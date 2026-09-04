@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use oga_config::{LovedModel, ResolvedModelSettings, model_enabled, profile_enabled};
+use oga_config::{LoveRule, ResolvedModelSettings, model_enabled, profile_enabled};
 use oga_domain::{
     Difficulty, ModelInfo, Profile, ProfileUsage, RoutePreference, SelectionRejection,
     SelectionRelaxation, SelectionStage, TaskClass,
@@ -402,18 +402,19 @@ pub fn choose_model(
             && (!attempt.quota || !quota_binds || !is_exhausted(item))
     };
 
-    // The loved model is the caller's standing answer to the question
-    // selection would otherwise ask, so it stands in for the class policy the
-    // way a named model does — the class still prices the effort. It gives way
-    // the moment it cannot take the work: the point of loving one is to stop
-    // choosing, not to buy a way for a dispatch to fail.
-    if let Some(loved) = &extra.settings.loved
+    // A love rule is the caller's standing answer to the question selection
+    // would otherwise ask for this kind of work, so it stands in for the class
+    // policy the way a named model does — the class still prices the effort
+    // unless the rule set one. It gives way the moment it cannot take the work:
+    // the point of loving a model is to stop choosing, not to buy a way for a
+    // dispatch to fail.
+    if let Some(loved) = extra.settings.love.for_class(demand.task_class)
         && options.model_hint.is_none()
         && options.profile_id.is_none()
     {
         let pick = screened
             .iter()
-            .filter(|item| loved_matches(loved, item.model))
+            .filter(|item| loved.names_model(&item.model.profile_id, &item.model.id))
             .min_by(|a, b| a.used.unwrap_or(0.0).total_cmp(&b.used.unwrap_or(0.0)));
         let skipped: Option<String> = match pick {
             None => Some(loved_skip_reason(loved, &rejected)),
@@ -454,9 +455,10 @@ pub fn choose_model(
             ));
         }
         warnings.push(format!(
-            "{} is loved here but could not take this task: {}; this went to the usual choice \
+            "{} is loved here{} but could not take this task: {}; this went to the usual choice \
              for {} work instead",
-            loved_label(loved),
+            loved.label(),
+            love_kind_suffix(loved, demand.task_class),
             skipped.unwrap_or_default(),
             demand.task_class.as_str()
         ));
@@ -828,10 +830,11 @@ struct LovedContext<'a> {
 }
 
 /// Build the loved-model route once a candidate cleared everything. The class
-/// still prices the effort; only the destination was never in question.
+/// prices the effort unless the rule set one; only the destination was never in
+/// question.
 fn finish_loved_route<'a>(
     pick: &Screened,
-    loved: &LovedModel,
+    loved: &LoveRule,
     ctx: LovedContext<'a>,
     warnings: &mut Vec<String>,
     rejected: &[SelectionRejection],
@@ -845,7 +848,9 @@ fn finish_loved_route<'a>(
         options,
     } = ctx;
     let traits = model_traits(pick.model);
-    let projected = loved_effort(pick.model, loved)
+    let rule_effort = loved_effort(pick.model, loved);
+    let projected = rule_effort
+        .clone()
         .map(|effort| crate::effort::ProjectedEffort {
             effort: Some(effort),
             reason: "the loved model's configured reasoning effort".into(),
@@ -881,13 +886,9 @@ fn finish_loved_route<'a>(
         effort: projected.effort,
         effort_reason: projected.reason,
         reason: format!(
-            "{}; sent to the loved model, the default {}",
+            "{}; {}",
             demand.reason,
-            if loved.scope == "project" {
-                "for this project"
-            } else {
-                "everywhere"
-            }
+            love_route_reason(loved, demand.task_class, rule_effort.as_deref())
         ),
         candidates: vec![ModelCandidate {
             profile_id: pick.model.profile_id.clone(),
@@ -902,7 +903,37 @@ fn finish_loved_route<'a>(
     }
 }
 
-fn loved_effort(model: &ModelInfo, loved: &LovedModel) -> Option<String> {
+/// Why the route ended here, naming the rule that decided it: the kind of work
+/// it claims, or the whole scope when it is the catch-all.
+fn love_route_reason(loved: &LoveRule, class: TaskClass, effort: Option<&str>) -> String {
+    let effort = effort.map_or_else(String::new, |effort| format!(" at {effort} effort"));
+    match loved.when.is_empty() {
+        true => format!(
+            "sent to the loved model, the default {}{effort}",
+            if loved.scope == "project" {
+                "for this project"
+            } else {
+                "everywhere"
+            }
+        ),
+        false => format!(
+            "sent to {}, loved for {} work{effort}",
+            loved.label(),
+            class.as_str()
+        ),
+    }
+}
+
+/// How a warning names the rule that was skipped: the kind of work it claims,
+/// or nothing when it takes everything else.
+fn love_kind_suffix(loved: &LoveRule, class: TaskClass) -> String {
+    match loved.when.is_empty() {
+        true => String::new(),
+        false => format!(" for {} work", class.as_str()),
+    }
+}
+
+fn loved_effort(model: &ModelInfo, loved: &LoveRule) -> Option<String> {
     let requested = loved.effort.as_deref()?;
     let levels = model.efforts.as_deref()?;
     if levels.is_empty() {
@@ -923,41 +954,15 @@ fn loved_effort(model: &ModelInfo, loved: &LovedModel) -> Option<String> {
         .or_else(|| levels.first().cloned())
 }
 
-/// Whether one catalog entry is the loved one. A worker-scoped entry pins the
-/// account too; a bare model entry matches wherever it is offered, so the same
-/// model on a second account still counts as loved.
-fn loved_matches(loved: &LovedModel, model: &ModelInfo) -> bool {
-    model.id == loved.model
-        && loved
-            .profile_id
-            .as_deref()
-            .is_none_or(|named| named == model.profile_id)
-}
-
 /// Why the loved model was not among the candidates. The screening pass has
 /// already said this per model, so its wording is reused rather than guessed
 /// at a second time; nothing said means no account listed the model at all.
-fn loved_skip_reason(loved: &LovedModel, rejected: &[SelectionRejection]) -> String {
+fn loved_skip_reason(loved: &LoveRule, rejected: &[SelectionRejection]) -> String {
     rejected
         .iter()
-        .find(|row| {
-            row.model == loved.model
-                && loved
-                    .profile_id
-                    .as_deref()
-                    .is_none_or(|named| named == row.profile_id)
-        })
+        .find(|row| loved.names_model(&row.profile_id, &row.model))
         .map(|row| row.reason.clone())
         .unwrap_or_else(|| "no connected account offers it".into())
-}
-
-/// How one loved entry is written and read back: `<worker>/<model>`, or the
-/// bare model.
-fn loved_label(loved: &LovedModel) -> String {
-    match &loved.profile_id {
-        Some(profile_id) => format!("{profile_id}/{}", loved.model),
-        None => loved.model.clone(),
-    }
 }
 
 /// The caller-named pair under audit.

@@ -4,8 +4,8 @@
 use std::collections::BTreeMap;
 
 use oga_config::{
-    DirectoryModelSettings, ModelOverride, ModelOverrides, ProfileModelEnablement,
-    ResolvedModelSettings,
+    DirectoryModelSettings, LoveRule, LoveRules, ModelOverride, ModelOverrides,
+    ProfileModelEnablement, ResolvedModelSettings,
 };
 use oga_domain::{ModelCost, ModelInfoSource, ModelQuery, Provider};
 use oga_routing::{
@@ -301,7 +301,7 @@ fn settings(models: &[oga_domain::ModelInfo]) -> ResolvedModelSettings {
         },
         project: None,
         overrides: None,
-        loved: None,
+        love: LoveRules::default(),
     }
 }
 
@@ -395,13 +395,53 @@ fn model_rows_join_catalog_entries_with_settings_and_narrowing() {
 }
 
 #[test]
+fn a_model_any_love_rule_names_survives_the_narrowed_view() {
+    let catalog = claude_models(&profile(Provider::Claude));
+    let mut overrides = ModelOverrides::default();
+    overrides.shared.insert(
+        "haiku".into(),
+        ModelOverride {
+            preferred: Some(true),
+            ..ModelOverride::default()
+        },
+    );
+    let mut settings = settings(&catalog);
+    settings.love = LoveRules(vec![
+        LoveRule {
+            model: "opus".into(),
+            profile_id: None,
+            when: vec![oga_domain::TaskClass::Reasoning],
+            effort: Some("max".into()),
+            scope: "project".into(),
+        },
+        LoveRule {
+            model: "sonnet".into(),
+            profile_id: Some("codex-work".into()),
+            when: Vec::new(),
+            effort: None,
+            scope: "project".into(),
+        },
+    ]);
+
+    let rows = select_model_rows(&catalog, &overrides, &settings, &ModelQuery::default());
+
+    let loved = rows
+        .iter()
+        .filter(|row| row.loved)
+        .map(|row| row.model.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(loved, ["sonnet", "opus"]);
+    assert!(rows.iter().all(|row| row.preferred || row.loved));
+}
+
+#[test]
 fn a_model_nobody_switched_on_is_reported_unavailable() {
     let catalog = claude_models(&profile(Provider::Claude));
     let nothing_on = ResolvedModelSettings {
         global: DirectoryModelSettings::default(),
         project: None,
         overrides: None,
-        loved: None,
+        love: LoveRules::default(),
     };
     let rows = select_model_rows(
         &catalog,

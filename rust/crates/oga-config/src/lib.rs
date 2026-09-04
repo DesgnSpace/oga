@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use oga_domain::{Profile, Provider};
+use oga_domain::{Profile, Provider, TaskClass};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -19,6 +19,11 @@ const DEFAULT_MODELS: &[(Provider, &str)] = &[
     (Provider::Antigravity, "gemini-3.6-flash-medium"),
     (Provider::Pi, "opencode-go/deepseek-v4-flash"),
 ];
+
+pub const EFFORT_LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+const EFFORT_MESSAGE: &str = "must be one of minimal, low, medium, high, xhigh, max";
+const KIND_LIST_MESSAGE: &str =
+    "must be a list of kinds of work: mechanical, context, build, reasoning, general";
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
@@ -98,13 +103,72 @@ pub struct ModelOverrides {
     #[serde(rename = "byProfile")]
     pub by_profile: BTreeMap<String, BTreeMap<String, ModelOverride>>,
 }
+/// One standing answer to "where does work that names no model go": a model,
+/// the kinds of work it takes, and the reasoning effort it takes them at. An
+/// empty `when` is the catch-all, taking every kind no other rule claims.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LovedModel {
+#[serde(rename_all = "camelCase")]
+pub struct LoveRule {
     pub model: String,
-    #[serde(rename = "profileId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
-    pub scope: String,
+    pub when: Vec<TaskClass>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    pub scope: String,
+}
+
+impl LoveRule {
+    /// Whether a catalog entry is this rule's model. A worker-scoped rule pins
+    /// the account too; a bare model id matches wherever it is offered.
+    pub fn names_model(&self, profile_id: &str, model: &str) -> bool {
+        self.model == model
+            && self
+                .profile_id
+                .as_deref()
+                .is_none_or(|named| named == profile_id)
+    }
+
+    /// How the rule is written and read back: `<worker>/<model>`, or the bare
+    /// model.
+    pub fn label(&self) -> String {
+        match &self.profile_id {
+            Some(profile_id) => format!("{profile_id}/{}", self.model),
+            None => self.model.clone(),
+        }
+    }
+}
+
+/// The love rules of the scope that owns them: a project's list replaces the
+/// global one whole, never merging the two.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LoveRules(pub Vec<LoveRule>);
+
+impl LoveRules {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, LoveRule> {
+        self.0.iter()
+    }
+
+    /// The rule that owns this kind of work: the one claiming it, else the
+    /// catch-all, else nothing.
+    pub fn for_class(&self, class: TaskClass) -> Option<&LoveRule> {
+        self.0
+            .iter()
+            .find(|rule| rule.when.contains(&class))
+            .or_else(|| self.0.iter().find(|rule| rule.when.is_empty()))
+    }
+
+    /// Whether any rule sends work to this model.
+    pub fn names_model(&self, profile_id: &str, model: &str) -> bool {
+        self.0
+            .iter()
+            .any(|rule| rule.names_model(profile_id, model))
+    }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirectoryModelSettings {
@@ -121,7 +185,7 @@ pub struct ResolvedModelSettings {
     pub global: DirectoryModelSettings,
     pub project: Option<DirectoryModelSettings>,
     pub overrides: Option<ModelOverrides>,
-    pub loved: Option<LovedModel>,
+    pub love: LoveRules,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigSnapshot {
@@ -685,86 +749,231 @@ pub fn read_model_settings(value: &Value) -> DirectoryModelSettings {
 }
 
 /// Read model choices from the YAML layers. Project choices replace the same
-/// user choice, while a project loved model replaces the user loved model.
+/// user choice, while a project's love rules replace the user's whole list.
 pub fn read_model_overrides(
     layers: &ConfigLayers,
-) -> Result<(ModelOverrides, Option<LovedModel>), ConfigError> {
+) -> Result<(ModelOverrides, LoveRules), ConfigError> {
     let mut overrides = ModelOverrides::default();
-    let mut loved = None;
+    let mut love = LoveRules::default();
     for (layer, scope) in [
         (layers.user.as_ref(), "global"),
         (layers.project.as_ref(), "project"),
     ] {
         let Some(layer) = layer else { continue };
-        let Some(models) = layer.root.get("models") else {
-            continue;
-        };
-        let table = models
-            .as_mapping()
-            .ok_or_else(|| invalid(&layer.path, "models", "must be a table"))?;
         let mut layer_loved = Vec::new();
-        for (raw_key, value) in table {
-            let Some(key) = yaml_key(raw_key) else {
-                continue;
-            };
-            if let Some(profile_models) = value.as_mapping()
-                && profile_models.values().any(serde_yaml::Value::is_mapping)
-            {
-                for (raw_model, value) in profile_models {
-                    let Some(model) = yaml_key(raw_model) else {
-                        continue;
-                    };
-                    let parsed =
-                        parse_model_override(value, &layer.path, &format!("models.{key}.{model}"))?;
-                    if parsed.loved == Some(true) {
-                        layer_loved.push((
-                            Some(key.to_owned()),
-                            model.to_owned(),
-                            parsed.effort.clone(),
-                        ));
+        if let Some(models) = layer.root.get("models") {
+            let table = models
+                .as_mapping()
+                .ok_or_else(|| invalid(&layer.path, "models", "must be a table"))?;
+            for (raw_key, value) in table {
+                let Some(key) = yaml_key(raw_key) else {
+                    continue;
+                };
+                if let Some(profile_models) = value.as_mapping()
+                    && profile_models.values().any(serde_yaml::Value::is_mapping)
+                {
+                    for (raw_model, value) in profile_models {
+                        let Some(model) = yaml_key(raw_model) else {
+                            continue;
+                        };
+                        let parsed = parse_model_override(
+                            value,
+                            &layer.path,
+                            &format!("models.{key}.{model}"),
+                        )?;
+                        if parsed.loved == Some(true) {
+                            layer_loved.push(LoveRule {
+                                model: model.to_owned(),
+                                profile_id: Some(key.to_owned()),
+                                when: Vec::new(),
+                                effort: parsed.effort.clone(),
+                                scope: scope.into(),
+                            });
+                        }
+                        overrides
+                            .by_profile
+                            .entry(key.to_owned())
+                            .or_default()
+                            .insert(model.to_owned(), parsed);
                     }
-                    overrides
-                        .by_profile
-                        .entry(key.to_owned())
-                        .or_default()
-                        .insert(model.to_owned(), parsed);
+                } else {
+                    let parsed =
+                        parse_model_override(value, &layer.path, &format!("models.{key}"))?;
+                    if parsed.loved == Some(true) {
+                        layer_loved.push(LoveRule {
+                            model: key.to_owned(),
+                            profile_id: None,
+                            when: Vec::new(),
+                            effort: parsed.effort.clone(),
+                            scope: scope.into(),
+                        });
+                    }
+                    overrides.shared.insert(key.to_owned(), parsed);
                 }
-            } else {
-                let parsed = parse_model_override(value, &layer.path, &format!("models.{key}"))?;
-                if parsed.loved == Some(true) {
-                    layer_loved.push((None, key.to_owned(), parsed.effort.clone()));
-                }
-                overrides.shared.insert(key.to_owned(), parsed);
             }
         }
         if layer_loved.len() > 1 {
             let names = layer_loved
                 .iter()
-                .map(|(profile, model, _)| {
-                    profile
-                        .as_ref()
-                        .map_or_else(|| model.clone(), |p| format!("{p}/{model}"))
-                })
-                .collect::<Vec<_>>();
+                .map(LoveRule::label)
+                .collect::<Vec<_>>()
+                .join(" and ");
             return Err(invalid(
                 &layer.path,
                 "models",
+                &format!("only one model can be loved at a time; {names} are both marked"),
+            ));
+        }
+        let listed = read_love_list(layer, scope)?;
+        match (listed, layer_loved.into_iter().next()) {
+            (Some(_), Some(marked)) => {
+                return Err(invalid(
+                    &layer.path,
+                    "love",
+                    &format!(
+                        "{} is also marked loved under models; write the love list or the flag, \
+                         not both",
+                        marked.label()
+                    ),
+                ));
+            }
+            (Some(rules), None) => love = LoveRules(rules),
+            (None, Some(marked)) => love = LoveRules(vec![marked]),
+            (None, None) => {}
+        }
+    }
+    Ok((overrides, love))
+}
+
+const LOVE_SHAPE: &str =
+    "each rule takes model, an optional when list of kinds, and an optional effort";
+
+/// The `love` list of one layer, or nothing when the layer does not write one.
+fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRule>>, ConfigError> {
+    let Some(value) = layer.root.get("love") else {
+        return Ok(None);
+    };
+    let entries = value.as_sequence().ok_or_else(|| {
+        invalid(
+            &layer.path,
+            "love",
+            &format!("must be a list; {LOVE_SHAPE}"),
+        )
+    })?;
+    let mut rules: Vec<LoveRule> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let field = format!("love[{index}]");
+        let table = entry.as_mapping().ok_or_else(|| {
+            invalid(
+                &layer.path,
+                &field,
+                &format!("must be a table; {LOVE_SHAPE}"),
+            )
+        })?;
+        if let Some(key) = table.keys().find_map(|key| {
+            let key = yaml_key(key)?;
+            (!["model", "when", "effort"].contains(&key)).then_some(key)
+        }) {
+            return Err(invalid(
+                &layer.path,
+                &format!("{field}.{key}"),
+                &format!("unknown field; {LOVE_SHAPE}"),
+            ));
+        }
+        let target = table
+            .get("model")
+            .and_then(serde_yaml::Value::as_str)
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .ok_or_else(|| {
+                invalid(
+                    &layer.path,
+                    &format!("{field}.model"),
+                    "must name a model, as <worker>:<model> or a bare model id",
+                )
+            })?;
+        let (profile_id, model) = match target.split_once(':') {
+            Some((profile_id, model)) if !profile_id.is_empty() && !model.is_empty() => {
+                (Some(profile_id.to_owned()), model.to_owned())
+            }
+            Some(_) => {
+                return Err(invalid(
+                    &layer.path,
+                    &format!("{field}.model"),
+                    "must name a model, as <worker>:<model> or a bare model id",
+                ));
+            }
+            None => (None, target.to_owned()),
+        };
+        let when = match table.get("when") {
+            None => Vec::new(),
+            Some(when) => {
+                let listed = when.as_sequence().ok_or_else(|| {
+                    invalid(&layer.path, &format!("{field}.when"), KIND_LIST_MESSAGE)
+                })?;
+                listed
+                    .iter()
+                    .map(|value| {
+                        value.as_str().and_then(TaskClass::parse).ok_or_else(|| {
+                            invalid(&layer.path, &format!("{field}.when"), KIND_LIST_MESSAGE)
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        let effort = table
+            .get("effort")
+            .map(|effort| {
+                effort
+                    .as_str()
+                    .filter(|effort| EFFORT_LEVELS.contains(effort))
+                    .map(String::from)
+                    .ok_or_else(|| invalid(&layer.path, &format!("{field}.effort"), EFFORT_MESSAGE))
+            })
+            .transpose()?;
+        if when.is_empty()
+            && let Some(other) = rules.iter().find(|rule| rule.when.is_empty())
+        {
+            return Err(invalid(
+                &layer.path,
+                "love",
                 &format!(
-                    "only one model can be loved at a time; {} are both marked",
-                    names.join(" and ")
+                    "{} and {} both take every other kind of work; only one rule may leave when \
+                     out",
+                    other.label(),
+                    LoveRule {
+                        model: model.clone(),
+                        profile_id: profile_id.clone(),
+                        when: Vec::new(),
+                        effort: None,
+                        scope: scope.into(),
+                    }
+                    .label()
                 ),
             ));
         }
-        if let Some((profile_id, model, effort)) = layer_loved.into_iter().next() {
-            loved = Some(LovedModel {
-                model,
-                profile_id,
-                scope: scope.into(),
-                effort,
-            });
+        if let Some(class) = when
+            .iter()
+            .find(|class| rules.iter().any(|rule| rule.when.contains(class)))
+        {
+            return Err(invalid(
+                &layer.path,
+                "love",
+                &format!(
+                    "two rules claim {} work; a kind of work belongs to one rule",
+                    class.as_str()
+                ),
+            ));
         }
+        rules.push(LoveRule {
+            model,
+            profile_id,
+            when,
+            effort,
+            scope: scope.into(),
+        });
     }
-    Ok((overrides, loved))
+    Ok(Some(rules))
 }
 
 /// The worker rules one `.oga.yaml` writes for its own scope. `prompt` is the
@@ -836,15 +1045,11 @@ fn parse_model_override(
             .transpose()
     };
     if let Some(effort) = table.get("effort")
-        && effort.as_str().is_none_or(|effort| {
-            !["minimal", "low", "medium", "high", "xhigh", "max"].contains(&effort)
-        })
+        && effort
+            .as_str()
+            .is_none_or(|effort| !EFFORT_LEVELS.contains(&effort))
     {
-        return Err(invalid(
-            path,
-            &format!("{field}.effort"),
-            "must be one of minimal, low, medium, high, xhigh, max",
-        ));
+        return Err(invalid(path, &format!("{field}.effort"), EFFORT_MESSAGE));
     }
     let capabilities = table
         .get("capabilities")
@@ -1092,7 +1297,7 @@ mod tests {
             global,
             project: Some(project),
             overrides: None,
-            loved: None,
+            love: LoveRules::default(),
         };
         assert!(!model_enabled(&settings, "main", "opus"));
         assert_eq!(config_revision("same"), config_revision("same"));
@@ -1107,7 +1312,7 @@ mod tests {
             global,
             project,
             overrides: None,
-            loved: None,
+            love: LoveRules::default(),
         }
     }
 
@@ -1208,12 +1413,140 @@ mod tests {
         );
         assert_eq!(
             loved,
-            Some(LovedModel {
+            LoveRules(vec![LoveRule {
                 model: "openai/gpt-5.6-luna".into(),
                 profile_id: Some("opencode".into()),
-                scope: "project".into(),
+                when: Vec::new(),
                 effort: None,
+                scope: "project".into(),
+            }])
+        );
+    }
+
+    #[test]
+    fn love_rules_read_kinds_and_effort_per_rule() {
+        let project = layer(
+            "/work/.oga.yaml",
+            r#"
+            love:
+              - model: opencode:openai/gpt-5.6-luna
+                when: [context, mechanical]
+                effort: low
+              - model: opencode:openai/gpt-5.6-luna
+                when: [reasoning, build]
+                effort: max
+              - model: claude:opus
+        "#,
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap();
+
+        let context = love.for_class(TaskClass::Context).unwrap();
+        assert_eq!(context.model, "openai/gpt-5.6-luna");
+        assert_eq!(context.effort.as_deref(), Some("low"));
+        assert_eq!(
+            love.for_class(TaskClass::Reasoning)
+                .unwrap()
+                .effort
+                .as_deref(),
+            Some("max")
+        );
+        assert_eq!(love.for_class(TaskClass::General).unwrap().model, "opus");
+        assert!(love.names_model("claude", "opus"));
+    }
+
+    #[test]
+    fn love_rules_of_a_project_replace_the_global_list() {
+        let user = layer("/home/user/.oga.yaml", "love:\n  - model: claude:opus\n");
+        let project = layer(
+            "/work/.oga.yaml",
+            "love:\n  - model: opencode:kimi\n    when: [context]\n",
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: Some(user),
+            project: Some(project),
+        })
+        .unwrap();
+
+        assert_eq!(love.for_class(TaskClass::Context).unwrap().model, "kimi");
+        assert!(love.for_class(TaskClass::Reasoning).is_none());
+    }
+
+    #[test]
+    fn love_rules_reject_a_kind_claimed_twice_and_a_second_catch_all() {
+        let twice = layer(
+            "/work/.oga.yaml",
+            "love:\n  - model: a\n    when: [build]\n  - model: b\n    when: [build]\n",
+        );
+        assert_eq!(
+            read_model_overrides(&ConfigLayers {
+                user: None,
+                project: Some(twice),
             })
+            .unwrap_err()
+            .to_string(),
+            "invalid config /work/.oga.yaml at love: two rules claim build work; a kind of work belongs to one rule"
+        );
+
+        let two_catch_alls = layer("/work/.oga.yaml", "love:\n  - model: a\n  - model: b\n");
+        assert!(
+            read_model_overrides(&ConfigLayers {
+                user: None,
+                project: Some(two_catch_alls),
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("both take every other kind of work")
+        );
+    }
+
+    #[test]
+    fn love_rules_reject_unknown_fields_kinds_and_efforts() {
+        for (source, message) in [
+            (
+                "love:\n  - model: a\n    kind: [build]\n",
+                "invalid config /work/.oga.yaml at love[0].kind: unknown field; each rule takes model, an optional when list of kinds, and an optional effort",
+            ),
+            (
+                "love:\n  - model: a\n    when: [refactor]\n",
+                "invalid config /work/.oga.yaml at love[0].when: must be a list of kinds of work: mechanical, context, build, reasoning, general",
+            ),
+            (
+                "love:\n  - model: a\n    effort: enormous\n",
+                "invalid config /work/.oga.yaml at love[0].effort: must be one of minimal, low, medium, high, xhigh, max",
+            ),
+            (
+                "love:\n  - when: [build]\n",
+                "invalid config /work/.oga.yaml at love[0].model: must name a model, as <worker>:<model> or a bare model id",
+            ),
+        ] {
+            let error = read_model_overrides(&ConfigLayers {
+                user: None,
+                project: Some(layer("/work/.oga.yaml", source)),
+            })
+            .unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn love_rules_and_the_loved_flag_cannot_share_a_layer() {
+        let project = layer(
+            "/work/.oga.yaml",
+            "love:\n  - model: claude:opus\nmodels:\n  claude:\n    haiku:\n      loved: true\n",
+        );
+        let error = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "invalid config /work/.oga.yaml at love: claude/haiku is also marked loved under models; write the love list or the flag, not both"
         );
     }
 

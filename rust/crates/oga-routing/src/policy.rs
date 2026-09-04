@@ -269,7 +269,7 @@ fn validate_policy(
     root: &serde_yaml::Mapping,
     path: &str,
 ) -> Result<Option<RoutingPolicy>, PolicyError> {
-    const ROOT_FIELDS: [&str; 5] = ["version", "routes", "worker", "profiles", "models"];
+    const ROOT_FIELDS: [&str; 6] = ["version", "routes", "worker", "profiles", "models", "love"];
     if let Some(unknown) = root.keys().find_map(|key| {
         let key = key.as_str()?;
         (!ROOT_FIELDS.contains(&key)).then_some(key)

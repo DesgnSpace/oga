@@ -10,12 +10,14 @@ import { toast } from "@/state/toast";
 import type {
   CleanupSettings,
   CleanupSnapshot,
+  LoveRule,
   McpInstallResult,
   MemoryEntry,
   ModelSettingsSnapshot,
   ProfileView,
   Provider,
   WaitSettings,
+  WorkKind,
 } from "@/bridge/types";
 import {
   applyMemoryEntries,
@@ -491,6 +493,44 @@ function ChevronGlyph({ expanded }: { expanded: boolean }) {
   );
 }
 
+const WORK_LABELS = {
+  context: "Reading and lookups",
+  mechanical: "Small edits",
+  build: "Building and fixing",
+  reasoning: "Hard thinking",
+  general: "Open-ended work",
+} satisfies Record<WorkKind, string>;
+
+function workLabel(when: WorkKind[]): string {
+  if (when.length === 0) return "Everything else";
+  const [first, ...rest] = when.map((kind) => WORK_LABELS[kind]);
+  return [first, ...rest.map((label) => label.toLowerCase())].join(", ");
+}
+
+function modelLabel(rule: LoveRule): string {
+  return rule.profileId ? `${rule.profileId} · ${rule.model}` : rule.model;
+}
+
+/** Where work that names no model goes, kind of work by kind of work. */
+function FavouriteModels({ rules }: { rules: LoveRule[] }) {
+  if (rules.length === 0) return null;
+  return (
+    <div className="settings-favourites">
+      <p className="eyebrow">Favourite models</p>
+      <ul className="settings-favourite-rules">
+        {rules.map((rule, index) => (
+          <li className="settings-favourite-rule" key={`${rule.model}-${index}`}>
+            <span className="settings-favourite-work">{workLabel(rule.when)}</span>
+            <span className="settings-favourite-model">{modelLabel(rule)}</span>
+            <span className="settings-muted">{rule.effort ? `${rule.effort} effort` : "effort to suit the task"}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="settings-helper">A task that names no model goes to the model listed for that kind of work.</p>
+    </div>
+  );
+}
+
 function suggestedModels(state: SettingsState, profileId: string | undefined): string[] {
   const workers = state.modelSettings.snapshot?.workers ?? [];
   const pool = profileId ? workers.filter((w) => w.id === profileId) : workers;
@@ -599,6 +639,8 @@ function WorkersPanel({
             </button>
           </div>
         </div>
+
+        <FavouriteModels rules={state.modelSettings.snapshot?.love ?? []} />
 
         <div className="settings-worker-rows">
           {editor.kind === "add" ? (

@@ -207,6 +207,8 @@ async fn models_honor_project_model_enablement() {
     let text = response["result"]["content"][0]["text"]
         .as_str()
         .expect("model rows");
-    let rows: Vec<Value> = serde_json::from_str(text).expect("model rows JSON");
+    let catalog: Value = serde_json::from_str(text).expect("model rows JSON");
+    let rows = catalog["models"].as_array().expect("model rows");
     assert!(rows.iter().all(|row| row["model"] != "sonnet"));
+    assert_eq!(catalog["love"], json!([]));
 }

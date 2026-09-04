@@ -31,13 +31,13 @@ pub(crate) fn resolved_model_settings(
     };
     let layers = load_config_layers((cwd != global).then_some(std::path::Path::new(&cwd)))
         .map_err(|error| StoreError::Refusal(error.to_string()))?;
-    let (overrides, loved) =
+    let (overrides, love) =
         read_model_overrides(&layers).map_err(|error| StoreError::Refusal(error.to_string()))?;
     Ok(ResolvedModelSettings {
         global: read_model_settings(&saved(store, &global)?.unwrap_or_else(|| json!({}))),
         project,
         overrides: Some(overrides),
-        loved,
+        love,
     })
 }
 

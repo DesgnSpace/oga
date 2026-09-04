@@ -12,7 +12,7 @@ pub const MCP_INSTRUCTIONS: &str = concat!(
     "At the start of a new chat, identify the project cwd; call memory with action: list, and get only task-relevant keys; treat durable memory as context, while current code and task state are authoritative; never store secrets or transient task status. ",
     "Before any new task or continuation, list active and recent tasks with tasks; when one already owns the same file, feature, or command, resume it instead of dispatching a duplicate. ",
     "Use delegate for bounded implementation, research, review, writing, and analysis — not limited to coding; route execution here by default, including second opinions, capacity gaps, and work another provider's policy will not take; keep goal-setting, architecture, integration, and final review here. ",
-    "Use models as the one capacity read before choosing a destination; its narrow defaults show preferred, enabled models plus the loved one — where work naming no model already goes — and its rows are ready for delegate. ",
+    "Use models as the one capacity read before choosing a destination; its narrow defaults show preferred, enabled models plus every model a love rule names — where work naming no model already goes — and its rows are ready for delegate. ",
     "Act on the settled report: the worker already verified its own work, so do not re-read changed files or re-run checks. ",
     "After delegate, resume, or reply returns a task id, start `oga watch <taskId>` in the caller's terminal and background it; it holds no chat turn, so several tasks run at once. ",
     "Every Oga tool result ends with a second block when a delegated task has settled or asked a question since you last heard — the task id and title, one line each, every move handed over once; it works whether or not the host reports a background job's exit — only Claude Code does. ",
@@ -31,8 +31,9 @@ const DELEGATE_DESCRIPTION: &str = concat!(
     "Also for a second opinion, another model's take, or work past the current provider's usage limit. ",
     "You set the goal, done conditions, model, difficulty, effort, and scope; the worker must verify its work and report each check and result, so re-reading files or re-running checks duplicates cost — open only a broken, uncertain, or surprising item it names, or run a check its sandbox cannot run. ",
     "Give difficulty and leave profile and model out: Oga picks the account, model and thinking level from that, what the project allows, and each account's remaining usage. ",
-    "When the project has a loved model, that is where every dispatch naming no model lands, for any kind of work — difficulty still sets the thinking level, and a loved model that is off, rate-limited or out of credits is skipped, with the reason on the response. ",
-    "Naming a profile or model always wins — over the loved model too — and the response warns when that account is out of credits or rate-limited, lacks the model, or the project disallows it for this kind of work. ",
+    "A dispatch that names no model follows the project's love rules, which pick the model and the thinking level per kind of work — reading and lookups, mechanical edits, building, reasoning — so write the Goal plainly enough that the kind of work is obvious from it; the router reads the kind from the prompt and the caller never states it. ",
+    "A rule may set its own reasoning effort, and a rule whose model is off, rate-limited or out of credits is skipped, with the reason on the response; difficulty still sets the thinking level wherever no rule set one. ",
+    "Naming a profile or model always wins — over the love rules too, which is how to leave them for one task — and the response warns when that account is out of credits or rate-limited, lacks the model, or the project disallows it for this kind of work. ",
     "Approve a destination and data scope once per cwd and profile; that stands for later dispatches, so ask for consent only when none exists or this task would widen it. ",
     "Scope is sandbox-enforced for most tasks, and approval only for an unsandboxed one. ",
     "Grant a directory, not a single file, for write access — a normal edit writes a temporary file beside the target — and give planned output directories a /** suffix, since a path that does not exist yet stays literal. ",
@@ -53,8 +54,9 @@ const DELEGATE_DESCRIPTION: &str = concat!(
 );
 
 const MODELS_DESCRIPTION: &str = concat!(
-    "Read the models available for a project. This is the one capacity read: the default view shows preferred, enabled models, plus the loved model when one is set. ",
-    "A row with `loved: true` is where every dispatch that names no model already goes, whatever the work is; read it before naming a destination, and name one only when this task needs a different account or tier. ",
+    "Read the models available for a project. This is the one capacity read: the default view shows preferred, enabled models, plus every model a love rule names. ",
+    "The response is `{ love, models }`. `love` is the project's rules for work that names no model, each `{ when, profile, model, effort, scope }` — `when` lists the kinds of work that rule takes and an empty `when` takes every other kind — and a row with `loved: true` is a model some rule sends work to. ",
+    "The router reads the kind of work from the prompt, so a dispatch that names no model already follows these rules; read them before naming a destination, and name one only when this task needs a different account or tier. ",
     "Use `onlyPreferred: false` to see every enabled model, or `onlyEnabled: false` when something is not working and you need to see what is turned off. ",
     "Use `query: <text>` to narrow to model ids containing that text, case-insensitive. ",
     "Each flat row gives the profile and model ready to pass to `delegate`, plus a `usage` summary — percent used, the window it resets in, and rate-limited/out-of-credits flags — so a choice between accounts can weigh budget, not just availability. `usage.known: false` means the provider has no usage source or none has been read yet, never a silent omission; set `usage: false` to skip the read entirely."
