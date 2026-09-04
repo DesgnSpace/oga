@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Oga gives your coding agent more hands by sending focused work to other coding agents like Codex, Claude Code, Pi, OpenCode, and Antigravity.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga - Give your coding agent more hands</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="#main">
+      <img src="logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="#install">Install</a>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Give your coding agent more hands.</h1>
+        <p class="hero-intro">Oga sends parts of the job to other coding agents, and they work in parallel.</p>
+      </div>
+
+      <section class="install" id="install" aria-label="Install Oga">
+        <a class="primary-action" href="https://downloads.desgn.space/oga/Oga-latest.dmg">Download for macOS</a>
+        <p class="install-note">Requires macOS 14 or later.</p>
+        <ul class="platform-list" aria-label="Platform availability">
+          <li class="platform platform-available">
+            <img class="platform-mark" src="logos/macos.svg" alt="" width="24" height="24">
+            <span>macOS</span>
+            <strong>Available</strong>
+          </li>
+          <li class="platform platform-soon">
+            <img class="platform-mark" src="logos/windows.svg" alt="" width="24" height="24">
+            <span>Windows</span>
+            <strong>Coming soon</strong>
+          </li>
+          <li class="platform platform-soon">
+            <img class="platform-mark" src="logos/linux.svg" alt="" width="24" height="24">
+            <span>Linux</span>
+            <strong>Coming soon</strong>
+          </li>
+        </ul>
+        <div class="install-options">
+          <div class="command-block">
+            <div class="command-heading">
+              <span>Install with curl</span>
+              <button class="copy-button" type="button" data-copy-target="curl-command" data-copy-label="Curl" aria-label="Copy curl command">Copy</button>
+            </div>
+            <code id="curl-command">curl -fsSL https://downloads.desgn.space/oga/install.sh | sh</code>
+          </div>
+          <div class="command-block">
+            <div class="command-heading">
+              <span>Install with Homebrew</span>
+              <button class="copy-button" type="button" data-copy-target="brew-command" data-copy-label="Homebrew" aria-label="Copy Homebrew command">Copy</button>
+            </div>
+            <code id="brew-command">brew install --cask DesgnSpace/tap/oga</code>
+          </div>
+        </div>
+      </section>
+
+      <div class="hero-board">
+        <p class="eyebrow board-label">Works with</p>
+        <div class="goal-card">
+          <span class="goal-label">Your goal</span>
+          <strong>Ship the release</strong>
+        </div>
+        <ul class="agent-row">
+          <li class="agent">
+            <img class="agent-mark" src="logos/codex.svg" alt="" width="28" height="28">
+            <span class="agent-name">Codex</span>
+            <span class="agent-task">Builds the feature</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/claude-code.svg" alt="" width="28" height="28">
+            <span class="agent-name">Claude Code</span>
+            <span class="agent-task">Writes the tests</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/pi.svg" alt="" width="28" height="28">
+            <span class="agent-name">Pi</span>
+            <span class="agent-task">Reviews the change</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/opencode.svg" alt="" width="28" height="28">
+            <span class="agent-name">OpenCode</span>
+            <span class="agent-task">Updates the docs</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/antigravity.svg" alt="" width="28" height="28">
+            <span class="agent-name">Antigravity</span>
+            <span class="agent-task">Checks the build</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="product-shot" aria-label="Oga desktop app">
+      <picture>
+        <source srcset="app-dark.png" media="(prefers-color-scheme: dark)">
+        <img src="app-light.png" alt="Oga desktop app showing a task list on the left and a task brief on the right, in a dark-themed macOS window" width="2000" height="1360" loading="lazy">
+      </picture>
+    </section>
+
+    <section class="outcomes" aria-labelledby="outcomes-title">
+      <div class="section-heading">
+        <p class="eyebrow">Built for focused work</p>
+        <h2 id="outcomes-title">Keep your attention where it matters.</h2>
+      </div>
+      <div class="outcome-grid">
+        <article>
+          <span class="outcome-number">01</span>
+          <h3>Move more work at once</h3>
+          <p>Send implementation, research, and review ahead without leaving your current conversation.</p>
+        </article>
+        <article>
+          <span class="outcome-number">02</span>
+          <h3>Use the right model</h3>
+          <p>Match quick edits to fast models and difficult decisions to deeper reasoning.</p>
+        </article>
+        <article>
+          <span class="outcome-number">03</span>
+          <h3>Stay in control</h3>
+          <p>Set what each task can read, what it can change, and how it proves the work is done.</p>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <span>Available for macOS.</span>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script>
+    document.documentElement.classList.add("has-js");
+
+    document.querySelectorAll("[data-copy-target]").forEach((button) => {
+      const idleLabel = button.getAttribute("aria-label");
+      const commandName = button.dataset.copyLabel;
+      let reset;
+
+      button.addEventListener("click", async () => {
+        const command = document.getElementById(button.dataset.copyTarget).textContent;
+
+        try {
+          await navigator.clipboard.writeText(command);
+          button.textContent = "Copied";
+          button.setAttribute("aria-label", `${commandName} command copied`);
+        } catch {
+          button.textContent = "Select command";
+          button.setAttribute("aria-label", `Copy failed. Select the ${commandName.toLowerCase()} command`);
+        }
+
+        clearTimeout(reset);
+        reset = setTimeout(() => {
+          button.textContent = "Copy";
+          button.setAttribute("aria-label", idleLabel);
+        }, 1800);
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+[package]
+name = "oga-http"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = "0.8"
+oga-config = { path = "../oga-config" }
+oga-context = { path = "../oga-context" }
+oga-domain = { path = "../oga-domain" }
+oga-events = { path = "../oga-events" }
+oga-pricing = { path = "../oga-pricing" }
+oga-service = { path = "../oga-service" }
+oga-routing = { path = "../oga-routing" }
+oga-runner = { path = "../oga-runner" }
+oga-store = { path = "../oga-store" }
+oga-worktree = { path = "../oga-worktree" }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "fs"] }
+tokio-stream = "0.1"
+uuid = { version = "1", default-features = false, features = ["v4", "fast-rng"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

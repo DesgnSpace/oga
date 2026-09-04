@@ -1,0 +1,74 @@
+.syntax-code {
+  color: inherit;
+  font: inherit;
+}
+
+.review-token-comment {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.review-token-string,
+.review-token-char,
+.review-token-regex,
+.review-token-attr-value {
+  color: color-mix(in srgb, var(--color-warning) 78%, var(--color-text));
+}
+
+.review-token-number,
+.review-token-boolean,
+.review-token-constant {
+  color: color-mix(in srgb, var(--color-success) 78%, var(--color-text));
+}
+
+.review-token-keyword,
+.review-token-operator,
+.review-token-important {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.review-token-function,
+.review-token-function-definition {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.review-token-class-name,
+.review-token-type,
+.review-token-builtin,
+.review-token-property,
+.review-token-attr-name {
+  color: color-mix(in srgb, var(--color-accent) 58%, var(--color-text));
+}
+
+.review-token-punctuation {
+  color: var(--color-text-muted);
+}
+
+.review-token-tag,
+.review-token-selector {
+  color: color-mix(in srgb, var(--color-danger) 72%, var(--color-text));
+}
+
+.review-token-changed {
+  border-radius: 2px;
+   background: color-mix(in srgb, var(--color-warning) 34%, transparent);
+}
+
+.syntax-piece-added,
+.syntax-code-added {
+  color: var(--color-success);
+}
+
+.syntax-piece-removed,
+.syntax-code-removed {
+  color: var(--color-danger);
+}
+
+.syntax-piece-added .review-token,
+.syntax-piece-removed .review-token,
+.syntax-code-added .review-token,
+.syntax-code-removed .review-token {
+  color: currentColor;
+}

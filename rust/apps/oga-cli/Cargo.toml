@@ -1,0 +1,28 @@
+[package]
+name = "oga-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = "0.8"
+chrono = "0.4"
+oga-client = { path = "../../crates/oga-client" }
+oga-config = { path = "../../crates/oga-config" }
+oga-context = { path = "../../crates/oga-context" }
+oga-domain = { path = "../../crates/oga-domain" }
+oga-events = { path = "../../crates/oga-events" }
+oga-http = { path = "../../crates/oga-http" }
+oga-mcp = { path = "../../crates/oga-mcp" }
+oga-routing = { path = "../../crates/oga-routing" }
+oga-service = { path = "../../crates/oga-service" }
+oga-store = { path = "../../crates/oga-store" }
+oga-worktree = { path = "../../crates/oga-worktree" }
+rusqlite = "0.37"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time", "io-util"] }
+serde_yaml = "0.9"
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "oga-providers"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oga-domain = { path = "../oga-domain" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[lints]
+workspace = true
