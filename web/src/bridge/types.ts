@@ -488,11 +488,26 @@ export interface WorkerSettings {
   models: ModelSettingsModel[];
 }
 
+export type WorkKind = "mechanical" | "context" | "build" | "reasoning" | "general";
+
+/**
+ * One standing rule for work that names no model. `when` lists the kinds of
+ * work the rule takes; an empty list takes every kind no other rule claims.
+ */
+export interface LoveRule {
+  model: string;
+  profileId?: string;
+  when: WorkKind[];
+  effort?: string;
+  scope: string;
+}
+
 export interface ModelSettingsSnapshot {
   cwd: string;
   scope: string;
   revision: string;
   workers: WorkerSettings[];
+  love: LoveRule[];
 }
 
 export interface UsageBreakdown {

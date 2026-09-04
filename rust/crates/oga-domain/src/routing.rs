@@ -35,6 +35,14 @@ pub enum TaskClass {
 }
 
 impl TaskClass {
+    pub const ALL: [TaskClass; 5] = [
+        TaskClass::Mechanical,
+        TaskClass::Context,
+        TaskClass::Build,
+        TaskClass::Reasoning,
+        TaskClass::General,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             TaskClass::Mechanical => "mechanical",
@@ -43,6 +51,14 @@ impl TaskClass {
             TaskClass::Reasoning => "reasoning",
             TaskClass::General => "general",
         }
+    }
+
+    /// Read a class the way a config file writes it, ignoring case and padding.
+    pub fn parse(value: &str) -> Option<TaskClass> {
+        let normalized = value.trim().to_lowercase();
+        TaskClass::ALL
+            .into_iter()
+            .find(|class| class.as_str() == normalized)
     }
 }
 
@@ -254,10 +270,8 @@ pub struct ModelSettingsRow {
     pub capabilities: Vec<String>,
     pub enabled: bool,
     pub preferred: bool,
-    /// The model dispatches land on when the caller names none.
+    /// A love rule sends work here when the caller names no model.
     pub loved: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub loved_effort: Option<String>,
     /// Effort levels this model accepts, weakest first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub efforts: Option<Vec<String>>,

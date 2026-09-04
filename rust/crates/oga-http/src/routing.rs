@@ -414,6 +414,34 @@ mod tests {
     }
 
     #[test]
+    fn a_love_rule_for_the_kind_of_work_reaches_an_unnamed_route() {
+        let (directory, store) = fixture();
+        switch(&store, directory.path(), true);
+        std::fs::write(
+            directory.path().join(".oga.yaml"),
+            format!("love:\n  - model: profile:{MODEL}\n    when: [context]\n    effort: low\n"),
+        )
+        .expect("project config");
+
+        let route = plan(
+            &HttpState::new(store),
+            RouteInput {
+                prompt: "Read these files and understand how auth works.".into(),
+                cwd: directory.path().display().to_string(),
+                profile: None,
+                model: None,
+                difficulty: None,
+                effort: None,
+                default_profile_shortcut: false,
+            },
+        )
+        .expect("route");
+
+        assert_eq!(route.model, MODEL);
+        assert_eq!(route.profile_id, "profile");
+    }
+
+    #[test]
     fn naming_a_model_that_is_off_refuses_instead_of_substituting() {
         let (directory, store) = fixture();
 

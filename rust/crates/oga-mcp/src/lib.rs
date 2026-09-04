@@ -319,8 +319,13 @@ impl McpServer {
         )
         .await
         .map_err(|error| McpError::Message(error.message))?;
+        let love = oga_http::settings::love_rules(&cwd)
+            .map_err(|error| McpError::Message(error.message))?;
         Ok((
-            serde_json::to_value(rows).expect("model rows are serializable"),
+            json!({
+                "love": love,
+                "models": rows,
+            }),
             requested_cwd,
         ))
     }

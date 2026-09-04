@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use oga_config::{DirectoryModelSettings, LovedModel, ResolvedModelSettings};
+use oga_config::{DirectoryModelSettings, LoveRule, LoveRules, ResolvedModelSettings};
 use oga_domain::{
     Difficulty, FailureCode, ModelCost, ModelInfo, ModelInfoSource, Profile, ProfileFailure,
     ProfileSuccess, ProfileUsage, Provider, RoutePreference, SelectionStage, TaskClass,
@@ -1515,7 +1515,7 @@ fn settings_with(
         global,
         project,
         overrides: None,
-        loved: None,
+        love: LoveRules::default(),
     }
 }
 
@@ -1663,16 +1663,30 @@ fn model_settings_bound_selection() {
 }
 
 fn loved(model_name: &str, profile_id: Option<&str>) -> ResolvedModelSettings {
+    love_rules(vec![rule(model_name, profile_id, &[], None)])
+}
+
+fn rule(
+    model_name: &str,
+    profile_id: Option<&str>,
+    when: &[TaskClass],
+    effort: Option<&str>,
+) -> LoveRule {
+    LoveRule {
+        model: model_name.into(),
+        profile_id: profile_id.map(String::from),
+        when: when.to_vec(),
+        effort: effort.map(String::from),
+        scope: "project".into(),
+    }
+}
+
+fn love_rules(rules: Vec<LoveRule>) -> ResolvedModelSettings {
     ResolvedModelSettings {
         global: all_on(&models()),
         project: None,
         overrides: None,
-        loved: Some(LovedModel {
-            model: model_name.into(),
-            profile_id: profile_id.map(String::from),
-            scope: "project".into(),
-            effort: None,
-        }),
+        love: LoveRules(rules),
     }
 }
 
@@ -1913,6 +1927,108 @@ fn a_loved_model_changes_the_destination_and_nothing_else() {
     assert_eq!(with_empty.reason, bare.reason);
     assert_eq!(with_empty.warnings, bare.warnings);
     assert!(!bare.reason.contains("loved"));
+}
+
+// Love rules split the standing answer by kind of work: the rule claiming the
+// class wins, the catch-all takes the rest, and each rule prices its own
+// effort.
+#[test]
+fn love_rules_route_each_kind_of_work_to_its_own_model() {
+    let catalog = models()
+        .into_iter()
+        .map(|mut model| {
+            if model.id == "opencode/big-pickle" {
+                model.efforts = Some(
+                    ["low", "medium", "high", "xhigh", "max"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                );
+            }
+            model
+        })
+        .collect::<Vec<_>>();
+    let workers = profiles();
+    let architecture = "Architect a secure migration and analyze race conditions.";
+    let reading = "Read these files and understand how auth works.";
+    let settings = love_rules(vec![
+        rule(
+            "opencode/big-pickle",
+            Some("opencode"),
+            &[TaskClass::Context, TaskClass::Mechanical],
+            Some("low"),
+        ),
+        rule(
+            "opencode/big-pickle",
+            Some("opencode"),
+            &[TaskClass::Reasoning, TaskClass::Build],
+            Some("max"),
+        ),
+        rule("haiku", Some("claude"), &[], None),
+    ]);
+
+    // The rule that claims the class decides the effort, not the difficulty.
+    let cheap = choose_model(
+        reading,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(cheap.model, "opencode/big-pickle");
+    assert_eq!(cheap.effort.as_deref(), Some("low"));
+    assert!(
+        cheap
+            .reason
+            .contains("loved for context work at low effort"),
+        "{}",
+        cheap.reason
+    );
+
+    let thinking = choose_model(
+        architecture,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(thinking.model, "opencode/big-pickle");
+    assert_eq!(thinking.effort.as_deref(), Some("max"));
+
+    // Work no rule claims falls to the catch-all.
+    let other = choose_model(
+        "Draft the release note.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(other.model, "haiku");
+
+    // A rule that cannot take the work names itself and the kind it claims.
+    let statuses = [unavailable(
+        "opencode",
+        Provider::OpenCode,
+        "opencode/big-pickle",
+        "the account is out of credits",
+        None,
+    )];
+    let skipped = choose_model(
+        reading,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings).statuses(&statuses),
+    )
+    .unwrap();
+    assert_ne!(skipped.model, "opencode/big-pickle");
+    assert!(skipped.warnings.iter().any(|warning| {
+        warning.contains("opencode/opencode/big-pickle is loved here for context work")
+            && warning.contains("the account is out of credits")
+    }));
 }
 
 #[test]

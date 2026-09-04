@@ -50,6 +50,10 @@ function snapshot(): ModelSettingsSnapshot {
     cwd: "/tmp/project",
     scope: "global",
     revision: "rev1",
+    love: [
+      { model: "openai/gpt-5.6-luna", profileId: "opencode-work", when: ["context"], effort: "low", scope: "project" },
+      { model: "opus", profileId: "claude-work", when: [], scope: "project" },
+    ],
     workers: [
       {
         id: "claude-work",
@@ -243,6 +247,16 @@ describe("workers list", () => {
     expect(document.querySelector('[data-provider-logo="claude"]')).toBeTruthy();
     expect(document.querySelector('[data-provider-logo="opencode"]')).toBeTruthy();
     expect(screen.queryByText(longModelId)).toBeNull();
+  });
+
+  it("names the kind of work each favourite model takes, in plain words", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    expect(await screen.findByText("Reading and lookups")).toBeTruthy();
+    expect(screen.getByText("Everything else")).toBeTruthy();
+    expect(screen.getByText("low effort")).toBeTruthy();
+    expect(screen.queryByText("context")).toBeNull();
   });
 });
 

@@ -13,8 +13,8 @@ use axum::{
     response::IntoResponse,
 };
 use oga_config::{
-    DEFAULT_WORKER_PROMPT, ResolvedModelSettings, config_revision, global_cwd, load_config_layers,
-    model_enabled, read_model_overrides, read_model_settings,
+    DEFAULT_WORKER_PROMPT, LoveRules, ResolvedModelSettings, config_revision, global_cwd,
+    load_config_layers, model_enabled, read_model_overrides, read_model_settings,
 };
 use oga_domain::{
     CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
@@ -1212,14 +1212,24 @@ pub(crate) fn resolved_model_settings(
     let global_raw = global_raw.unwrap_or_else(|| json!({}));
     let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let (overrides, loved) =
+    let (overrides, love) =
         read_model_overrides(&layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
     Ok(ResolvedModelSettings {
         global: read_model_settings(&global_raw),
         project: project_raw.as_ref().map(read_model_settings),
         overrides: Some(overrides),
-        loved,
+        love,
     })
+}
+
+/// Where a directory sends work that names no model, rule by rule.
+pub fn love_rules(cwd: &str) -> Result<LoveRules, HttpError> {
+    let global = canonical_cwd(&global_cwd().display().to_string());
+    let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
+        .map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let (_, love) =
+        read_model_overrides(&layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    Ok(love)
 }
 
 async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<Value, HttpError> {
@@ -1237,7 +1247,7 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
     let project_settings = project_raw.as_ref().map(read_model_settings);
     let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let (_, loved) =
+    let (_, love) =
         read_model_overrides(&layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
     let models = if refresh {
         discover_catalog(&profiles, true).await
@@ -1303,10 +1313,7 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                         "capabilities": capabilities,
                         "inheritedCapabilities": inherited_capabilities,
                         "hasCapabilitiesOverride": project_model.as_ref().is_some_and(|setting| setting.capabilities.is_some()),
-                        "loved": loved.as_ref().is_some_and(|chosen| {
-                            chosen.model == model.id
-                                && chosen.profile_id.as_deref().is_none_or(|id| id == profile.id)
-                        }),
+                        "loved": love.names_model(&profile.id, &model.id),
                         "availableGlobally": inherited_enabled,
                     })
                 })
@@ -1329,6 +1336,7 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
         "scope": if global == cwd { "global" } else { "project" },
         "revision": current.revision,
         "workers": workers,
+        "love": love,
     }))
 }
 
@@ -1909,7 +1917,7 @@ mod catalog_tests {
             global: Default::default(),
             project: None,
             overrides: None,
-            loved: None,
+            love: LoveRules::default(),
         };
         let all_rows = select_model_rows(
             &models,

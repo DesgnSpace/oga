@@ -36,6 +36,7 @@ function snapshot(revision = "abc"): ModelSettingsSnapshot {
     cwd: "/tmp/project",
     scope: "project",
     revision,
+    love: [],
     workers: [
       {
         id: "claude-work",

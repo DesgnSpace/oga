@@ -399,16 +399,6 @@ pub fn model_capabilities(
     capabilities
 }
 
-fn is_loved(settings: &ResolvedModelSettings, profile_id: &str, model_id: &str) -> bool {
-    settings.loved.as_ref().is_some_and(|loved| {
-        loved.model == model_id
-            && loved
-                .profile_id
-                .as_deref()
-                .is_none_or(|named| named == profile_id)
-    })
-}
-
 /// One `/api/models` row: the catalog entry joined with per-project settings.
 pub fn select_model_rows(
     models: &[ModelInfo],
@@ -430,18 +420,7 @@ pub fn select_model_rows(
                 capabilities: model_capabilities(model, override_for_model.as_ref()),
                 enabled,
                 preferred: override_for_model.as_ref().and_then(|o| o.preferred) == Some(true),
-                loved: is_loved(settings, &model.profile_id, &model.id),
-                loved_effort: settings
-                    .loved
-                    .as_ref()
-                    .filter(|loved| {
-                        loved.model == model.id
-                            && loved
-                                .profile_id
-                                .as_deref()
-                                .is_none_or(|profile| profile == model.profile_id)
-                    })
-                    .and_then(|loved| loved.effort.clone()),
+                loved: settings.love.names_model(&model.profile_id, &model.id),
                 efforts: model.efforts.clone(),
                 default_effort: model.default_effort.clone(),
                 usage: None,
