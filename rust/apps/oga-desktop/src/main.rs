@@ -141,6 +141,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             lifecycle::configure_window(app)?;
             let resource_directory = app.path().resource_dir().ok();
             let supervisor = BrokerSupervisor::new(resource_directory.as_deref())?;
+            if let Ok(home) = app.path().home_dir() {
+                match supervisor.link_cli(&home) {
+                    Ok(Some(link)) => eprintln!("linked {}", link.display()),
+                    Ok(None) => {}
+                    Err(error) => eprintln!("could not link the oga command: {error}"),
+                }
+            }
             let client = LoopbackClient::from_env()?;
             let state = AppState {
                 broker_snapshot: Arc::new(RwLock::new(supervisor.snapshot())),

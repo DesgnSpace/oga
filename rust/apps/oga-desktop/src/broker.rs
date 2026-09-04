@@ -141,6 +141,30 @@ impl BrokerSupervisor {
         })
     }
 
+    /// Points `~/.local/bin/oga` at the bundled broker so the command line
+    /// follows the installed app, wherever it landed. Development brokers
+    /// are left alone.
+    pub fn link_cli(&self, home: &Path) -> std::io::Result<Option<PathBuf>> {
+        let Some(command) = self
+            .command
+            .as_ref()
+            .filter(|command| command.working_directory.is_none())
+        else {
+            return Ok(None);
+        };
+        let bin_dir = home.join(".local/bin");
+        let link = bin_dir.join("oga");
+        if std::fs::read_link(&link).is_ok_and(|target| target == command.executable) {
+            return Ok(None);
+        }
+        std::fs::create_dir_all(&bin_dir)?;
+        if std::fs::symlink_metadata(&link).is_ok() {
+            std::fs::remove_file(&link)?;
+        }
+        std::os::unix::fs::symlink(&command.executable, &link)?;
+        Ok(Some(link))
+    }
+
     pub fn snapshot(&self) -> BrokerSnapshot {
         self.snapshot.clone()
     }
