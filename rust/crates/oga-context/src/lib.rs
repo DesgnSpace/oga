@@ -10,7 +10,7 @@ pub use index::{
     BUILD_BUDGET, BuildOptions, BuildResult, ContextError, ContextIndex, ContextResult,
     ContextTarget, LearnRouteProposal, LearnRouteRejection, LearnRoutesResult, MAP_SCHEME,
     MAX_BUILD_FILES, MAX_FILE_BYTES, MAX_SYMBOLS_PER_CWD, MAX_SYMBOLS_PER_FILE, QueryOptions,
-    QuestionCandidate, ReconcileResult, RenderTier, WorktreeVerification,
+    QuestionCandidate, ReconcileResult, RenderTier, RouteMove, WorktreeVerification,
 };
 pub use symbols::{ExtractedFile, ExtractedSymbol, extract_refs, extract_symbols};
 pub use text::{

@@ -8,7 +8,9 @@ use std::sync::{Mutex, MutexGuard, RwLock};
 
 use rusqlite::{Connection, OpenFlags};
 
-use crate::schema::{LATEST_SCHEMA_VERSION, create_fresh_schema, migrate_v37_to_v38};
+use crate::schema::{
+    LATEST_SCHEMA_VERSION, create_fresh_schema, migrate_v37_to_v38, migrate_v38_to_v39,
+};
 
 pub const BUSY_TIMEOUT_MS: u64 = 5000;
 
@@ -158,8 +160,11 @@ impl Store {
                     path.display()
                 ))
             })?;
-        if version == 37 && LATEST_SCHEMA_VERSION == 38 {
+        if version == 37 {
             migrate_v37_to_v38(connection)?;
+        }
+        if version == 38 {
+            migrate_v38_to_v39(connection)?;
         }
         Self::require_current_schema(connection, path)
     }

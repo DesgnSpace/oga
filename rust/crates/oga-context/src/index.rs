@@ -16,7 +16,8 @@ use thiserror::Error;
 
 use crate::symbols::{ExtractedFile, ExtractedSymbol, extract_refs, extract_symbols};
 use crate::text::{
-    MAP_STOP_WORDS, fts_query, hint_key, identifier_tokens, normalize_word, prompt_terms, words,
+    MAP_STOP_WORDS, fts_query, hint_key, identifier_tokens, normalize_word, prompt_terms,
+    raw_words, words,
 };
 use crate::walk::{
     ContextWalkFile, WalkOptions, absolute_path, mapped_extension, mtime_ms, walk_context_files,
@@ -30,6 +31,7 @@ pub const MAX_FILE_BYTES: u64 = 500 * 1024;
 pub const MAX_SYMBOLS_PER_FILE: usize = 40;
 const MAX_LEARNED_ROUTES: usize = 12;
 const MAX_HINTS_CHARS: usize = 160;
+const MAX_ROUTE_ALIASES: usize = 8;
 const CANDIDATE_POOL: usize = 24;
 
 #[derive(Debug, Error)]
@@ -80,6 +82,15 @@ pub struct ReconcileResult {
     pub removed: usize,
     pub routes_confirmed: usize,
     pub routes_dropped: usize,
+    pub route_moves: Vec<RouteMove>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteMove {
+    pub from_path: String,
+    pub from_symbol: Option<String>,
+    pub to_path: String,
+    pub to_symbol: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -282,6 +293,7 @@ impl<'a> ContextIndex<'a> {
                 removed: 0,
                 routes_confirmed: 0,
                 routes_dropped: 0,
+                route_moves: Vec::new(),
             });
         }
         let walk = walk_context_files(
@@ -340,6 +352,7 @@ impl<'a> ContextIndex<'a> {
                 removed: 0,
                 routes_confirmed: 0,
                 routes_dropped: 0,
+                route_moves: Vec::new(),
             });
         }
 
@@ -402,6 +415,7 @@ impl<'a> ContextIndex<'a> {
             removed: vanished.len().saturating_sub(moved.len()),
             routes_confirmed: healed.0,
             routes_dropped: healed.1,
+            route_moves: healed.2,
         })
     }
 
@@ -616,13 +630,13 @@ impl<'a> ContextIndex<'a> {
                 .iter()
                 .filter(|term| {
                     route
-                        .hints
+                        .aliases
                         .split_whitespace()
                         .any(|hint| equivalent_match(hint, term))
                 })
                 .cloned()
                 .collect::<HashSet<_>>();
-            if !route.exact && (matched.len() < 2 || matched.len() * 10 < terms.len().max(1) * 4) {
+            if matched.is_empty() {
                 continue;
             }
             let anchor = format!(
@@ -633,7 +647,11 @@ impl<'a> ContextIndex<'a> {
             if existing_anchors.contains(&anchor) {
                 continue;
             }
-            let relevance = if route.exact { 1_000_000.0 } else { 500_000.0 };
+            let relevance = if route.exact {
+                1_000_000.0
+            } else {
+                500_000.0 + matched.len() as f64 * 1_000.0
+            };
             candidates.push((
                 file.clone(),
                 FileScore {
@@ -785,14 +803,14 @@ impl<'a> ContextIndex<'a> {
         let mut rejected = Vec::new();
         let mut seen = HashSet::new();
         for (index, route) in routes.iter().enumerate() {
-            let hints = hint_key(&route.hints);
+            let aliases = route_aliases(&route.hints);
             let path = route.path.trim().replace('\\', "/");
             let symbol = route
                 .symbol
                 .as_ref()
                 .map(|symbol| symbol.trim().to_owned())
                 .filter(|symbol| !symbol.is_empty());
-            if hints.is_empty() || hints.len() > MAX_HINTS_CHARS {
+            if aliases.is_empty() || aliases.len() > MAX_HINTS_CHARS {
                 rejected.push(LearnRouteRejection {
                     index,
                     reason: format!("hints must contain at least one useful word and at most {MAX_HINTS_CHARS} characters"),
@@ -842,12 +860,13 @@ impl<'a> ContextIndex<'a> {
                 });
                 continue;
             }
+            let digest = route_digest(&source_path, symbol.as_deref()).unwrap_or(digest);
             let dedupe = format!(
-                "{hints}\n{relative}\n{}",
+                "{aliases}\n{relative}\n{}",
                 symbol.as_deref().unwrap_or_default()
             );
             if seen.insert(dedupe) {
-                prepared.push((hints, relative, symbol, digest));
+                prepared.push((aliases, relative, symbol, digest));
             }
         }
         if !rejected.is_empty() {
@@ -863,7 +882,7 @@ impl<'a> ContextIndex<'a> {
         }
         let now = timestamp_now();
         self.store.transaction(|transaction| {
-            for (hints, path, symbol, digest) in &prepared {
+            for (aliases, path, symbol, digest) in &prepared {
                 let entity_id: Option<i64> = transaction
                     .query_row(
                         "SELECT id FROM context_entities WHERE cwd=? AND path=? AND ((? = '' AND kind='file') OR (? != '' AND kind != 'file' AND name=?)) LIMIT 1",
@@ -871,9 +890,21 @@ impl<'a> ContextIndex<'a> {
                         |row| row.get(0),
                     )
                     .optional()?;
-                transaction.execute(
-                    "INSERT INTO context_learned_routes(cwd,hints,entity_id,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(cwd,hints,learned_path,learned_symbol) DO UPDATE SET entity_id=excluded.entity_id,source_digest=excluded.source_digest,task_id=excluded.task_id,attempt=excluded.attempt,profile_id=excluded.profile_id,model=excluded.model,last_confirmed_at=excluded.last_confirmed_at",
-                    params![source_cwd.display().to_string(), hints, entity_id, path, symbol.as_deref().unwrap_or_default(), digest, task.id, attempt, task.profile_id, task.model, now, now],
+                save_route(
+                    transaction,
+                    RouteRecord {
+                        cwd: &source_cwd.display().to_string(),
+                        entity_id,
+                        path,
+                        symbol: symbol.as_deref().unwrap_or_default(),
+                        aliases,
+                        source_digest: digest,
+                        task_id: &task.id,
+                        attempt,
+                        profile_id: &task.profile_id,
+                        model: &task.model,
+                        now: &now,
+                    },
                 )?;
             }
             Ok(())
@@ -890,8 +921,8 @@ impl<'a> ContextIndex<'a> {
         route: &LearnRouteProposal,
     ) -> Result<(), ContextError> {
         let cwd = cwd.as_ref();
-        let hints = hint_key(&route.hints);
-        if hints.is_empty() || hints.len() > MAX_HINTS_CHARS {
+        let aliases = route_aliases(&route.hints);
+        if aliases.is_empty() || aliases.len() > MAX_HINTS_CHARS {
             return Err(ContextError::Invalid(
                 "hints must contain at least one useful word and at most 160 characters".into(),
             ));
@@ -930,9 +961,23 @@ impl<'a> ContextIndex<'a> {
                 params![cwd.display().to_string(), relative, symbol.unwrap_or_default(), symbol.unwrap_or_default(), symbol.unwrap_or_default()],
                 |row| row.get(0),
             )?;
-            transaction.execute(
-                "INSERT INTO context_learned_routes(cwd,hints,entity_id,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(cwd,hints,learned_path,learned_symbol) DO UPDATE SET entity_id=excluded.entity_id,source_digest=excluded.source_digest,task_id=excluded.task_id,attempt=excluded.attempt,profile_id=excluded.profile_id,model=excluded.model,last_confirmed_at=excluded.last_confirmed_at",
-                params![cwd.display().to_string(), hints, entity_id, relative, symbol.unwrap_or_default(), file.digest, "", 0, "user", "", now, now],
+            let digest = route_digest(cwd.join(&relative).as_path(), symbol)
+                .unwrap_or_else(|| file.digest.clone());
+            save_route(
+                transaction,
+                RouteRecord {
+                    cwd: &cwd.display().to_string(),
+                    entity_id: Some(entity_id),
+                    path: &relative,
+                    symbol: symbol.unwrap_or_default(),
+                    aliases: &aliases,
+                    source_digest: &digest,
+                    task_id: "",
+                    attempt: 0,
+                    profile_id: "user",
+                    model: "",
+                    now: &now,
+                },
             )?;
             Ok(())
         })?;
@@ -1013,27 +1058,20 @@ impl<'a> ContextIndex<'a> {
         cwd: impl AsRef<Path>,
         question: &str,
     ) -> Result<Vec<QuestionCandidate>, ContextError> {
-        let cwd = cwd.as_ref().display().to_string();
-        let hints = hint_key(&[question.to_owned()]);
-        if hints.is_empty() {
+        let cwd = cwd.as_ref();
+        let terms = prompt_terms(question);
+        if terms.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(self.store.with_connection(|connection| {
-            let mut statement = connection.prepare(&format!(
-                "{LIVE_ROUTE_SELECT} WHERE r.cwd=? AND r.hints=? ORDER BY r.last_confirmed_at DESC LIMIT 24"
-            ))?;
-            let rows = statement
-                .query_map(params![cwd, hints], |row| {
-                    let route = live_route_from_row(row, true)?;
-                    Ok(QuestionCandidate {
-                        path: route.path,
-                        line: route.line.unwrap_or(1),
-                        symbol: route.symbol,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })?)
+        Ok(self
+            .learned_route_scores(cwd, question, &terms)?
+            .into_iter()
+            .map(|route| QuestionCandidate {
+                path: route.path,
+                line: route.line.unwrap_or(1),
+                symbol: route.symbol,
+            })
+            .collect())
     }
 
     /// Drop a route whose target left the map; its path or symbol no longer exists.
@@ -1050,13 +1088,14 @@ impl<'a> ContextIndex<'a> {
         cwd: &Path,
         paths: &[String],
         moves: &[(String, String)],
-    ) -> Result<(usize, usize), ContextError> {
+    ) -> Result<(usize, usize, Vec<RouteMove>), ContextError> {
         let files = self.list_files(cwd)?;
         let mut confirmed = 0;
         let mut dropped = 0;
+        let mut route_moves = Vec::new();
         let routes = self.store.with_connection(|connection| {
             let mut statement = connection.prepare(
-                "SELECT id,learned_path,learned_symbol FROM context_learned_routes WHERE cwd=?",
+                "SELECT id,learned_path,learned_symbol,source_digest FROM context_learned_routes WHERE cwd=?",
             )?;
             Ok(statement
                 .query_map([cwd.display().to_string()], |row| {
@@ -1064,46 +1103,73 @@ impl<'a> ContextIndex<'a> {
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?)
         })?;
-        for (id, mut path, symbol) in routes {
+        for (id, mut path, symbol, source_digest) in routes {
+            let from_path = path.clone();
+            let from_symbol = non_empty(symbol.clone());
             if let Some((_, to)) = moves.iter().find(|(from, _)| from == &path) {
                 path = to.clone();
             }
-            if !paths.contains(&path) {
+            if !paths.contains(&path) && path == from_path {
                 continue;
             }
-            let Some(file) = files.get(&path) else {
+            let direct = files.get(&path).and_then(|file| {
+                (symbol.is_empty()
+                    || file
+                        .symbols
+                        .iter()
+                        .any(|candidate| candidate.name == symbol))
+                .then_some((path.clone(), symbol.clone(), file.digest.clone()))
+            });
+            let resolved = if let Some((path, symbol, digest)) = direct {
+                self.store.with_connection(|connection| {
+                    Ok(connection
+                        .query_row(
+                            "SELECT id,path,CASE WHEN kind='file' THEN '' ELSE name END,digest FROM context_entities WHERE cwd=? AND path=? AND ((?='' AND kind='file') OR (? != '' AND kind!='file' AND name=?)) LIMIT 1",
+                            params![cwd.display().to_string(), path, symbol, symbol, symbol],
+                            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, digest)),
+                        )
+                        .optional()?)
+                })?
+            } else {
+                self.store.with_connection(|connection| {
+                    let mut statement = connection.prepare(
+                        "SELECT id,path,name,digest FROM context_entities WHERE cwd=? AND kind!='file' AND digest=? LIMIT 2",
+                    )?;
+                    let matches = statement
+                        .query_map(params![cwd.display().to_string(), source_digest], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok((matches.len() == 1).then(|| matches.into_iter().next().expect("one route target")))
+                })?
+            };
+            let Some((entity_id, path, resolved_symbol, digest)) = resolved else {
                 self.forget_route(id)?;
                 dropped += 1;
                 continue;
             };
-            if !symbol.is_empty()
-                && !file
-                    .symbols
-                    .iter()
-                    .any(|candidate| candidate.name == symbol)
-            {
-                self.forget_route(id)?;
-                dropped += 1;
-                continue;
-            }
-            let entity_id: i64 = self.store.with_connection(|connection| {
-                Ok(connection.query_row(
-                    "SELECT id FROM context_entities WHERE cwd=? AND path=? AND ((?='' AND kind='file') OR (? != '' AND kind!='file' AND name=?)) LIMIT 1",
-                    params![cwd.display().to_string(), path, symbol, symbol, symbol],
-                    |row| row.get(0),
-                )?)
-            })?;
+            let source_digest =
+                route_digest(cwd.join(&path).as_path(), Some(&resolved_symbol)).unwrap_or(digest);
             self.store.transaction(|transaction| {
-                transaction.execute("UPDATE context_learned_routes SET learned_path=?,entity_id=?,source_digest=?,last_confirmed_at=? WHERE id=?", params![path, entity_id, file.digest, timestamp_now(), id])?;
+                transaction.execute("UPDATE context_learned_routes SET learned_path=?,learned_symbol=?,entity_id=?,source_digest=?,last_confirmed_at=? WHERE id=?", params![path, resolved_symbol, entity_id, source_digest, timestamp_now(), id])?;
                 Ok(())
             })?;
+            if from_path != path || from_symbol.as_deref() != Some(resolved_symbol.as_str()) {
+                route_moves.push(RouteMove {
+                    from_path,
+                    from_symbol,
+                    to_path: path,
+                    to_symbol: non_empty(resolved_symbol),
+                });
+            }
             confirmed += 1;
         }
-        Ok((confirmed, dropped))
+        Ok((confirmed, dropped, route_moves))
     }
 
     fn list_files(&self, cwd: &Path) -> Result<HashMap<String, ContextFile>, ContextError> {
@@ -1508,6 +1574,61 @@ impl<'a> ContextIndex<'a> {
                 moves.push((old[0].clone(), new[0].clone()));
             }
         }
+        let old_symbols = self.store.with_connection(|connection| {
+            let mut by_digest = HashMap::<String, Vec<String>>::new();
+            let mut statement = connection.prepare(
+                "SELECT path,digest FROM context_entities WHERE cwd=? AND kind!='file' AND path=?",
+            )?;
+            for path in vanished {
+                for row in statement.query_map(
+                    params![
+                        existing
+                            .values()
+                            .next()
+                            .map_or("", |file| file.cwd.as_str()),
+                        path
+                    ],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )? {
+                    let (path, digest) = row?;
+                    by_digest.entry(digest).or_default().push(path);
+                }
+            }
+            Ok(by_digest)
+        })?;
+        let mut new_symbols = HashMap::<String, Vec<String>>::new();
+        for (file, bytes, extracted) in touched {
+            let symbols = extracted
+                .symbols
+                .iter()
+                .map(|symbol| ContextSymbol {
+                    line: symbol.line,
+                    end_line: symbol.end_line,
+                    kind: symbol.kind,
+                    name: symbol.name.clone(),
+                    params: symbol.params.clone(),
+                    returns: symbol.returns.clone(),
+                    exported: symbol.exported,
+                    purpose: symbol.purpose.clone(),
+                    comments: symbol.comments.clone(),
+                    confirmed: false,
+                })
+                .collect::<Vec<_>>();
+            for digest in symbol_digests(bytes, &symbols).into_values() {
+                new_symbols
+                    .entry(digest)
+                    .or_default()
+                    .push(file.path.clone());
+            }
+        }
+        for (digest, old) in old_symbols {
+            let Some(new) = new_symbols.get(&digest) else {
+                continue;
+            };
+            if old.len() == 1 && new.len() == 1 && !moves.iter().any(|(from, _)| from == &old[0]) {
+                moves.push((old[0].clone(), new[0].clone()));
+            }
+        }
         Ok(moves)
     }
 
@@ -1594,17 +1715,17 @@ impl<'a> ContextIndex<'a> {
         question: &str,
         terms: &[String],
     ) -> Result<Vec<LearnedRoute>, ContextError> {
-        let exact_hints = hint_key(&[question.to_owned()]);
-        if exact_hints.is_empty() {
+        let exact_aliases = hint_key(&[question.to_owned()]);
+        if exact_aliases.is_empty() {
             return Ok(Vec::new());
         }
         Ok(self.store.with_connection(|connection| {
             let mut routes = Vec::new();
             let mut exact_statement = connection.prepare(&format!(
-                "{LIVE_ROUTE_SELECT} WHERE r.cwd=? AND r.hints=? ORDER BY r.last_confirmed_at DESC LIMIT 24"
+                "{LIVE_ROUTE_SELECT} WHERE r.cwd=? AND r.aliases=? ORDER BY r.last_confirmed_at DESC LIMIT 24"
             ))?;
             let exact_rows = exact_statement.query_map(
-                params![cwd.display().to_string(), exact_hints],
+                params![cwd.display().to_string(), exact_aliases],
                 |row| live_route_from_row(row, true),
             )?;
             for row in exact_rows {
@@ -1674,11 +1795,11 @@ struct LearnedRoute {
     path: String,
     symbol: Option<String>,
     line: Option<u64>,
-    hints: String,
+    aliases: String,
     exact: bool,
 }
 
-const LIVE_ROUTE_SELECT: &str = "SELECT r.id, COALESCE(e.path, r.learned_path), COALESCE(CASE WHEN e.kind='file' THEN '' ELSE e.name END, r.learned_symbol), e.line, r.hints FROM context_learned_routes r LEFT JOIN context_entities e ON e.id=r.entity_id";
+const LIVE_ROUTE_SELECT: &str = "SELECT r.id, COALESCE(e.path, r.learned_path), COALESCE(CASE WHEN e.kind='file' THEN '' ELSE e.name END, r.learned_symbol), e.line, r.aliases FROM context_learned_routes r LEFT JOIN context_entities e ON e.id=r.entity_id";
 
 fn live_route_from_row(row: &Row<'_>, exact: bool) -> rusqlite::Result<LearnedRoute> {
     Ok(LearnedRoute {
@@ -1686,7 +1807,7 @@ fn live_route_from_row(row: &Row<'_>, exact: bool) -> rusqlite::Result<LearnedRo
         path: row.get(1)?,
         symbol: non_empty(row.get(2)?),
         line: row.get::<_, Option<i64>>(3)?.map(|line| line as u64),
-        hints: row.get(4)?,
+        aliases: row.get(4)?,
         exact,
     })
 }
@@ -1963,9 +2084,148 @@ fn symbol_digests(bytes: &[u8], symbols: &[ContextSymbol]) -> HashMap<String, St
             let start = symbol.line.saturating_sub(1) as usize;
             let end = symbol.end_line as usize;
             let declaration = lines.get(start..end).unwrap_or(&[]).join("\n");
-            (symbol.name.clone(), digest_of(declaration.as_bytes()))
+            let body = declaration.replacen(&symbol.name, "<symbol>", 1);
+            (symbol.name.clone(), digest_of(body.as_bytes()))
         })
         .collect()
+}
+
+const ROUTE_SYNONYM_GROUPS: &[&[&str]] = &[
+    &[
+        "auth",
+        "authentication",
+        "login",
+        "signin",
+        "sign",
+        "session",
+    ],
+    &["config", "configuration", "setting", "settings"],
+    &["db", "database", "store", "storage"],
+];
+
+fn route_aliases(hints: &[String]) -> String {
+    let mut aliases = Vec::new();
+    for hint in hints {
+        for part in hint.split('|') {
+            for word in raw_route_terms(part) {
+                push_route_alias(&mut aliases, word);
+            }
+        }
+    }
+    let explicit = aliases.clone();
+    for term in explicit {
+        for group in ROUTE_SYNONYM_GROUPS {
+            if group
+                .iter()
+                .any(|candidate| normalize_word(candidate) == term)
+            {
+                for synonym in *group {
+                    for word in raw_route_terms(synonym) {
+                        push_route_alias(&mut aliases, word);
+                    }
+                }
+            }
+        }
+    }
+    aliases.join(" ")
+}
+
+fn raw_route_terms(value: &str) -> Vec<String> {
+    raw_words(value)
+        .into_iter()
+        .map(|word| normalize_word(&word))
+        .filter(|word| word.len() > 2 && !MAP_STOP_WORDS.contains(&word.as_str()))
+        .collect()
+}
+
+fn push_route_alias(aliases: &mut Vec<String>, alias: String) {
+    if aliases.len() < MAX_ROUTE_ALIASES && !aliases.contains(&alias) {
+        aliases.push(alias);
+    }
+}
+
+fn merge_route_aliases(existing: &str, incoming: &str) -> String {
+    let mut aliases = Vec::new();
+    for alias in existing
+        .split_whitespace()
+        .chain(incoming.split_whitespace())
+    {
+        push_route_alias(&mut aliases, alias.to_owned());
+    }
+    aliases.join(" ")
+}
+
+struct RouteRecord<'a> {
+    cwd: &'a str,
+    entity_id: Option<i64>,
+    path: &'a str,
+    symbol: &'a str,
+    aliases: &'a str,
+    source_digest: &'a str,
+    task_id: &'a str,
+    attempt: i64,
+    profile_id: &'a str,
+    model: &'a str,
+    now: &'a str,
+}
+
+fn save_route(
+    transaction: &rusqlite::Transaction<'_>,
+    route: RouteRecord<'_>,
+) -> rusqlite::Result<()> {
+    let existing = if let Some(entity_id) = route.entity_id {
+        transaction
+            .query_row(
+                "SELECT id,aliases FROM context_learned_routes WHERE cwd=? AND entity_id=? LIMIT 1",
+                params![route.cwd, entity_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+    } else {
+        transaction
+            .query_row(
+                "SELECT id,aliases FROM context_learned_routes WHERE cwd=? AND learned_path=? AND learned_symbol=? LIMIT 1",
+                params![route.cwd, route.path, route.symbol],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+    };
+    if let Some((id, existing_aliases)) = existing {
+        transaction.execute(
+            "UPDATE context_learned_routes SET aliases=?,entity_id=?,learned_path=?,learned_symbol=?,source_digest=?,task_id=?,attempt=?,profile_id=?,model=?,last_confirmed_at=? WHERE id=?",
+            params![merge_route_aliases(&existing_aliases, route.aliases), route.entity_id, route.path, route.symbol, route.source_digest, route.task_id, route.attempt, route.profile_id, route.model, route.now, id],
+        )?;
+    } else {
+        transaction.execute(
+            "INSERT INTO context_learned_routes(cwd,aliases,entity_id,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            params![route.cwd, route.aliases, route.entity_id, route.path, route.symbol, route.source_digest, route.task_id, route.attempt, route.profile_id, route.model, route.now, route.now],
+        )?;
+    }
+    Ok(())
+}
+
+fn route_digest(path: &Path, symbol: Option<&str>) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let symbol = symbol?;
+    let entry = mapped_extension(&path.to_string_lossy())?;
+    let extracted = extract_symbols(&String::from_utf8_lossy(&bytes), entry.lang, entry.generic);
+    let symbols = extracted
+        .symbols
+        .into_iter()
+        .map(|symbol| ContextSymbol {
+            line: symbol.line,
+            end_line: symbol.end_line,
+            kind: symbol.kind,
+            name: symbol.name,
+            params: symbol.params,
+            returns: symbol.returns,
+            exported: symbol.exported,
+            purpose: symbol.purpose,
+            comments: symbol.comments,
+            confirmed: false,
+        })
+        .collect::<Vec<_>>();
+    symbol_digests(&bytes, &symbols).remove(symbol)
 }
 
 fn read_indexable_file(cwd: &Path, file: &ContextWalkFile) -> Option<Vec<u8>> {

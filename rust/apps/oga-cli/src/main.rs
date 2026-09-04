@@ -514,7 +514,7 @@ async fn run_relearn(args: &[String]) -> CliResult<i32> {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage: oga relearn | oga relearn \"<hint words>\" <path>[#<symbol>] | oga relearn '<json>'"
+            "Usage: oga relearn | oga relearn \"<hint words|alias>\" <path>[#<symbol>] | oga relearn '<json>'"
         );
         return Ok(0);
     }
@@ -531,6 +531,7 @@ async fn run_relearn(args: &[String]) -> CliResult<i32> {
             result.routes_confirmed,
             result.routes_dropped
         );
+        print_route_moves(&result.route_moves);
         return Ok(0);
     }
     let routes = if args.len() == 1 {
@@ -548,10 +549,11 @@ async fn run_relearn(args: &[String]) -> CliResult<i32> {
         }]
     } else {
         return Err(CliError::new(
-            "usage: oga relearn \"<hint words>\" <path>[#<symbol>]",
+            "usage: oga relearn \"<hint words|alias>\" <path>[#<symbol>]",
         ));
     };
-    index.reconcile(&cwd, Default::default())?;
+    let reconciled = index.reconcile(&cwd, Default::default())?;
+    print_route_moves(&reconciled.route_moves);
     for route in &routes {
         index.learn_user_route(
             &cwd,
@@ -568,6 +570,20 @@ async fn run_relearn(args: &[String]) -> CliResult<i32> {
         if routes.len() == 1 { "" } else { "s" }
     );
     Ok(0)
+}
+
+fn print_route_moves(moves: &[oga_context::RouteMove]) {
+    for route in moves {
+        println!(
+            "moved route: {} → {}",
+            route_target(&route.from_path, route.from_symbol.as_deref()),
+            route_target(&route.to_path, route.to_symbol.as_deref()),
+        );
+    }
+}
+
+fn route_target(path: &str, symbol: Option<&str>) -> String {
+    symbol.map_or_else(|| path.to_owned(), |symbol| format!("{path}#{symbol}"))
 }
 
 #[derive(Debug, Deserialize)]

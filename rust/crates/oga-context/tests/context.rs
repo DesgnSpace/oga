@@ -199,7 +199,7 @@ fn learns_routes_and_verifies_changed_worktree_sources() {
 }
 
 #[test]
-fn learned_routes_follow_edits_and_forget_removed_symbols() {
+fn learned_routes_follow_symbol_renames() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth(token: string): boolean { return !!token; }\n");
     let index = ContextIndex::new(&fixture.store);
@@ -248,25 +248,20 @@ fn learned_routes_follow_edits_and_forget_removed_symbols() {
     assert_eq!(answer.candidates[0].line, 5);
     assert!(answer.markdown.contains("src/auth.ts:5#checkAuth"));
 
-    fixture.write_auth("export function verifyToken(token: string): boolean { return !!token; }\n");
+    fixture.write_auth(
+        "export function verifyToken(token: string): boolean { return token !== ''; }\n",
+    );
     index
         .reconcile(fixture.project.path(), BuildOptions::default())
         .expect("map reconciles the rename");
     let answer = index
         .question(&target, "auth check")
         .expect("question still answers");
-    assert!(
-        answer
-            .candidates
-            .iter()
-            .all(|candidate| candidate.symbol.as_deref() != Some("checkAuth"))
-    );
-    assert!(
-        index
-            .learned_routes(fixture.project.path(), "auth check")
-            .expect("learned routes read")
-            .is_empty()
-    );
+    assert_eq!(answer.candidates[0].symbol.as_deref(), Some("verifyToken"));
+    let routes = index
+        .learned_routes(fixture.project.path(), "auth check")
+        .expect("learned routes read");
+    assert_eq!(routes[0].symbol.as_deref(), Some("verifyToken"));
 }
 
 #[test]
@@ -310,6 +305,119 @@ fn learned_routes_follow_file_moves_during_reconcile() {
         .learned_routes(fixture.project.path(), "auth check")
         .expect("routes read");
     assert_eq!(routes[0].path, "src/security.ts");
+}
+
+#[test]
+fn learned_routes_follow_file_and_symbol_renames() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("map builds");
+    index
+        .learn_user_route(
+            fixture.project.path(),
+            &LearnRouteProposal {
+                hints: vec!["auth check".into()],
+                path: "src/auth.ts".into(),
+                symbol: Some("checkAuth".into()),
+            },
+        )
+        .expect("route learns");
+    fs::rename(
+        fixture.project.path().join("src/auth.ts"),
+        fixture.project.path().join("src/login.ts"),
+    )
+    .expect("file moves");
+    fs::write(
+        fixture.project.path().join("src/login.ts"),
+        "export function verifyLogin() { return true; }\n",
+    )
+    .expect("renamed source writes");
+    let result = index
+        .reconcile(fixture.project.path(), BuildOptions::default())
+        .expect("map reconciles the rename");
+    assert_eq!(result.route_moves.len(), 1);
+    let route = index
+        .learned_routes(fixture.project.path(), "auth check")
+        .expect("route resolves");
+    assert_eq!(route[0].path, "src/login.ts");
+    assert_eq!(route[0].symbol.as_deref(), Some("verifyLogin"));
+}
+
+#[test]
+fn learned_routes_match_synonyms_and_dedupe_entity_aliases() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("map builds");
+    for hint in ["auth", "login|sign in"] {
+        index
+            .learn_user_route(
+                fixture.project.path(),
+                &LearnRouteProposal {
+                    hints: vec![hint.into()],
+                    path: "src/auth.ts".into(),
+                    symbol: Some("checkAuth".into()),
+                },
+            )
+            .expect("route learns");
+    }
+    for question in ["auth", "login", "sign in"] {
+        assert_eq!(
+            index
+                .learned_routes(fixture.project.path(), question)
+                .expect("synonym route resolves")[0]
+                .symbol
+                .as_deref(),
+            Some("checkAuth")
+        );
+    }
+    let count: i64 = fixture
+        .store
+        .with_connection(|connection| {
+            Ok(
+                connection.query_row("SELECT COUNT(*) FROM context_learned_routes", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .expect("route count reads");
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn learned_route_aliases_are_capped() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("map builds");
+    index
+        .learn_user_route(
+            fixture.project.path(),
+            &LearnRouteProposal {
+                hints: vec!["login|alpha|bravo|charlie|delta|echo|foxtrot|golf|hotel".into()],
+                path: "src/auth.ts".into(),
+                symbol: Some("checkAuth".into()),
+            },
+        )
+        .expect("route learns");
+    let aliases: String = fixture
+        .store
+        .with_connection(|connection| {
+            Ok(
+                connection.query_row("SELECT aliases FROM context_learned_routes", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .expect("route aliases read");
+    assert!(aliases.split_whitespace().count() <= 8);
 }
 
 #[test]
