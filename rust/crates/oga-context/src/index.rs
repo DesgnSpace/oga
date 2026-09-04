@@ -33,6 +33,8 @@ const MAX_LEARNED_ROUTES: usize = 12;
 const MAX_HINTS_CHARS: usize = 160;
 const MAX_ROUTE_ALIASES: usize = 8;
 const CANDIDATE_POOL: usize = 24;
+const DEFAULT_QUERY_LIMIT: usize = 3;
+const MAX_FILE_BODY_LINES: usize = 120;
 
 #[derive(Debug, Error)]
 pub enum ContextError {
@@ -142,6 +144,14 @@ pub struct QuestionCandidate {
     pub path: String,
     pub line: u64,
     pub symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct QuestionOptions {
+    pub limit: Option<usize>,
+    pub code: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -579,6 +589,15 @@ impl<'a> ContextIndex<'a> {
         target: &ContextTarget,
         question: &str,
     ) -> Result<ContextResult, ContextError> {
+        self.question_with_options(target, question, QuestionOptions::default())
+    }
+
+    pub fn question_with_options(
+        &self,
+        target: &ContextTarget,
+        question: &str,
+        options: QuestionOptions,
+    ) -> Result<ContextResult, ContextError> {
         self.ensure(target.map_cwd())?;
         let map_cwd = target.map_cwd();
         let rows = self.list_files(map_cwd)?.into_values().collect::<Vec<_>>();
@@ -687,6 +706,7 @@ impl<'a> ContextIndex<'a> {
         let mut legal = Vec::new();
         let mut outside_scope = 0;
         let mut gone = 0;
+        let limit = options.limit.unwrap_or(DEFAULT_QUERY_LIMIT);
         for (file, score) in candidates.iter().take(CANDIDATE_POOL) {
             if !scope_covers_path(&target.scope.read, &target.cwd, &file.path) {
                 outside_scope += 1;
@@ -697,7 +717,7 @@ impl<'a> ContextIndex<'a> {
                 continue;
             };
             legal.push((file, score.clone()));
-            if legal.len() == 3 {
+            if legal.len() == limit {
                 break;
             }
         }
@@ -711,6 +731,9 @@ impl<'a> ContextIndex<'a> {
                     .and_then(|name| file.symbols.iter().find(|symbol| &symbol.name == name))
                     .map_or(1, |symbol| symbol.line),
                 symbol: score.symbol.clone(),
+                code: options
+                    .code
+                    .then(|| source_body(target, file, score.symbol.as_deref())),
             })
             .collect::<Vec<_>>();
         let mut lines = Vec::new();
@@ -735,6 +758,15 @@ impl<'a> ContextIndex<'a> {
                     Vec::new(),
                     Some(question_candidates[0].line),
                 ));
+                if options.code {
+                    lines.push(
+                        question_candidates[0]
+                            .code
+                            .as_deref()
+                            .unwrap_or("source unavailable")
+                            .to_owned(),
+                    );
+                }
             } else {
                 let mut candidates = legal.iter().collect::<Vec<_>>();
                 candidates.sort_by_key(|(_, score)| std::cmp::Reverse(score.matched.len()));
@@ -754,6 +786,17 @@ impl<'a> ContextIndex<'a> {
                         "{} (matched: {matched})",
                         entry_line(&file.path, score.symbol.as_deref(), Vec::new(), Some(line),)
                     ));
+                    if options.code {
+                        let candidate = question_candidates.iter().find(|candidate| {
+                            candidate.path == file.path && candidate.symbol == score.symbol
+                        });
+                        lines.push(
+                            candidate
+                                .and_then(|candidate| candidate.code.as_deref())
+                                .unwrap_or("source unavailable")
+                                .to_owned(),
+                        );
+                    }
                 }
             }
         } else {
@@ -1070,6 +1113,7 @@ impl<'a> ContextIndex<'a> {
                 path: route.path,
                 line: route.line.unwrap_or(1),
                 symbol: route.symbol,
+                code: None,
             })
             .collect())
     }
@@ -2715,6 +2759,32 @@ fn entry_line(path: &str, symbol: Option<&str>, notes: Vec<String>, line: Option
         entry.push_str(&notes.join(" · "));
     }
     entry
+}
+
+fn source_body(target: &ContextTarget, file: &ContextFile, symbol: Option<&str>) -> String {
+    let path = target.cwd.join(&file.path);
+    let Ok(source) = fs::read_to_string(&path) else {
+        return format!("source unavailable: {}", path.display());
+    };
+    let lines = source.lines().collect::<Vec<_>>();
+    let (start, end) = symbol
+        .and_then(|name| file.symbols.iter().find(|candidate| candidate.name == name))
+        .map_or((1, lines.len()), |symbol| {
+            (symbol.line as usize, symbol.end_line as usize)
+        });
+    if start == 0 || start > end || end > lines.len() {
+        return format!("source span unavailable: {}:{start}-{end}", path.display());
+    }
+    let mut body = lines[start - 1..end]
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect::<Vec<_>>();
+    if symbol.is_none() && body.len() > MAX_FILE_BODY_LINES {
+        let remaining = body.len() - MAX_FILE_BODY_LINES;
+        body.truncate(MAX_FILE_BODY_LINES);
+        body.push(format!("… {remaining} more lines"));
+    }
+    format!("```text\n{}\n```", body.join("\n"))
 }
 
 fn map_header(

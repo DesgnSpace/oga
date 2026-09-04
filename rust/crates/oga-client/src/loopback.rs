@@ -701,6 +701,13 @@ impl LoopbackClient {
         let mut url = self.endpoint(&["api", "query"]);
         url.query_pairs_mut().append_pair("cwd", &request.cwd);
         url.query_pairs_mut().append_pair("q", &request.question);
+        if let Some(limit) = request.limit {
+            url.query_pairs_mut()
+                .append_pair("limit", &limit.to_string());
+        }
+        if request.code {
+            url.query_pairs_mut().append_pair("code", "true");
+        }
         let response: MarkdownResponse = self.get_json(url).await?;
         Ok(response.markdown)
     }
@@ -723,6 +730,13 @@ impl LoopbackClient {
         }
         if let Some(tier) = request.tier {
             url.query_pairs_mut().append_pair("tier", tier.as_str());
+        }
+        if let Some(limit) = request.limit {
+            url.query_pairs_mut()
+                .append_pair("limit", &limit.to_string());
+        }
+        if request.code {
+            url.query_pairs_mut().append_pair("code", "true");
         }
         self.send_json(Method::GET, url, None, Some("application/json"))
             .await

@@ -31,6 +31,8 @@ use crate::{
 pub struct QueryParams {
     pub cwd: Option<String>,
     pub q: Option<String>,
+    pub limit: Option<u64>,
+    pub code: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -43,6 +45,8 @@ pub struct MapParams {
     pub depth: Option<u64>,
     pub q: Option<String>,
     pub tier: Option<String>,
+    pub limit: Option<u64>,
+    pub code: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -73,7 +77,14 @@ pub async fn get_query(
             ContextTarget::new(&cwd, everything())
         }
     };
-    let result = index.question(&target, question)?;
+    let result = index.question_with_options(
+        &target,
+        question,
+        oga_context::QuestionOptions {
+            limit: query.limit.map(|limit| limit as usize),
+            code: query.code.unwrap_or(false),
+        },
+    )?;
     Ok(Json(json!({
         "markdown": result.markdown,
         "candidates": result.candidates,
@@ -113,7 +124,14 @@ pub async fn get_map(
         .to_string();
     refresh(&index, &map_cwd)?;
     let result = match question {
-        Some(question) => index.question(&target, question)?,
+        Some(question) => index.question_with_options(
+            &target,
+            question,
+            oga_context::QuestionOptions {
+                limit: query.limit.map(|limit| limit as usize),
+                code: query.code.unwrap_or(false),
+            },
+        )?,
         None => index.list(
             &target,
             &QueryOptions {
