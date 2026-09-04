@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 38;
+pub const LATEST_SCHEMA_VERSION: i64 = 39;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -341,11 +341,11 @@ const CONTEXT_ENTITIES: &str = r#"      CREATE TABLE context_entities (
         );
       END;"#;
 
-/// Learned routes keyed by their hint text, with an FTS5 mirror kept in step by triggers.
+/// Learned routes keep one bounded alias set for each source entity.
 const ROUTE_HINTS_TABLE: &str = r#"      CREATE TABLE context_learned_routes (
         id INTEGER PRIMARY KEY,
         cwd TEXT NOT NULL,
-        hints TEXT NOT NULL,
+        aliases TEXT NOT NULL,
         entity_id INTEGER REFERENCES context_entities(id) ON DELETE SET NULL,
         learned_path TEXT NOT NULL,
         learned_symbol TEXT NOT NULL DEFAULT '',
@@ -356,11 +356,12 @@ const ROUTE_HINTS_TABLE: &str = r#"      CREATE TABLE context_learned_routes (
         model TEXT NOT NULL,
         created_at TEXT NOT NULL,
         last_confirmed_at TEXT NOT NULL,
-        UNIQUE(cwd, hints, learned_path, learned_symbol)
+        UNIQUE(cwd, learned_path, learned_symbol)
        );
        CREATE INDEX context_learned_routes_cwd_entity ON context_learned_routes(cwd, entity_id);
+       CREATE INDEX context_learned_routes_cwd_aliases ON context_learned_routes(cwd, aliases);
        CREATE VIRTUAL TABLE context_learned_routes_fts USING fts5(
-         hints,
+         aliases,
          content='context_learned_routes',
          content_rowid='id',
          tokenize='porter unicode61 remove_diacritics 2',
@@ -368,18 +369,18 @@ const ROUTE_HINTS_TABLE: &str = r#"      CREATE TABLE context_learned_routes (
        );
        CREATE TRIGGER context_learned_routes_ai
        AFTER INSERT ON context_learned_routes BEGIN
-         INSERT INTO context_learned_routes_fts(rowid, hints) VALUES (new.id, new.hints);
+         INSERT INTO context_learned_routes_fts(rowid, aliases) VALUES (new.id, new.aliases);
        END;
        CREATE TRIGGER context_learned_routes_ad
        AFTER DELETE ON context_learned_routes BEGIN
-         INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, hints)
-         VALUES ('delete', old.id, old.hints);
+         INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, aliases)
+         VALUES ('delete', old.id, old.aliases);
        END;
        CREATE TRIGGER context_learned_routes_au
        AFTER UPDATE ON context_learned_routes BEGIN
-         INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, hints)
-         VALUES ('delete', old.id, old.hints);
-         INSERT INTO context_learned_routes_fts(rowid, hints) VALUES (new.id, new.hints);
+         INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, aliases)
+         VALUES ('delete', old.id, old.aliases);
+         INSERT INTO context_learned_routes_fts(rowid, aliases) VALUES (new.id, new.aliases);
        END;"#;
 
 pub fn migrate_v37_to_v38(conn: &Connection) -> Result<(), StoreError> {
@@ -415,6 +416,47 @@ pub fn migrate_v37_to_v38(conn: &Connection) -> Result<(), StoreError> {
         CREATE TRIGGER context_learned_routes_au AFTER UPDATE ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, hints) VALUES ('delete', old.id, old.hints); INSERT INTO context_learned_routes_fts(rowid, hints) VALUES (new.id, new.hints); END;
         INSERT INTO context_learned_routes_fts(rowid, hints) SELECT id, hints FROM context_learned_routes;
         INSERT INTO schema_migrations(version, name) VALUES (38, 'user learned routes');
+        COMMIT;"#,
+    )?;
+    Ok(())
+}
+
+pub fn migrate_v38_to_v39(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"BEGIN IMMEDIATE;
+        DROP TRIGGER IF EXISTS context_learned_routes_ai;
+        DROP TRIGGER IF EXISTS context_learned_routes_ad;
+        DROP TRIGGER IF EXISTS context_learned_routes_au;
+        DROP TABLE IF EXISTS context_learned_routes_fts;
+        ALTER TABLE context_learned_routes RENAME TO context_learned_routes_old;
+        CREATE TABLE context_learned_routes (
+          id INTEGER PRIMARY KEY,
+          cwd TEXT NOT NULL,
+          aliases TEXT NOT NULL,
+          entity_id INTEGER REFERENCES context_entities(id) ON DELETE SET NULL,
+          learned_path TEXT NOT NULL,
+          learned_symbol TEXT NOT NULL DEFAULT '',
+          source_digest TEXT NOT NULL,
+          task_id TEXT,
+          attempt INTEGER NOT NULL CHECK(attempt >= 0),
+          profile_id TEXT NOT NULL,
+          model TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_confirmed_at TEXT NOT NULL,
+          UNIQUE(cwd, learned_path, learned_symbol)
+        );
+        INSERT INTO context_learned_routes(id,cwd,aliases,entity_id,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
+          SELECT MIN(id),cwd,SUBSTR(GROUP_CONCAT(hints, ' '), 1, 160),MAX(entity_id),learned_path,learned_symbol,MAX(source_digest),MAX(task_id),MAX(attempt),MAX(profile_id),MAX(model),MIN(created_at),MAX(last_confirmed_at)
+          FROM context_learned_routes_old GROUP BY cwd,learned_path,learned_symbol;
+        DROP TABLE context_learned_routes_old;
+        CREATE INDEX context_learned_routes_cwd_entity ON context_learned_routes(cwd, entity_id);
+        CREATE INDEX context_learned_routes_cwd_aliases ON context_learned_routes(cwd, aliases);
+        CREATE VIRTUAL TABLE context_learned_routes_fts USING fts5(aliases, content='context_learned_routes', content_rowid='id', tokenize='porter unicode61 remove_diacritics 2', prefix='2 3 4 5 6 8 10');
+        CREATE TRIGGER context_learned_routes_ai AFTER INSERT ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(rowid, aliases) VALUES (new.id, new.aliases); END;
+        CREATE TRIGGER context_learned_routes_ad AFTER DELETE ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, aliases) VALUES ('delete', old.id, old.aliases); END;
+        CREATE TRIGGER context_learned_routes_au AFTER UPDATE ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, aliases) VALUES ('delete', old.id, old.aliases); INSERT INTO context_learned_routes_fts(rowid, aliases) VALUES (new.id, new.aliases); END;
+        INSERT INTO context_learned_routes_fts(rowid, aliases) SELECT id, aliases FROM context_learned_routes;
+        INSERT INTO schema_migrations(version, name) VALUES (39, 'learned route aliases');
         COMMIT;"#,
     )?;
     Ok(())
