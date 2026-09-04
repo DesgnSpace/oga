@@ -22,7 +22,7 @@ use oga_domain::{
     UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
-use oga_providers::environment_for;
+use oga_providers::{codex_home, environment_for};
 use oga_routing::{
     claude_models, claude_models_from_catalog, format_rfc3339_ms, now_ms, parse_antigravity_models,
     parse_codex_models, parse_opencode_models, parse_opencode_v2_models, parse_pi_models,
@@ -962,22 +962,6 @@ async fn models_for_profile(profile: &Profile, refresh: bool) -> Vec<ModelInfo> 
     models
 }
 
-fn expand_home(value: &str) -> String {
-    let Ok(home) = std::env::var("HOME") else {
-        return value.to_owned();
-    };
-    if let Some(rest) = value.strip_prefix("$HOME") {
-        if rest.is_empty() || rest.starts_with('/') {
-            return format!("{home}{rest}");
-        }
-    } else if let Some(rest) = value.strip_prefix('~')
-        && (rest.is_empty() || rest.starts_with('/'))
-    {
-        return format!("{home}{rest}");
-    }
-    value.to_owned()
-}
-
 /// Spawns the provider's own model-listing command in a throwaway directory
 /// and parses its output. A provider that fails, times out, or is not
 /// understood yields no models, so the caller falls back to the profile's
@@ -1037,10 +1021,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
 async fn cached_opencode_models(profile: &Profile) -> Vec<ModelInfo> {
     let home = global_cwd();
     let cache_roots = [
-        profile
-            .env
-            .get("XDG_CACHE_HOME")
-            .map(|path| expand_home(path)),
+        environment_for(profile).remove("XDG_CACHE_HOME"),
         std::env::var("XDG_CACHE_HOME").ok(),
         Some(home.join(".cache").display().to_string()),
         Some(home.join("Library/Caches").display().to_string()),
@@ -1059,10 +1040,7 @@ async fn cached_opencode_models(profile: &Profile) -> Vec<ModelInfo> {
     };
 
     let data_roots = [
-        profile
-            .env
-            .get("XDG_DATA_HOME")
-            .map(|path| expand_home(path)),
+        environment_for(profile).remove("XDG_DATA_HOME"),
         std::env::var("XDG_DATA_HOME").ok(),
         Some(home.join(".local/share").display().to_string()),
         Some(
@@ -1638,12 +1616,7 @@ fn parse_claude_usage(text: &str) -> Vec<UsageWindow> {
 /// Codex logs `token_count` events with `rate_limits` into every session
 /// rollout; the newest few files are enough to find the latest one.
 async fn codex_usage(profile: &Profile) -> ProfileUsage {
-    let home = profile
-        .env
-        .get("CODEX_HOME")
-        .map(|value| expand_home(value))
-        .or_else(|| std::env::var("CODEX_HOME").ok())
-        .unwrap_or_else(|| format!("{}/.codex", expand_home("$HOME")));
+    let home = codex_home(profile);
     let sessions_dir = format!("{home}/sessions");
     let mut files = Vec::new();
     collect_rollout_files(Path::new(&sessions_dir), &mut files).await;
@@ -1850,13 +1823,32 @@ mod catalog_tests {
     }
 
     #[test]
-    fn expand_home_rewrites_leading_home_and_tilde() {
-        // SAFETY: test-only env mutation, no other test in this process reads HOME.
-        unsafe { std::env::set_var("HOME", "/Users/fixture") };
-        assert_eq!(expand_home("$HOME/.config"), "/Users/fixture/.config");
-        assert_eq!(expand_home("~/.config"), "/Users/fixture/.config");
-        assert_eq!(expand_home("/already/absolute"), "/already/absolute");
-        assert_eq!(expand_home("$HOMEROOM"), "$HOMEROOM");
+    fn usage_probes_read_account_directories_from_the_profile() {
+        // SAFETY: test-only env mutation; nothing else in this crate reads these.
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", "/broker/.claude-me");
+            std::env::set_var("CODEX_HOME", "/broker/.codex-me");
+        }
+        let home = std::env::var("HOME").expect("HOME");
+
+        let claude = profile("fixture-claude", Provider::Claude);
+        assert_eq!(
+            environment_for(&claude)["CLAUDE_CONFIG_DIR"],
+            format!("{home}/.fixture-claude")
+        );
+
+        let mut work = profile("fixture-claude-work", Provider::Claude);
+        work.env
+            .insert("CLAUDE_CONFIG_DIR".into(), "$HOME/.claude-work".into());
+        assert_eq!(
+            environment_for(&work)["CLAUDE_CONFIG_DIR"],
+            format!("{home}/.claude-work")
+        );
+
+        assert_eq!(
+            codex_home(&profile("fixture-codex", Provider::Codex)),
+            format!("{home}/.codex")
+        );
     }
 
     #[tokio::test]
