@@ -84,7 +84,7 @@
     "updater": {
       "pubkey": "__SET_TAURI_PUBLIC_KEY__",
       "endpoints": [
-        "https://public-update-host.example.com/oga/latest.json"
+        "https://downloads.desgn.space/oga/latest.json"
       ]
     }
   }
