@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Changes in Oga releases and the next release.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga docs - Changelog</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html" aria-current="page">Changelog</a></li>
+          </ul>
+        </nav>
+      </details>
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html" aria-current="page">Changelog</a></li>
+        </ul>
+      </nav>
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Changelog</p>
+        <h1>What changed</h1>
+        <p class="docs-intro">Release notes for Oga.</p>
+          <p>All notable changes to Oga are documented here.</p>
+          <p>The format follows <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,</p>
+          <p>and Oga uses <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
+          <h2>Unreleased</h2>
+          <h3>Added</h3>
+          <ul>
+          <li>Added per-kind default model rules with <code>oga love --when</code>.</li>
+          <li>Added <code>oga query --limit</code> and <code>oga query --code</code>.</li>
+          <li>Added scheduled starts for delegated and resumed work.</li>
+          <li>Added task-specific next-step guidance to MCP responses.</li>
+          <li>Added queued follow-up instructions when a running worker cannot accept them.</li>
+          <li>Added public documentation for installation, setup, delegation, task follow-up, worktrees, local data, and release notes.</li>
+          </ul>
+          <h3>Changed</h3>
+          <ul>
+          <li>Consolidated the maintained reference docs.</li>
+          </ul>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Kept Codex and Pi account directories separate for each worker profile.</li>
+          <li>Installed source builds beside released Oga without sharing an app identity.</li>
+          <li>Let workers clear local, reversible obstacles before reporting a blocker.</li>
+          </ul>
+          <h2>0.0.5 - 2026-09-04</h2>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Packaged the broker sidecar for supported macOS architectures.</li>
+          <li>Located the bundled broker beside the app executable.</li>
+          <li>Let Tauri handle app notarization during publishing.</li>
+          </ul>
+          <h2>0.0.4 - 2026-08-26</h2>
+          <h3>Added</h3>
+          <ul>
+          <li>Linked ignored project paths into task worktrees by default.</li>
+          <li>Kept interrupted work on hold for recovery.</li>
+          </ul>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Preserved task holds during handoff.</li>
+          <li>Settled dependent tasks after direct completion.</li>
+          </ul>
+          <h2>0.0.3 - 2026-08-24</h2>
+          <h3>Added</h3>
+          <ul>
+          <li>Added the product landing page.</li>
+          <li>Added Pages deployment for the landing site.</li>
+          </ul>
+          <h2>0.0.2 - 2026-08-24</h2>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Loaded release environment values safely during publishing.</li>
+          </ul>
+      </article>
+    </div>
+  </main>
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>

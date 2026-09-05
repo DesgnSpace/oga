@@ -34,6 +34,7 @@
             <li><a href="/docs/follow.html">Check on the work</a></li>
             <li><a href="/docs/worktrees.html" aria-current="page">Branches &amp; pull requests</a></li>
             <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
           </ul>
         </nav>
       </details>
@@ -48,6 +49,7 @@
           <li><a href="/docs/follow.html">Check on the work</a></li>
           <li><a href="/docs/worktrees.html" aria-current="page">Branches &amp; pull requests</a></li>
           <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
         </ul>
       </nav>
 
@@ -81,7 +83,7 @@ git merge oga/&lt;branch-name&gt;</code></pre>
         <p>Work on its own branch can also commit, push, and open a pull request for you. When it does, the link comes back with the rest of the report.</p>
 
         <h2 id="space">Freeing the space</h2>
-        <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. Add <code>--delete</code> to free it. Only work that has finished and that you archived is ever eligible, and the branch it produced is never touched — the code survives the copy being cleared.</p>
+        <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. To delete, use <code>oga cleanup --older-than 30d --delete</code>. Only finished, archived work is eligible. Cleanup can remove a clean task copy, but the branch remains.</p>
 
         <div class="docs-next">
           <a href="/docs/data.html">Next: Your data &rarr;</a>

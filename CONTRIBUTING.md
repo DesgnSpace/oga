@@ -22,6 +22,12 @@ bunx tsc --noEmit
 The test suite exercises task lifecycle, event tracing, scope enforcement, the
 event socket protocol, watch exit codes, and the public task view contract.
 
+## Changelog
+
+Update `CHANGELOG.md` with every user-visible change. Run `make changelog`
+before reviewing or deploying the landing site; it regenerates
+`landing/docs/changelog.html` from that file.
+
 ## Code style
 
 Comments are sparse and speak to *why*, not *what*. The code itself carries the
