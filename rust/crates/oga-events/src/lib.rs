@@ -3139,6 +3139,8 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
             }
         }
         "hold_cross_cwd" => tree_value(payload, &["blockerId"]).map(|id| format!("Task {id}")),
+        "session_rejected" => tree_value(payload, &["profile"])
+            .map(|profile| format!("{profile} could not reopen it; starting fresh")),
         "network_retry_scheduled" => {
             let error = tree_value(payload, &["originalError"]);
             let expires = tree_value(payload, &["expiresAt"]);
@@ -3414,6 +3416,7 @@ fn lifecycle_title(event_type: &str) -> String {
         "scope_inherited" => "Using approved scope",
         "scope_ungranted" => "Default scope used",
         "resume_fallback" => "Session rebuilt from message history",
+        "session_rejected" => "Previous session unavailable",
         "worker_stderr" => "Worker stderr",
         "completion_asserted" => "Completion asserted",
         "oga.orchestrator" => "Orchestrator started",
