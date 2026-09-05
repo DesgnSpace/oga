@@ -112,7 +112,6 @@ describe("Transcript", () => {
   });
 
   it("keeps thinking out of the trace until the reader asks for it", () => {
-    window.localStorage.removeItem("traceShowThinking");
     const thinking: TaskEventView = {
       id: 1,
       taskId: "task",
@@ -136,10 +135,10 @@ describe("Transcript", () => {
       },
     };
 
-    render(<Transcript items={[item]} />);
+    const view = render(<Transcript items={[item]} />);
     expect(screen.queryByText("Weighing two options")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show thinking" }));
+    view.rerender(<Transcript items={[item]} showThinking={true} />);
     expect(screen.getByText("Weighing two options")).toBeTruthy();
   });
 

@@ -23,6 +23,8 @@
 - Kept Codex and Pi account directories separate for each worker profile.
 - Installed source builds beside released Oga without sharing an app identity.
 - Let workers clear local, reversible obstacles before reporting a blocker.
+- Moved "Show thinking" next to the reply box, out of the empty space above the transcript.
+- Kept the task menu's "Move to another worker" from being cut off at the top of the window.
 
 ## 0.0.5 - 2026-09-04
 

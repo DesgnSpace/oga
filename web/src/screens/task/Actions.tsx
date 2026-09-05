@@ -519,7 +519,15 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
 }
 
 /** The composer plus the blocked-task explanation, in the footer of the transcript. */
-export function TaskControls({ task, onChanged }: { task: Task; onChanged: () => void }) {
+export function TaskControls({
+  task,
+  onChanged,
+  thinkingToggle,
+}: {
+  task: Task;
+  onChanged: () => void;
+  thinkingToggle?: { active: boolean; onToggle: () => void };
+}) {
   const [busy, setBusy] = React.useState(false);
   const routing = routingForState(task.state, false, task.question);
   const queued = task.queuedFollowUpItems ?? [];
@@ -629,7 +637,14 @@ export function TaskControls({ task, onChanged }: { task: Task; onChanged: () =>
         </div>
       )}
       {routing.type !== "none" && (
-        <ConversationComposer routing={routing} scope={task.scope} queued={queued} onSend={handleSend} onRemoveQueued={removeQueued} />
+        <ConversationComposer
+          routing={routing}
+          scope={task.scope}
+          queued={queued}
+          onSend={handleSend}
+          onRemoveQueued={removeQueued}
+          thinkingToggle={thinkingToggle}
+        />
       )}
       {routing.type !== "none" && <TaskMetadata task={task} />}
     </section>
