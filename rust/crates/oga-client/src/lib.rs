@@ -623,6 +623,8 @@ pub struct MapQuery {
     pub depth: Option<u64>,
     pub question: Option<String>,
     pub tier: Option<MapTier>,
+    pub limit: Option<u64>,
+    pub code: bool,
 }
 
 impl MapQuery {
@@ -657,12 +659,24 @@ impl MapQuery {
         self.tier = Some(tier);
         self
     }
+
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn code(mut self, code: bool) -> Self {
+        self.code = code;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryRequest {
     pub cwd: String,
     pub question: String,
+    pub limit: Option<u64>,
+    pub code: bool,
 }
 
 impl QueryRequest {
@@ -670,7 +684,19 @@ impl QueryRequest {
         Self {
             cwd: cwd.into(),
             question: question.into(),
+            limit: None,
+            code: false,
         }
+    }
+
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn code(mut self, code: bool) -> Self {
+        self.code = code;
+        self
     }
 }
 

@@ -2,8 +2,8 @@ use std::fs;
 use std::time::Duration;
 
 use oga_context::{
-    BuildOptions, ContextIndex, ContextTarget, LearnRouteProposal, QueryOptions, RenderTier,
-    clean_comment, extract_symbols,
+    BuildOptions, ContextIndex, ContextTarget, LearnRouteProposal, QueryOptions, QuestionOptions,
+    RenderTier, clean_comment, extract_symbols,
 };
 use oga_domain::{SourceLang, Task, TaskScope};
 use oga_store::Store;
@@ -75,6 +75,45 @@ fn builds_symbols_and_ranks_exact_questions() {
     assert_eq!(result.candidates[0].path, "src/auth.ts");
     assert_eq!(result.candidates[0].symbol.as_deref(), Some("checkAuth"));
     assert!(result.markdown.contains("src/auth.ts:2#checkAuth"));
+}
+
+#[test]
+fn limits_question_results_and_reads_current_source_for_code() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "export function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
+    );
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("context map builds");
+    let target = ContextTarget::new(
+        fixture.project.path(),
+        TaskScope {
+            read: vec!["**".into()],
+            write: Vec::new(),
+        },
+    );
+
+    let result = index
+        .question_with_options(
+            &target,
+            "where is checkAuth handled",
+            QuestionOptions {
+                limit: Some(1),
+                code: true,
+            },
+        )
+        .expect("question renders");
+    assert_eq!(result.candidates.len(), 1);
+    assert_eq!(
+        result.candidates[0].code.as_deref(),
+        Some(
+            "```text\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n```"
+        )
+    );
+    assert!(result.markdown.contains("return token.length > 0;"));
 }
 
 #[test]

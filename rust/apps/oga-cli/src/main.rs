@@ -318,7 +318,9 @@ fn run_version() -> CliResult<i32> {
 
 async fn run_query(args: &[String]) -> CliResult<i32> {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
-        println!("Usage: oga query \"<question>\" | oga query --init [--force]");
+        println!(
+            "Usage: oga query [--limit N] [--code] \"<question>\" | oga query --init [--force]"
+        );
         return Ok(0);
     }
 
@@ -352,7 +354,8 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
         return Ok(0);
     }
 
-    let question = args.join(" ").trim().to_owned();
+    let (options, question_parts) = parse_query_options(args)?;
+    let question = question_parts.join(" ").trim().to_owned();
     if question.is_empty() {
         return Err(CliError::new("usage: oga query \"<question>\""));
     }
@@ -372,11 +375,18 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
                 "unknown task: {task_id} — call tasks to list recent task ids"
             )));
         }
-        let request = MapQuery::new(task_id).question(question);
+        let request = MapQuery::new(task_id)
+            .question(question)
+            .limit(options.limit)
+            .code(options.code);
         client.map(&request).await.map(|response| response.markdown)
     } else {
         client
-            .query(&QueryRequest::new(cwd.display().to_string(), question))
+            .query(
+                &QueryRequest::new(cwd.display().to_string(), question)
+                    .limit(options.limit)
+                    .code(options.code),
+            )
             .await
     };
     match result {
@@ -392,6 +402,39 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
         }
         Err(error) => Err(query_broker_error(&client, error)),
     }
+}
+
+#[derive(Debug, Default)]
+struct QueryCliOptions {
+    limit: u64,
+    code: bool,
+}
+
+fn parse_query_options(args: &[String]) -> CliResult<(QueryCliOptions, Vec<String>)> {
+    let mut options = QueryCliOptions {
+        limit: 3,
+        code: false,
+    };
+    let mut question = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--code" => options.code = true,
+            "--limit" => {
+                index += 1;
+                options.limit = parse_limit(
+                    args.get(index)
+                        .ok_or_else(|| CliError::new("--limit needs a value"))?,
+                )?;
+            }
+            value if value.starts_with("--limit=") => {
+                options.limit = parse_limit(value.trim_start_matches("--limit="))?;
+            }
+            value => question.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    Ok((options, question))
 }
 
 /// Only a transport failure means the broker is down. Every other failure
@@ -627,8 +670,8 @@ Usage: oga <command> [options]
   tail                 Watch everything the broker records, one line per event.
                        For checking on the service itself; to follow a single
                        task, use watch.
-  query "<question>"   Ask where code lives in the current project.
-                       Use query --init first when the project has no index.
+  query "<question>"   Find files and symbols for a plain-language question.
+                       Use --limit N to set results; --code prints source bodies.
   love [worker:model[:effort]]  Send work that names no model to one model. Add
                        --when context,mechanical to send only those kinds of
                        work there. Run it bare to see this project's rules,
@@ -3278,6 +3321,20 @@ mod tests {
         assert_eq!(parsed.kinds, [EventKind::Lifecycle, EventKind::Error]);
         assert!(parsed.detail);
         assert_eq!(parsed.cursor, 7);
+    }
+
+    #[test]
+    fn parses_query_limit_and_code() {
+        let args = vec![
+            "--code".into(),
+            "--limit".into(),
+            "1".into(),
+            "where is auth".into(),
+        ];
+        let (options, question) = parse_query_options(&args).unwrap();
+        assert_eq!(options.limit, 1);
+        assert!(options.code);
+        assert_eq!(question, ["where is auth"]);
     }
 
     #[test]
