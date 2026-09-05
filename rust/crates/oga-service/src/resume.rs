@@ -1,6 +1,6 @@
 //! Resume and fresh-session reseed transitions.
 
-use oga_domain::{Task, TaskScope, TaskState};
+use oga_domain::{HoldArgs, HoldVerb, Task, TaskHold, TaskScope, TaskState};
 use serde_json::json;
 
 use crate::{
@@ -8,9 +8,15 @@ use crate::{
     dispatch::Dispatcher,
     encode_store,
     handoff_brief::{FreshSessionCause, HandoffBriefOptions, handoff_brief},
+    holds::{HOLD_EXPIRY, HoldSweep},
     lifecycle::now_iso,
-    require_existing_worktree, require_profile, require_task, resume_prompt, validate_model,
+    require_existing_worktree, require_profile, require_task, resume_prompt,
+    schedule::{StartAt, parse_start_at},
+    validate_model, waiting,
 };
+
+/// How long a `rate_limit` hold waits when the failed run named no reset time.
+const RATE_LIMIT_FALLBACK_MS: i64 = 10 * 60 * 1_000;
 
 #[derive(Debug, Clone, Default)]
 pub struct ResumeRequest {
@@ -21,6 +27,7 @@ pub struct ResumeRequest {
     pub effort: Option<String>,
     pub timeout_ms: Option<u64>,
     pub allow_questions: Option<bool>,
+    pub start_at: Option<String>,
 }
 
 impl ResumeRequest {
@@ -58,6 +65,11 @@ impl ResumeRequest {
 
     pub fn allow_questions(mut self, allow_questions: bool) -> Self {
         self.allow_questions = Some(allow_questions);
+        self
+    }
+
+    pub fn start_at(mut self, start_at: impl Into<String>) -> Self {
+        self.start_at = Some(start_at.into());
         self
     }
 }
@@ -133,6 +145,31 @@ pub async fn resume(
         .filter(|effort| !effort.is_empty())
         .map(str::to_owned)
         .or_else(|| old.effort.clone());
+    if let Some(start_at) = request.start_at.as_deref() {
+        // A held resume replays its instruction and nothing else, so settings
+        // stated now would be dropped the moment the hold releases.
+        let dropped: Vec<&str> = [
+            request.model.is_some().then_some("model"),
+            request.effort.is_some().then_some("effort"),
+            request.timeout_ms.is_some().then_some("timeoutMs"),
+            request.scope.is_some().then_some("scope"),
+            request
+                .allow_questions
+                .is_some()
+                .then_some("allowQuestions"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !dropped.is_empty() {
+            return Err(ContinuationError::Refusal(format!(
+                "a scheduled resume carries only its instruction: {} — {} would be lost when it starts; resume without startAt to change them",
+                old.id,
+                dropped.join(" and ")
+            )));
+        }
+        return hold_until(dispatcher, &old, instruction, start_at);
+    }
     let now = now_iso();
     let attempts = close_attempt(&old, &now, false);
     let attempts_json = encode_store(&attempts)?;
@@ -298,4 +335,58 @@ pub async fn resume(
         old.session_id,
     );
     Ok(task)
+}
+
+/// Parks the resume behind a hold instead of running it. `rate_limit` keys the
+/// release on the account rather than the clock alone — the reset time is only
+/// the first place to look, and the sweep will not start a run into an account
+/// still reporting no usage.
+fn hold_until(
+    dispatcher: &Dispatcher,
+    old: &Task,
+    instruction: Option<String>,
+    start_at: &str,
+) -> Result<Task, ContinuationError> {
+    let now_ms = oga_routing::now_ms();
+    let start_at = parse_start_at(start_at, now_ms).map_err(ContinuationError::Refusal)?;
+    let (until, await_profile, note) = match start_at {
+        StartAt::At(instant) => {
+            let note = waiting::scheduled_start_note(&instant);
+            (instant, None, note)
+        }
+        StartAt::WhenUsageResets => {
+            let instant = old
+                .completion
+                .as_ref()
+                .and_then(|completion| completion.resets_at.clone())
+                .unwrap_or_else(|| {
+                    oga_routing::format_rfc3339_ms(now_ms.saturating_add(RATE_LIMIT_FALLBACK_MS))
+                });
+            let note = waiting::rate_limit_wait_note(&instant);
+            (instant, Some(old.profile_id.clone()), note)
+        }
+    };
+    let scheduled = await_profile.is_none();
+    let now = now_iso();
+    let hold = TaskHold {
+        task_id: old.id.clone(),
+        verb: HoldVerb::Resume,
+        args: HoldArgs {
+            instruction,
+            scheduled: scheduled.then_some(true),
+            ..HoldArgs::default()
+        },
+        start_at: Some(until.clone()),
+        await_model: await_profile.as_ref().map(|_| old.model.clone()),
+        await_profile,
+        next_check_at: until,
+        expires_at: oga_routing::format_rfc3339_ms(
+            now_ms.saturating_add(HOLD_EXPIRY.as_millis() as i64),
+        ),
+        probe_count: 0,
+        note,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    Ok(HoldSweep::new(dispatcher.store().clone()).arm(&hold)?)
 }

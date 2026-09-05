@@ -642,7 +642,9 @@ Usage: oga <command> [options]
   inspect <task-id>    Show one task record.
   archive <task-id>... Archive tasks; restore reverses this.
   cancel <task-id>...  Cancel tasks.
-  resume <task-id>     Resume a task, optionally with -m instruction.
+  resume <task-id>     Resume a task, optionally with -m instruction. Add
+                       --start-at 4h (or an exact time) to have it start later
+                       instead of now.
   complete <task-id>   Mark a task complete.
   cleanup              Free the disk that old finished work is holding. Shows
                        what would go and deletes nothing until you say so.
@@ -674,6 +676,7 @@ struct TaskCliOptions {
     archived: bool,
     limit: Option<u64>,
     instruction: Option<String>,
+    start_at: Option<String>,
 }
 
 fn parse_task_options(args: &[String]) -> CliResult<(TaskCliOptions, Vec<String>)> {
@@ -708,6 +711,17 @@ fn parse_task_options(args: &[String]) -> CliResult<(TaskCliOptions, Vec<String>
                         .ok_or_else(|| CliError::new("-m needs a value"))?
                         .clone(),
                 );
+            }
+            "--start-at" => {
+                index += 1;
+                options.start_at = Some(
+                    args.get(index)
+                        .ok_or_else(|| CliError::new("--start-at needs a value"))?
+                        .clone(),
+                );
+            }
+            value if value.starts_with("--start-at=") => {
+                options.start_at = Some(value.trim_start_matches("--start-at=").to_owned());
             }
             value if value.starts_with("--limit=") => {
                 options.limit = Some(parse_limit(value.trim_start_matches("--limit="))?);
@@ -913,9 +927,9 @@ async fn run_cancel(args: &[String]) -> CliResult<i32> {
 
 async fn run_resume(args: &[String]) -> CliResult<i32> {
     let (options, values) = parse_task_options(args)?;
-    let id = values
-        .first()
-        .ok_or_else(|| CliError::new("usage: oga resume <task-id> [-m instruction]"))?;
+    let id = values.first().ok_or_else(|| {
+        CliError::new("usage: oga resume <task-id> [-m instruction] [--start-at 4h]")
+    })?;
     if values.len() != 1 {
         return Err(CliError::new(
             "resume takes one task id and one instruction",
@@ -925,12 +939,17 @@ async fn run_resume(args: &[String]) -> CliResult<i32> {
     let task = resolve_task(&client, id).await?;
     let request = ResumeRequest {
         instruction: options.instruction,
+        start_at: options.start_at,
         ..ResumeRequest::default()
     };
     let response = client.resume_task(&task.id, &request).await?;
-    let value = json!({"id": response.id, "state": response.state, "title": task_title(&task), "action": "resumed"});
+    let waiting = response.state == TaskState::Pending;
+    let action = if waiting { "scheduled" } else { "resumed" };
+    let value = json!({"id": response.id, "state": response.state, "title": task_title(&task), "action": action});
     if options.json {
         print_json(&value)?;
+    } else if waiting {
+        println!("Scheduled {} {}", response.id, task_title(&task));
     } else {
         println!("Resumed {} {}", response.id, task_title(&task));
     }

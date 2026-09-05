@@ -38,6 +38,7 @@ use crate::{
     reconcile,
     reply::{self, ReplyRequest},
     resume::{self, ResumeRequest},
+    schedule::{StartAt, parse_start_at},
     steer::{self, SteerRequest},
     waiting,
 };
@@ -98,6 +99,8 @@ pub struct DispatchRequest {
     pub context_map: Option<String>,
     pub memories: Vec<MemoryEntry>,
     pub caller_id: Option<String>,
+    /// The caller's own start time, unparsed. Absent means start now.
+    pub start_at: Option<String>,
 }
 
 impl DispatchRequest {
@@ -133,6 +136,7 @@ impl DispatchRequest {
             context_map: None,
             memories: Vec::new(),
             caller_id: None,
+            start_at: None,
         }
     }
 
@@ -169,6 +173,11 @@ impl DispatchRequest {
 
     pub fn tldr(mut self, tldr: impl Into<String>) -> Self {
         self.tldr = Some(tldr.into());
+        self
+    }
+
+    pub fn start_at(mut self, start_at: impl Into<String>) -> Self {
+        self.start_at = Some(start_at.into());
         self
     }
 }
@@ -368,7 +377,10 @@ impl Dispatcher {
         } else {
             request.grant_id.clone()
         };
-        let dependency_plan = self.plan_dependencies(&task_id, &request)?;
+        let mut dependency_plan = self.plan_dependencies(&task_id, &request)?;
+        if let Some(start_at) = request.start_at.as_deref() {
+            dependency_plan = schedule_plan(dependency_plan, &task_id, start_at)?;
+        }
         let (task_cwd, worktree, worktree_created, branch) = self
             .resolve_worktree(
                 &workspace,
@@ -1155,6 +1167,60 @@ impl DependencyPlan {
     }
 }
 
+/// Folds a caller's start time into the plan. A task already waiting on a
+/// prerequisite keeps that wait and gains a floor under it; one that would
+/// otherwise start now waits on the clock alone.
+fn schedule_plan(
+    plan: DependencyPlan,
+    task_id: &str,
+    start_at: &str,
+) -> Result<DependencyPlan, DispatchError> {
+    let now_ms = oga_routing::now_ms();
+    let until = match parse_start_at(start_at, now_ms).map_err(DispatchError::Refusal)? {
+        StartAt::At(instant) => instant,
+        StartAt::WhenUsageResets => {
+            return Err(DispatchError::Refusal(
+                "startAt \"rate_limit\" continues a run that already hit one; a new task takes an ISO timestamp or a duration like \"30m\"".into(),
+            ));
+        }
+    };
+    if plan.state == TaskState::Blocked {
+        return Ok(plan);
+    }
+    let note = waiting::scheduled_start_note(&until);
+    let now = lifecycle::now_iso();
+    let hold = match plan.hold {
+        Some(hold) => oga_domain::TaskHold {
+            note: format!("{}; {note}", hold.note),
+            start_at: Some(until.clone()),
+            next_check_at: until,
+            ..hold
+        },
+        None => oga_domain::TaskHold {
+            task_id: task_id.into(),
+            verb: HoldVerb::Delegate,
+            args: HoldArgs {
+                scheduled: Some(true),
+                ..HoldArgs::default()
+            },
+            start_at: Some(until.clone()),
+            await_profile: None,
+            await_model: None,
+            next_check_at: until,
+            expires_at: oga_routing::format_rfc3339_ms(now_ms.saturating_add(DEPENDENCY_EXPIRY_MS)),
+            probe_count: 0,
+            note,
+            created_at: now.clone(),
+            updated_at: now,
+        },
+    };
+    Ok(DependencyPlan {
+        state: TaskState::Pending,
+        completion: plan.completion,
+        hold: Some(hold),
+    })
+}
+
 fn validate_request(request: &DispatchRequest) -> Result<(), DispatchError> {
     if request.profile_id.trim().is_empty() {
         return Err(DispatchError::Refusal("profile is required".into()));
@@ -1578,6 +1644,98 @@ mod tests {
             task.completion.expect("completion").code,
             CompletionCode::RateLimit
         );
+    }
+
+    #[tokio::test]
+    async fn a_scheduled_task_waits_for_its_start_time_and_then_runs() {
+        let (directory, dispatcher) = service();
+        let dispatched = dispatcher
+            .dispatch(
+                DispatchRequest::new("fake", "do the thing later", directory.path()).start_at("4h"),
+            )
+            .await
+            .expect("dispatched");
+        assert!(!dispatched.launched);
+        assert_eq!(dispatched.task.state, TaskState::Pending);
+        let hold = crate::holds::get_hold(&dispatcher.store, &dispatched.task.id)
+            .expect("hold lookup")
+            .expect("hold armed");
+        assert_eq!(hold.verb, HoldVerb::Delegate);
+        assert_eq!(hold.args.scheduled, Some(true));
+        assert!(hold.start_at.is_some());
+        assert!(
+            hold.note.starts_with("Starts "),
+            "unexpected wait reason: {}",
+            hold.note
+        );
+        assert_eq!(
+            dispatcher
+                .task(&dispatched.task.id)
+                .expect("task")
+                .hold
+                .expect("hold view")
+                .kind,
+            oga_domain::HoldViewKind::Time
+        );
+
+        let clock = crate::holds::FixedClock::new(SystemTime::now());
+        let sweep = HoldSweep::with_clock(dispatcher.store.clone(), clock.clone());
+        assert!(
+            sweep.sweep().expect("early sweep").released.is_empty(),
+            "the start time has not come yet"
+        );
+
+        clock.advance(Duration::from_secs(4 * 60 * 60 + 1));
+        let report = sweep.sweep().expect("release sweep");
+        assert_eq!(
+            report
+                .released
+                .iter()
+                .map(|hold| hold.task_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![dispatched.task.id.as_str()]
+        );
+        assert_eq!(
+            dispatcher.task(&dispatched.task.id).expect("task").state,
+            TaskState::Queued
+        );
+    }
+
+    #[tokio::test]
+    async fn resuming_a_scheduled_task_starts_it_without_waiting() {
+        let (directory, dispatcher) = service();
+        let dispatched = dispatcher
+            .dispatch(
+                DispatchRequest::new("fake", "do the thing later", directory.path()).start_at("2d"),
+            )
+            .await
+            .expect("dispatched");
+        assert_eq!(dispatched.task.state, TaskState::Pending);
+
+        let task = dispatcher
+            .resume(ResumeRequest::new(dispatched.task.id.clone()))
+            .await
+            .expect("resumed");
+        assert_ne!(task.state, TaskState::Pending);
+        assert!(
+            crate::holds::get_hold(&dispatcher.store, &dispatched.task.id)
+                .expect("hold lookup")
+                .is_none(),
+            "starting it now drops the wait"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_start_time_that_has_passed_is_refused() {
+        let (directory, dispatcher) = service();
+        let refusal = dispatcher
+            .dispatch(
+                DispatchRequest::new("fake", "do the thing later", directory.path())
+                    .start_at("2020-01-01T00:00:00.000Z"),
+            )
+            .await
+            .expect_err("dispatch refused");
+        assert!(refusal.to_string().contains("already past"), "{refusal}");
     }
 
     #[tokio::test]

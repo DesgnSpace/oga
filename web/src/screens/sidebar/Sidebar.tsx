@@ -18,7 +18,7 @@ import {
 } from "@/ui/icons";
 import { SearchField } from "@/components/SearchField";
 import { canComplete, canPause, canResume, executeArchive, executeCancel, executeComplete, executeResume } from "@/screens/task/Actions";
-import { isUnattendedWait, taskStatusLabel, waitLabel } from "@/screens/task/format";
+import { isExplainedWait, taskStatusLabel, waitLabel } from "@/screens/task/format";
 import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
@@ -89,7 +89,7 @@ function taskSubtitle(task: TaskSummary, state: SidebarState): string {
   const parts = [worker];
   // A task nobody stopped is waiting for something; the row says what, because
   // otherwise it reads as stalled.
-  if (isUnattendedWait(task.hold)) parts.push(waitLabel(task.hold));
+  if (isExplainedWait(task.hold)) parts.push(waitLabel(task.hold));
   const wallTime = taskWallTime(task.createdAt, task.updatedAt, !SETTLED_STATES.has(task.state));
   if (wallTime) parts.push(wallTime);
   const cost = formatCost(task.costUsd, task.costUsdEstimated);

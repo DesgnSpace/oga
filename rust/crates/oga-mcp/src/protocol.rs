@@ -141,6 +141,8 @@ const TIMEOUT_DESCRIPTION: &str = "Hard runtime limit. The task lands in failed 
 const DEPENDS_ON_DESCRIPTION: &str =
     "Prerequisite task ids: this task waits until every one completes, then starts on its own.";
 const BLOCKER_FAILURE_DESCRIPTION: &str = "What a failed prerequisite does: \"hold\" (the default) blocks this task, and puts it back to waiting when that prerequisite is resumed. \"run\" starts it anyway.";
+const DELEGATE_START_AT_DESCRIPTION: &str = "Hold the task instead of starting it now: an ISO instant, or a duration like \"30m\", \"4h\" or \"2d\". It sits `pending` showing when it starts, then starts on its own; resume it to start it sooner, or cancel to drop it. A time already past is refused. With dependsOn it becomes the floor: the task waits for both.";
+const RESUME_START_AT_DESCRIPTION: &str = "Hold the resume instead of running it now. \"rate_limit\" re-arms a rate-limited task's own wait; the reset time is the hint, the account's live usage is the release rule. Also accepts an ISO instant or a duration like \"30m\", \"4h\" or \"2d\". The task sits `pending` and carries only its instruction: resume it again without startAt to start it now, or cancel to drop it.";
 const ISO_DATETIME_PATTERN: &str = r"^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$";
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -412,6 +414,13 @@ pub fn tool_list() -> Value {
             described(
                 json!({ "type": "string", "enum": ["hold", "run"] }),
                 BLOCKER_FAILURE_DESCRIPTION,
+            ),
+        ),
+        (
+            "startAt".into(),
+            described(
+                json!({ "type": "string", "minLength": 1, "maxLength": 64 }),
+                DELEGATE_START_AT_DESCRIPTION,
             ),
         ),
     ]);
@@ -713,7 +722,7 @@ pub fn tool_list() -> Value {
             "startAt".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 64 }),
-                "Hold the resume instead of running it now. \"rate_limit\" re-arms a rate-limited task's automatic hold; the reset time is the hint, the account's live status is the release rule. Also accepts an ISO instant or a duration like \"45m\" / \"4h\". The task sits `pending`; resume it again without startAt to start it, or cancel to drop it.",
+                RESUME_START_AT_DESCRIPTION,
             ),
         ),
         (

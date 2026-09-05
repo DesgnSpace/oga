@@ -41,6 +41,7 @@ pub(crate) struct DispatchBody {
     pub worktree: Option<WorktreeOption>,
     pub depends_on: Option<Vec<String>>,
     pub on_blocker_failure: Option<OnBlockerFailure>,
+    pub start_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +57,7 @@ struct ResumeBody {
     timeout_ms: Option<u64>,
     scope: Option<TaskScope>,
     allow_questions: Option<bool>,
+    start_at: Option<String>,
     queue: Option<QueueAction>,
 }
 
@@ -220,6 +222,7 @@ pub(crate) async fn dispatch_body(
     request.on_blocker_failure = body.on_blocker_failure.unwrap_or(OnBlockerFailure::Hold);
     request.selection = Some(route.decision);
     request.worker_prompt = Some(worker_prompt);
+    request.start_at = body.start_at;
     Ok(state.dispatcher.dispatch(request).await?.task)
 }
 
@@ -333,7 +336,11 @@ pub async fn resume(
                     current.id
                 ))
             })?;
-        if body.timeout_ms.is_some() || body.scope.is_some() || body.allow_questions.is_some() {
+        if body.timeout_ms.is_some()
+            || body.scope.is_some()
+            || body.allow_questions.is_some()
+            || body.start_at.is_some()
+        {
             return Err(HttpError::bad_request(format!(
                 "a queued follow-up takes only an instruction: {}",
                 current.id
@@ -357,6 +364,9 @@ pub async fn resume(
     }
     if let Some(allow_questions) = body.allow_questions {
         request = request.allow_questions(allow_questions);
+    }
+    if let Some(start_at) = body.start_at {
+        request = request.start_at(start_at);
     }
     let task = state.dispatcher.resume(request).await?;
     Ok((
