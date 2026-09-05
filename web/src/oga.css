@@ -1809,6 +1809,11 @@ h1 {
     border-left: 1px solid var(--color-border);
 }
 
+/* Split sides carry no marker column, so the code takes the whole cell. */
+.diff-split .diff-line {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .diff-line-empty {
     min-height: 1.4em;
 }

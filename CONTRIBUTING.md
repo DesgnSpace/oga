@@ -9,7 +9,11 @@ bunx tsc --noEmit
 ```
 
 - `make dev` launches the desktop app for local development.
-- `make install` builds and installs the full app bundle to `/Applications`.
+- `make install` builds the full app bundle and installs it to `~/Applications`
+  as **Oga (local)** — a separate app from a released Oga.app, with its own
+  bundle identifier, so both can sit in Applications. They share port 7331 and
+  `~/.oga`, so run one at a time. `make install` also repoints `oga` on your
+  PATH at the build it just installed. `INSTALL_DIR` overrides where it lands.
 
 ## Tests and types
 

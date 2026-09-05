@@ -63,8 +63,11 @@ bun install
 make install
 ```
 
-The installer adds Oga to Applications and links `oga` in
-`~/.local/bin`. Open Oga to start the broker. Confirm it is running with:
+A source build installs as **Oga (local)**, so it sits in Applications next to
+a released Oga without replacing it. Only one can run at a time — they share
+port 7331 and `~/.oga` — so quit one before opening the other. `make install`
+quits whichever is open, launches the one it just built, and points `oga` in
+`~/.local/bin` at it. Confirm the broker is running with:
 
 ```bash
 curl http://127.0.0.1:7331/health
@@ -84,7 +87,8 @@ provider, default model, and environment variables; secret-like values
 
 ## Command line
 
-`make install` links the compiled binary onto your PATH as `oga`. It carries
+`make install` links the compiled binary onto your PATH as `oga`, replacing any
+earlier link — after a source build, `oga` is the Oga (local) build. It carries
 its own runtime, so every command below works with no Bun and no checkout.
 
 | Command | What it does |

@@ -20,7 +20,12 @@ DEV_DB ?= $(HOME)/.oga/dev.db
 # refuses a terminal write into /Applications until that terminal is approved
 # again after every update. INSTALL_DIR overrides it.
 INSTALL_DIR ?= $(HOME)/Applications
-INSTALL_APP := $(INSTALL_DIR)/Oga.app
+# The development build installs under its own name and bundle identifier, so
+# it sits beside a released Oga.app instead of replacing it: LaunchServices,
+# the Dock and Spotlight see two apps. Both share port 7331 and ~/.oga, so only
+# one runs at a time — quit one, open the other.
+LOCAL_APP_NAME := Oga (local)
+INSTALL_APP := $(INSTALL_DIR)/$(LOCAL_APP_NAME).app
 # Where `cargo tauri build` leaves the macOS bundle it assembles.
 TAURI_APP := rust/target/release/bundle/macos/Oga.app
 
@@ -97,7 +102,10 @@ bundle app-bundle:
 install: app-bundle
 	@# Retiring the broker stops whatever it is driving before replacement.
 	@OGA_DB="$(OGA_DB)" sh scripts/install-preflight.sh $(BROKER_BINARY)
-	pkill -x Oga || true
+	@# Both bundles run an executable named oga-desktop, so this quits whichever
+	@# Oga is open — released or local. One broker owns port 7331 and ~/.oga, so
+	@# the one being installed has to be the only one running.
+	pkill -x oga-desktop || true
 	# The broker outlives the app it was spawned from, and the next launch finds
 	# port 7331 already answering /health — so it reports healthy while serving
 	# the previous build's contract. Retire it with the app.
@@ -113,18 +121,22 @@ install: app-bundle
 		bash rust/packaging/cutover.sh restore --database "$(OGA_DB)" --backup "$(CUTOVER_BACKUP)"; \
 	fi
 	mkdir -p $(INSTALL_DIR)
-	rm -rf $(INSTALL_APP)
-	ditto $(APP) $(INSTALL_APP)
-	@# A second Oga.app in /Applications — say, from an older manual install —
-	@# leaves LaunchServices two apps to choose between, and a broken copy there
-	@# turns every launch into a crash blamed on this build.
-	@test ! -d /Applications/Oga.app || \
-		echo "install: warning: /Applications/Oga.app also exists and can shadow this install"
+	rm -rf "$(INSTALL_APP)"
+	ditto $(APP) "$(INSTALL_APP)"
+	@# Renaming the copy and its identifier is what keeps a released Oga.app out
+	@# of this install's way, in Applications and in LaunchServices alike.
+	bash scripts/localize-app.sh "$(INSTALL_APP)" "$(LOCAL_APP_NAME)" "$(DEVELOPER_ID_APP)" rust/apps/oga-desktop/entitlements.plist
+	@# An Oga.app left in $(INSTALL_DIR) by an install that predates this one
+	@# still carries the release identifier, so it competes with the released
+	@# app for every launch. It is no longer written to, and can be deleted.
+	@test ! -d "$(INSTALL_DIR)/Oga.app" || \
+		echo "install: note: $(INSTALL_DIR)/Oga.app is from an older install and is no longer updated; delete it"
 	@# The bundle is the app, not the CLI: link the broker binary onto PATH so
-	@# `oga` names this install. BINDIR overrides where the link lands, and a
-	@# link directory missing from PATH is a warning, never a failure.
+	@# `oga` names this install — the development build, not a released one.
+	@# BINDIR overrides where the link lands, and a link directory missing from
+	@# PATH is a warning, never a failure.
 	mkdir -p $(BINDIR)
-	ln -sf $(INSTALL_APP)/Contents/Resources/oga-server $(BINDIR)/oga
+	ln -sf "$(INSTALL_APP)/Contents/Resources/oga-server" $(BINDIR)/oga
 	@case ":$$PATH:" in \
 		*":$(BINDIR):"*) ;; \
 		*) echo "install: warning: $(BINDIR) is not on PATH; add it to your shell profile for the oga command" ;; \
@@ -136,11 +148,11 @@ install: app-bundle
 	@# itself refuses (no GUI session to ask — over SSH, say), the app is on
 	@# disk, the broker check is skipped, and the message says how to open it.
 	@launched=1; \
-	open $(INSTALL_APP) || launched=0; \
+	open "$(INSTALL_APP)" || launched=0; \
 	if [ "$$launched" -eq 0 ]; then \
-		echo "install: Oga is installed at $(INSTALL_APP) but could not be launched"; \
+		echo "install: $(LOCAL_APP_NAME) is installed at $(INSTALL_APP) but could not be launched"; \
 		echo "install: open(1) had no GUI session to ask — typical over SSH or in a session without one"; \
-		echo "install: open Oga from Applications; the broker check was skipped"; \
+		echo "install: open $(LOCAL_APP_NAME) from Applications; the broker check was skipped"; \
 	else \
 		health=""; \
 		for i in $$(seq 1 30); do \
@@ -149,7 +161,7 @@ install: app-bundle
 		done; \
 		if [ -z "$$health" ]; then \
 			echo "install: FAILED: the app was launched but no broker answered /health on port 7331 within 30s"; \
-			echo "install: open Oga from Applications and check whether the broker comes up"; \
+			echo "install: open $(LOCAL_APP_NAME) from Applications and check whether the broker comes up"; \
 			pkill -f 'Contents/Resources/oga-server' || true; \
 			bash rust/packaging/cutover.sh restore --database "$(OGA_DB)" --backup "$(CUTOVER_BACKUP)"; \
 			exit 1; \
@@ -159,6 +171,7 @@ install: app-bundle
 			echo "install: FAILED: the broker on port 7331 is not the build just installed"; \
 			echo "  /health answers: $$health"; \
 			echo "  just built:      $$built"; \
+			echo "install: a released Oga may have reopened and taken the port; quit it and run make install again"; \
 			pkill -f 'Contents/Resources/oga-server' || true; \
 			bash rust/packaging/cutover.sh restore --database "$(OGA_DB)" --backup "$(CUTOVER_BACKUP)"; \
 			exit 1; \

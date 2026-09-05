@@ -32,6 +32,24 @@ still break the *installed* app without `stale` ever turning true. If a
 client's calls start behaving unexpectedly right after editing source, check
 the diff, not just `health`.
 
+## Oga and Oga (local) cannot both be open
+
+`make install` installs a source build as **Oga (local)**, a separate app from
+a released Oga.app: its own bundle identifier, its own entry in the Dock and
+Spotlight, and no effect on the released copy. What the two still share is
+port 7331, `~/.oga/oga.db`, and the event socket, so only one broker can serve
+at a time.
+
+Whichever opens first wins the port; the second finds it taken. `make install`
+handles this by quitting whatever Oga is open before it launches the one it
+just built, and it fails loudly when the broker answering `/health` is not the
+build it installed — usually a released Oga that reopened and took the port
+back. Switching by hand is the same move: quit one, open the other.
+
+`oga` on your PATH is a link to one bundle's broker, and `make install` points
+it at the build it just installed. After a source build, `oga` names Oga
+(local), even while the released app is the one open.
+
 ## Requested reasoning effort is not verified against what ran
 
 `delegate` records *why* a task landed on the effort it did —
