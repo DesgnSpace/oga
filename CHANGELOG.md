@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added in-app updates for the Oga desktop app.
+- Added update controls to Oga, ready for a public release source.
 - Add task text search for MCP and `oga tasks --query`.
 - Added per-kind default model rules with `oga love --when`.
 - Added `oga query --limit` and `oga query --code`.
