@@ -27,6 +27,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+mod hints;
 mod map;
 mod protocol;
 mod shaping;
@@ -39,6 +40,10 @@ pub use protocol::{
 enum McpError {
     #[error("{0}")]
     Message(String),
+    /// A refusal that already knows what the caller should do instead. The
+    /// hints ride on the error result, where the caller is looking.
+    #[error("{message}")]
+    Refused { message: String, next: Vec<Value> },
     #[error("method not found: {0}")]
     MethodNotFound(String),
     #[error("invalid params: {0}")]
@@ -120,6 +125,18 @@ impl McpServer {
         };
         let response = match self.execute(&request).await {
             Ok(result) => protocol::JsonRpcResponse::result(id, result),
+            Err(McpError::Refused { message, next }) if request.method == "tools/call" => {
+                let body = json!({ "error": message, "next": next });
+                protocol::JsonRpcResponse::result(
+                    id,
+                    json!({
+                        "content": [protocol::text_content(
+                            serde_json::to_string_pretty(&body).expect("refusal is serializable"),
+                        )],
+                        "isError": true,
+                    }),
+                )
+            }
             Err(error) if request.method == "tools/call" => protocol::JsonRpcResponse::result(
                 id,
                 json!({
@@ -268,7 +285,10 @@ impl McpServer {
         view.as_object_mut()
             .expect("task view is an object")
             .insert("cursor".into(), json!(self.task_cursor(&task.id)?));
-        Ok((view, Some(cwd)))
+        Ok((
+            shaping::with_next(view, &task, hints::Move::Started),
+            Some(cwd),
+        ))
     }
 
     fn inspect(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -281,7 +301,15 @@ impl McpServer {
         )?;
         let fields = fields(args.get("fields"))?.unwrap_or_else(shaping::default_inspect_fields);
         let cwd = project_cwd(&task);
-        Ok((shaping::task_view(&task, &fields), Some(cwd)))
+        let action = if task.archived_at.is_some() {
+            hints::Move::Archived
+        } else {
+            hints::Move::Settled
+        };
+        Ok((
+            shaping::with_next(shaping::task_view(&task, &fields), &task, action),
+            Some(cwd),
+        ))
     }
 
     async fn models(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -488,7 +516,11 @@ impl McpServer {
             request.scope = Some(scope_value(scope)?);
         }
         let task = self.state.dispatcher.reply(request).await?;
-        self.started_response(task, fields(args.get("fields"))?.unwrap_or_default())
+        self.started_response(
+            task,
+            fields(args.get("fields"))?.unwrap_or_default(),
+            hints::Move::Started,
+        )
     }
 
     async fn resume(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -500,7 +532,7 @@ impl McpServer {
             .map_err(McpError::from)?;
         if let Some(queue) = optional_string(args, "queue") {
             let follow_ups = FollowUpQueue::new(self.state.store.clone());
-            match queue.as_str() {
+            let action = match queue.as_str() {
                 "add" => {
                     let instruction = required_string(args, "instruction")?;
                     if args.get("timeoutMs").is_some()
@@ -515,12 +547,14 @@ impl McpServer {
                         ));
                     }
                     follow_ups.queue(&task_id, current.state, &instruction)?;
+                    hints::Move::Queued
                 }
                 "clear" => {
                     follow_ups.clear(&task_id, current.state, "removed on request")?;
+                    hints::Move::Settled
                 }
                 _ => return Err(McpError::InvalidParams("queue must be add or clear".into())),
-            }
+            };
             return self.started_response(
                 self.enrich_task(
                     self.state
@@ -529,7 +563,11 @@ impl McpServer {
                         .map_err(McpError::from)?,
                 )?,
                 fields(args.get("fields"))?.unwrap_or_default(),
+                action,
             );
+        }
+        if let Some((message, next)) = hints::resume_refusal(&current) {
+            return Err(McpError::Refused { message, next });
         }
         let mut request = ResumeRequest::new(task_id);
         if let Some(value) = optional_string(args, "startAt") {
@@ -554,7 +592,11 @@ impl McpServer {
             request = request.effort(value);
         }
         let task = self.state.dispatcher.resume(request).await?;
-        self.started_response(task, fields(args.get("fields"))?.unwrap_or_default())
+        self.started_response(
+            task,
+            fields(args.get("fields"))?.unwrap_or_default(),
+            hints::Move::Started,
+        )
     }
 
     async fn steer(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -580,7 +622,12 @@ impl McpServer {
                     json!("Queued as a follow-up. It will be applied after the current run."),
                 );
         }
-        Ok((value, Some(cwd)))
+        let action = if outcome.queued {
+            hints::Move::Queued
+        } else {
+            hints::Move::Started
+        };
+        Ok((shaping::with_next(value, &task, action), Some(cwd)))
     }
 
     async fn handoff(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -602,6 +649,7 @@ impl McpServer {
         self.started_response(
             task,
             fields(args.get("fields"))?.unwrap_or_else(|| vec!["routing".into()]),
+            hints::Move::Started,
         )
     }
 
@@ -637,7 +685,10 @@ impl McpServer {
         } else {
             None
         };
-        Ok((shaping::task_action_response(&ids, resolved, &fields), cwd))
+        Ok((
+            shaping::task_action_response(&ids, resolved, &fields, hints::Move::Settled),
+            cwd,
+        ))
     }
 
     fn complete(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -651,7 +702,11 @@ impl McpServer {
         let task = self.enrich_task(task)?;
         let cwd = project_cwd(&task);
         Ok((
-            shaping::task_view(&task, &fields(args.get("fields"))?.unwrap_or_default()),
+            shaping::with_next(
+                shaping::task_view(&task, &fields(args.get("fields"))?.unwrap_or_default()),
+                &task,
+                hints::Move::Settled,
+            ),
             Some(cwd),
         ))
     }
@@ -687,7 +742,15 @@ impl McpServer {
         } else {
             None
         };
-        Ok((shaping::task_action_response(&ids, outcomes, &fields), cwd))
+        let action = if archived {
+            hints::Move::Archived
+        } else {
+            hints::Move::Settled
+        };
+        Ok((
+            shaping::task_action_response(&ids, outcomes, &fields, action),
+            cwd,
+        ))
     }
 
     async fn worktree_remove(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
@@ -710,7 +773,7 @@ impl McpServer {
             })
             .or_else(|| project.clone());
         let value = if let Some(task_id) = task_id {
-            serde_json::to_value(
+            let removed = serde_json::to_value(
                 self.state
                     .dispatcher
                     .remove_worktree(WorktreeRemoveRequest {
@@ -719,7 +782,17 @@ impl McpServer {
                     })
                     .await?,
             )
-            .expect("worktree result is serializable")
+            .expect("worktree result is serializable");
+            // A skipped removal left the checkout where it was, so the moves
+            // that follow one being gone do not apply to it.
+            let skipped = removed.get("skipped").is_some();
+            let branch_kept = removed.get("branch").and_then(Value::as_str) != Some("deleted");
+            match self.state.dispatcher.task(&task_id) {
+                Ok(task) if !skipped => {
+                    shaping::with_next(removed, &task, hints::Move::CheckoutRemoved { branch_kept })
+                }
+                _ => removed,
+            }
         } else {
             serde_json::to_value(
                 self.state
@@ -830,6 +903,7 @@ impl McpServer {
         &self,
         task: Task,
         fields: Vec<String>,
+        action: hints::Move,
     ) -> Result<(Value, Option<String>), McpError> {
         let task = self.enrich_task(task)?;
         let cwd = project_cwd(&task);
@@ -838,7 +912,7 @@ impl McpServer {
             .as_object_mut()
             .expect("task view is an object")
             .insert("cursor".into(), json!(self.task_cursor(&task.id)?));
-        Ok((value, Some(cwd)))
+        Ok((shaping::with_next(value, &task, action), Some(cwd)))
     }
 
     fn list_tasks(&self, query: &TaskListQuery) -> Result<Vec<Task>, String> {
@@ -1071,7 +1145,7 @@ fn error_code(error: &McpError) -> i64 {
     match error {
         McpError::MethodNotFound(_) => -32601,
         McpError::InvalidParams(_) => -32602,
-        McpError::Message(_) => -32000,
+        McpError::Message(_) | McpError::Refused { .. } => -32000,
     }
 }
 

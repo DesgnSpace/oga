@@ -8,131 +8,94 @@ pub const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";
 pub const EARLIEST_PROTOCOL_VERSION: &str = "2025-06-18";
 
 pub const MCP_INSTRUCTIONS: &str = concat!(
-    "Locating code starts with query, every time: ask it for a source anchor before any glob or grep, and phrase it as what you are looking for — it answers concepts, not just names. Fall back to tree search only when query returns nothing, the project is unindexed, or you need every match; read the source before acting. This holds in worker mode too. ",
-    "At the start of a new chat, identify the project cwd; call memory with action: list, and get only task-relevant keys; treat durable memory as context, while current code and task state are authoritative; never store secrets or transient task status. ",
-    "Before any new task or continuation, list active and recent tasks with tasks; when one already owns the same file, feature, or command, resume it instead of dispatching a duplicate. ",
-    "Use delegate for bounded implementation, research, review, writing, and analysis — not limited to coding; route execution here by default, including second opinions, capacity gaps, and work another provider's policy will not take; keep goal-setting, architecture, integration, and final review here. ",
-    "Use models as the one capacity read before choosing a destination; its narrow defaults show preferred, enabled models plus every model a love rule names — where work naming no model already goes — and its rows are ready for delegate. ",
-    "Act on the settled report: the worker already verified its own work, so do not re-read changed files or re-run checks. ",
-    "After delegate, resume, or reply returns a task id, start `oga watch <taskId>` in the caller's terminal and background it; it holds no chat turn, so several tasks run at once. ",
-    "Every Oga tool result ends with a second block when a delegated task has settled or asked a question since you last heard — the task id and title, one line each, every move handed over once; it works whether or not the host reports a background job's exit — only Claude Code does. ",
-    "A watch line or that block is the required trigger to call inspect with the task id before reporting its state, deciding what to do next, or ending a turn that tracks it; inspect's answer is the record and a line is not, so never report a task as still running from state that predates it. ",
-    "Use reply for a needs_input question you can answer within the task's scope. Use resume for failed, blocked, cancelled, or follow-up work, including on a completed task. Use handoff to move a task — running or not — to another model or profile in one call; never cancel first. ",
-    "Delegation sends the prompt, the cwd's saved memories, and whatever the worker reads to an external account: get approval for the destination and data once, do not re-ask per dispatch, and ask again only when either moves outside the approved scope. ",
-    "Callers hold only the Oga task ID; provider session IDs stay private, and resume continues the same session. ",
-    "Answer reversible in-scope questions yourself; escalate product intent, secrets, destructive actions, and requests for new authority. ",
-    "Worker mode: you are executing an assigned Oga task; continue the assigned brief directly; do not call Oga, delegate another task, or create a child task for the same work. ",
-    "For a clearly separate continuation, state why it is separate, create it without following it, and emit only a compact child-task pointer event with the child task id and title; do not include prompt or output in the pointer. ",
-    "If stale child state exists, cancel the child and resume the parent with fresh instructions; do not follow the stale child."
+    "The loop: read the cwd's memories, list tasks, query for the code, delegate the work, watch, inspect. ",
+    "Before any call — locate code with query rather than glob or grep, and read what it names; resume the task that already owns the same work instead of dispatching a duplicate; keep decisions and conventions in memory, never secrets or task status. ",
+    "Use delegate for bounded implementation, research, review, writing, and analysis, and keep goal-setting, architecture, integration, and final review here. ",
+    "Delegation sends the prompt, the cwd's memories, and whatever the worker reads to an external account: approve the destination and data scope once per cwd and profile, and ask again only when a task would widen it. ",
+    "After delegate, resume, or reply returns a task id, background `oga watch <taskId>` in the caller's terminal; it holds no chat turn, so several tasks run at once. ",
+    "That settle line, or the alert block a later Oga result carries, is the required trigger to call inspect before you report a task's state, decide what to do next, or end a turn that tracks it — inspect's answer is the record and a line is not. ",
+    "Act on the settled report: the worker already verified its own work. ",
+    "Every task response carries `next`, the moves that fit the state the task is now in; take one from there rather than guessing. ",
+    "Worker mode: execute the assigned brief here; never delegate it onward or open a child task for the same work."
 );
 
 const DELEGATE_DESCRIPTION: &str = concat!(
-    "Hand a new bounded task to an external AI provider — a normal way to get work done, not a fallback. ",
-    "Also for a second opinion, another model's take, or work past the current provider's usage limit. ",
-    "You set the goal, done conditions, model, difficulty, effort, and scope; the worker must verify its work and report each check and result, so re-reading files or re-running checks duplicates cost — open only a broken, uncertain, or surprising item it names, or run a check its sandbox cannot run. ",
-    "Give difficulty and leave profile and model out: Oga picks the account, model and thinking level from that, what the project allows, and each account's remaining usage. ",
-    "A dispatch that names no model follows the project's love rules, which pick the model and the thinking level per kind of work — reading and lookups, mechanical edits, building, reasoning — so write the Goal plainly enough that the kind of work is obvious from it; the router reads the kind from the prompt and the caller never states it. ",
-    "A rule may set its own reasoning effort, and a rule whose model is off, rate-limited or out of credits is skipped, with the reason on the response; difficulty still sets the thinking level wherever no rule set one. ",
-    "Naming a profile or model always wins — over the love rules too, which is how to leave them for one task — and the response warns when that account is out of credits or rate-limited, lacks the model, or the project disallows it for this kind of work. ",
-    "Approve a destination and data scope once per cwd and profile; that stands for later dispatches, so ask for consent only when none exists or this task would widen it. ",
-    "Scope is sandbox-enforced for most tasks, and approval only for an unsandboxed one. ",
-    "Grant a directory, not a single file, for write access — a normal edit writes a temporary file beside the target — and give planned output directories a /** suffix, since a path that does not exist yet stays literal. ",
-    "Write rules are readable too, read rules never permit writes, so include generated build paths in write scope when checks need them. ",
-    "Existing cwd-relative paths named in the prompt join the read grant automatically; writes never do. ",
-    "Stating scope records it as this cwd's grant; omitting it reuses the newest grant for that cwd, falling back to ** only when there is none — a task on that fallback is flagged. ",
-    "A task denied for missing scope ends with a suggestedScope to pass on resume; reply and resume may each replace scope after fresh approval. ",
-    "The scope argument is the only place permissions belong: ** is the recommended read default, so a file the worker finds mid-run is never denied. ",
-    "Never restate read or write paths in the prompt, and never script the reading — no file list, no order to open, no instruction to read the repository. ",
-    "The worker decides what to open inside the grant, and query-first navigation ships with every dispatch; a prompt that guesses files hands it your guess instead. ",
-    "Send prompt as structured markdown (Goal, Context, Required behavior, numbered Instructions, Guardrails, Output Format), never one flattened paragraph. ",
-    "Always pass tldr, which the task list shows instead of the prompt. ",
-    "Always pass title too: a short imperative label (max 60 chars, no markdown), readable at a glance in a sidebar — tldr is the sentence you read when you stop on the task, title is what you read in the list. ",
-    "A worktree supplies what git ignores in the directory — `node_modules`, `vendor`, `.env`, build caches — so the worker starts with dependencies installed instead of spending its run on `bun install`; pass `worktree.link` only to override that list, and `[]` to supply nothing. ",
-    "Pass worktree when the work should land as commits, or when more than one task runs against one repository; it also widens the task's read to the whole repository history, so get approval where that history holds anything private. Omit `branch` to use `oga/<slug-of-title>`; a caller-supplied branch wins. The worker commits the branch; after the task settles, the caller reviews it, pushes it, and opens a pull request from `~/.oga/worktrees/<taskId>`. ",
-    "The returned Oga task ID is the only continuation handle; provider session IDs are private. ",
-    "Dispatch returns immediately: background `oga watch <taskId>`, or take the alert block on the next Oga tool result — either one is the required trigger to call inspect, before reporting the task's state, deciding what to do next, or ending a turn that tracks it."
+    "Hand new bounded work — implementation, research, review, writing, analysis — to an external provider, including a second opinion or work past this provider's usage limit. ",
+    "Returns an Oga task id, the only handle you get, and the run carries on after the call returns. ",
+    "Use resume to continue work a task already did, and handoff to move one elsewhere. ",
+    "Give difficulty; omit profile and model unless this task needs a particular account. Routing reads the kind of work from the prompt."
 );
 
 const MODELS_DESCRIPTION: &str = concat!(
-    "Read the models available for a project. This is the one capacity read: the default view shows preferred, enabled models, plus every model a love rule names. ",
-    "The response is `{ love, models }`. `love` is the project's rules for work that names no model, each `{ when, profile, model, effort, scope }` — `when` lists the kinds of work that rule takes and an empty `when` takes every other kind — and a row with `loved: true` is a model some rule sends work to. ",
-    "The router reads the kind of work from the prompt, so a dispatch that names no model already follows these rules; read them before naming a destination, and name one only when this task needs a different account or tier. ",
-    "Use `onlyPreferred: false` to see every enabled model, or `onlyEnabled: false` when something is not working and you need to see what is turned off. ",
-    "Use `query: <text>` to narrow to model ids containing that text, case-insensitive. ",
-    "Each flat row gives the profile and model ready to pass to `delegate`, plus a `usage` summary — percent used, the window it resets in, and rate-limited/out-of-credits flags — so a choice between accounts can weigh budget, not just availability. `usage.known: false` means the provider has no usage source or none has been read yet, never a silent omission; set `usage: false` to skip the read entirely."
+    "Read a project's capacity before naming a destination: preferred, enabled models, plus every model the project's routing rules name. ",
+    "Answers `{ love, models }` — `love` is the rules that route work naming no model, where a rule's `when` lists the kinds of work it takes and an empty `when` takes every other kind. ",
+    "Each model row is ready to pass to delegate and carries a usage summary. ",
+    "Widen it with `onlyPreferred: false`, or `onlyEnabled: false` to see what is switched off."
 );
 
 const INSPECT_DESCRIPTION: &str = concat!(
-    "Get one task's record: output, scope, grant, spend, and completion. A watch line, or the alert block on the next Oga tool result, is the required trigger to call this before reporting the task's state, deciding what to do next, or ending a turn that tracks it; a line is not the record, and state read before this call is never \"still running\". ",
-    "Read the worker's report and act; do not re-read changed files or re-run checks unless it names a broken, uncertain, or surprising item, or the sandbox could not run that check. ",
-    "For a completed worktree task, the branch is the deliverable: review it, then push it and open a pull request from `~/.oga/worktrees/<taskId>`."
+    "Read one task's record: output, scope, spend, and how the run ended. ",
+    "A watch line, or the alert block a later Oga result carries, is what you call this on — the line is not the record, and state read before this call is never \"still running\". ",
+    "Act on the worker's report; `fields: [\"attempts\"]` shows what earlier runs of the same task produced."
 );
 
 const HEALTH_DESCRIPTION: &str = "Check whether the Oga broker is running and read its broker and MCP contract versions, plus whether the source tree this build came from holds a newer one. For connection or compatibility diagnosis, not worker availability.";
 
-const TASKS_DESCRIPTION: &str = "Find recent delegated tasks by state, a since/until time range, or a fan-out batch. With no arguments it covers tasks updated today (since local midnight) and each row is id, state, title, and cwd — plus originCwd, the project directory, when the task runs in its own checkout and cwd is inside it. Enough to recognise a task and call inspect on it directly. Any explicit since, until, parent, state, profile, or archived drops the today scoping and searches the full history under that filter. `fields` replaces the default row: `[\"label\"]` adds tldr, and `[\"routing\"]`, `[\"spend\"]`, `[\"completion\"]`, or `[\"all\"]` give more. Use inspect for one task in full.";
+const TASKS_DESCRIPTION: &str = "Find recent delegated tasks. With no arguments it covers tasks updated since local midnight, one row each: id, state, title, and cwd — plus originCwd, the project directory, when the task runs in its own checkout. Any since, until, parent, state, profile, or archived searches the full history under that filter instead. `fields` replaces the default row: `[\"label\"]` adds tldr, and `[\"routing\"]`, `[\"spend\"]`, `[\"completion\"]` or `[\"all\"]` give more. Use inspect for one task in full.";
 
 const MEMORY_DESCRIPTION: &str = "Read or update durable project facts shared across Oga callers and delegated workers; delegation ships the cwd's active memories automatically. Store decisions, constraints, and conventions, never secrets or transient task status. Use expectedVersion to prevent concurrent overwrites.";
 
-const MAP_DESCRIPTION: &str = "Ask where a project's source files and top-level symbols live, without searching the tree. Oga builds the map from earlier tasks and re-verifies it against disk the moment you ask, so the answer is fresh — but it is an index, not a specification, so open a file before you act on an entry. The `options` selectors compose; globs are not supported; omit `options` or pass `{}` for the whole map. Refuses when map lookup is off. For a plain-language question ('where is X handled'), use `query`.";
+const MAP_DESCRIPTION: &str = "List where a project's files and top-level symbols are, without searching the tree. Oga re-verifies the map against disk as you ask, so the answer is fresh — but it is an index, not a specification, so open a file before acting on an entry. The `options` selectors compose; globs are not supported; omit `options` or pass `{}` for the whole map. For a plain-language question, use `query`.";
 
-const QUERY_DESCRIPTION: &str = "When you do not know which file or symbol to open, ask here before searching the tree — \"email driver\" can answer `src/adapters.ts#emailDriver`. Answers with one anchor when confident, a few candidates when not, or an honest miss telling you to search instead. Search directly when you need every match. The index can lag the code, so read the source it names before acting. For browsing a directory or an exact symbol or path, use `map`.";
+const QUERY_DESCRIPTION: &str = "Ask where something lives before searching the tree — \"email driver\" can answer `src/adapters.ts#emailDriver`. Answers with one anchor when confident, a few candidates when not, or an honest miss telling you to search instead. The index can lag the code, so read the source it names before acting. Use `map` to browse a directory or resolve an exact symbol or path.";
 
-const REPLY_DESCRIPTION: &str = "Answer a question from a task in needs_input state. Pass only its Oga task ID; Oga maps it to the private provider session and returns the same task ID. Optional scope is granted with the answer, replacing the task's scope and becoming the cwd's grant. After reply returns, start watch immediately in the background; its line, or the alert block on the next Oga tool result, is the trigger to call inspect before reporting state or deciding what to do next.";
+const REPLY_DESCRIPTION: &str = "Answer the question a task is parked on in needs_input. Answer what is in scope and reversible yourself; escalate product intent, secrets, destructive actions, and requests for new authority. Send the answer alone — the session still holds the brief. Optional scope replaces the task's scope and becomes the cwd's grant.";
 
 const RESUME_DESCRIPTION: &str = concat!(
-    "Continue a task on the same profile and provider session, keeping the same Oga task ID; when no session was captured, start a fresh one under that id. ",
-    "This is the normal way to keep going on work a task already did, completed or not, rather than a recovery path for failures — a fresh delegation re-reads everything and loses why the work is the way it is. ",
-    "Retry a failed, cancelled, blocked, or pending run with no instruction and it picks up where it stopped; a pending task force-starts, and a completed task needs an instruction for its follow-up. ",
-    "An archived task is resumed in one call: it is unarchived and runs again, keeping its id and history. A worktree task whose checkout was removed with the archive gets it back on the same branch if the branch still exists; only when the branch is gone does the resume fail, naming the missing branch. ",
-    "While a worker is still on the task, queue: \"add\" stacks the instruction onto the same session for Oga to send when that run finishes clean. ",
-    "The finished run is not overwritten: it becomes an attempt carrying its own output, completion and session, so inspect with fields: [\"attempts\"] still shows what it produced. ",
-    "Keep the instruction short — say only what changed and what to do next. The session still holds the goal, the guardrails, the scope and the reporting format from the first dispatch, so restating them wastes the run rather than steering it. ",
-    "Optional scope and allowQuestions replace those task settings; get explicit approval before expanding scope. ",
-    "Use reply instead when the task needs input, and handoff to move it to another model or profile — a rate-limited task parks itself and resumes once that account has usage again, at completion.resetsAt. ",
-    "A session the provider can no longer reopen is not a dead end: resume starts a fresh session under the same task id, seeded with the original prompt and a summary of the prior run. ",
-    "If the task never started behind a dependency, resume also restores its dependency-blocked dependents to waiting; they start when their prerequisites complete. ",
-    "After resume returns, start `oga watch <taskId>` in the background; its settle line, or the alert block the next Oga tool result carries, is the required trigger to call inspect."
+    "Continue a task that has stopped — failed, cancelled, blocked, pending, or completed — in the session it already has, keeping its task id and everything the worker read. ",
+    "This is the normal way to keep going, not a recovery path: a fresh delegation re-reads everything and loses why the work is the way it is. ",
+    "With no instruction it picks up where it stopped; a completed task needs one. ",
+    "Use steer for a task that is still working, and handoff to change the model or account."
 );
 
-const STEER_DESCRIPTION: &str = "Send an instruction to a task that is still working, or switch its model mid-run, without stopping it or starting a new session; it keeps running and the change is recorded in its history. When the provider takes no live input the instruction is queued instead and runs as a follow-up once the current run finishes clean — the response says so, and the task's history shows it waiting. A model change cannot wait that way: it is refused, so send the instruction on its own or use handoff. Nothing is silently ignored.";
+const STEER_DESCRIPTION: &str = concat!(
+    "Tell a task that is still working something, or switch its model mid-run, without stopping it. ",
+    "This is how you reach a running task; resume is for one that has stopped. ",
+    "When the provider takes live input the worker gets the instruction on its next turn; when it does not, the instruction waits and runs as a follow-up once this run finishes clean — the response says which happened. ",
+    "A model change cannot wait: it is refused, so send the instruction on its own or use handoff."
+);
 
 const HANDOFF_DESCRIPTION: &str = concat!(
-    "Move a task to a different model, a different profile, or both, in one call, keeping the same Oga task ID — running or not, with no cancel first. ",
-    "It preserves everything the destination can still use: a same-profile model change on a live worker switches in place with nothing restarted; otherwise on the same profile the old worker is stopped and the same provider session reopens under the new model, keeping all its context; a cross-profile move starts a fresh session seeded with a brief built from the previous run — a session belongs to one account and cannot be opened from another. ",
-    "Use it whenever the destination changes: the current model is wrong for the work, or the account failed — rate limit, auth, billing, or a provider that will not take the work. ",
-    "Use resume, not this, to continue or follow up on the same profile and model. ",
-    "A rate-limited task is not dead — Oga parks it and resumes it at completion.resetsAt — so let it, hand off to a cheaper model on the same account, or hand off to a second account's quota for immediate recovery. ",
-    "On a running task the old worker is stopped before the new one starts, so the two never overlap, and what it wrote stays on disk. ",
-    "The task keeps its id, title, attempt history, and scope; a restarted run files the previous one as an attempt naming the profile, model, and session it ran as, so inspect with fields: [\"attempts\"] shows every run. ",
-    "If the task waits on unfinished prerequisites, the move keeps it parked on a dependency hold instead of starting it; the response names what it waits on, and it starts on this destination when they complete. ",
-    "State scope to approve a cross-profile destination and it becomes the cwd's grant; omit it and the task keeps the scope it already had — approved for the profile it is leaving, so the response warns about the new destination."
+    "Move a task to another model, another profile, or both, in one call, running or not, with no cancel first. ",
+    "Use it when the destination is wrong for the work, or the account failed — rate limit, auth, billing, or a provider that will not take the work. ",
+    "Use resume to continue on the same model and account. ",
+    "The task keeps its id, title, scope, and attempt history, and it preserves as much of the session as the destination can reopen."
 );
 
-const CANCEL_DESCRIPTION: &str = "Stop a delegated task and its worker process tree. Works on queued, running, needs_input, and blocked tasks, so a task parked on a question you do not want to answer is not a dead end. The task record survives. A batch reports each id's outcome; one that cannot be cancelled — already settled, or unknown — does not fail the rest.";
+const CANCEL_DESCRIPTION: &str = "Stop a delegated task and its worker's process tree, from queued, pending, running, needs_input, or blocked. The task record survives, so a cancelled task can still be resumed, handed off, or archived. A batch reports each id's outcome; one that cannot be cancelled — already settled, or unknown — does not fail the rest.";
 
 const COMPLETE_DESCRIPTION: &str = concat!(
-    "Mark a blocked or failed task completed on your word that the work demonstrably landed, when the worker never attested its own completion. ",
-    "Use it only after you checked the deliverable yourself: the original completion survives on the record, and the override permanently carries who asserted it, why, and the code it replaced. ",
-    "Rejected while a task is still running — asserting completion of work in flight is the worse mistake — and on one already completed or cancelled; resume or archive those instead."
+    "Mark a blocked or failed task completed on your word that the work landed, when the worker never attested its own completion. ",
+    "Use it only after you checked the deliverable yourself: the original completion survives on the record, and the override permanently carries who asserted it and why. ",
+    "Refused while a task is still running, and on one already completed or cancelled."
 );
 
 const ARCHIVE_DESCRIPTION: &str = concat!(
-    "Archive or restore a delegated task without deleting its history: it stays addressable by Oga task ID and drops out of active task lists. A task that is not settled is stopped first, so it is never hidden while its worker is alive — its entry carries `stopped: true` and its state reads `cancelled`. ",
-    "Archiving a worktree task removes its checkout and keeps the branch the work is on; a checkout holding uncommitted work, or one that could not be removed, stays in place, the entry's `checkout` names the path, and the archive still succeeds. ",
-    "A batch reports each id's outcome; one that cannot be archived does not fail the rest."
+    "Archive or restore a delegated task without deleting its history: it stays addressable by Oga task id and drops out of active task lists. ",
+    "A task that is not settled is stopped first, so it is never hidden while its worker is alive. ",
+    "Archiving a worktree task removes its checkout and keeps the branch the work is on; a checkout holding uncommitted work stays, and the entry's `checkout` names the path. ",
+    "A batch reports each id's outcome."
 );
 
 const DELETE_WORKTREE_DESCRIPTION: &str = concat!(
-    "Delete a task's git worktree now — the checkout it ran in and any path it linked — without archiving the task or leaving it to cleanup. ",
-    "Only a settled worktree task has a checkout to remove; one still running or holding a question keeps it. ",
-    "A linked path is only unlinked, and what it pointed at is untouched. ",
-    "Removing a checkout that is already gone is not an error; the result says what went and whether the branch survives. ",
-    "Resuming an archived worktree task recreates its checkout on the same branch when the branch still exists."
+    "Remove a settled worktree task's checkout now — the directory it ran in and any path it linked — without archiving the task or leaving it to cleanup. ",
+    "The branch survives unless `deleteBranch` asks for it too, and a linked path is only unlinked. ",
+    "A task still running or holding a question keeps its checkout. ",
+    "Removing one that is already gone is not an error."
 );
 
-const SCOPE_DESCRIPTION: &str = "Paths the worker may touch, relative to cwd: literal file paths, dir/** for a subtree, ** for the whole tree. The only place permissions belong — never restate them in the prompt, and never treat a grant as a reading plan.";
-const WORKTREE_DESCRIPTION: &str = "Give the task its own checkout of the repository at cwd, on a branch of its own, so the worker commits there instead of in the user's working tree — or join a checkout another task already has. cwd must be inside a git repository with at least one commit. true takes every default for a new checkout; the object sets them, or names join to enter an existing one instead of making a new one. By default, ignored directories and .env* files are linked at any depth according to gitignore; editor and agent state is skipped. link overrides that list. Omit branch to use oga/<slug-of-title>; it falls back to oga/<taskId> when the title has no slug. The project map is not shipped to a worktree task. The worker commits there; the caller reviews and pushes the branch, then opens a pull request. Oga cleanup removes a checkout, never the branch, and never while another task still joins it.";
+const SCOPE_DESCRIPTION: &str = "Paths the worker may touch, relative to cwd: literal file paths, dir/** for a subtree, ** for the whole tree. `**` is the recommended read default. Write access takes the directory, not the file, and a path that does not exist yet needs a `/**` suffix; read paths never permit writes, so generated build paths belong in write when checks need them. Stating scope records it as this cwd's grant; omitting it reuses the newest grant for the cwd. The only place permissions belong — never restate them in the prompt, and never treat a grant as a reading plan.";
+const WORKTREE_DESCRIPTION: &str = "Give the task its own checkout of the repository at cwd, on a branch of its own, so the worker commits there instead of in the user's working tree — or `join` a checkout another task already has. cwd must be inside a git repository with at least one commit. `true` takes every default: ignored directories and .env* files are seeded from the original at any depth, editor and agent state is not, and the branch is oga/<slug-of-title>, falling back to oga/<taskId>. It also widens the task's read to the whole repository history, so get approval where that history holds anything private.";
 const DIFFICULTY_DESCRIPTION: &str = "How hard this work is, which decides the model and how much it thinks. mechanical: fully specified, just apply it. standard: a named target and a clear endpoint, the worker decides how. hard: the answer's shape is part of the work — design, root-cause, a cross-cutting refactor. critical: being wrong is expensive and hard to spot — security, concurrency, migrations, data loss. Omit it and the prompt decides.";
 const EFFORT_DESCRIPTION: &str = "Reasoning effort for this run, when you want to set it yourself; left out, Oga reads it off difficulty and the model's own levels. Honoured by claude, codex, opencode, opencode-2 and pi; antigravity bakes its level into the model id.";
 const ALLOW_QUESTIONS_DESCRIPTION: &str =
@@ -285,14 +248,14 @@ fn worktree_schema() -> Value {
                 "link".into(),
                 described(
                     json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 32 }),
-                    "Untracked paths, relative to cwd, the checkout is seeded from. Omit it: ignored directories and .env* files are seeded at any depth according to gitignore; .claude, .agents, .DS_Store, .plans, .malico and *.bun-build state is skipped. Pass it only to override that, and [] seeds nothing. Each path becomes the checkout's own directory rather than a symlink, so everything under it resolves inside the checkout and the original is never written through. A path that is missing or that git tracks is refused by name, and removing the checkout leaves the originals alone.",
+                    "Untracked paths, relative to cwd, the checkout is seeded from — dependencies and build caches the worker would otherwise install. Omitted, gitignored directories and .env* files are seeded at any depth and editor and agent state is skipped; `[]` seeds nothing. Each path becomes the checkout's own directory, so the original is never written through. A path that is missing or that git tracks is refused by name.",
                 ),
             ),
             (
                 "join".into(),
                 described(
                     json!({ "type": "string", "minLength": 1 }),
-                    "Oga task id whose checkout to enter instead of making a new one: same directory, same branch, no second copy of the tree. Use it to put a reviewer or a fixer in the exact tree another task already wrote to, reading or committing alongside it. Refused together with from, branch or link — the checkout named already decided all three. A task with write scope joining a checkout waits behind every other unsettled writer already in it (declare that with dependsOn, or the dispatch is refused); a task with no write scope may join and run alongside anything else there.",
+                    "Oga task id whose checkout to enter instead of making a new one: same directory, same branch, no second copy of the tree — how a reviewer or a fixer works in the exact tree another task wrote to. Refused together with from, branch or link. A task with write scope must declare every unsettled writer already in that checkout with dependsOn, or the dispatch is refused; a task with no write scope may run alongside anything there.",
                 ),
             ),
         ]),
@@ -330,7 +293,7 @@ pub fn tool_list() -> Value {
             "model".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 200 }),
-                "Model id for that profile. Omit to use the profile's default.",
+                "Model id for that profile. Naming one overrides the project's routing rules. Omit to use the profile's default.",
             ),
         ),
         (
@@ -392,7 +355,10 @@ pub fn tool_list() -> Value {
         ),
         (
             "title".into(),
-            json!({ "type": "string", "minLength": 1, "maxLength": 60 }),
+            described(
+                json!({ "type": "string", "minLength": 1, "maxLength": 60 }),
+                "Short imperative label, no markdown — what a sidebar shows at a glance.",
+            ),
         ),
         (
             "timeoutMs".into(),
@@ -477,7 +443,7 @@ pub fn tool_list() -> Value {
                     "usage".into(),
                     described(
                         json!({ "type": "boolean", "default": true }),
-                        "Include each row's usage summary (remaining/limit, reset window, rate-limited/out-of-credits flags). Costs a network call per profile beyond the cache; set false to skip it.",
+                        "Include each row's usage summary: percent used, the window it resets in, and rate-limited or out-of-credits flags. `known: false` means no usage source has been read, never a silent omission. Costs a network call per profile beyond the cache; set false to skip it.",
                     ),
                 ),
             ]),
@@ -708,7 +674,7 @@ pub fn tool_list() -> Value {
             "model".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 200 }),
-                "Model for the continued run on this same profile. The session is the conversation and the model is per run, so the change keeps what the worker already read and decided. Omit to keep the task's model. Refused together with startAt or queue.",
+                "Model for the continued run on this same profile; the session keeps what the worker already read. Omit to keep the task's model. Refused together with startAt or queue.",
             ),
         ),
         (
@@ -729,7 +695,7 @@ pub fn tool_list() -> Value {
             "queue".into(),
             described(
                 json!({ "type": "string", "enum": ["add", "clear"] }),
-                "\"add\" queues the instruction to run after the current run finishes clean. Instruction is required and nothing else is: timeoutMs, scope, allowQuestions, model, effort and startAt describe a run, not an instruction. Items run oldest first, and a run that fails, asks a question, or ends blocked leaves them untouched rather than sending more work into a session in trouble; continue that run and the rest follow. Cancelling the task discards them, \"clear\" drops them, and on a finished task \"add\" does nothing and the resume runs now.",
+                "\"add\" queues the instruction to run after the current run finishes clean; \"clear\" drops what is waiting. With \"add\", instruction is required and timeoutMs, scope, allowQuestions, model, effort and startAt are refused. Items run oldest first, and a run that fails, asks a question, or ends blocked leaves them untouched. Cancelling the task discards them.",
             ),
         ),
     ]);

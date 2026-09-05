@@ -23,7 +23,27 @@ After `resume` returns, start `oga watch <taskId>` immediately. Treat it
 ending or printing an event as the required trigger to call `inspect` before
 reporting the task's state or deciding what to do next — a watch line alone is
 not the result, and state read before that `inspect` call is never "still
-running".
+running". The response's [`next`](next.md) says the same thing in place.
+
+## A task still working takes a steer, not a resume
+
+`resume` covers work that has stopped. On a `running`, `queued`, `answered`, or
+`needs_input` task it is refused, and the refusal names the tool that does
+apply — `steer` for a run in flight, `reply` for one parked on a question:
+
+```json
+{
+  "error": "task cannot be resumed from state running: t_4f2",
+  "next": [
+    { "tool": "steer", "when": "tells a running task something — delivered live, or queued for when the run finishes" }
+  ]
+}
+```
+
+`steer` handles both halves of that: the worker gets the instruction live when
+the provider takes live input, and otherwise it waits and runs as a follow-up
+when the current run finishes clean. `resume` with `queue: "add"` still queues
+an instruction directly for callers that already do.
 
 ## Retry a run that died
 

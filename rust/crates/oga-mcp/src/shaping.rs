@@ -3,6 +3,8 @@
 use oga_domain::{Task, TaskSummary};
 use serde_json::{Map, Value, json};
 
+use crate::hints;
+
 const GROUPS: &[(&str, &[&str])] = &[
     ("routing", &["profileId", "model", "effort", "effortActual"]),
     (
@@ -348,12 +350,25 @@ pub fn default_inspect_fields() -> Vec<String> {
     .collect()
 }
 
+/// Adds the moves that fit the task's current state. Nothing is added when
+/// nothing applies, so an empty `next` never has to be read.
+pub fn with_next(mut value: Value, task: &Task, action: hints::Move) -> Value {
+    let next = hints::next(task, action);
+    if !next.is_empty()
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("next".into(), Value::Array(next));
+    }
+    value
+}
+
 type TaskActionOutcome = Result<(Task, Option<String>, Option<String>), (String, String)>;
 
 pub fn task_action_response(
     ids: &[String],
     outcomes: Vec<TaskActionOutcome>,
     fields: &[String],
+    action: hints::Move,
 ) -> Value {
     let entries = outcomes
         .into_iter()
@@ -368,7 +383,7 @@ pub fn task_action_response(
                         object.insert("checkout".into(), json!(checkout));
                     }
                 }
-                value
+                with_next(value, &task, action)
             }
             Err((id, error)) => json!({ "id": id, "error": error }),
         })
