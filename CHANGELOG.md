@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.6 - 2026-09-05
+
 ### Added
 
 - Added in-app updates for the Oga desktop app.

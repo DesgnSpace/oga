@@ -194,7 +194,7 @@ deploy-landing: changelog
 	mkdir -p $(DIST)
 	cp -R landing $(DIST)/landing
 	sed -i '' -E 's/(src|srcset|href)="([A-Za-z0-9_./-]+\.(css|png|svg))"/\1="\2?v=$(BUILD_STAMP)"/g' $(DIST)/landing/index.html
-	bunx wrangler pages deploy $(DIST)/landing --project-name oga
+	bunx wrangler pages deploy $(DIST)/landing --project-name oga --env-file /dev/null
 
 sync-version:
 	@test -n "$(VERSION)" || { echo "error: VERSION file missing"; exit 1; }
