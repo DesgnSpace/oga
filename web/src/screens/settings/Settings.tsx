@@ -7,6 +7,7 @@ import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
 import { toast } from "@/state/toast";
+import type { AppUpdateStatus } from "@/shell/useAppUpdates";
 import type {
   CleanupSettings,
   CleanupSnapshot,
@@ -81,7 +82,21 @@ const SETTINGS_GROUPS: ReadonlyArray<{ label: string; tabs: readonly SettingsTab
 ];
 
 
-export default function SettingsPage({ open = true, offline = false, initialTab }: { open?: boolean; offline?: boolean; initialTab?: SettingsTab }) {
+export default function SettingsPage({
+  open = true,
+  offline = false,
+  initialTab,
+  updateStatus = { kind: "idle" },
+  onCheckForUpdates = () => {},
+  onInstallUpdate = () => {},
+}: {
+  open?: boolean;
+  offline?: boolean;
+  initialTab?: SettingsTab;
+  updateStatus?: AppUpdateStatus;
+  onCheckForUpdates?: () => void;
+  onInstallUpdate?: () => void;
+}) {
   const [state, setState] = useState<SettingsState>(() => readCachedSettingsState() ?? defaultSettingsState());
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "workers");
   const [sectionQuery, setSectionQuery] = useState("");
@@ -350,7 +365,13 @@ export default function SettingsPage({ open = true, offline = false, initialTab 
           hidden={activeTab !== "about"}
           className={activeTab !== "about" ? "settings-tab-panel-hidden" : undefined}
         >
-          <AboutPanel state={state} setState={setState} />
+          <AboutPanel
+            state={state}
+            setState={setState}
+            updateStatus={updateStatus}
+            onCheckForUpdates={onCheckForUpdates}
+            onInstallUpdate={onInstallUpdate}
+          />
         </div>
       </div>
     </div>
@@ -1944,9 +1965,15 @@ function formatBytes(value: number): string {
 function AboutPanel({
   state,
   setState,
+  updateStatus,
+  onCheckForUpdates,
+  onInstallUpdate,
 }: {
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
+  updateStatus: AppUpdateStatus;
+  onCheckForUpdates: () => void;
+  onInstallUpdate: () => void;
 }) {
   const handleRefresh = useCallback(async () => {
     const result = await broker.health();
@@ -2001,6 +2028,49 @@ function AboutPanel({
               Try again
             </button>
           </div>
+        )}
+      </div>
+      <div className="settings-about-card" aria-live="polite">
+        <div>
+          <p className="eyebrow">Updates</p>
+          <h3>Keep Oga current</h3>
+        </div>
+        {updateStatus.kind === "available" ? (
+          <>
+            <p>Version {updateStatus.version} is ready to install.</p>
+            {updateStatus.notes ? <p className="settings-helper">{updateStatus.notes}</p> : null}
+            <button className="settings-button settings-button-primary" type="button" onClick={onInstallUpdate}>
+              Download and install
+            </button>
+          </>
+        ) : updateStatus.kind === "checking" ? (
+          <p className="settings-status">Checking for a new version…</p>
+        ) : updateStatus.kind === "downloading" ? (
+          <p className="settings-status">
+            Downloading version {updateStatus.version}{updateStatus.progress === undefined ? "…" : ` (${updateStatus.progress}%)`}
+          </p>
+        ) : updateStatus.kind === "installing" ? (
+          <p className="settings-status">Installing version {updateStatus.version}…</p>
+        ) : updateStatus.kind === "up-to-date" ? (
+          <>
+            <p className="settings-status">You have the latest version.</p>
+            <button className="settings-button" type="button" onClick={onCheckForUpdates}>
+              Check for updates
+            </button>
+          </>
+        ) : updateStatus.kind === "failed" ? (
+          <>
+            <p className="settings-form-error">We couldn&apos;t check for a new version. Try again in a moment.</p>
+            <button className="settings-button" type="button" onClick={onCheckForUpdates}>
+              Try again
+            </button>
+          </>
+        ) : updateStatus.kind === "unavailable" ? (
+          <p className="settings-status">Updates are available in the desktop app.</p>
+        ) : (
+          <button className="settings-button" type="button" onClick={onCheckForUpdates}>
+            Check for updates
+          </button>
         )}
       </div>
     </section>

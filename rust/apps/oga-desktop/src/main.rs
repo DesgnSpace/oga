@@ -132,6 +132,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .plugin(lifecycle::window_state_plugin())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(commands::app_menu)
         .on_menu_event(commands::handle_menu_event)

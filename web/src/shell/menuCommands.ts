@@ -55,6 +55,7 @@ export interface MenuCommandContext {
   sidebar: SidebarController;
   route: Route;
   navigate: (route: Route) => void;
+  checkForUpdates?: () => void;
 }
 
 function runMenuCommand(command: MenuCommand, context: MenuCommandContext): void {
@@ -94,6 +95,10 @@ function runMenuCommand(command: MenuCommand, context: MenuCommandContext): void
       return;
     case "open-settings":
       context.navigate({ kind: "settings" });
+      return;
+    case "check-for-updates":
+      context.navigate({ kind: "settings", tab: "about" });
+      context.checkForUpdates?.();
       return;
     case "history-back":
       window.history.back();

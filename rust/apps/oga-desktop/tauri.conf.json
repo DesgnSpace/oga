@@ -84,7 +84,7 @@
     "updater": {
       "pubkey": "__SET_TAURI_PUBLIC_KEY__",
       "endpoints": [
-        "https://downloads.desgn.space/oga/latest.json"
+        "https://github.com/yondifon/oga/releases/latest/download/latest.json"
       ]
     }
   }

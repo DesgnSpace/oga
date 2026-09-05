@@ -5,6 +5,7 @@ use crate::lifecycle;
 pub const MENU_OPEN: &str = "open-oga";
 pub const MENU_QUIT: &str = "quit-oga";
 pub const MENU_SETTINGS: &str = "open-settings";
+pub const MENU_CHECK_FOR_UPDATES: &str = "check-for-updates";
 pub const MENU_FIND_TASK: &str = "find-task";
 pub const MENU_HELP: &str = "open-help";
 pub const MENU_REPORT_PROBLEM: &str = "report-problem";
@@ -33,6 +34,7 @@ pub enum MenuCommand {
     OpenHelp,
     ReportProblem,
     OpenSettings,
+    CheckForUpdates,
     FindTask,
     ToggleSidebar,
     ToggleInspector,
@@ -56,6 +58,7 @@ impl MenuCommand {
             MENU_HELP => Some(Self::OpenHelp),
             MENU_REPORT_PROBLEM => Some(Self::ReportProblem),
             MENU_SETTINGS => Some(Self::OpenSettings),
+            MENU_CHECK_FOR_UPDATES => Some(Self::CheckForUpdates),
             MENU_FIND_TASK => Some(Self::FindTask),
             MENU_TOGGLE_SIDEBAR => Some(Self::ToggleSidebar),
             MENU_TOGGLE_INSPECTOR => Some(Self::ToggleInspector),
@@ -80,9 +83,12 @@ pub fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Me
     let settings = MenuItemBuilder::with_id(MENU_SETTINGS, "Settings...")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
+    let check_for_updates =
+        MenuItemBuilder::with_id(MENU_CHECK_FOR_UPDATES, "Check for Updates...").build(app)?;
     let app_submenu = SubmenuBuilder::new(app, "Oga")
         .about_with_text("About Oga", None)
         .separator()
+        .item(&check_for_updates)
         .item(&settings)
         .separator()
         .hide()
