@@ -1042,7 +1042,7 @@ function findImageDataUrl(value: unknown): string | undefined {
     if (
       object.type === "image" &&
       source?.type === "base64" &&
-      typeof source.data === "string" &&
+      isBase64(source.data) &&
       typeof source.media_type === "string"
     ) {
       return `data:${source.media_type};base64,${source.data}`;
@@ -1051,11 +1051,7 @@ function findImageDataUrl(value: unknown): string | undefined {
     // tool response holds a file with its own base64 and mime type rather than
     // an API content block.
     const file = object.file as Record<string, unknown> | undefined;
-    if (
-      object.type === "image" &&
-      typeof file?.base64 === "string" &&
-      typeof file.type === "string"
-    ) {
+    if (object.type === "image" && isBase64(file?.base64) && typeof file?.type === "string") {
       return `data:${file.type};base64,${file.base64}`;
     }
     for (const child of Object.values(object)) {
@@ -1064,6 +1060,15 @@ function findImageDataUrl(value: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Stored payloads cap long strings with an ellipsis, so a large image arrives
+ * as a cut base64 body that no browser can decode. Only a whole body is
+ * usable; anything else falls back to reading the file from disk.
+ */
+function isBase64(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
 }
 
 function imageDataUrlFromRaw(raw: string): string | undefined {
