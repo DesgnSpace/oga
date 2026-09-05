@@ -47,7 +47,6 @@
 .docs-nav-list a {
   display: block;
   padding: 8px 10px;
-  border: 2px solid transparent;
   border-radius: var(--radius-small);
   color: var(--muted);
   font-weight: 700;
@@ -56,14 +55,12 @@
 }
 
 .docs-nav-list a:hover {
-  border-color: var(--rule);
+  color: var(--text);
 }
 
 .docs-nav-list a[aria-current="page"] {
-  border: var(--border);
   color: #000000;
   background: var(--accent);
-  box-shadow: var(--shadow-small);
 }
 
 .docs-content {
@@ -103,8 +100,6 @@
 
 .docs-content h2 {
   margin: 40px 0 16px;
-  padding-bottom: 8px;
-  border-bottom: var(--border);
   font-size: 22px;
   font-weight: 900;
   letter-spacing: -0.02em;
@@ -161,7 +156,6 @@
 .docs-content th,
 .docs-content td {
   padding: 10px 12px;
-  border: 2px solid var(--rule);
   text-align: left;
   vertical-align: top;
 }
@@ -182,7 +176,6 @@
 .docs-content code {
   display: inline;
   padding: 2px 5px;
-  border: 2px solid var(--rule);
   color: #000000;
   background: var(--accent);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -194,16 +187,13 @@
   margin: 0 0 20px;
   padding: 14px 16px;
   overflow-x: auto;
-  border: var(--border);
   border-radius: var(--radius-medium);
   background: var(--sunken);
-  box-shadow: var(--shadow-small);
 }
 
 .docs-content pre code {
   display: block;
   padding: 0;
-  border: none;
   color: #000000;
   background: none;
   font-size: 13px;
@@ -214,10 +204,8 @@
 .docs-callout {
   margin: 0 0 20px;
   padding: 14px 18px;
-  border: var(--border);
   background: var(--sidebar);
   color: #000000;
-  box-shadow: var(--shadow-small);
 }
 
 .docs-callout p {
@@ -231,8 +219,6 @@
 
 .docs-next {
   margin-top: 40px;
-  padding-top: 20px;
-  border-top: var(--border);
   font-size: 14px;
 }
 
@@ -246,7 +232,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  border-left: 2px solid var(--rule);
 }
 
 .docs-toc li + li {
@@ -255,7 +240,7 @@
 
 .docs-toc a {
   display: block;
-  padding: 4px 0 4px 14px;
+  padding: 4px 0;
   color: var(--muted);
   font-size: 13px;
   text-decoration: none;
@@ -280,9 +265,7 @@
   .docs-sidebar-mobile {
     display: block;
     margin-bottom: 28px;
-    border: var(--border);
     background: var(--panel);
-    box-shadow: var(--shadow-small);
   }
 
   .docs-sidebar-mobile summary {
