@@ -34,6 +34,7 @@
             <li><a href="/docs/follow.html" aria-current="page">Check on the work</a></li>
             <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
             <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
           </ul>
         </nav>
       </details>
@@ -48,6 +49,7 @@
           <li><a href="/docs/follow.html" aria-current="page">Check on the work</a></li>
           <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
           <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
         </ul>
       </nav>
 
@@ -57,9 +59,9 @@
         <p class="docs-intro">Work you handed off runs on its own. Waiting for it should cost you nothing — so the point isn't to keep looking, it's to be told the moment something happens.</p>
 
         <h2 id="be-told">Be told when it's done</h2>
-        <p><code>oga watch</code> waits quietly and prints one line the moment the work asks a question, fails, or finishes. Run it in the background and forget it:</p>
+        <p><code>oga watch</code> waits quietly and writes an event when the work asks a question, fails, is cancelled, or finishes. Run it in the background and forget it:</p>
         <pre><code>oga watch 8f2c1a94-... --timeout 30m &amp;</code></pre>
-        <p>Waiting costs nothing while it waits. In Claude Code, a background command that finishes wakes the agent up again — so this <em>is</em> the notification. Wait on several at once by naming several IDs: <code>oga watch &lt;id&gt; &lt;id&gt; &lt;id&gt;</code>.</p>
+        <p>Wait on several tasks by naming several IDs: <code>oga watch &lt;id&gt; &lt;id&gt; &lt;id&gt;</code>. Add <code>--all</code> when you also need tool, command, file, and error events.</p>
         <p>The Oga app shows the same thing on screen: what's running, what's waiting on you, and everything that happened inside a run.</p>
 
         <h2 id="read-it">Read the whole thing</h2>
@@ -71,10 +73,10 @@
         <p>Work can stop partway and ask you something it can't decide on its own. Ask your coding agent to answer it — the reply goes back into the same session, and the work picks up exactly where it stopped rather than starting over.</p>
 
         <h2 id="pick-up">Pick it back up</h2>
-        <p>Work that failed, was cancelled, or got stuck can carry on in the same session. The files it already read and the thinking it already did are still there:</p>
+        <p>Work that failed, was cancelled, or got stuck can be resumed:</p>
         <pre><code>oga resume &lt;task-id&gt;
 oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code></pre>
-        <p>Work that already finished can be picked up too, as a follow-up. Then you have to say what you want different — there's nothing to retry on its own:</p>
+        <p>When you need a completed task to do more, give it a new instruction:</p>
         <pre><code>oga resume &lt;task-id&gt; -m "move the status dot to the end of the title"</code></pre>
 
         <div class="docs-callout">
