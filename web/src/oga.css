@@ -131,6 +131,7 @@ a {
 }
 
 .app-shell {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -162,7 +163,11 @@ a {
 }
 
 .toast-viewport {
-    position: fixed;
+    /* Anchored to .app-shell (which already tracks the window's own box)
+       rather than the true viewport: position:fixed combined with the
+       window-zoom feature (menuCommands.ts) miscomputes right/bottom
+       offsets in WebKit, letting the toast render past the window edge. */
+    position: absolute;
     z-index: 1100;
     right: var(--space-4);
     bottom: var(--space-4);
