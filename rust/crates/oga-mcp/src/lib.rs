@@ -566,11 +566,21 @@ impl McpServer {
         if let Some(value) = optional_string(args, "model") {
             request = request.model(value);
         }
-        let task = self.state.dispatcher.steer(request).await?;
-        let task = self.enrich_task(task)?;
+        let outcome = self.state.dispatcher.steer(request).await?;
+        let task = self.enrich_task(outcome.task)?;
         let cwd = project_cwd(&task);
         let fields = fields(args.get("fields"))?.unwrap_or_default();
-        Ok((shaping::task_view(&task, &fields), Some(cwd)))
+        let mut value = shaping::task_view(&task, &fields);
+        if outcome.queued {
+            value
+                .as_object_mut()
+                .expect("task view is an object")
+                .insert(
+                    "note".into(),
+                    json!("Queued as a follow-up. It will be applied after the current run."),
+                );
+        }
+        Ok((value, Some(cwd)))
     }
 
     async fn handoff(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {

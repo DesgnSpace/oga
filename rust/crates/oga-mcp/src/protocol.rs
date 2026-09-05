@@ -95,7 +95,7 @@ const RESUME_DESCRIPTION: &str = concat!(
     "After resume returns, start `oga watch <taskId>` in the background; its settle line, or the alert block the next Oga tool result carries, is the required trigger to call inspect."
 );
 
-const STEER_DESCRIPTION: &str = "Send an instruction to a task that is still working, or switch its model mid-run, without stopping it or starting a new session; it keeps running and the change is recorded in its history. Providers without live control refuse the call and explain why; nothing is silently ignored.";
+const STEER_DESCRIPTION: &str = "Send an instruction to a task that is still working, or switch its model mid-run, without stopping it or starting a new session; it keeps running and the change is recorded in its history. When the provider takes no live input the instruction is queued instead and runs as a follow-up once the current run finishes clean — the response says so, and the task's history shows it waiting. A model change cannot wait that way: it is refused, so send the instruction on its own or use handoff. Nothing is silently ignored.";
 
 const HANDOFF_DESCRIPTION: &str = concat!(
     "Move a task to a different model, a different profile, or both, in one call, keeping the same Oga task ID — running or not, with no cancel first. ",

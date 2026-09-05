@@ -4,9 +4,17 @@ use oga_domain::{Task, TaskControlState, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, dispatch::Dispatcher, lifecycle::now_iso, require_task,
-    validate_model,
+    ContinuationError, append_event_tx, dispatch::Dispatcher, follow_ups::queue_follow_up,
+    lifecycle::now_iso, require_task, validate_model,
 };
+
+/// What became of the instruction: delivered to a live run, or left waiting for
+/// the current one to finish.
+#[derive(Debug, Clone)]
+pub struct SteerOutcome {
+    pub task: Task,
+    pub queued: bool,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct SteerRequest {
@@ -59,7 +67,7 @@ pub fn control_state(dispatcher: &Dispatcher, task: &Task) -> TaskControlState {
 pub async fn steer(
     dispatcher: &Dispatcher,
     request: SteerRequest,
-) -> Result<Task, ContinuationError> {
+) -> Result<SteerOutcome, ContinuationError> {
     let task = require_task(dispatcher.store(), &request.task_id)?;
     let instruction = request
         .instruction
@@ -96,9 +104,19 @@ pub async fn steer(
         let reason = state
             .reason
             .unwrap_or_else(|| "this run cannot be steered".into());
-        record_rejection(dispatcher, &task, instruction.as_deref(), &reason)?;
+        let Some(instruction) = instruction else {
+            record_rejection(dispatcher, &task, None, &reason)?;
+            return Err(ContinuationError::Refusal(format!(
+                "{reason}; use handoff to change the model now: {}",
+                task.id
+            )));
+        };
+        if model.is_none() {
+            return queue_for_later(dispatcher, task, &instruction);
+        }
+        record_rejection(dispatcher, &task, Some(&instruction), &reason)?;
         return Err(ContinuationError::Refusal(format!(
-            "{reason}; wait for the task to finish and resume it, or use handoff to move it now: {}",
+            "{reason}; send the instruction on its own to run it after this one, or use handoff to change the model now: {}",
             task.id
         )));
     }
@@ -106,6 +124,19 @@ pub async fn steer(
         "this run cannot be steered: {}",
         task.id
     )))
+}
+
+/// Nothing can reach the worker mid-run, so the instruction waits its turn
+/// behind the current one instead of costing the caller the work done so far.
+fn queue_for_later(
+    dispatcher: &Dispatcher,
+    mut task: Task,
+    instruction: &str,
+) -> Result<SteerOutcome, ContinuationError> {
+    let now = now_iso();
+    let waiting = queue_follow_up(dispatcher.store(), &task.id, task.state, instruction, &now)?;
+    task.queued_follow_ups = Some(waiting as u64);
+    Ok(SteerOutcome { task, queued: true })
 }
 
 fn record_rejection(

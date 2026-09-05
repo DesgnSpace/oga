@@ -39,7 +39,7 @@ use crate::{
     reply::{self, ReplyRequest},
     resume::{self, ResumeRequest},
     schedule::{StartAt, parse_start_at},
-    steer::{self, SteerRequest},
+    steer::{self, SteerOutcome, SteerRequest},
     waiting,
 };
 
@@ -257,7 +257,7 @@ impl Dispatcher {
         resume::resume(self, request).await
     }
 
-    pub async fn steer(&self, request: SteerRequest) -> Result<Task, ContinuationError> {
+    pub async fn steer(&self, request: SteerRequest) -> Result<SteerOutcome, ContinuationError> {
         steer::steer(self, request).await
     }
 
