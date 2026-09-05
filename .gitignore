@@ -25,7 +25,7 @@ opencode.json
 *.icns
 
 # Rust build output
-target/
+target
 
 # Generated Tauri capability schemas
 rust/apps/oga-desktop/gen/
