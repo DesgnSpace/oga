@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- Kept toast notifications inside the desktop window at every size.
 - Kept Codex and Pi account directories separate for each worker profile.
 - Installed source builds beside released Oga without sharing an app identity.
 - Let workers clear local, reversible obstacles before reporting a blocker.
