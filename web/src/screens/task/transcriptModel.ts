@@ -191,11 +191,16 @@ function walkRun(
   return segment;
 }
 
-/** Splits events at an attempt's own end: everything up to and including it is that attempt's, the rest carries on. */
+/**
+ * Splits events at an attempt's own end: everything before it is that
+ * attempt's, the rest carries on. An attempt is closed by the resume that
+ * follows it, so the "Resumed" event shares its `endedAt` and belongs to the
+ * next run — counting it here would close the attempt twice.
+ */
 function splitAtAttemptEnd(events: TaskEventView[], endedAt: string): [TaskEventView[], TaskEventView[]] {
   const cutoff = Date.parse(endedAt);
   if (Number.isNaN(cutoff)) return [[], events];
-  const index = events.findIndex((event) => Date.parse(event.createdAt) > cutoff);
+  const index = events.findIndex((event) => Date.parse(event.createdAt) >= cutoff);
   return index === -1 ? [events, []] : [events.slice(0, index), events.slice(index)];
 }
 

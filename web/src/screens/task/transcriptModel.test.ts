@@ -153,6 +153,26 @@ describe("buildTranscript across resumed attempts", () => {
     expect(response2.block.text).toBe("Second reply, settled.");
   });
 
+  it("shows a resumed attempt's reply once when the resume shares its end time", () => {
+    // The resume closes attempt 1, so the "Resumed" event carries the same
+    // timestamp as the attempt's end; it opens attempt 2 rather than
+    // closing attempt 1 a second time.
+    const events: TaskEventView[] = [
+      messageEvent(1, "First reply."),
+      { ...event(2, undefined, "Resumed"), createdAt: "2026-07-30T15:00:03Z" },
+      event(4, undefined),
+    ];
+    const built = task({
+      attempts: [attempt({ output: "First reply.", endedAt: "2026-07-30T15:00:03Z" })],
+      output: "Second reply, settled.",
+    });
+
+    const items = buildTranscript(built, events);
+
+    expect(items.map((item) => item.type)).toEqual(["bubble", "work", "response", "bubble", "work", "response"]);
+    expect(items.filter((item) => item.type === "response" && item.block.text === "First reply.").length).toBe(1);
+  });
+
   it("leaves a single-run task unchanged when there are no past attempts", () => {
     const events: TaskEventView[] = [event(1, undefined), event(2, undefined)];
     const items = buildTranscript(task({ output: "Only reply." }), events);
