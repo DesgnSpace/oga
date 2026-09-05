@@ -1,0 +1,103 @@
+.docs-main {
+  padding: 24px 0 80px;
+}
+
+.docs-main h1 {
+  max-width none;
+  margin-inline: 0;
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  text-align: left;
+}
+
+.docs-intro {
+  max-width: 60ch;
+  margin-bottom: 32px;
+  color: var(--muted);
+  font-size: clamp(17px, 1.6vw, 19px);
+}
+
+.docs-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 48px;
+  padding: 16px;
+  border: var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow-small);
+}
+
+.docs-toc a {
+  padding: 6px 10px;
+  border: 2px solid #000000;
+  color: #000000;
+  background: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.docs-section {
+  max-width: 68ch;
+  margin: 0 0 56px;
+  padding-top: 32px;
+  border-top: var(--border);
+}
+
+.docs-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.docs-section h2 {
+  margin-bottom: 16px;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.docs-section p {
+  margin-bottom: 16px;
+  color: var(--muted);
+}
+
+.docs-section strong {
+  color: var(--text);
+}
+
+.docs-section ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+  color: var(--muted);
+}
+
+.docs-section li {
+  margin-bottom: 12px;
+}
+
+.docs-section .command-block {
+  margin-bottom: 16px;
+  background: var(--sunken);
+}
+
+.docs-section code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (prefers-color-scheme: dark) {
+  .docs-toc {
+    color: #000000;
+  }
+}
+
+@media (max-width: 520px) {
+  .docs-toc {
+    padding: 12px;
+  }
+}

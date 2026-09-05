@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How to install Oga, connect it to your coding agent, and delegate your first task.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga Docs - Getting started</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="index.html">
+      <img src="logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="index.html#install">Install</a>
+  </header>
+
+  <main id="main" class="docs-main">
+    <h1>Getting started</h1>
+    <p class="docs-intro">Oga is a local broker that hands work to other coding agent CLIs — Claude Code, Codex, OpenCode, Antigravity, and Pi — so they run in parallel on their own accounts while you keep working. This page covers install through your first delegated task.</p>
+
+    <nav class="docs-toc" aria-label="On this page">
+      <a href="#install">Install</a>
+      <a href="#first-run">First run</a>
+      <a href="#delegate">Delegate a task</a>
+      <a href="#follow">Watch, inspect, resume</a>
+      <a href="#worktrees">Worktrees and PRs</a>
+      <a href="#data">Where data lives</a>
+    </nav>
+
+    <section id="install" class="docs-section">
+      <h2>Install</h2>
+      <p>Requires macOS 14 or later.</p>
+      <div class="command-block">
+        <div class="command-heading"><span>curl</span></div>
+        <code>curl -fsSL https://downloads.desgn.space/oga/install.sh | sh</code>
+      </div>
+      <div class="command-block">
+        <div class="command-heading"><span>Homebrew</span></div>
+        <code>brew install --cask DesgnSpace/tap/oga</code>
+      </div>
+      <p>Either installs the <strong>Oga</strong> menu-bar app and puts the <code>oga</code> command on your <code>PATH</code>. Confirm the broker is running:</p>
+      <div class="command-block">
+        <code>curl http://127.0.0.1:7331/health</code>
+      </div>
+    </section>
+
+    <section id="first-run" class="docs-section">
+      <h2>First run</h2>
+      <ol>
+        <li>Open Oga. On first launch it finds which provider CLIs you already have installed and lets you add, edit, and enable <strong>profiles</strong> — one per provider account. No accounts are hardcoded; log into each provider's CLI yourself first.</li>
+        <li>Click <strong>Install MCP</strong>. It writes an MCP entry pointing at <code>http://127.0.0.1:7331/mcp</code> into every coding agent it finds — Claude Code, Codex, OpenCode, and Antigravity. Existing configs are backed up with a <code>.bak</code> suffix.</li>
+        <li>Restart your coding agent so it picks up the new MCP server.</li>
+      </ol>
+      <p>One worker/model pair can be marked <strong>loved</strong>, which becomes the default for work that doesn't name one:</p>
+      <div class="command-block">
+        <code>oga love opencode/openai/gpt-5.6-luna</code>
+      </div>
+    </section>
+
+    <section id="delegate" class="docs-section">
+      <h2>Delegate a task</h2>
+      <p>Delegating happens from inside your coding agent, not from a separate CLI command. Ask the agent you're already talking to — Claude Code, Codex, whichever you connected — to hand off a bounded piece of work:</p>
+      <div class="command-block">
+        <code>Delegate: implement the CSV export endpoint in api/export.py</code>
+      </div>
+      <p>Your agent calls Oga's <code>delegate</code> MCP tool with a prompt and a working directory. Oga picks a model, starts a sandboxed worker on a different account, and hands back a task ID immediately — dispatch, not completion. The worker keeps running after your agent moves on to something else.</p>
+    </section>
+
+    <section id="follow" class="docs-section">
+      <h2>Watch, inspect, resume</h2>
+      <p>A delegated task runs unattended. Follow it from the same terminal your agent uses:</p>
+      <div class="command-block">
+        <div class="command-heading"><span>Wait for it to settle</span></div>
+        <code>oga watch &lt;task-id&gt; &amp;</code>
+      </div>
+      <p>It prints one line the moment the task asks a question, fails, or finishes, and costs nothing while it waits. In Claude Code, a backgrounded command finishing is itself the notification.</p>
+      <div class="command-block">
+        <div class="command-heading"><span>List today's tasks</span></div>
+        <code>oga tasks</code>
+      </div>
+      <div class="command-block">
+        <div class="command-heading"><span>Read one task's full record</span></div>
+        <code>oga inspect &lt;task-id&gt;</code>
+      </div>
+      <div class="command-block">
+        <div class="command-heading"><span>Retry a failed or blocked task</span></div>
+        <code>oga resume &lt;task-id&gt;</code>
+      </div>
+    </section>
+
+    <section id="worktrees" class="docs-section">
+      <h2>Worktrees and PRs</h2>
+      <p>Add <code>worktree: true</code> to a delegated task and Oga gives it its own checkout and branch, so the worker commits without ever touching your working tree. Use it whenever the work should land as commits, or whenever more than one task runs against the same repository.</p>
+      <p>The checkout stays after the task settles, on branch <code>oga/&lt;slug&gt;</code> by default. Review and merge it, or open a PR from it, like any other branch:</p>
+      <div class="command-block">
+        <code>git -C &lt;repo&gt; log oga/&lt;slug&gt;</code>
+      </div>
+    </section>
+
+    <section id="data" class="docs-section">
+      <h2>Where data lives</h2>
+      <p>Everything Oga keeps stays on your machine, under <code>~/.oga</code>: the SQLite task store, worktree checkouts, and the unix socket the broker uses to push task updates. Nothing is sent to a third-party server — tasks run through the provider CLIs you already have installed, on their own accounts.</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="docs.html">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>
