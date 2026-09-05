@@ -681,12 +681,37 @@ fn expand_home(value: &str, home: &str) -> String {
     }
     value.to_owned()
 }
-/// Resolves the environment a provider process receives, expanding `$HOME`
-/// and `~` values before they reach `execve`.
-///
-/// Claude keeps credentials and limits below `CLAUDE_CONFIG_DIR`. Give every
-/// Claude profile a directory, even when its config omitted the variable, so
-/// an inherited broker value cannot join otherwise separate profiles.
+/// Where a provider keeps the account it is signed in as: the profile's own
+/// override when it sets one, otherwise the provider's default directory
+/// under the home folder. Read from the profile alone, never from this
+/// process, so a broker launched with the variable exported cannot lend its
+/// account to a profile that never asked for it.
+fn account_dir(profile: &Profile, key: &str, default: &str) -> String {
+    let home = home();
+    profile.env.get(key).map_or_else(
+        || format!("{home}{default}"),
+        |value| expand_home(value, &home),
+    )
+}
+/// Claude's account directory for this profile. Credentials and limits live
+/// below it, so a profile that names no directory gets one of its own rather
+/// than sharing the default with every other Claude profile.
+pub fn claude_config_dir(profile: &Profile) -> String {
+    let default = if profile.id == "claude" {
+        "/.claude".to_owned()
+    } else {
+        format!("/.{}", profile.id)
+    };
+    account_dir(profile, "CLAUDE_CONFIG_DIR", &default)
+}
+/// Codex's account directory for this profile.
+pub fn codex_home(profile: &Profile) -> String {
+    account_dir(profile, "CODEX_HOME", "/.codex")
+}
+/// The environment a provider process receives: the profile's own env with
+/// `$HOME` and `~` expanded before they reach `execve`, plus the provider's
+/// account directory set explicitly, so an inherited broker value cannot join
+/// otherwise separate profiles.
 pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
     let home = home();
     let mut env = profile
@@ -694,23 +719,28 @@ pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
         .iter()
         .map(|(key, value)| (key.clone(), expand_home(value, &home)))
         .collect::<BTreeMap<_, _>>();
-    if profile.provider == Provider::Claude {
-        env.entry("CLAUDE_CONFIG_DIR".into())
-            .or_insert_with(|| claude_config_dir(profile, &home));
+    match profile.provider {
+        Provider::Claude => {
+            env.insert("CLAUDE_CONFIG_DIR".into(), claude_config_dir(profile));
+        }
+        Provider::Codex => {
+            env.insert("CODEX_HOME".into(), codex_home(profile));
+        }
+        Provider::Pi => {
+            let agent = account_dir(profile, "PI_CODING_AGENT_DIR", "/.pi/agent");
+            let sessions = profile.env.get("PI_CODING_AGENT_SESSION_DIR").map_or_else(
+                || format!("{agent}/sessions"),
+                |value| expand_home(value, &home),
+            );
+            env.insert("PI_CODING_AGENT_DIR".into(), agent);
+            env.insert("PI_CODING_AGENT_SESSION_DIR".into(), sessions);
+        }
+        Provider::OpenCode | Provider::OpenCode2 | Provider::Antigravity => {}
     }
     env
 }
-
-fn claude_config_dir(profile: &Profile, home: &str) -> String {
-    if profile.id == "claude" {
-        format!("{home}/.claude")
-    } else {
-        format!("{home}/.{}", profile.id)
-    }
-}
 fn skills_dir(profile: &Profile) -> String {
-    let config = environment_for(profile)["CLAUDE_CONFIG_DIR"].clone();
-    PathBuf::from(config)
+    PathBuf::from(claude_config_dir(profile))
         .join("skills")
         .to_string_lossy()
         .into_owned()
@@ -881,5 +911,47 @@ mod tests {
             environment_for(&work)["CLAUDE_CONFIG_DIR"],
             environment_for(&personal)["CLAUDE_CONFIG_DIR"]
         );
+    }
+
+    #[test]
+    fn account_directories_come_from_the_profile_not_this_process() {
+        // SAFETY: test-only env mutation; nothing else in this crate reads these.
+        unsafe {
+            std::env::set_var("CLAUDE_CONFIG_DIR", "/broker/.claude-me");
+            std::env::set_var("CODEX_HOME", "/broker/.codex-me");
+            std::env::set_var("PI_CODING_AGENT_DIR", "/broker/.pi-me");
+        }
+        let mut claude = profile(Provider::Claude);
+        claude.id = "claude".into();
+        let command = command_for(&claude, "go", "/repo", None, None, None);
+        assert_eq!(
+            command.env["CLAUDE_CONFIG_DIR"],
+            format!("{}/.claude", home())
+        );
+
+        let codex = profile(Provider::Codex);
+        assert_eq!(
+            environment_for(&codex)["CODEX_HOME"],
+            format!("{}/.codex", home())
+        );
+        assert_eq!(environment_for(&codex)["CODEX_HOME"], codex_home(&codex));
+
+        let pi_env = environment_for(&profile(Provider::Pi));
+        assert_eq!(
+            pi_env["PI_CODING_AGENT_DIR"],
+            format!("{}/.pi/agent", home())
+        );
+        assert_eq!(
+            pi_env["PI_CODING_AGENT_SESSION_DIR"],
+            format!("{}/.pi/agent/sessions", home())
+        );
+    }
+
+    #[test]
+    fn claude_skills_follow_the_profile_account_directory() {
+        let mut me = profile(Provider::Claude);
+        me.env
+            .insert("CLAUDE_CONFIG_DIR".into(), "~/.claude-work".into());
+        assert_eq!(skills_dir(&me), format!("{}/.claude-work/skills", home()));
     }
 }

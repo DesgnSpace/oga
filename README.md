@@ -104,8 +104,12 @@ worker ID, display name, command-line tool, default model, capabilities, and
 environment variables. The supported provider names are exactly:
 `claude`, `codex`, `opencode`, `opencode-2`, `antigravity`, and `pi`.
 
-Each worker is one provider account. Keep a separate provider configuration
-directory in its environment when you use more than one signed-in account.
+Each worker is one provider account. The account directory always comes from
+the worker, never from the shell Oga was started in. Claude workers each get
+their own — `$HOME/.claude` for the worker named `claude`, `$HOME/.<worker-id>`
+for the rest — while `CODEX_HOME` defaults to `$HOME/.codex` and
+`PI_CODING_AGENT_DIR` to `$HOME/.pi/agent`. Set one of them in a worker's
+environment to point that worker at a directory you have already signed into.
 Secret-like environment keys containing `KEY`, `TOKEN`, `SECRET`, or `PASS` are
 masked in the app and in `oga config` output.
 
