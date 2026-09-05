@@ -1124,6 +1124,21 @@ h1 {
     color: var(--color-text-muted);
 }
 
+.app-first-run-card {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-3);
+    padding: var(--space-5);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-surface);
+}
+
+.app-first-run-card .eyebrow,
+.app-first-run-card .app-description {
+    margin: 0;
+}
+
 .home-link {
     display: inline-block;
     margin-top: var(--space-5);

@@ -52,6 +52,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
     () => sidebarController.snapshot,
   );
   const hasTasks = sidebar.tasks.length > 0;
+  const hasConnectedAi = sidebar.profiles.length > 0;
 
   if (sidebar.loadState === "loading" && !hasTasks) {
     return (
@@ -59,6 +60,29 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
         <p className="eyebrow">Workspace</p>
         <h1 id="page-title">Your workspace</h1>
       </>
+    );
+  }
+
+  if (sidebar.loadState === "error" && !hasTasks) {
+    return (
+      <>
+        <p className="eyebrow">Workspace</p>
+        <h1 id="page-title">Your workspace</h1>
+        <p className="app-description">Couldn&apos;t load your workspace. Use Retry to try again.</p>
+      </>
+    );
+  }
+
+  if (sidebar.loadState === "ready" && !hasConnectedAi) {
+    return (
+      <div className="app-first-run-card">
+        <p className="eyebrow">Workspace</p>
+        <h1 id="page-title">Connect your AI to start delegating</h1>
+        <p className="app-description">Choose an AI account for the work you want to hand off.</p>
+        <button className="settings-button settings-button-primary" type="button" onClick={() => onOpenSettings("workers")}>
+          Connect your AI
+        </button>
+      </div>
     );
   }
 
