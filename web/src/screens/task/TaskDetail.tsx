@@ -22,7 +22,8 @@ import {
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
 import { ChangedFilesPanel, type ChangesSource } from "./ChangedFiles";
 import { effortDisplay, taskStatusLabel } from "./format";
-import { Transcript } from "./Transcript";
+import { useShowThinking } from "./Trace";
+import { Transcript, transcriptHasThinking } from "./Transcript";
 import { activityIsSettled, buildTranscript, WorkSegmentCache } from "./transcriptModel";
 
 /** Dispatched by the native "Refresh" menu command to reload the open task alongside the sidebar. */
@@ -249,6 +250,8 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
     () => (task ? buildTranscript(task, events, segmentCache) : []),
     [task, events, segmentCache],
   );
+  const [showThinking, toggleThinking] = useShowThinking();
+  const hasThinking = React.useMemo(() => transcriptHasThinking(transcriptItems), [transcriptItems]);
   React.useLayoutEffect(() => {
     const content = contentRef.current;
     if (content && stickToEnd.current) content.scrollTop = content.scrollHeight;
@@ -348,11 +351,17 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
                   {state.loadingEarlier && <span className="transcript-load-earlier-spinner" />}
                 </div>
               )}
-              <Transcript items={transcriptItems} />
+              <Transcript items={transcriptItems} showThinking={showThinking} />
             </div>
           </>
         )}
-        {task && <TaskControls task={task} onChanged={refreshDetail} />}
+        {task && (
+          <TaskControls
+            task={task}
+            onChanged={refreshDetail}
+            thinkingToggle={hasThinking ? { active: showThinking, onToggle: toggleThinking } : undefined}
+          />
+        )}
       </div>
       {showingChanges && task && (
         <ChangedFilesPanel

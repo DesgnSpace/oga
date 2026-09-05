@@ -108,12 +108,13 @@ export interface ConversationComposerProps {
   queued: string[];
   onSend: (request: ComposerRequest) => void;
   onRemoveQueued: (index: number) => void;
+  thinkingToggle?: { active: boolean; onToggle: () => void };
 }
 
 const COMPOSER_MIN_HEIGHT = 44;
 const COMPOSER_MAX_HEIGHT = 160;
 
-export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQueued }: ConversationComposerProps) {
+export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQueued, thinkingToggle }: ConversationComposerProps) {
   const [draft, setDraft] = React.useState("");
   const disabled = isSendDisabled(routing, draft);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
@@ -189,6 +190,16 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
         />
         <div className="composer-footer">
           <div className="composer-footer-left">
+            {thinkingToggle && (
+              <button
+                className="composer-thinking-toggle"
+                type="button"
+                aria-pressed={thinkingToggle.active}
+                onClick={thinkingToggle.onToggle}
+              >
+                {thinkingToggle.active ? "Hide thinking" : "Show thinking"}
+              </button>
+            )}
             {scopeLabel && (
               <span className="composer-scope" title={scopeHelp}>
                 <span className="composer-scope-dot" aria-hidden="true">●</span>
