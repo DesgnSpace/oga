@@ -64,11 +64,11 @@
           <li>Added scheduled starts for delegated and resumed work.</li>
           <li>Added task-specific next-step guidance to MCP responses.</li>
           <li>Added queued follow-up instructions when a running worker cannot accept them.</li>
-          <li>Added public documentation for installation, setup, delegation, task follow-up, worktrees, and local data.</li>
+          <li>Added public documentation for installation, setup, delegation, task follow-up, worktrees, local data, and release notes.</li>
           </ul>
           <h3>Changed</h3>
           <ul>
-          <li>Consolidated the maintained reference docs and added generated landing release notes.</li>
+          <li>Consolidated the maintained reference docs.</li>
           </ul>
           <h3>Fixed</h3>
           <ul>
@@ -76,10 +76,34 @@
           <li>Installed source builds beside released Oga without sharing an app identity.</li>
           <li>Let workers clear local, reversible obstacles before reporting a blocker.</li>
           </ul>
-          <h2>1.0.0 - 2026-09-04</h2>
+          <h2>0.0.5 - 2026-09-04</h2>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Packaged the broker sidecar for supported macOS architectures.</li>
+          <li>Located the bundled broker beside the app executable.</li>
+          <li>Let Tauri handle app notarization during publishing.</li>
+          </ul>
+          <h2>0.0.4 - 2026-08-26</h2>
           <h3>Added</h3>
           <ul>
-          <li>First Oga 1.0.0 release.</li>
+          <li>Linked ignored project paths into task worktrees by default.</li>
+          <li>Kept interrupted work on hold for recovery.</li>
+          </ul>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Preserved task holds during handoff.</li>
+          <li>Settled dependent tasks after direct completion.</li>
+          </ul>
+          <h2>0.0.3 - 2026-08-24</h2>
+          <h3>Added</h3>
+          <ul>
+          <li>Added the product landing page.</li>
+          <li>Added Pages deployment for the landing site.</li>
+          </ul>
+          <h2>0.0.2 - 2026-08-24</h2>
+          <h3>Fixed</h3>
+          <ul>
+          <li>Loaded release environment values safely during publishing.</li>
           </ul>
       </article>
     </div>
