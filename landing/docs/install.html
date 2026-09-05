@@ -74,6 +74,9 @@ bun install
 make install</code></pre>
         <p>A build of your own installs as <strong>Oga (local)</strong>, alongside a released Oga rather than replacing it. Only one can run at a time — they share the same port and the same folder — so quit one before opening the other. <code>make install</code> quits whichever is open, starts the one it just built, and points the <code>oga</code> command at it.</p>
 
+        <h2 id="updates">Get new versions</h2>
+        <p>Oga checks quietly when it opens. You can also choose <strong>Check for Updates</strong> from the Oga menu or the About section in Settings, then download and install a new version without leaving the app.</p>
+
         <h2 id="confirm">Check that it's running</h2>
         <p>Opening the app starts everything Oga needs. To confirm it answered:</p>
         <pre><code>curl http://127.0.0.1:7331/health</code></pre>
@@ -92,6 +95,7 @@ make install</code></pre>
           <li><a href="#curl">One command</a></li>
           <li><a href="#homebrew">Homebrew</a></li>
           <li><a href="#source">Build it yourself</a></li>
+          <li><a href="#updates">New versions</a></li>
           <li><a href="#confirm">Check it's running</a></li>
           <li><a href="#cli">From the terminal</a></li>
         </ul>

@@ -16,6 +16,7 @@ import { ToastViewport } from "@/components/ToastViewport";
 import { TitleBar, type TaskTitleBarInfo } from "./TitleBar";
 import { subscribeMenuCommands, syncMenuAvailability } from "./menuCommands";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
+import { useAppUpdates } from "./useAppUpdates";
 
 const LAST_SELECTED_TASK_KEY = "lastSelectedTask";
 
@@ -172,6 +173,7 @@ function isOverlayRoute(route: Route): boolean {
 function Shell() {
   const { route, navigate, canGoBack, canGoForward, goBack, goForward } = useRouter();
   const sidebarController = useMemo(() => new SidebarController(), []);
+  const { updateStatus, checkForUpdates, installUpdate } = useAppUpdates();
   const initialTask = useRef(route.kind === "task" ? route.id : undefined).current;
 
   // The settings route now opens as a modal over whichever screen was
@@ -192,8 +194,8 @@ function Shell() {
   const openSettings = useCallback((tab: "workers" | "connections") => navigate({ kind: "settings", tab }), [navigate]);
   const openUsage = useCallback(() => navigate({ kind: "usage" }), [navigate]);
 
-  const contextRef = useRef({ sidebar: sidebarController, route, navigate });
-  contextRef.current = { sidebar: sidebarController, route, navigate };
+  const contextRef = useRef({ sidebar: sidebarController, route, navigate, checkForUpdates: () => void checkForUpdates() });
+  contextRef.current = { sidebar: sidebarController, route, navigate, checkForUpdates: () => void checkForUpdates() };
 
   useEffect(
     () => subscribeMenuCommands(() => contextRef.current),
@@ -262,6 +264,9 @@ function Shell() {
           open={route.kind === "settings"}
           offline={offline}
           initialTab={route.kind === "settings" ? route.tab : undefined}
+          updateStatus={updateStatus}
+          onCheckForUpdates={() => void checkForUpdates()}
+          onInstallUpdate={() => void installUpdate()}
         />
       </Modal>
       <Modal open={route.kind === "usage"} onClose={() => navigate(underlyingRoute)} labelledBy="usage-modal-title" className="modal-dialog-usage">

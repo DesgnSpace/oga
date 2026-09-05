@@ -592,6 +592,7 @@ export const MENU_EVENT = "oga-menu-command";
  * quitting, and the help links are answered natively and never arrive here. */
 export type MenuCommand =
   | "open-settings"
+  | "check-for-updates"
   | "find-task"
   | "toggle-sidebar"
   | "toggle-inspector"
