@@ -215,4 +215,4 @@ pub use prompt::{
 pub use reply::{ReplyRequest, reply};
 pub use resume::{ResumeRequest, resume};
 pub use schedule::{StartAt, parse_start_at};
-pub use steer::{SteerRequest, steer};
+pub use steer::{SteerOutcome, SteerRequest, steer};

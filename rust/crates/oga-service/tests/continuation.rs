@@ -468,17 +468,47 @@ fn completion_assertion_only_accepts_failed_or_blocked_and_force_excludes_comple
 }
 
 #[tokio::test]
-async fn steer_refuses_without_a_live_channel_and_records_the_offer() {
+async fn steer_without_a_live_channel_queues_the_instruction_and_refuses_a_model_change() {
     let (directory, store, dispatcher) = service();
     let cwd = directory.path().to_str().unwrap();
     seed(&store, "running", cwd, TaskState::Running);
-    let error = steer(
+    let outcome = steer(
         &dispatcher,
         SteerRequest::new("running").instruction("change direction"),
     )
     .await
-    .expect_err("steer refusal");
-    assert!(error.to_string().contains("no open channel"));
+    .expect("steer queues the instruction");
+    assert!(outcome.queued);
+    assert_eq!(outcome.task.queued_follow_ups, Some(1));
+    let queued = oga_service::list_follow_ups(&store, "running").expect("queue");
+    assert_eq!(
+        queued
+            .iter()
+            .map(|follow_up| follow_up.instruction.as_str())
+            .collect::<Vec<_>>(),
+        vec!["change direction"]
+    );
+    let events = store
+        .repositories()
+        .events()
+        .list("running")
+        .expect("events");
+    assert_eq!(events.last().expect("queued").kind, "follow_up_queued");
+
+    let error = steer(
+        &dispatcher,
+        SteerRequest::new("running")
+            .instruction("use the other model")
+            .model("model"),
+    )
+    .await
+    .expect_err("a model change cannot wait in the queue");
+    assert!(
+        error
+            .to_string()
+            .contains("use handoff to change the model")
+    );
+    assert_eq!(oga_service::count_follow_ups(&store, "running").unwrap(), 1);
     let events = store
         .repositories()
         .events()

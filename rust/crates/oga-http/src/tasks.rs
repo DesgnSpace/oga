@@ -437,7 +437,7 @@ pub(crate) async fn steer_task(
     if let Some(model) = body.model {
         request = request.model(model);
     }
-    Ok(state.dispatcher.steer(request).await?)
+    Ok(state.dispatcher.steer(request).await?.task)
 }
 
 pub async fn handoff(
