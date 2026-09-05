@@ -9,8 +9,8 @@ use std::{
 
 use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_client::{
-    CompletionRequest, EventFrame, EventStreamQuery, LoopbackClient, MapInitRequest, MapQuery,
-    QueryRequest, ResumeRequest, StateQuery,
+    CompletionRequest, DispatchRequest, EventFrame, EventStreamQuery, LoopbackClient,
+    MapInitRequest, MapQuery, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
     DEFAULT_WORKER_PROMPT, canonical_cwd, global_cwd, load_config_layers, load_profiles,
@@ -18,10 +18,10 @@ use oga_config::{
 };
 use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
-    ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, EventKind,
-    HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource, ModelQuery,
-    Profile, Provider, Task, TaskClass, TaskEvent, TaskListQuery, TaskState, TaskSummary,
-    TaskWorktree, VERSION,
+    ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, Difficulty,
+    EventKind, HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource,
+    ModelQuery, Profile, Provider, Task, TaskClass, TaskEvent, TaskListQuery, TaskState,
+    TaskSummary, TaskWorktree, VERSION, WorktreeOption,
 };
 use oga_events::{EventSocketOptions, SocketError, event_socket_path, start_event_socket};
 use oga_http::HttpState;
@@ -38,7 +38,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, UnixStream},
     time::{sleep, timeout},
 };
@@ -57,6 +57,7 @@ const HOLD_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the broker checks whether the host was suspended under it.
 const WAKE_WATCH_INTERVAL: Duration = Duration::from_secs(30);
 const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nKinds are context, mechanical, build, reasoning, general, comma-separated.";
+const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
 type CliResult<T> = Result<T, CliError>;
 
 #[derive(Debug, Error)]
@@ -144,6 +145,7 @@ async fn run(args: Vec<String>) -> CliResult<i32> {
         "relearn" => run_relearn(&args[1..]).await,
         "love" => run_love(&args[1..]).await,
         "inflight" => run_inflight(),
+        "delegate" => run_delegate(&args[1..]).await,
         "tasks" => run_tasks(&args[1..]).await,
         "inspect" => run_inspect(&args[1..]).await,
         "archive" => run_archive(&args[1..], true).await,
@@ -682,6 +684,10 @@ Usage: oga <command> [options]
                        rebuild it from scratch.
   inflight             List the tasks still running, so you know what stopping
                         the service would interrupt.
+  delegate "<task>"    Hand a task to a worker and print its id. Pass - to read
+                       the task from standard input. Add --worker, --model, or
+                       --difficulty to choose who runs it, --worktree to run it
+                       in its own checkout, --cwd to run it elsewhere.
   tasks [options]      List today's tasks. Add --query or -q to search history.
   inspect <task-id>    Show one task record.
   archive <task-id>... Archive tasks; restore reverses this.
@@ -709,7 +715,7 @@ First run:
 
 fn unknown_command_message(command: &str) -> String {
     format!(
-        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, tasks, inspect, archive, restore, cancel, resume, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
+        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
     )
 }
 
@@ -844,6 +850,155 @@ fn state_name(state: TaskState) -> String {
 fn print_json(value: &Value) -> CliResult<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+#[derive(Debug, Default)]
+struct DelegateOptions {
+    worker: Option<String>,
+    model: Option<String>,
+    difficulty: Option<Difficulty>,
+    worktree: bool,
+    cwd: Option<String>,
+    json: bool,
+    help: bool,
+}
+
+fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<String>)> {
+    let mut options = DelegateOptions::default();
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        let mut take = |name: &str| -> CliResult<String> {
+            index += 1;
+            Ok(args
+                .get(index)
+                .ok_or_else(|| CliError::new(format!("{name} needs a value")))?
+                .clone())
+        };
+        match arg {
+            "--help" | "-h" => options.help = true,
+            "--json" => options.json = true,
+            "--worktree" => options.worktree = true,
+            "--worker" => options.worker = Some(take("--worker")?),
+            "--model" => options.model = Some(take("--model")?),
+            "--cwd" => options.cwd = Some(take("--cwd")?),
+            "--difficulty" => options.difficulty = Some(parse_difficulty(&take("--difficulty")?)?),
+            value if value.starts_with("--worker=") => {
+                options.worker = Some(value.trim_start_matches("--worker=").to_owned());
+            }
+            value if value.starts_with("--model=") => {
+                options.model = Some(value.trim_start_matches("--model=").to_owned());
+            }
+            value if value.starts_with("--cwd=") => {
+                options.cwd = Some(value.trim_start_matches("--cwd=").to_owned());
+            }
+            value if value.starts_with("--difficulty=") => {
+                options.difficulty =
+                    Some(parse_difficulty(value.trim_start_matches("--difficulty="))?);
+            }
+            "-" => values.push("-".to_owned()),
+            value if value.starts_with('-') => {
+                return Err(CliError::new(format!("unknown option: {value}")));
+            }
+            value => values.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    Ok((options, values))
+}
+
+fn parse_difficulty(value: &str) -> CliResult<Difficulty> {
+    serde_json::from_value(json!(value)).map_err(|_| {
+        CliError::new(format!(
+            "difficulty must be mechanical, standard, hard, or critical, got {value}"
+        ))
+    })
+}
+
+/// The first line of the brief, which is where a caller states what the work is.
+fn brief_summary(prompt: &str, max: usize) -> String {
+    let line = prompt
+        .lines()
+        .map(|line| line.trim().trim_start_matches('#').trim())
+        .find(|line| !line.is_empty())
+        .unwrap_or("Delegated task");
+    if line.chars().count() <= max {
+        return line.to_owned();
+    }
+    let head: String = line.chars().take(max - 1).collect();
+    format!("{}…", head.trim_end())
+}
+
+async fn read_stdin_prompt() -> CliResult<String> {
+    let mut prompt = String::new();
+    tokio::io::stdin().read_to_string(&mut prompt).await?;
+    Ok(prompt)
+}
+
+async fn run_delegate(args: &[String]) -> CliResult<i32> {
+    let (options, values) = parse_delegate_args(args)?;
+    if options.help {
+        println!("{DELEGATE_USAGE}");
+        return Ok(0);
+    }
+    let prompt = match values.as_slice() {
+        [value] if value == "-" => read_stdin_prompt().await?,
+        [value] => value.clone(),
+        [] => return Err(CliError::new(DELEGATE_USAGE)),
+        _ => return Err(CliError::new("delegate takes one task, quoted")),
+    };
+    if prompt.trim().is_empty() {
+        return Err(CliError::new("the task is empty"));
+    }
+
+    let cwd = canonical_cwd(match &options.cwd {
+        Some(cwd) => PathBuf::from(cwd),
+        None => env::current_dir()?,
+    });
+    if !cwd.is_absolute() {
+        return Err(CliError::new(format!(
+            "not a directory Oga can reach: {}",
+            cwd.display()
+        )));
+    }
+
+    let tldr = brief_summary(&prompt, 200);
+    let title = brief_summary(&prompt, 60);
+    let mut request = DispatchRequest::new(prompt, cwd.display().to_string(), tldr);
+    request.title = Some(title);
+    request.profile = options.worker;
+    request.model = options.model;
+    request.difficulty = options.difficulty;
+    if options.worktree {
+        request.worktree = Some(WorktreeOption::Bare(true));
+    }
+
+    let client = broker_client()?;
+    let response = client.dispatch(&request).await?;
+    let task = client.get_task(&response.id).await?;
+    let title = task.title.as_deref().unwrap_or("Untitled task");
+    if options.json {
+        print_json(&json!({
+            "id": response.id,
+            "state": response.state,
+            "title": title,
+            "cwd": task.cwd,
+            "profileId": response.profile_id,
+            "model": response.model,
+            "scope": task.scope,
+        }))?;
+    } else {
+        println!("Delegated {} {title}", response.id);
+        if task.grant_id.is_none() {
+            println!(
+                "No files are approved for this project yet, so it can change anything in {}.",
+                task.cwd
+            );
+        }
+        println!("oga watch {}", response.id);
+    }
+    Ok(0)
 }
 
 async fn run_tasks(args: &[String]) -> CliResult<i32> {
@@ -3378,6 +3533,44 @@ mod tests {
         assert_eq!(options.limit, 1);
         assert!(options.code);
         assert_eq!(question, ["where is auth"]);
+    }
+
+    #[test]
+    fn parses_delegate_options_and_the_task() {
+        let args = vec![
+            "--worker=claude".into(),
+            "--model".into(),
+            "opus".into(),
+            "--difficulty".into(),
+            "hard".into(),
+            "--worktree".into(),
+            "--cwd=/tmp/project".into(),
+            "port the parser".into(),
+        ];
+        let (options, values) = parse_delegate_args(&args).unwrap();
+        assert_eq!(options.worker.as_deref(), Some("claude"));
+        assert_eq!(options.model.as_deref(), Some("opus"));
+        assert_eq!(options.difficulty, Some(Difficulty::Hard));
+        assert!(options.worktree);
+        assert_eq!(options.cwd.as_deref(), Some("/tmp/project"));
+        assert_eq!(values, ["port the parser"]);
+
+        assert!(parse_delegate_args(&["--difficulty=easy".into()]).is_err());
+        assert!(parse_delegate_args(&["--model".into()]).is_err());
+        let (_, stdin) = parse_delegate_args(&["-".into()]).unwrap();
+        assert_eq!(stdin, ["-"]);
+    }
+
+    #[test]
+    fn brief_summary_takes_the_first_line_within_the_limit() {
+        let prompt = "# Port the parser\n\nIt lives in rust/crates.";
+        assert_eq!(brief_summary(prompt, 60), "Port the parser");
+        assert_eq!(brief_summary("\n\n  spaced  \n", 60), "spaced");
+        let long = "a".repeat(80);
+        let summary = brief_summary(&long, 60);
+        assert_eq!(summary.chars().count(), 60);
+        assert!(summary.ends_with('…'));
+        assert_eq!(brief_summary("###", 60), "Delegated task");
     }
 
     #[test]
