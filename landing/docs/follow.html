@@ -67,7 +67,7 @@
         <h2 id="read-it">Read the whole thing</h2>
         <p>When you want the full picture — what came back, what the work was allowed to touch, and what it cost:</p>
         <pre><code>oga inspect &lt;task-id&gt;</code></pre>
-        <p><code>oga tasks</code> lists today's, so you can find the one you mean first.</p>
+        <p><code>oga tasks</code> lists today's. Search active history by feature, file, or command with <code>oga tasks --query "text"</code>.</p>
 
         <h2 id="answer">Answer a question it asked</h2>
         <p>Work can stop partway and ask you something it can't decide on its own. Ask your coding agent to answer it — the reply goes back into the same session, and the work picks up exactly where it stopped rather than starting over.</p>
@@ -80,7 +80,7 @@ oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code
         <pre><code>oga resume &lt;task-id&gt; -m "move the status dot to the end of the title"</code></pre>
 
         <div class="docs-callout">
-          <p>Check <code>oga tasks</code> before you start something new. If a piece of work already covers the file or feature you're about to touch, pick that one back up instead of running two against each other.</p>
+          <p>Search <code>oga tasks --query "feature, file, or command"</code> before you start something new. If it finds related work, pick that task back up instead of running two against each other.</p>
         </div>
 
         <div class="docs-next">

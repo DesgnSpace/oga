@@ -136,6 +136,33 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
 }
 
 #[tokio::test]
+async fn tasks_schema_exposes_text_search() {
+    let (_directory, server) = test_server();
+    let response = post(
+        &server,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+    )
+    .await;
+    let task_tool = response["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "tasks")
+        .expect("tasks tool");
+
+    assert_eq!(
+        task_tool["inputSchema"]["properties"]["query"]["type"],
+        "string"
+    );
+    assert!(
+        task_tool["description"]
+            .as_str()
+            .expect("description")
+            .contains("ranks title matches first")
+    );
+}
+
+#[tokio::test]
 async fn tool_call_returns_mcp_content() {
     let (_directory, server) = test_server();
     let response = post(

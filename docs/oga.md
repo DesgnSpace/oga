@@ -14,7 +14,7 @@ follow it, or operate without the app open.
 | `oga relearn` | Refresh a project map or save source routes. |
 | `oga love` | Read or set defaults for unnamed work. |
 | `oga inflight` | List work a broker restart would interrupt. |
-| `oga tasks` | List tasks created today. |
+| `oga tasks [--query <text>]` | List today's tasks, or search active history. |
 | `oga inspect <task-id>` | Print a complete task record. |
 | `oga archive` / `oga restore` | Hide or restore task records. |
 | `oga cancel <task-id>...` | Stop a task. |
@@ -41,3 +41,12 @@ Use `oga inspect <task-id>` before acting on a settled task. Resume failed,
 cancelled, or blocked work with `oga resume`; use `-m` when the next run needs
 an instruction. Archive hides a record without deleting it. `cleanup` is the
 only command that permanently removes task activity.
+
+Before starting work, search for a task on the same feature, file, or command:
+
+```sh
+oga tasks --query "feature, file, or command"
+```
+
+Resume a matching task instead of creating a duplicate. Search results rank
+title matches first, then summary and prompt matches.

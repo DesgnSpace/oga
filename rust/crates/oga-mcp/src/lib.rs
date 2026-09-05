@@ -14,7 +14,7 @@ use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_config::{canonical_cwd, global_cwd};
 use oga_domain::{
     ArchivedFilter, ListOrder, ModelInfo, ModelInfoSource, OnBlockerFailure, Provider, StateFilter,
-    Task, TaskKind, TaskListQuery, TaskScope, TaskState,
+    Task, TaskKind, TaskListQuery, TaskMatch, TaskScope, TaskState,
 };
 use oga_http::{HttpState, settings::ModelQuery as SettingsModelQuery};
 use oga_routing::claude_models;
@@ -373,9 +373,9 @@ impl McpServer {
         Ok(Value::Array(
             rows.into_iter()
                 .take(query.limit.unwrap_or(20).clamp(1, 100) as usize)
-                .map(|task| {
-                    let summary = shaping::task_summary(&task);
-                    shaping::summary_view(&summary, fields.as_deref())
+                .map(|row| {
+                    let summary = shaping::task_summary(&row.task);
+                    shaping::summary_view(&summary, fields.as_deref(), row.matched)
                 })
                 .collect(),
         ))
@@ -915,7 +915,30 @@ impl McpServer {
         Ok((shaping::with_next(value, &task, action), Some(cwd)))
     }
 
-    fn list_tasks(&self, query: &TaskListQuery) -> Result<Vec<Task>, String> {
+    fn list_tasks(&self, query: &TaskListQuery) -> Result<Vec<ListedTask>, String> {
+        if query.query.is_some() {
+            let matches = self
+                .state
+                .store
+                .repositories()
+                .tasks()
+                .search(query)
+                .map_err(|error| error.to_string())?;
+            return matches
+                .into_iter()
+                .map(|matched| {
+                    let task = self
+                        .state
+                        .dispatcher
+                        .task(&matched.id)
+                        .map_err(|error| error.to_string())?;
+                    Ok(ListedTask {
+                        task: self.enrich_task(task).map_err(|error| error.to_string())?,
+                        matched: Some(matched.matched),
+                    })
+                })
+                .collect();
+        }
         let ids = self
             .state
             .store
@@ -963,10 +986,18 @@ impl McpServer {
             {
                 continue;
             }
-            tasks.push(task);
+            tasks.push(ListedTask {
+                task,
+                matched: None,
+            });
         }
         Ok(tasks)
     }
+}
+
+struct ListedTask {
+    task: Task,
+    matched: Option<TaskMatch>,
 }
 
 #[derive(Clone)]
@@ -1337,9 +1368,11 @@ fn task_ids(value: Option<&Value>) -> Result<Vec<String>, McpError> {
 }
 
 fn task_query(args: &Value) -> Result<TaskListQuery, McpError> {
-    let explicit = ["state", "since", "until", "profile", "parent", "archived"]
-        .iter()
-        .any(|key| args.get(*key).is_some());
+    let explicit = [
+        "state", "since", "until", "profile", "parent", "archived", "query",
+    ]
+    .iter()
+    .any(|key| args.get(*key).is_some());
     let since = optional_string(args, "since").or_else(|| (!explicit).then(local_midnight));
     let state = args.get("state").map(parse_state_filter).transpose()?;
     let archived = optional_string(args, "archived")
@@ -1370,6 +1403,7 @@ fn task_query(args: &Value) -> Result<TaskListQuery, McpError> {
         profile: optional_string(args, "profile"),
         parent: optional_string(args, "parent"),
         archived: archived.or(Some(ArchivedFilter::Active)),
+        query: optional_string(args, "query"),
     })
 }
 

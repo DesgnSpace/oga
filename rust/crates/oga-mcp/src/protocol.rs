@@ -9,6 +9,7 @@ pub const EARLIEST_PROTOCOL_VERSION: &str = "2025-06-18";
 
 pub const MCP_INSTRUCTIONS: &str = concat!(
     "The loop: read the cwd's memories, list tasks, query for the code, delegate the work, watch, inspect. ",
+    "Before delegating, search `tasks` with `query` for the same feature, file, or command; resume a match. ",
     "Before any call — locate code with query rather than glob or grep, and read what it names; resume the task that already owns the same work instead of dispatching a duplicate; keep decisions and conventions in memory, never secrets or task status. ",
     "Use delegate for bounded implementation, research, review, writing, and analysis, and keep goal-setting, architecture, integration, and final review here. ",
     "Delegation sends the prompt, the cwd's memories, and whatever the worker reads to an external account: approve the destination and data scope once per cwd and profile, and ask again only when a task would widen it. ",
@@ -22,7 +23,7 @@ pub const MCP_INSTRUCTIONS: &str = concat!(
 const DELEGATE_DESCRIPTION: &str = concat!(
     "Hand new bounded work — implementation, research, review, writing, analysis — to an external provider, including a second opinion or work past this provider's usage limit. ",
     "Returns an Oga task id, the only handle you get, and the run carries on after the call returns. ",
-    "Use resume to continue work a task already did, and handoff to move one elsewhere. ",
+    "Before delegating, search `tasks` with `query` for the same feature, file, or command; resume a match. ",
     "Give difficulty; omit profile and model unless this task needs a particular account. Routing reads the kind of work from the prompt."
 );
 
@@ -41,7 +42,7 @@ const INSPECT_DESCRIPTION: &str = concat!(
 
 const HEALTH_DESCRIPTION: &str = "Check whether the Oga broker is running and read its broker and MCP contract versions, plus whether the source tree this build came from holds a newer one. For connection or compatibility diagnosis, not worker availability.";
 
-const TASKS_DESCRIPTION: &str = "Find recent delegated tasks. With no arguments it covers tasks updated since local midnight, one row each: id, state, title, and cwd — plus originCwd, the project directory, when the task runs in its own checkout. Any since, until, parent, state, profile, or archived searches the full history under that filter instead. `fields` replaces the default row: `[\"label\"]` adds tldr, and `[\"routing\"]`, `[\"spend\"]`, `[\"completion\"]` or `[\"all\"]` give more. Use inspect for one task in full.";
+const TASKS_DESCRIPTION: &str = "Find delegated tasks. No arguments lists active tasks updated since local midnight: id, state, title, cwd, plus originCwd for a worktree. `query` searches active history by title, tldr, or prompt, ranks title matches first then newest, and adds `match`; combine filters. Any since, until, parent, state, profile, or archived searches full history. `fields` replaces the row: `[\"label\"]` adds tldr; `[\"routing\"]`, `[\"spend\"]`, `[\"completion\"]`, `[\"all\"]` add more. Use inspect for one task.";
 
 const MEMORY_DESCRIPTION: &str = "Read or update durable project facts shared across Oga callers and delegated workers; delegation ships the cwd's active memories automatically. Store decisions, constraints, and conventions, never secrets or transient task status. Use expectedVersion to prevent concurrent overwrites.";
 
@@ -526,6 +527,13 @@ pub fn tool_list() -> Value {
             described(
                 json!({ "type": "string", "enum": ["active", "only", "include"] }),
                 "Defaults to active (non-archived) tasks.",
+            ),
+        ),
+        (
+            "query".into(),
+            described(
+                json!({ "type": "string", "minLength": 1 }),
+                "Case-insensitive text to find in a task title, tldr, or prompt. Searches active history and ranks title matches first.",
             ),
         ),
     ]);

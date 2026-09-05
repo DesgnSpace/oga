@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 39;
+pub const LATEST_SCHEMA_VERSION: i64 = 40;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -104,6 +104,9 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS tasks_profile_updated ON tasks(profile_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS tasks_title_nocase ON tasks(title COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS tasks_tldr_nocase ON tasks(tldr COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS tasks_prompt_nocase ON tasks(prompt COLLATE NOCASE);
     CREATE TABLE IF NOT EXISTS task_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -236,7 +239,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
     );
-     INSERT INTO schema_migrations(version, name) VALUES (38, 'user learned routes');"#;
+     INSERT INTO schema_migrations(version, name) VALUES (40, 'task search indexes');"#;
 
 /// One row per file or symbol, with its derived search text written in the same statement.
 const CONTEXT_ENTITIES: &str = r#"      CREATE TABLE context_entities (
@@ -457,6 +460,18 @@ pub fn migrate_v38_to_v39(conn: &Connection) -> Result<(), StoreError> {
         CREATE TRIGGER context_learned_routes_au AFTER UPDATE ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, aliases) VALUES ('delete', old.id, old.aliases); INSERT INTO context_learned_routes_fts(rowid, aliases) VALUES (new.id, new.aliases); END;
         INSERT INTO context_learned_routes_fts(rowid, aliases) SELECT id, aliases FROM context_learned_routes;
         INSERT INTO schema_migrations(version, name) VALUES (39, 'learned route aliases');
+        COMMIT;"#,
+    )?;
+    Ok(())
+}
+
+pub fn migrate_v39_to_v40(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"BEGIN IMMEDIATE;
+        CREATE INDEX IF NOT EXISTS tasks_title_nocase ON tasks(title COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS tasks_tldr_nocase ON tasks(tldr COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS tasks_prompt_nocase ON tasks(prompt COLLATE NOCASE);
+        INSERT INTO schema_migrations(version, name) VALUES (40, 'task search indexes');
         COMMIT;"#,
     )?;
     Ok(())

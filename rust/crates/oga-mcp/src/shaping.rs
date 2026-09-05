@@ -1,6 +1,6 @@
 //! Public task response shaping shared by MCP tools.
 
-use oga_domain::{Task, TaskSummary};
+use oga_domain::{Task, TaskMatch, TaskSummary};
 use serde_json::{Map, Value, json};
 
 use crate::hints;
@@ -193,7 +193,11 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
     Value::Object(view)
 }
 
-pub fn summary_view(summary: &TaskSummary, fields: Option<&[String]>) -> Value {
+pub fn summary_view(
+    summary: &TaskSummary,
+    fields: Option<&[String]>,
+    matched: Option<TaskMatch>,
+) -> Value {
     let default = fields.is_none();
     let default_fields = [String::from("label"), String::from("location")];
     let want = wanted_fields(fields.unwrap_or(&default_fields));
@@ -206,6 +210,9 @@ pub fn summary_view(summary: &TaskSummary, fields: Option<&[String]>) -> Value {
     }
     if let Some(hold) = &summary.hold {
         view.insert("hold".into(), json!(hold));
+    }
+    if let Some(matched) = matched {
+        view.insert("match".into(), json!(matched));
     }
     if want.contains("profileId") {
         view.insert("profileId".into(), json!(summary.profile_id));

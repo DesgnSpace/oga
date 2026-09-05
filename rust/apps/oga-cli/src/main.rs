@@ -20,7 +20,8 @@ use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
     ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, EventKind,
     HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource, ModelQuery,
-    Profile, Provider, Task, TaskClass, TaskEvent, TaskState, TaskSummary, TaskWorktree, VERSION,
+    Profile, Provider, Task, TaskClass, TaskEvent, TaskListQuery, TaskState, TaskSummary,
+    TaskWorktree, VERSION,
 };
 use oga_events::{EventSocketOptions, SocketError, event_socket_path, start_event_socket};
 use oga_http::HttpState;
@@ -681,7 +682,7 @@ Usage: oga <command> [options]
                        rebuild it from scratch.
   inflight             List the tasks still running, so you know what stopping
                         the service would interrupt.
-  tasks [options]      List today's tasks.
+  tasks [options]      List today's tasks. Add --query or -q to search history.
   inspect <task-id>    Show one task record.
   archive <task-id>... Archive tasks; restore reverses this.
   cancel <task-id>...  Cancel tasks.
@@ -720,6 +721,7 @@ struct TaskCliOptions {
     limit: Option<u64>,
     instruction: Option<String>,
     start_at: Option<String>,
+    query: Option<String>,
 }
 
 fn parse_task_options(args: &[String]) -> CliResult<(TaskCliOptions, Vec<String>)> {
@@ -746,6 +748,17 @@ fn parse_task_options(args: &[String]) -> CliResult<(TaskCliOptions, Vec<String>
                     args.get(index)
                         .ok_or_else(|| CliError::new("--limit needs a value"))?,
                 )?);
+            }
+            "--query" | "-q" => {
+                index += 1;
+                options.query = Some(
+                    args.get(index)
+                        .ok_or_else(|| CliError::new("--query needs a value"))?
+                        .clone(),
+                );
+            }
+            value if value.starts_with("--query=") => {
+                options.query = Some(value.trim_start_matches("--query=").to_owned());
             }
             "-m" => {
                 index += 1;
@@ -849,13 +862,43 @@ async fn run_tasks(args: &[String]) -> CliResult<i32> {
         .unwrap_or_else(Local::now)
         .with_timezone(&Utc)
         .to_rfc3339_opts(SecondsFormat::Millis, true);
-    let mut tasks = all_task_summaries(&client)
-        .await?
-        .into_iter()
-        .filter(|task| options.archived == task.archived_at.is_some())
-        .filter(|task| options.state.is_none_or(|state| task.state == state))
-        .filter(|task| options.state.is_some() || task.created_at >= since)
-        .collect::<Vec<_>>();
+    let mut tasks: Vec<TaskSummary> = if let Some(query) = &options.query {
+        let store = Store::open_observe(database_path())?;
+        store
+            .repositories()
+            .tasks()
+            .search(&TaskListQuery {
+                state: options.state.map(oga_domain::StateFilter::One),
+                archived: Some(if options.archived {
+                    ArchivedFilter::Only
+                } else {
+                    ArchivedFilter::Active
+                }),
+                query: Some(query.clone()),
+                ..TaskListQuery::default()
+            })?
+            .into_iter()
+            .map(|task| TaskSummary {
+                id: task.id,
+                state: task.state,
+                title: task.title,
+                tldr: task.tldr,
+                cwd: task.cwd,
+                created_at: task.created_at,
+                updated_at: task.updated_at,
+                archived_at: task.archived_at,
+                ..TaskSummary::default()
+            })
+            .collect()
+    } else {
+        all_task_summaries(&client)
+            .await?
+            .into_iter()
+            .filter(|task| options.archived == task.archived_at.is_some())
+            .filter(|task| options.state.is_none_or(|state| task.state == state))
+            .filter(|task| options.state.is_some() || task.created_at >= since)
+            .collect()
+    };
     if let Some(limit) = options.limit {
         tasks.truncate(limit as usize);
     }

@@ -57,7 +57,8 @@ pub use task::{
     ActivityCounts, ArchivedFilter, BranchOutcome, CheckoutOutcome, CompletionCode, HoldArgs,
     HoldVerb, HoldViewKind, InFlightTask, ListOrder, NetworkHoldArgs, OnBlockerFailure, Provider,
     RestartHoldArgs, StateFilter, Task, TaskAttempt, TaskCompletion, TaskCompletionOverride,
-    TaskControlState, TaskHold, TaskHoldView, TaskKind, TaskListQuery, TaskScope, TaskState,
-    TaskSummary, TaskWorker, TaskWorktree, WorktreeDeleteBatchResult, WorktreeDeleteEntry,
-    WorktreeDeleteResult, WorktreeDeleteSkipped, WorktreeOption, WorktreeRequest,
+    TaskControlState, TaskHold, TaskHoldView, TaskKind, TaskListQuery, TaskMatch, TaskScope,
+    TaskState, TaskSummary, TaskWorker, TaskWorktree, WorktreeDeleteBatchResult,
+    WorktreeDeleteEntry, WorktreeDeleteResult, WorktreeDeleteSkipped, WorktreeOption,
+    WorktreeRequest,
 };

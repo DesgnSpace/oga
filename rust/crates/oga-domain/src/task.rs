@@ -572,6 +572,15 @@ pub enum ArchivedFilter {
     Include,
 }
 
+/// Which task field matched a task-list search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskMatch {
+    Title,
+    Tldr,
+    Prompt,
+}
+
 /// One-or-many state filter, as the query string accepts it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -599,6 +608,8 @@ pub struct TaskListQuery {
     pub parent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archived: Option<ArchivedFilter>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
 }
 
 /// The number of running tasks, counted in SQL so the poll behind it never has

@@ -10,6 +10,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::schema::{
     LATEST_SCHEMA_VERSION, create_fresh_schema, migrate_v37_to_v38, migrate_v38_to_v39,
+    migrate_v39_to_v40,
 };
 
 pub const BUSY_TIMEOUT_MS: u64 = 5000;
@@ -148,7 +149,7 @@ impl Store {
     }
 
     fn migrate_schema(connection: &Connection, path: &Path) -> Result<(), StoreError> {
-        let version: i64 = connection
+        let mut version: i64 = connection
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
                 [],
@@ -160,11 +161,14 @@ impl Store {
                     path.display()
                 ))
             })?;
-        if version == 37 {
-            migrate_v37_to_v38(connection)?;
-        }
-        if version == 38 {
-            migrate_v38_to_v39(connection)?;
+        while version < LATEST_SCHEMA_VERSION {
+            match version {
+                37 => migrate_v37_to_v38(connection)?,
+                38 => migrate_v38_to_v39(connection)?,
+                39 => migrate_v39_to_v40(connection)?,
+                _ => break,
+            }
+            version += 1;
         }
         Self::require_current_schema(connection, path)
     }
