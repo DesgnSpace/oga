@@ -115,12 +115,24 @@ pub async fn handoff(
     let scope_updated = request.scope.is_some();
     let scope = request.scope.unwrap_or_else(|| old.scope.clone());
     let scope_json = encode_store(&scope)?;
-    if matches!(old.state, TaskState::Queued | TaskState::Pending) {
+    // A hold that names the old profile is that account's wait — a rate limit,
+    // an account with no usage left. Moving the task off that account is what
+    // resolves it, so the move drops the hold and runs instead of inheriting a
+    // reset time the destination never had to wait for. Every other hold — a
+    // prerequisite, a scheduled start — outlives the move.
+    let held_on_old_account = crate::holds::get_hold(dispatcher.store(), &old.id)?
+        .is_some_and(|hold| hold.await_profile.as_deref() == Some(old.profile_id.as_str()));
+    if matches!(old.state, TaskState::Queued | TaskState::Pending)
+        && (same_profile || !held_on_old_account)
+    {
         let now = now_iso();
+        // A provider session belongs to one account, so a row that changes
+        // profile leaves its session behind even while it keeps waiting.
+        let session_id = old.session_id.clone().filter(|_| same_profile);
         dispatcher.store().transaction(|tx| {
             let changed = tx.execute(
-                "UPDATE tasks SET profile_id=?,model=?,effort=?,scope_json=?,updated_at=? WHERE id=? AND state IN ('queued','pending')",
-                rusqlite::params![profile_id, model, effort, scope_json, now, old.id],
+                "UPDATE tasks SET profile_id=?,model=?,effort=?,session_id=?,scope_json=?,updated_at=? WHERE id=? AND state IN ('queued','pending')",
+                rusqlite::params![profile_id, model, effort, session_id, scope_json, now, old.id],
             )?;
             if changed != 1 {
                 return Err(oga_store::StoreError::Refusal(format!(
@@ -139,7 +151,7 @@ pub async fn handoff(
                     "toProfile": profile_id,
                     "fromModel": old.model,
                     "model": model,
-                    "sessionPreserved": true,
+                    "sessionPreserved": same_profile,
                     "scopeUpdated": scope_updated,
                 }),
                 &now,
@@ -240,6 +252,19 @@ pub async fn handoff(
             rusqlite::params![now, old.id],
         )?;
         tx.execute("DELETE FROM task_holds WHERE task_id=?", [old.id.as_str()])?;
+        if held_on_old_account {
+            append_event_tx(
+                tx,
+                &old.id,
+                "hold_released",
+                TaskState::Queued,
+                json!({
+                    "note": format!("moved to {profile_id}, no longer waiting for {} to have usage again", old.profile_id),
+                    "wait": "rate_limit",
+                }),
+                &now,
+            )?;
+        }
         append_event_tx(
             tx,
             &old.id,

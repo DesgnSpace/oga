@@ -200,6 +200,25 @@ pub fn classify_failure(value: &str) -> CompletionCode {
     CompletionCode::WorkerError
 }
 
+/// Whether provider text says the session it was asked to reopen does not
+/// exist. Every provider phrases it differently and none of them give it a
+/// status code, so the text is all there is to go on.
+pub(crate) fn session_rejected(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    contains_any(
+        &lower,
+        &[
+            "no conversation found",
+            "conversation not found",
+            "no session found",
+            "session not found",
+            "no such session",
+            "unknown session",
+            "invalid session id",
+        ],
+    )
+}
+
 fn contains_any(value: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| value.contains(needle))
 }

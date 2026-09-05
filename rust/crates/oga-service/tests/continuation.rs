@@ -1,7 +1,8 @@
 use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
 
 use oga_domain::{
-    CompletionCode, Profile, Provider, Task, TaskCompletion, TaskKind, TaskScope, TaskState,
+    CompletionCode, HoldArgs, HoldVerb, Profile, Provider, Task, TaskCompletion, TaskHold,
+    TaskKind, TaskScope, TaskState,
 };
 use oga_service::{
     ArchiveRequest, CancelRequest, CompletionAssertion, Dispatcher, HandoffRequest, ReplyRequest,
@@ -736,6 +737,196 @@ async fn handoff_to_a_different_profile_starts_fresh_with_the_rebuilt_brief() {
     assert!(
         events.iter().any(|event| event.kind == "handoff_brief"),
         "the rebuilt brief must be recorded in the task's event trace"
+    );
+}
+
+/// A Claude profile whose `claude` binary is the given shell script.
+fn claude_profile(directory: &TempDir, store: &Store, id: &str, script: &str) -> Profile {
+    let bin = directory.path().join(format!("bin-{id}"));
+    fs::create_dir(&bin).expect("bin");
+    let claude = bin.join("claude");
+    fs::write(&claude, script).expect("fake claude");
+    let mut permissions = fs::metadata(&claude).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&claude, permissions).expect("permissions");
+    let profile = Profile {
+        id: id.into(),
+        label: id.into(),
+        provider: Provider::Claude,
+        default_model: "session-model".into(),
+        enabled: true,
+        env: BTreeMap::from([("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()))]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, "2026-01-01T00:00:00.000Z")
+        .expect("claude profile");
+    profile
+}
+
+async fn wait_for_state(dispatcher: &Dispatcher, id: &str, wanted: TaskState) -> TaskState {
+    let mut state = dispatcher.task(id).expect("task").state;
+    for _ in 0..2_000 {
+        state = dispatcher.task(id).expect("task").state;
+        if state == wanted {
+            return state;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    state
+}
+
+#[tokio::test]
+async fn handoff_off_a_rate_limited_account_drops_its_hold_and_starts_now() {
+    let (directory, store, dispatcher) = service();
+    let capture = directory.path().join("captured-argv");
+    claude_profile(
+        &directory,
+        &store,
+        "session",
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nprintf 'finished\\nOGA_RESULT: completed\\n'\n",
+            capture.display()
+        ),
+    );
+    let cwd = directory.path().to_str().expect("cwd");
+    let mut fixture = task("rate-limited", cwd, TaskState::Failed);
+    fixture.prompt = "MARKER-BRIEF-BODY: build the widget".into();
+    fixture.session_id = Some("session-from-profile-one".into());
+    fixture.output = "got partway".into();
+    fixture.error = Some("usage limit reached".into());
+    fixture.completion = Some(TaskCompletion {
+        exit_code: Some(1),
+        blocked: true,
+        code: CompletionCode::RateLimit,
+        reason: Some("usage limit reached".into()),
+        suggested_scope: None,
+        resets_at: Some("2099-01-01T00:00:00.000Z".into()),
+        asserted_completion: None,
+        dependency_blocked: None,
+    });
+    store.repositories().tasks().insert(&fixture).expect("task");
+    // Parked exactly as a rate-limited run parks: waiting on the account that
+    // ran out, not on the clock alone.
+    let hold = TaskHold {
+        task_id: "rate-limited".into(),
+        verb: HoldVerb::Resume,
+        args: HoldArgs::default(),
+        start_at: Some("2099-01-01T00:00:00.000Z".into()),
+        await_profile: Some("one".into()),
+        await_model: Some("model-one".into()),
+        next_check_at: "2099-01-01T00:00:00.000Z".into(),
+        expires_at: "2099-01-02T00:00:00.000Z".into(),
+        probe_count: 0,
+        note: "waiting for usage to reset".into(),
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: "2026-01-01T00:00:00.000Z".into(),
+    };
+    oga_service::arm_hold(&store, &hold).expect("hold armed");
+    assert_eq!(
+        dispatcher.task("rate-limited").expect("task").state,
+        TaskState::Pending
+    );
+
+    let moved = handoff(
+        &dispatcher,
+        HandoffRequest::new("rate-limited").profile("session"),
+    )
+    .await
+    .expect("handoff");
+    assert_ne!(
+        moved.state,
+        TaskState::Pending,
+        "the new account has usage; the task must not keep waiting for the old account's reset"
+    );
+    assert_eq!(moved.hold, None, "the old account's hold must be dropped");
+    assert_eq!(
+        moved.session_id, None,
+        "a provider session belongs to one account and cannot move with the task"
+    );
+
+    assert_eq!(
+        wait_for_settlement(&dispatcher, "rate-limited").await,
+        TaskState::Completed
+    );
+    let captured = fs::read_to_string(&capture).expect("captured argv");
+    assert!(
+        !captured.contains("--resume"),
+        "the destination cannot be handed the source account's session id: {captured}"
+    );
+    assert!(
+        captured.contains("MARKER-BRIEF-BODY"),
+        "the fresh run must be seeded with the original task: {captured}"
+    );
+    let settled = dispatcher.task("rate-limited").expect("task");
+    assert_eq!(settled.profile_id, "session");
+    assert_eq!(
+        settled.attempts.len(),
+        1,
+        "the rate-limited run must be filed as an attempt"
+    );
+    let events = store
+        .repositories()
+        .events()
+        .list("rate-limited")
+        .expect("events");
+    assert!(
+        events.iter().any(|event| event.kind == "hold_released"),
+        "the move out of the wait must be recorded in the task's event trace"
+    );
+    assert!(
+        events.iter().any(|event| event.kind == "handoff_brief"),
+        "the rebuilt brief must be recorded in the task's event trace"
+    );
+}
+
+#[tokio::test]
+async fn a_session_the_provider_rejects_is_forgotten_and_the_task_runs_fresh() {
+    let (directory, store, dispatcher) = service();
+    let capture = directory.path().join("captured-argv");
+    claude_profile(
+        &directory,
+        &store,
+        "session",
+        &format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = \"--resume\" ]; then\n    echo 'No conversation found with session ID: stale-session' >&2\n    exit 1\n  fi\ndone\nprintf '%s\\n' \"$@\" > {}\nprintf 'fresh run\\nOGA_RESULT: completed\\n'\n",
+            capture.display()
+        ),
+    );
+    let cwd = directory.path().to_str().expect("cwd");
+    let mut fixture = task("rejected-session", cwd, TaskState::Failed);
+    fixture.profile_id = "session".into();
+    fixture.model = "session-model".into();
+    fixture.prompt = "MARKER-BRIEF-BODY: build the widget".into();
+    fixture.session_id = Some("stale-session".into());
+    store.repositories().tasks().insert(&fixture).expect("task");
+
+    resume(&dispatcher, ResumeRequest::new("rejected-session"))
+        .await
+        .expect("resume");
+    assert_eq!(
+        wait_for_state(&dispatcher, "rejected-session", TaskState::Completed).await,
+        TaskState::Completed,
+        "a rejected session must not fail the task the same way twice"
+    );
+    let settled = dispatcher.task("rejected-session").expect("task");
+    assert_eq!(settled.session_id, None);
+    let captured = fs::read_to_string(&capture).expect("captured argv");
+    assert!(
+        captured.contains("MARKER-BRIEF-BODY"),
+        "the retry must be seeded with the original task: {captured}"
+    );
+    let events = store
+        .repositories()
+        .events()
+        .list("rejected-session")
+        .expect("events");
+    assert!(
+        events.iter().any(|event| event.kind == "session_rejected"),
+        "the rejected session must be recorded in the task's event trace"
     );
 }
 

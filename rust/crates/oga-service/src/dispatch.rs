@@ -581,10 +581,63 @@ impl Dispatcher {
         if task.state != TaskState::Failed {
             return false;
         }
+        if self.restart_without_rejected_session(task).await {
+            return true;
+        }
         match task.completion.as_ref().map(|completion| completion.code) {
             Some(CompletionCode::RateLimit) => self.park_rate_limited(task).await,
             Some(CompletionCode::Network) => self.park_disconnected(task),
             _ => false,
+        }
+    }
+
+    /// The provider refused the session the run was told to reopen — it was
+    /// another account's, or it has aged out. The work itself is untouched, so
+    /// the session is forgotten and the same task runs again from a rebuilt
+    /// brief. Clearing it first is what stops the retry repeating the failure.
+    async fn restart_without_rejected_session(&self, task: &Task) -> bool {
+        if task.session_id.is_none() {
+            return false;
+        }
+        let rejected = [
+            task.error.as_deref(),
+            task.completion
+                .as_ref()
+                .and_then(|completion| completion.reason.as_deref()),
+        ]
+        .into_iter()
+        .flatten()
+        .any(crate::prompt::session_rejected);
+        if !rejected {
+            return false;
+        }
+        let now = lifecycle::now_iso();
+        let cleared = self.store.transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET session_id=NULL,updated_at=? WHERE id=?",
+                rusqlite::params![now, task.id],
+            )?;
+            append_event_tx(
+                tx,
+                &task.id,
+                "session_rejected",
+                task.state,
+                json!({"sessionId": task.session_id, "profile": task.profile_id}),
+                &now,
+                None,
+            )?;
+            Ok(())
+        });
+        if let Err(error) = cleared {
+            eprintln!("clearing rejected session of {} failed: {error}", task.id);
+            return false;
+        }
+        match crate::resume::resume(self, crate::resume::ResumeRequest::new(&task.id)).await {
+            Ok(_) => true,
+            Err(error) => {
+                eprintln!("restarting {} without its session failed: {error}", task.id);
+                false
+            }
         }
     }
 
