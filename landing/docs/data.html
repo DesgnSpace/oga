@@ -34,6 +34,7 @@
             <li><a href="/docs/follow.html">Check on the work</a></li>
             <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
             <li><a href="/docs/data.html" aria-current="page">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
           </ul>
         </nav>
       </details>
@@ -48,6 +49,7 @@
           <li><a href="/docs/follow.html">Check on the work</a></li>
           <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
           <li><a href="/docs/data.html" aria-current="page">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
         </ul>
       </nav>
 
@@ -57,15 +59,15 @@
         <p class="docs-intro">Oga runs entirely on your machine. The only thing that ever leaves it is the work itself — the brief and the files you allowed — sent to the account you picked for it.</p>
 
         <h2 id="where">What Oga keeps, and where</h2>
-        <p>All of it lives in <code>~/.oga</code>:</p>
+        <p>Task records and task copies live under <code>~/.oga</code>:</p>
         <table>
           <thead>
             <tr><th>What</th><th>Where</th></tr>
           </thead>
           <tbody>
-            <tr><td>Everything Oga remembers — the work you've handed off, your accounts, and what it's learned about your projects</td><td><code>oga.db</code></td></tr>
-            <tr><td>One copy of your repository for each piece of work <a href="/docs/worktrees.html">given its own branch</a></td><td><code>worktrees/</code></td></tr>
-            <tr><td>Working state Oga keeps between runs</td><td>the rest of the folder</td></tr>
+            <tr><td>The work you've handed off, your workers, and project memories</td><td><code>~/.oga/oga.db</code></td></tr>
+            <tr><td>One copy of your repository for each piece of work <a href="/docs/worktrees.html">given its own branch</a></td><td><code>~/.oga/worktrees/</code></td></tr>
+            <tr><td>Other local working state</td><td><code>~/.oga/</code></td></tr>
           </tbody>
         </table>
 
@@ -82,8 +84,8 @@
         <h2 id="space">Freeing disk space</h2>
         <p><code>oga cleanup</code> shows what old work is holding and deletes nothing until you say so:</p>
         <pre><code>oga cleanup
-oga cleanup --delete</code></pre>
-        <p>Only work that has finished and that you archived is ever eligible. Anything still running, anything waiting on you, and what Oga knows about your projects are never touched. Neither is a branch produced by work that ran on its own.</p>
+oga cleanup --older-than 30d --delete</code></pre>
+        <p>Only finished, archived work is eligible. Anything still running, anything waiting on you, and project memories are never touched. Cleanup can remove a clean task copy, but the branch remains.</p>
 
         <div class="docs-callout">
           <p>None of this follows you between machines. On a new Mac, sign back into each provider tool and add your accounts again in Oga's Settings.</p>

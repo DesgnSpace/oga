@@ -158,14 +158,10 @@ In Claude Code, a background command that exits re-invokes the agent — so
 oga watch 8f2c1a94-... --timeout 30m &
 ```
 
-**2. MCP `wait`** — a short deliberate block. Blocks up to 30 seconds and
-returns the instant attention is needed. Use `until: "attention"` for a sanity
-check right after dispatch, or in a harness with no background shell.
-
-**3. `inspect`** — read one task's full record: output, scope, spend,
+**2. `inspect`** — read one task's full record: output, scope, spend,
 completion, and (on request) prompt and attempts.
 
-Read [docs/follow-along.md](docs/follow-along.md) for the full story.
+Read [docs/oga.md](docs/oga.md) for the maintained command reference.
 
 ## Tool surface
 
@@ -175,22 +171,18 @@ Every tool is available over MCP (`http://127.0.0.1:7331/mcp`) and the REST API.
 | --- | --- |
 | `delegate` | Start scoped work. Auto-routes or takes an explicit profile/model. |
 | `models` | List preferred, enabled models ready for `delegate`. |
-| `wait` | Block briefly for progress or attention. |
 | `inspect` | Full record of one task. |
 | `tasks` | Search tasks by text, state, time, profile, or fan-out batch. |
 | `reply` | Answer a `needs_input` question on the same provider session. |
 | `resume` | Retry a failed, cancelled, or blocked task on the same session. |
+| `steer` | Send an instruction to work that is still active. |
 | `handoff` | Move a dead task to a different profile, keeping the same task ID. |
 | `cancel` | Stop a task and its worker process tree. |
 | `complete` | Assert completion when work demonstrably landed but the worker never attested it. |
 | `archive` | Soft-hide old tasks without deleting history. |
 | `memory` | Durable project facts shared across callers and workers. |
+| `map` / `query` | Inspect or search the project context map. |
 | `health` | Broker and MCP contract versions. |
-
-Every task-returning tool accepts a `fields` selector that controls the
-response payload. Defaults are minimal — `cancel` returns just `id` and
-`state` — because the caller already has the data it sent. Read
-[docs/fields.md](docs/fields.md) for per-tool defaults and the group table.
 
 ## Architecture
 
@@ -213,7 +205,7 @@ response payload. Defaults are minimal — `cancel` returns just `id` and
                                    │
                            ┌───────┴────────┐
                            │  desktop app    │
-                           │  Tauri + Leptos │
+                           │  Tauri + React  │
                            └────────────────┘
 ```
 
@@ -228,9 +220,9 @@ response payload. Defaults are minimal — `cancel` returns just `id` and
   `~/.oga/oga.sock`. Pushes task-event batches to local subscribers on the
   NDJSON protocol (contract EC-001). `oga watch` consumes it for zero-poll
   follow-along; the desktop app can consume it too.
-- **Desktop app** (`rust/apps/oga-desktop`): Tauri shell over the Leptos UI in
-  `rust/crates/oga-ui`, showing broker health, recent tasks with full event
-  traces, and profile management. Ships the broker binary as a bundled sidecar.
+- **Desktop app** (`rust/apps/oga-desktop`): Tauri shell over the React UI in
+  `web/`, showing broker health, recent tasks with full event traces, and
+  profile management. Ships the broker binary as a bundled sidecar.
 
 ## Configuration
 
@@ -360,14 +352,12 @@ the Rust workspace with `cargo tauri build --no-sign`; CI uses the matrix in
 
 | File | What |
 | --- | --- |
-| [docs/fields.md](docs/fields.md) | Response shape selector — per-tool defaults, group table, worked examples |
-| [docs/follow-along.md](docs/follow-along.md) | Following a task without paying for it — watch / wait / inspect |
-| [docs/complete.md](docs/complete.md) | Asserting completion when the worker never attested it |
-| [docs/handoff.md](docs/handoff.md) | Moving a dead task across profiles |
-| [docs/pi.md](docs/pi.md) | Pi provider reference — dispatch, resume, sandbox, and verification |
-| [docs/worktree.md](docs/worktree.md) | Task worktrees — a checkout and branch per task, and committing inside the sandbox |
-| [docs/scope.md](docs/scope.md) | Data scope rules — bare dir vs. `/**` vs. `**`, grants, and EPERM gotchas |
-| [docs/gotchas.md](docs/gotchas.md) | Failure modes worth knowing before you hit them, and their fixes |
+| [docs/oga.md](docs/oga.md) | Command line and task actions |
+| [docs/routing.md](docs/routing.md) | Selecting workers and models |
+| [docs/scope.md](docs/scope.md) | Files a task may read or change |
+| [docs/worker-rules.md](docs/worker-rules.md) | Project instructions for workers |
+| [docs/worktree.md](docs/worktree.md) | Separate checkouts and branches |
+| [docs/cleanup.md](docs/cleanup.md) | Removing old task activity and worktrees |
 
 ## License
 

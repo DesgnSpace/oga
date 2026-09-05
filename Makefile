@@ -40,7 +40,7 @@ endif
 BROKER_BUILD := server
 BROKER_BINARY := $(RUST_BROKER)
 
-.PHONY: dev dev-broker dev-desktop server rust-fmt rust-lint rust-test smoke desktop desktop-app bundle app-bundle install deploy-landing clean sync-version publish release _publish major minor fix check-publish-tools
+.PHONY: dev dev-broker dev-desktop server rust-fmt rust-lint rust-test smoke desktop desktop-app bundle app-bundle install changelog deploy-landing clean sync-version publish release _publish major minor fix check-publish-tools
 
 dev: dev-desktop
 
@@ -186,7 +186,10 @@ install: app-bundle
 
 # Local asset links get a version query so the edge cache cannot serve an
 # older stylesheet or image next to new HTML.
-deploy-landing:
+changelog:
+	bun scripts/changelog-to-html.mjs
+
+deploy-landing: changelog
 	rm -rf $(DIST)/landing
 	mkdir -p $(DIST)
 	cp -R landing $(DIST)/landing

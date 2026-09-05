@@ -34,6 +34,7 @@
             <li><a href="/docs/follow.html">Check on the work</a></li>
             <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
             <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
           </ul>
         </nav>
       </details>
@@ -48,6 +49,7 @@
           <li><a href="/docs/follow.html">Check on the work</a></li>
           <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
           <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
         </ul>
       </nav>
 
@@ -57,24 +59,20 @@
         <p class="docs-intro">Two things, once: tell Oga which accounts it may hand work to, then point the coding agent you already use at Oga.</p>
 
         <h2 id="connect">Let your coding agent reach Oga</h2>
-        <p>Oga's <strong>Install MCP</strong> button adds Oga to every coding agent it finds on your Mac — Claude Code, Codex, OpenCode, and Antigravity. Anything already configured is backed up first.</p>
-        <p>Setting one up by hand instead? Point it at <code>http://127.0.0.1:7331/mcp</code>. Either way, your agent can then hand work to Oga the way it uses any other tool you've connected.</p>
+        <p>Oga's <strong>Install MCP</strong> button connects the coding agents it finds on your Mac. Existing connections are backed up first.</p>
+        <p>Setting one up by hand instead? Point it at <code>http://127.0.0.1:7331/mcp</code>. Your agent can then hand work to Oga like any other connected tool.</p>
 
         <h2 id="accounts">Add an account</h2>
-        <p>The first time you open Oga, it looks for the provider tools you already have and offers to add an account for each. Nothing is set up in advance. Every account holds:</p>
+        <p>Open <strong>Settings → Workers</strong> to add a worker for an account you already use. Every worker holds:</p>
         <ul>
-          <li>Which tool it runs — Claude Code, Codex, OpenCode, Antigravity, or Pi.</li>
+          <li>Which provider tool it runs.</li>
           <li>The model it uses when nothing else is named.</li>
           <li>Any environment values it needs. Anything that looks like a key, token, secret, or password is hidden everywhere Oga shows it.</li>
         </ul>
-        <p>Each account keeps its own sign-in, so two accounts never fight over the same login. A Claude account named <code>claude</code> uses <code>~/.claude</code>; every other one gets a folder of its own. To point an account at a folder you've already signed into, set <code>CLAUDE_CONFIG_DIR</code> on it:</p>
-        <pre><code>profiles:
-  claude-work:
-    env:
-      CLAUDE_CONFIG_DIR: $HOME/.claude-work</code></pre>
+        <p>Each worker can use its own sign-in. Add environment values in the worker settings when a provider needs them.</p>
 
         <h2 id="default-model">Choose who gets work that names nobody</h2>
-        <p>Settings controls which accounts and models can receive work at all — a model has to be turned on before Oga will send anything to it.</p>
+        <p>Settings controls which workers and models can receive work. A model has to be turned on before Oga can select it.</p>
         <p>Mark one account and model as <strong>loved</strong> to make it the default for work that names nothing. From the terminal:</p>
         <pre><code>oga love claude:opus</code></pre>
         <p>Run <code>oga love</code> on its own to see what this project does today. <code>oga love --clear</code> goes back to choosing per piece of work, and <code>--global</code> applies your choice to every project instead of this one.</p>
