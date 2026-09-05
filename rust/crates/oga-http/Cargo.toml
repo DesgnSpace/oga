@@ -10,6 +10,7 @@ oga-context = { path = "../oga-context" }
 oga-domain = { path = "../oga-domain" }
 oga-events = { path = "../oga-events" }
 oga-pricing = { path = "../oga-pricing" }
+oga-providers = { path = "../oga-providers" }
 oga-service = { path = "../oga-service" }
 oga-routing = { path = "../oga-routing" }
 oga-runner = { path = "../oga-runner" }

@@ -211,7 +211,7 @@ pub fn command_for_with_options(
     };
     ProviderCommand {
         argv,
-        env: profile_env(profile),
+        env: environment_for(profile),
     }
 }
 
@@ -359,7 +359,7 @@ pub fn resume_command_for_with_options(
     };
     Ok(ProviderCommand {
         argv,
-        env: profile_env(profile),
+        env: environment_for(profile),
     })
 }
 
@@ -681,25 +681,35 @@ fn expand_home(value: &str, home: &str) -> String {
     }
     value.to_owned()
 }
-/// Profile env is stored the way a config file writes it, `$HOME` and `~`
-/// included. Nothing between here and `execve` expands a shell path, so a
-/// provider handed `$HOME/.claude-me` keeps its account state in a directory
-/// of that literal name beside the task's cwd, where it is never logged in.
-fn profile_env(profile: &Profile) -> BTreeMap<String, String> {
+/// Resolves the environment a provider process receives, expanding `$HOME`
+/// and `~` values before they reach `execve`.
+///
+/// Claude keeps credentials and limits below `CLAUDE_CONFIG_DIR`. Give every
+/// Claude profile a directory, even when its config omitted the variable, so
+/// an inherited broker value cannot join otherwise separate profiles.
+pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
     let home = home();
-    profile
+    let mut env = profile
         .env
         .iter()
         .map(|(key, value)| (key.clone(), expand_home(value, &home)))
-        .collect()
+        .collect::<BTreeMap<_, _>>();
+    if profile.provider == Provider::Claude {
+        env.entry("CLAUDE_CONFIG_DIR".into())
+            .or_insert_with(|| claude_config_dir(profile, &home));
+    }
+    env
+}
+
+fn claude_config_dir(profile: &Profile, home: &str) -> String {
+    if profile.id == "claude" {
+        format!("{home}/.claude")
+    } else {
+        format!("{home}/.{}", profile.id)
+    }
 }
 fn skills_dir(profile: &Profile) -> String {
-    let home = home();
-    let config = profile
-        .env
-        .get("CLAUDE_CONFIG_DIR")
-        .map(|value| expand_home(value, &home))
-        .unwrap_or_else(|| format!("{home}/.claude"));
+    let config = environment_for(profile)["CLAUDE_CONFIG_DIR"].clone();
     PathBuf::from(config)
         .join("skills")
         .to_string_lossy()
@@ -836,6 +846,40 @@ mod tests {
             command.argv.contains(&format!("{home}/.claude-me/skills")),
             "skills directory is expanded too: {:?}",
             command.argv
+        );
+    }
+
+    #[test]
+    fn claude_profiles_without_overrides_use_separate_config_directories() {
+        let home = home();
+        let mut primary = profile(Provider::Claude);
+        primary.id = "claude".into();
+        let mut personal = profile(Provider::Claude);
+        personal.id = "claude-me".into();
+
+        assert_eq!(
+            environment_for(&primary)["CLAUDE_CONFIG_DIR"],
+            format!("{home}/.claude")
+        );
+        assert_eq!(
+            environment_for(&personal)["CLAUDE_CONFIG_DIR"],
+            format!("{home}/.claude-me")
+        );
+    }
+
+    #[test]
+    fn claude_profiles_with_config_directories_keep_them_separate() {
+        let mut work = profile(Provider::Claude);
+        work.env
+            .insert("CLAUDE_CONFIG_DIR".into(), "$HOME/.claude-work".into());
+        let mut personal = profile(Provider::Claude);
+        personal
+            .env
+            .insert("CLAUDE_CONFIG_DIR".into(), "$HOME/.claude-me".into());
+
+        assert_ne!(
+            environment_for(&work)["CLAUDE_CONFIG_DIR"],
+            environment_for(&personal)["CLAUDE_CONFIG_DIR"]
         );
     }
 }

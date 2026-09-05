@@ -2776,6 +2776,7 @@ dependencies = [
  "oga-domain",
  "oga-events",
  "oga-pricing",
+ "oga-providers",
  "oga-routing",
  "oga-runner",
  "oga-service",
