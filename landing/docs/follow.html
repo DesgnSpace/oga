@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Watch a delegated task for free, read its full record, answer a question, and resume it.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga docs - Follow a task</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header docs-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Setup</a></li>
+            <li><a href="/docs/delegate.html">Delegate a task</a></li>
+            <li><a href="/docs/follow.html" aria-current="page">Follow a task</a></li>
+            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+            <li><a href="/docs/data.html">Where data lives</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Setup</a></li>
+          <li><a href="/docs/delegate.html">Delegate a task</a></li>
+          <li><a href="/docs/follow.html" aria-current="page">Follow a task</a></li>
+          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+          <li><a href="/docs/data.html">Where data lives</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Follow a task</p>
+        <h1>Follow a task without paying for it</h1>
+        <p class="docs-intro">A delegated task runs unattended. Following it should cost you nothing while it works - Oga gives you a few ways to check in, from free to full detail.</p>
+
+        <h2 id="watch">Watch: the free default</h2>
+        <p><code>oga watch</code> is a background process that sleeps for free and prints one line the moment a task asks a question, fails, or finishes:</p>
+        <pre><code>oga watch 8f2c1a94-... --timeout 30m &amp;</code></pre>
+        <p>It connects to the broker's event socket for instant delivery, and falls back to reading the local store if the socket isn't there. In Claude Code, a backgrounded command that exits re-invokes the agent - so running <code>oga watch</code> in the background <em>is</em> the notification. Several task IDs can be watched at once: <code>oga watch &lt;id&gt; &lt;id&gt; &lt;id&gt;</code>.</p>
+
+        <h2 id="inspect">Inspect: the full record</h2>
+        <p>When you need the complete picture - output, scope, spend, and completion - read one task in full:</p>
+        <pre><code>oga inspect &lt;task-id&gt;</code></pre>
+        <p><code>oga tasks</code> lists today's tasks by state, so you can find one before inspecting it or starting a new one.</p>
+
+        <h2 id="reply">Reply: answer a question</h2>
+        <p>A task can pause on a question mid-run - it lands in a <code>needs_input</code> state. Answering it is a job for your editor agent: ask it to reply to the task, and it calls the <code>reply</code> tool on the same provider session so the worker picks up exactly where it left off.</p>
+
+        <h2 id="resume">Resume: pick a task back up</h2>
+        <p>A task that failed, was cancelled, or is blocked can be retried on its own session - the same files it already read, the same reasoning it already did, are still there:</p>
+        <pre><code>oga resume &lt;task-id&gt;
+oga resume &lt;task-id&gt; -m "the approved area covers tests - continue there"</code></pre>
+        <p>A task that already <strong>completed</strong> can be resumed too, as a follow-up - but an instruction is required, since there's nothing to retry without one:</p>
+        <pre><code>oga resume &lt;task-id&gt; -m "move the state dot to the title's tail"</code></pre>
+
+        <div class="docs-callout">
+          <p>Check <code>oga tasks</code> before starting new work. If a task already owns the file or feature you're about to touch, resume it instead of dispatching a duplicate.</p>
+        </div>
+
+        <div class="docs-next">
+          <a href="/docs/worktrees.html">Next: Worktrees &amp; PRs &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#watch">Watch</a></li>
+          <li><a href="#inspect">Inspect</a></li>
+          <li><a href="#reply">Reply</a></li>
+          <li><a href="#resume">Resume</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>

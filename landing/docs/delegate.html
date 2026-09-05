@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Send a task to another AI account from your editor agent or straight from the terminal.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga docs - Delegate a task</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header docs-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Setup</a></li>
+            <li><a href="/docs/delegate.html" aria-current="page">Delegate a task</a></li>
+            <li><a href="/docs/follow.html">Follow a task</a></li>
+            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+            <li><a href="/docs/data.html">Where data lives</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Setup</a></li>
+          <li><a href="/docs/delegate.html" aria-current="page">Delegate a task</a></li>
+          <li><a href="/docs/follow.html">Follow a task</a></li>
+          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+          <li><a href="/docs/data.html">Where data lives</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Delegate a task</p>
+        <h1>Send off your first task</h1>
+        <p class="docs-intro">A task is a prompt, a working directory, and an approved set of files. There are two ways to start one - ask your editor agent, or talk to Oga directly from the terminal.</p>
+
+        <h2 id="from-your-agent">From your editor agent</h2>
+        <p>Once Claude Code, Codex, or OpenCode is connected over MCP, it can call Oga's <code>delegate</code> tool on your behalf. Just ask for the work in plain language:</p>
+        <div class="docs-callout">
+          <p>"Delegate the failing test suite fix to a fast model."</p>
+          <p>"Send the changelog write-up to opencode while I keep working on the API."</p>
+        </div>
+        <p>Your agent writes the brief, names a working directory, and either lets Oga pick the account and model or names one explicitly. It gets back a task ID the moment dispatch succeeds - the worker then runs unattended on its own account.</p>
+        <p>Naming nothing sends the work to your <a href="/docs/setup.html#enable-models">loved model</a> if you've set one; otherwise Oga scores every enabled model on every connected account and picks the best fit for the kind of work described.</p>
+
+        <h2 id="from-the-terminal">From the terminal</h2>
+        <p><code>oga oga</code> opens a conversation with an assistant that plans in prose and delegates through Oga for you - no editor needed:</p>
+        <pre><code>oga oga --worker &lt;profile&gt; \
+  --goal "I am adding billing to the API. Plan it, and send the mechanical parts out."</code></pre>
+        <p>The assistant calls <code>delegate</code> with a full brief and a cheap model while you keep typing to it. When a worker finishes, its report lands back in the same conversation.</p>
+        <p><code>--print</code> runs the same session without the full-screen terminal, for scripting or a headless run:</p>
+        <pre><code>oga oga --worker &lt;profile&gt; --print --goal "get the release branch green"</code></pre>
+
+        <h2 id="what-a-task-can-touch">What a task can touch</h2>
+        <p>Every delegated task carries an approved <strong>scope</strong> - a <code>read</code> and a <code>write</code> list of paths, relative to the working directory. <code>read: ["**"]</code> is the common default; a narrower <code>write</code> list keeps a task's edits inside the directories it's meant to change. Once approved for a project, the same scope is reused on later tasks without asking again.</p>
+
+        <div class="docs-next">
+          <a href="/docs/follow.html">Next: Follow a task &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#from-your-agent">From your editor agent</a></li>
+          <li><a href="#from-the-terminal">From the terminal</a></li>
+          <li><a href="#what-a-task-can-touch">What a task can touch</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>

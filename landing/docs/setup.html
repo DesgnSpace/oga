@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Connect Claude Code, Codex, or OpenCode to Oga over MCP, and add the accounts you delegate to.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga docs - Setup</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header docs-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html" aria-current="page">Setup</a></li>
+            <li><a href="/docs/delegate.html">Delegate a task</a></li>
+            <li><a href="/docs/follow.html">Follow a task</a></li>
+            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+            <li><a href="/docs/data.html">Where data lives</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html" aria-current="page">Setup</a></li>
+          <li><a href="/docs/delegate.html">Delegate a task</a></li>
+          <li><a href="/docs/follow.html">Follow a task</a></li>
+          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+          <li><a href="/docs/data.html">Where data lives</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Setup</p>
+        <h1>Connect your agent and your accounts</h1>
+        <p class="docs-intro">Two things to set up once: point your coding agent at Oga, then tell Oga which provider accounts it's allowed to delegate to.</p>
+
+        <h2 id="connect-mcp">Connect Claude Code, Codex, or OpenCode</h2>
+        <p>Oga speaks MCP over <code>http://127.0.0.1:7331/mcp</code>. The app's <strong>Install MCP</strong> button writes a global MCP entry for every installed client it finds - Claude Code, Codex, OpenCode, and Antigravity - and backs up any existing config with a <code>.bak</code> suffix.</p>
+        <p>Once connected, your agent can see Oga's tools - <code>delegate</code>, <code>tasks</code>, <code>inspect</code>, <code>reply</code>, <code>resume</code>, and the rest - the same way it sees any other MCP server.</p>
+
+        <h2 id="profiles">Add a profile for each account</h2>
+        <p>On first launch, Oga detects which provider CLIs are installed and lets you add, edit, and enable profiles. No accounts are hardcoded. Each profile stores:</p>
+        <ul>
+          <li>Its provider - one of <code>claude</code>, <code>codex</code>, <code>opencode</code>, <code>opencode-2</code>, <code>antigravity</code>, or <code>pi</code>.</li>
+          <li>A default model.</li>
+          <li>Environment variables, with secret-like values (<code>KEY</code>, <code>TOKEN</code>, <code>SECRET</code>, <code>PASS</code>) masked on every surface.</li>
+        </ul>
+        <p>Each profile's account directory comes from the profile, never from the shell Oga was started in - so two profiles never fight over the same login. A Claude profile named <code>claude</code> uses <code>$HOME/.claude</code>; every other worker ID gets its own <code>$HOME/.&lt;worker-id&gt;</code> unless you point it elsewhere. Set <code>CLAUDE_CONFIG_DIR</code> in a profile's environment to reuse a directory you've already signed into:</p>
+        <pre><code>profiles:
+  claude-work:
+    env:
+      CLAUDE_CONFIG_DIR: $HOME/.claude-work</code></pre>
+
+        <h2 id="enable-models">Enable models and pick a default</h2>
+        <p>The Settings screen controls which workers and models can receive work - a model must be enabled for a worker before Oga can send a task there. Mark one worker/model pair <strong>loved</strong> to make it the default for work that names no model.</p>
+        <p>From the terminal:</p>
+        <pre><code>oga config
+oga love</code></pre>
+        <p>To set the default explicitly, name the worker and model:</p>
+        <pre><code>oga love opencode/openai/gpt-5.6-luna</code></pre>
+        <p>Use <code>oga love --clear</code> to let routing choose per task again. Add <code>--global</code> to any <code>love</code> command to set the user-wide default instead of the current project's.</p>
+
+        <div class="docs-callout">
+          <p>Everything here can be checked from the terminal - <code>oga config [cwd]</code> prints the effective profiles, models, and routes for a directory, and which file each setting came from.</p>
+        </div>
+
+        <div class="docs-next">
+          <a href="/docs/delegate.html">Next: Delegate a task &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#connect-mcp">Connect your agent</a></li>
+          <li><a href="#profiles">Add a profile</a></li>
+          <li><a href="#enable-models">Enable models</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>

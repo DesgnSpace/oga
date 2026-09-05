@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Give a delegated task its own checkout and branch, so it never touches your working tree.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga docs - Worktrees & PRs</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header docs-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Setup</a></li>
+            <li><a href="/docs/delegate.html">Delegate a task</a></li>
+            <li><a href="/docs/follow.html">Follow a task</a></li>
+            <li><a href="/docs/worktrees.html" aria-current="page">Worktrees &amp; PRs</a></li>
+            <li><a href="/docs/data.html">Where data lives</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Setup</a></li>
+          <li><a href="/docs/delegate.html">Delegate a task</a></li>
+          <li><a href="/docs/follow.html">Follow a task</a></li>
+          <li><a href="/docs/worktrees.html" aria-current="page">Worktrees &amp; PRs</a></li>
+          <li><a href="/docs/data.html">Where data lives</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Worktrees &amp; PRs</p>
+        <h1>Give a task its own branch</h1>
+        <p class="docs-intro">A task can run in a checkout of its own instead of your working tree - useful for anything that should land as commits, or whenever more than one task runs against the same repository.</p>
+
+        <h2 id="turning-it-on">Turning it on</h2>
+        <p>Ask your editor agent to delegate with a worktree, or pass it on the <code>delegate</code> tool directly. The plain form takes every default:</p>
+        <pre><code>{ "worktree": true }</code></pre>
+        <p>The worker gets a fresh checkout on a branch of its own, commits there, and never touches your working tree. Two tasks sharing one plain checkout would share one index and overwrite each other's edits - a worktree keeps them apart.</p>
+
+        <h2 id="where-it-lives">Where it lives</h2>
+        <ul>
+          <li><strong>Checkout:</strong> <code>~/.oga/worktrees/&lt;task-id&gt;</code>, outside the project so it never shows up in a scan of your repository.</li>
+          <li><strong>Branch:</strong> <code>oga/&lt;slug-of-title&gt;</code> by default, created the moment the task is dispatched.</li>
+          <li><strong>Base:</strong> the repository's current <code>HEAD</code>, unless a different commit or branch is named.</li>
+        </ul>
+        <p>Everything else - scope, project memories, routing - stays keyed to the original repository, so a worktree task is approved exactly like any other task on that project.</p>
+
+        <h2 id="after-the-task">After the task</h2>
+        <p>The checkout stays once the task settles. Review the branch from the original repository and merge it, or throw it away:</p>
+        <pre><code>git -C &lt;repo&gt; log oga/&lt;slug-of-title&gt;
+git -C &lt;repo&gt; merge oga/&lt;slug-of-title&gt;</code></pre>
+        <p>A task working inside a worktree can commit and push its branch, then open a pull request, the same way you would - <code>oga watch</code> or <code>oga inspect</code> will show a PR link in its report once one exists.</p>
+
+        <h2 id="cleaning-up">Cleaning up</h2>
+        <p><code>oga cleanup --delete</code> removes the checkouts of finished, archived tasks past the retention cutoff - it never deletes a branch, so the work survives the checkout being freed. Archiving a task that ran in a worktree removes its checkout at the same time and keeps the branch.</p>
+
+        <div class="docs-next">
+          <a href="/docs/data.html">Next: Where data lives &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#turning-it-on">Turning it on</a></li>
+          <li><a href="#where-it-lives">Where it lives</a></li>
+          <li><a href="#after-the-task">After the task</a></li>
+          <li><a href="#cleaning-up">Cleaning up</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>

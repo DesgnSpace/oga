@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="What Oga is and how to get your first task delegated, in five minutes.">
+  <meta name="color-scheme" content="light dark">
+  <title>Oga docs - Overview</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header docs-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/" aria-current="page">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Setup</a></li>
+            <li><a href="/docs/delegate.html">Delegate a task</a></li>
+            <li><a href="/docs/follow.html">Follow a task</a></li>
+            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+            <li><a href="/docs/data.html">Where data lives</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/" aria-current="page">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Setup</a></li>
+          <li><a href="/docs/delegate.html">Delegate a task</a></li>
+          <li><a href="/docs/follow.html">Follow a task</a></li>
+          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
+          <li><a href="/docs/data.html">Where data lives</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Oga docs</p>
+        <h1>What Oga is</h1>
+        <p class="docs-intro">Oga hands a task to one of your other AI accounts, runs it in the background with only the files you allow, and tells you the moment it needs you or finishes.</p>
+
+        <h2 id="what-it-does">What it does</h2>
+        <p>You hand Oga a prompt and a working directory. It picks a model, spawns a sandboxed worker on a different account, and returns a task ID the moment dispatch succeeds. The worker runs independently while you keep working. When it needs input, hits a question, or finishes, Oga tells you.</p>
+        <p>Oga runs on macOS as a menu-bar app with a local broker on <code>127.0.0.1:7331</code>. Every AI coding agent that speaks MCP - Claude Code, Codex, OpenCode, Antigravity - can connect to it and delegate work to your other accounts.</p>
+
+        <h2 id="why-delegate">Why delegate</h2>
+        <ul>
+          <li><strong>Separate accounts, separate limits.</strong> A rate limit on one account does not block the whole session.</li>
+          <li><strong>No context tax.</strong> A delegated worker's prompt and output do not consume the caller's context window.</li>
+          <li><strong>Provider choice per task.</strong> A mechanical rename goes to a cheap fast model; a hard problem goes to a frontier model.</li>
+        </ul>
+
+        <h2 id="quick-start">Quick start</h2>
+        <ol>
+          <li><strong><a href="/docs/install.html">Install</a> the app</strong> and confirm the broker answers <code>curl http://127.0.0.1:7331/health</code>.</li>
+          <li><strong><a href="/docs/setup.html">Connect</a> your coding agent</strong> to <code>http://127.0.0.1:7331/mcp</code> and add a profile for each account you want to delegate to.</li>
+          <li><strong><a href="/docs/delegate.html">Delegate a task</a></strong> by asking your agent to send off a piece of work.</li>
+          <li><strong><a href="/docs/follow.html">Follow it</a></strong> with <code>oga watch &lt;task-id&gt;</code>, running in the background at no cost while it works.</li>
+        </ol>
+
+        <div class="docs-callout">
+          <p>First time on the command line? Run <code>oga</code> with no arguments - it prints this same walkthrough.</p>
+        </div>
+
+        <h2 id="where-to-next">Where to go next</h2>
+        <ul>
+          <li><a href="/docs/install.html">Install</a> - the app, the <code>oga</code> CLI, and the Homebrew tap.</li>
+          <li><a href="/docs/setup.html">Setup</a> - connecting Claude Code, Codex, and OpenCode, and adding accounts.</li>
+          <li><a href="/docs/delegate.html">Delegate a task</a> - from your editor agent or from the terminal.</li>
+          <li><a href="/docs/follow.html">Follow a task</a> - watch, inspect, answer, and resume.</li>
+          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a> - giving a task its own branch.</li>
+          <li><a href="/docs/data.html">Where data lives</a> - what's under <code>~/.oga</code>.</li>
+        </ul>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#what-it-does">What it does</a></li>
+          <li><a href="#why-delegate">Why delegate</a></li>
+          <li><a href="#quick-start">Quick start</a></li>
+          <li><a href="#where-to-next">Where to go next</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+</body>
+</html>
