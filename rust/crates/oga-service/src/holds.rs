@@ -395,7 +395,7 @@ pub fn arm_hold(store: &Store, hold: &TaskHold) -> Result<(), StoreError> {
         .map_err(|error| StoreError::Refusal(format!("invalid hold JSON: {error}")))?;
     store.transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='pending',updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending')",
+            "UPDATE tasks SET state='pending',updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending','completed')",
             params![hold.updated_at, hold.task_id],
         )?;
         if changed != 1 {

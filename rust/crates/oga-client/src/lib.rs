@@ -435,6 +435,8 @@ pub struct DispatchRequest {
     pub depends_on: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_blocker_failure: Option<oga_domain::OnBlockerFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_at: Option<String>,
 }
 
 impl DispatchRequest {
@@ -459,6 +461,8 @@ pub struct ResumeRequest {
     pub scope: Option<TaskScope>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_questions: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue: Option<QueueAction>,
 }

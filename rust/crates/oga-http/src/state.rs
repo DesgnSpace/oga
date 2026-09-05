@@ -449,7 +449,9 @@ fn hold_view_from_row_offset(row: &Row<'_>, first: usize) -> rusqlite::Result<Ta
     let expires_at: String = row.get(first + 6)?;
     let next_check_at: String = row.get(first + 7)?;
     let args: Value = serde_json::from_str(&args).unwrap_or_default();
-    let kind = if verb == "delegate" {
+    let kind = if args.get("scheduled") == Some(&Value::Bool(true)) {
+        oga_domain::HoldViewKind::Time
+    } else if verb == "delegate" {
         oga_domain::HoldViewKind::Dependency
     } else if args.get("restart").is_some() {
         oga_domain::HoldViewKind::Restart

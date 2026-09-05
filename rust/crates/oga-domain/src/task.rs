@@ -223,6 +223,10 @@ pub struct HoldArgs {
     /// Present only on a hold armed by restart recovery.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restart: Option<RestartHoldArgs>,
+    /// Present only when the caller named the start time. It is what separates
+    /// a start somebody chose from a wait on a prerequisite or an account.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled: Option<bool>,
 }
 
 /// Why a `pending` task has not started. One per task.

@@ -22,6 +22,7 @@ pub mod prompt;
 pub mod reconcile;
 pub mod reply;
 pub mod resume;
+pub mod schedule;
 pub mod steer;
 pub mod waiting;
 
@@ -38,6 +39,14 @@ pub enum ContinuationError {
     Worktree(#[from] oga_worktree::WorktreeError),
     #[error(transparent)]
     Provider(#[from] oga_providers::ProviderError),
+}
+
+impl From<holds::HoldError> for ContinuationError {
+    fn from(error: holds::HoldError) -> Self {
+        match error {
+            holds::HoldError::Store(error) => Self::Store(error),
+        }
+    }
 }
 
 impl ContinuationError {
@@ -205,4 +214,5 @@ pub use prompt::{
 };
 pub use reply::{ReplyRequest, reply};
 pub use resume::{ResumeRequest, resume};
+pub use schedule::{StartAt, parse_start_at};
 pub use steer::{SteerRequest, steer};

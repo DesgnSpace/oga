@@ -236,6 +236,7 @@ impl McpServer {
             .transpose()
             .map_err(|error| McpError::InvalidParams(format!("worktree: {error}")))?;
         request.depends_on = string_array(args.get("dependsOn"), "dependsOn")?;
+        request.start_at = optional_string(args, "startAt");
         request.on_blocker_failure = match optional_string(args, "onBlockerFailure").as_deref() {
             Some("run") => OnBlockerFailure::Run,
             Some("hold") | None => OnBlockerFailure::Hold,
@@ -530,12 +531,10 @@ impl McpServer {
                 fields(args.get("fields"))?.unwrap_or_default(),
             );
         }
-        if args.get("startAt").is_some() {
-            return Err(McpError::Message(
-                "startAt holds are not available through the Rust broker yet".into(),
-            ));
-        }
         let mut request = ResumeRequest::new(task_id);
+        if let Some(value) = optional_string(args, "startAt") {
+            request = request.start_at(value);
+        }
         if let Some(value) = optional_string(args, "instruction") {
             request = request.instruction(value);
         }

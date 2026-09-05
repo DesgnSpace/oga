@@ -150,6 +150,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
                         let args: HoldArgs =
                             serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default();
                         let kind = match row.get::<_, String>(0)?.as_str() {
+                            _ if args.scheduled == Some(true) => HoldViewKind::Time,
                             "delegate" => HoldViewKind::Dependency,
                             _ if args.restart.is_some() => HoldViewKind::Restart,
                             _ => HoldViewKind::Time,

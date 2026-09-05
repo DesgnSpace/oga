@@ -40,9 +40,12 @@ export function taskStateLabel(state: string): string {
   return TASK_STATE_LABELS[state] ?? state;
 }
 
-/** True for a wait the task did not choose: the connection or the account. */
-export function isUnattendedWait(hold: TaskHoldView | undefined): boolean {
-  return hold?.kind === "network" || hold?.kind === "profile_available";
+/**
+ * True for a wait a row should spell out and a page should offer a way out of:
+ * the connection, the account, or a start time somebody picked.
+ */
+export function isExplainedWait(hold: TaskHoldView | undefined): boolean {
+  return hold?.kind === "network" || hold?.kind === "profile_available" || hold?.kind === "time";
 }
 
 /** What a waiting task is waiting for, short enough for a row or a pill. */
@@ -56,6 +59,8 @@ export function waitLabel(hold: TaskHoldView | undefined): string {
       return "Waiting for usage";
     case "dependency":
       return "Waiting for another task";
+    case "time":
+      return hold.until ? `Starts ${absoluteTime(hold.until)}` : "Waiting to start";
     default:
       return TASK_STATE_LABELS.pending;
   }

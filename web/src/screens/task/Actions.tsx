@@ -18,7 +18,7 @@ import { Modal } from "@/components/primitives/Modal";
 import { ArchiveIcon, CancelIcon, CheckIcon, MoreIcon, RestoreIcon } from "@/ui/icons";
 import { MarkdownContent } from "@/domain/markdown";
 import { ComposerRequest, ConversationComposer, isResume, routingForState } from "./Composer";
-import { isUnattendedWait, nextTryLabel } from "./format";
+import { isExplainedWait, nextTryLabel } from "./format";
 import { TaskMetadata } from "./TaskMetadata";
 import { toast } from "@/state/toast";
 
@@ -465,12 +465,12 @@ function HandoffDialog({
 }
 
 /**
- * What a task that stopped for a reason nobody chose is waiting for, and the
- * two ways out of the wait: start it now, or stop waiting altogether.
+ * What a task that has not started yet is waiting for, and the two ways out of
+ * the wait: start it now, or stop waiting altogether.
  */
 export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
-  if (!isUnattendedWait(task.hold) || !task.hold) return null;
+  if (!isExplainedWait(task.hold) || !task.hold) return null;
   const nextTry = nextTryLabel(task.hold);
 
   const run = async (

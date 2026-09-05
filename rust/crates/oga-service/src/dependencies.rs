@@ -156,6 +156,7 @@ pub fn dependency_hold(
                 .then_some(OnBlockerFailure::Run),
             network: None,
             restart: None,
+            scheduled: None,
         },
         start_at: None,
         await_profile: None,

@@ -49,6 +49,17 @@ pub fn rate_limit_wait_note(resets_at: &str) -> String {
     }
 }
 
+/// The line a task shows while it waits for the start time its caller chose.
+pub fn scheduled_start_note(start_at: &str) -> String {
+    match DateTime::parse_from_rfc3339(start_at) {
+        Ok(instant) => format!(
+            "Starts {}",
+            instant.with_timezone(&Local).format("%b %-d at %H:%M")
+        ),
+        Err(_) => "Waiting to start".into(),
+    }
+}
+
 /// The account and connectivity probes the sweep runs against the real world.
 pub struct StoreProbe {
     store: Arc<Store>,
