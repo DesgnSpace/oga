@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="What Oga stores on your machine, where, and how to free the disk it uses.">
+  <meta name="description" content="What Oga keeps on your Mac, what leaves it, where settings come from, and how to free disk space.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Where data lives</title>
+  <title>Oga docs - Your data</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
@@ -13,7 +13,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header docs-header">
+  <header class="site-header">
     <a class="wordmark" href="/">
       <img src="/logo.svg" alt="Oga logo" width="32" height="32">
       <span aria-hidden="true">Oga</span>
@@ -29,11 +29,11 @@
           <ul class="docs-nav-list">
             <li><a href="/docs/">Overview</a></li>
             <li><a href="/docs/install.html">Install</a></li>
-            <li><a href="/docs/setup.html">Setup</a></li>
-            <li><a href="/docs/delegate.html">Delegate a task</a></li>
-            <li><a href="/docs/follow.html">Follow a task</a></li>
-            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-            <li><a href="/docs/data.html" aria-current="page">Where data lives</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html" aria-current="page">Your data</a></li>
           </ul>
         </nav>
       </details>
@@ -43,59 +43,59 @@
         <ul class="docs-nav-list">
           <li><a href="/docs/">Overview</a></li>
           <li><a href="/docs/install.html">Install</a></li>
-          <li><a href="/docs/setup.html">Setup</a></li>
-          <li><a href="/docs/delegate.html">Delegate a task</a></li>
-          <li><a href="/docs/follow.html">Follow a task</a></li>
-          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-          <li><a href="/docs/data.html" aria-current="page">Where data lives</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html" aria-current="page">Your data</a></li>
         </ul>
       </nav>
 
       <article class="docs-content">
-        <p class="docs-eyebrow">Docs / Where data lives</p>
-        <h1>Everything Oga stores stays on your machine</h1>
-        <p class="docs-intro">Oga is a local broker. Everything it remembers lives under <code>~/.oga</code>, and the only thing that leaves your machine is a task's prompt and files, sent to the provider account you chose for it.</p>
+        <p class="docs-eyebrow">Docs / Your data</p>
+        <h1>Everything Oga keeps stays on your Mac</h1>
+        <p class="docs-intro">Oga runs entirely on your machine. The only thing that ever leaves it is the work itself — the brief and the files you allowed — sent to the account you picked for it.</p>
 
-        <h2 id="oga-directory">Inside <code>~/.oga</code></h2>
+        <h2 id="where">What Oga keeps, and where</h2>
+        <p>All of it lives in <code>~/.oga</code>:</p>
         <table>
           <thead>
-            <tr><th>Path</th><th>What it holds</th></tr>
+            <tr><th>What</th><th>Where</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>oga.db</code></td><td>The SQLite store - tasks, events, profiles, memories. Runs in WAL mode, so <code>oga.db-shm</code> and <code>oga.db-wal</code> sit beside it.</td></tr>
-            <tr><td><code>oga.sock</code></td><td>The unix event socket the broker pushes task events on. <code>oga watch</code> and the desktop app both read it.</td></tr>
-            <tr><td><code>worktrees/</code></td><td>One checkout per task dispatched with <code>worktree: true</code>. See <a href="/docs/worktrees.html">Worktrees &amp; PRs</a>.</td></tr>
-            <tr><td><code>oga/</code></td><td>Saved <code>oga oga</code> terminal sessions, one JSON file per conversation, so a session reattaches where it left off.</td></tr>
-            <tr><td><code>cache/</code>, <code>runtime/</code></td><td>Working state the broker keeps between runs.</td></tr>
+            <tr><td>Everything Oga remembers — the work you've handed off, your accounts, and what it's learned about your projects</td><td><code>oga.db</code></td></tr>
+            <tr><td>One copy of your repository for each piece of work <a href="/docs/worktrees.html">given its own branch</a></td><td><code>worktrees/</code></td></tr>
+            <tr><td>Working state Oga keeps between runs</td><td>the rest of the folder</td></tr>
           </tbody>
         </table>
 
-        <h2 id="config">Configuration files</h2>
-        <p>Settings resolve through three layers, highest first:</p>
+        <h2 id="settings">Where a setting comes from</h2>
+        <p>Settings come from three places. The first one that has an answer wins:</p>
         <ol>
-          <li><code>&lt;project&gt;/.oga.yaml</code> - the project's own file, resolved from the task's working directory.</li>
-          <li><code>~/.oga.yaml</code> - your personal, user-wide config.</li>
-          <li>Oga's built-in defaults - discovered accounts and the shipped worker rules.</li>
+          <li><code>.oga.yaml</code> in the project itself.</li>
+          <li><code>~/.oga.yaml</code>, your own settings for every project.</li>
+          <li>Oga's own defaults — the accounts it found and the rules it ships with.</li>
         </ol>
-        <p>A missing file at any layer is normal. Run <code>oga config [cwd]</code> to print the effective configuration for a directory, and which file each setting actually came from.</p>
+        <p>Not having either file is normal. To see what a folder actually resolves to, and which file each setting came from:</p>
+        <pre><code>oga config</code></pre>
 
-        <h2 id="freeing-disk">Freeing disk</h2>
-        <p><code>oga cleanup</code> shows what old, finished task activity would be removed, and deletes nothing until you confirm:</p>
+        <h2 id="space">Freeing disk space</h2>
+        <p><code>oga cleanup</code> shows what old work is holding and deletes nothing until you say so:</p>
         <pre><code>oga cleanup
 oga cleanup --delete</code></pre>
-        <p>Add <code>--delete</code> to also remove the checkout of any finished worktree task past the retention cutoff - the branch it produced is never touched.</p>
+        <p>Only work that has finished and that you archived is ever eligible. Anything still running, anything waiting on you, and what Oga knows about your projects are never touched. Neither is a branch produced by work that ran on its own.</p>
 
         <div class="docs-callout">
-          <p>Nothing here is shared between machines. Moving to a new Mac means signing back into each provider CLI and re-adding profiles in Oga's Settings screen.</p>
+          <p>None of this follows you between machines. On a new Mac, sign back into each provider tool and add your accounts again in Oga's Settings.</p>
         </div>
       </article>
 
       <aside class="docs-toc" aria-label="On this page">
         <p class="docs-nav-label">On this page</p>
         <ul>
-          <li><a href="#oga-directory">Inside ~/.oga</a></li>
-          <li><a href="#config">Configuration files</a></li>
-          <li><a href="#freeing-disk">Freeing disk</a></li>
+          <li><a href="#where">What Oga keeps</a></li>
+          <li><a href="#settings">Where settings come from</a></li>
+          <li><a href="#space">Freeing disk space</a></li>
         </ul>
       </aside>
     </div>

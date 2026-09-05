@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Give a delegated task its own checkout and branch, so it never touches your working tree.">
+  <meta name="description" content="Run work on a branch of its own, away from your working folder, and end up with a pull request.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Worktrees & PRs</title>
+  <title>Oga docs - Branches &amp; pull requests</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
@@ -13,7 +13,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header docs-header">
+  <header class="site-header">
     <a class="wordmark" href="/">
       <img src="/logo.svg" alt="Oga logo" width="32" height="32">
       <span aria-hidden="true">Oga</span>
@@ -29,11 +29,11 @@
           <ul class="docs-nav-list">
             <li><a href="/docs/">Overview</a></li>
             <li><a href="/docs/install.html">Install</a></li>
-            <li><a href="/docs/setup.html">Setup</a></li>
-            <li><a href="/docs/delegate.html">Delegate a task</a></li>
-            <li><a href="/docs/follow.html">Follow a task</a></li>
-            <li><a href="/docs/worktrees.html" aria-current="page">Worktrees &amp; PRs</a></li>
-            <li><a href="/docs/data.html">Where data lives</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html" aria-current="page">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
           </ul>
         </nav>
       </details>
@@ -43,53 +43,59 @@
         <ul class="docs-nav-list">
           <li><a href="/docs/">Overview</a></li>
           <li><a href="/docs/install.html">Install</a></li>
-          <li><a href="/docs/setup.html">Setup</a></li>
-          <li><a href="/docs/delegate.html">Delegate a task</a></li>
-          <li><a href="/docs/follow.html">Follow a task</a></li>
-          <li><a href="/docs/worktrees.html" aria-current="page">Worktrees &amp; PRs</a></li>
-          <li><a href="/docs/data.html">Where data lives</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html" aria-current="page">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
         </ul>
       </nav>
 
       <article class="docs-content">
-        <p class="docs-eyebrow">Docs / Worktrees &amp; PRs</p>
-        <h1>Give a task its own branch</h1>
-        <p class="docs-intro">A task can run in a checkout of its own instead of your working tree - useful for anything that should land as commits, or whenever more than one task runs against the same repository.</p>
+        <p class="docs-eyebrow">Docs / Branches &amp; pull requests</p>
+        <h1>Give the work its own branch</h1>
+        <p class="docs-intro">Work can run in a copy of your repository instead of the folder you're editing in. Nothing it does shows up in your working tree until you merge it.</p>
 
-        <h2 id="turning-it-on">Turning it on</h2>
-        <p>Ask your editor agent to delegate with a worktree, or pass it on the <code>delegate</code> tool directly. The plain form takes every default:</p>
-        <pre><code>{ "worktree": true }</code></pre>
-        <p>The worker gets a fresh checkout on a branch of its own, commits there, and never touches your working tree. Two tasks sharing one plain checkout would share one index and overwrite each other's edits - a worktree keeps them apart.</p>
-
-        <h2 id="where-it-lives">Where it lives</h2>
+        <h2 id="when">When you want this</h2>
         <ul>
-          <li><strong>Checkout:</strong> <code>~/.oga/worktrees/&lt;task-id&gt;</code>, outside the project so it never shows up in a scan of your repository.</li>
-          <li><strong>Branch:</strong> <code>oga/&lt;slug-of-title&gt;</code> by default, created the moment the task is dispatched.</li>
-          <li><strong>Base:</strong> the repository's current <code>HEAD</code>, unless a different commit or branch is named.</li>
+          <li><strong>The work should end in commits.</strong> A branch and a pull request you review, rather than changes appearing under your hands.</li>
+          <li><strong>Two things run against the same repository.</strong> Sharing one folder means they overwrite each other. Separate copies keep them apart.</li>
         </ul>
-        <p>Everything else - scope, project memories, routing - stays keyed to the original repository, so a worktree task is approved exactly like any other task on that project.</p>
+        <p>For a small fix that lands in seconds, skip it — a branch is overhead you don't need.</p>
 
-        <h2 id="after-the-task">After the task</h2>
-        <p>The checkout stays once the task settles. Review the branch from the original repository and merge it, or throw it away:</p>
-        <pre><code>git -C &lt;repo&gt; log oga/&lt;slug-of-title&gt;
-git -C &lt;repo&gt; merge oga/&lt;slug-of-title&gt;</code></pre>
-        <p>A task working inside a worktree can commit and push its branch, then open a pull request, the same way you would - <code>oga watch</code> or <code>oga inspect</code> will show a PR link in its report once one exists.</p>
+        <h2 id="turn-on">Turning it on</h2>
+        <p>Ask your coding agent to run the work on a branch of its own. Everything else is chosen for you.</p>
 
-        <h2 id="cleaning-up">Cleaning up</h2>
-        <p><code>oga cleanup --delete</code> removes the checkouts of finished, archived tasks past the retention cutoff - it never deletes a branch, so the work survives the checkout being freed. Archiving a task that ran in a worktree removes its checkout at the same time and keeps the branch.</p>
+        <h2 id="where">Where the branch lives</h2>
+        <ul>
+          <li><strong>The copy</strong> sits in <code>~/.oga/worktrees/</code>, outside your project, so it never turns up in a search of your repository.</li>
+          <li><strong>The branch</strong> is named after the work, under <code>oga/</code>, and is created the moment the work starts.</li>
+          <li><strong>It starts</strong> from wherever your repository is right now, unless something else is named.</li>
+        </ul>
+        <p>Everything else — the files it may touch, what it knows about the project, who does the work — stays tied to your original repository, so this is approved exactly like any other work on that project.</p>
+
+        <h2 id="after">After it finishes</h2>
+        <p>The copy stays put. Review the branch from your own repository and merge it, or throw it away:</p>
+        <pre><code>git log oga/&lt;branch-name&gt;
+git merge oga/&lt;branch-name&gt;</code></pre>
+        <p>Work on its own branch can also commit, push, and open a pull request for you. When it does, the link comes back with the rest of the report.</p>
+
+        <h2 id="space">Freeing the space</h2>
+        <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. Add <code>--delete</code> to free it. Only work that has finished and that you archived is ever eligible, and the branch it produced is never touched — the code survives the copy being cleared.</p>
 
         <div class="docs-next">
-          <a href="/docs/data.html">Next: Where data lives &rarr;</a>
+          <a href="/docs/data.html">Next: Your data &rarr;</a>
         </div>
       </article>
 
       <aside class="docs-toc" aria-label="On this page">
         <p class="docs-nav-label">On this page</p>
         <ul>
-          <li><a href="#turning-it-on">Turning it on</a></li>
-          <li><a href="#where-it-lives">Where it lives</a></li>
-          <li><a href="#after-the-task">After the task</a></li>
-          <li><a href="#cleaning-up">Cleaning up</a></li>
+          <li><a href="#when">When you want this</a></li>
+          <li><a href="#turn-on">Turning it on</a></li>
+          <li><a href="#where">Where the branch lives</a></li>
+          <li><a href="#after">After it finishes</a></li>
+          <li><a href="#space">Freeing the space</a></li>
         </ul>
       </aside>
     </div>

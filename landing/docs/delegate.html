@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Send a task to another AI account from your editor agent or straight from the terminal.">
+  <meta name="description" content="What's worth handing off, how to ask for it, and which files it's allowed to touch.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Delegate a task</title>
+  <title>Oga docs - Hand off work</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
@@ -13,7 +13,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header docs-header">
+  <header class="site-header">
     <a class="wordmark" href="/">
       <img src="/logo.svg" alt="Oga logo" width="32" height="32">
       <span aria-hidden="true">Oga</span>
@@ -29,11 +29,11 @@
           <ul class="docs-nav-list">
             <li><a href="/docs/">Overview</a></li>
             <li><a href="/docs/install.html">Install</a></li>
-            <li><a href="/docs/setup.html">Setup</a></li>
-            <li><a href="/docs/delegate.html" aria-current="page">Delegate a task</a></li>
-            <li><a href="/docs/follow.html">Follow a task</a></li>
-            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-            <li><a href="/docs/data.html">Where data lives</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html" aria-current="page">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
           </ul>
         </nav>
       </details>
@@ -43,50 +43,55 @@
         <ul class="docs-nav-list">
           <li><a href="/docs/">Overview</a></li>
           <li><a href="/docs/install.html">Install</a></li>
-          <li><a href="/docs/setup.html">Setup</a></li>
-          <li><a href="/docs/delegate.html" aria-current="page">Delegate a task</a></li>
-          <li><a href="/docs/follow.html">Follow a task</a></li>
-          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-          <li><a href="/docs/data.html">Where data lives</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html" aria-current="page">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
         </ul>
       </nav>
 
       <article class="docs-content">
-        <p class="docs-eyebrow">Docs / Delegate a task</p>
-        <h1>Send off your first task</h1>
-        <p class="docs-intro">A task is a prompt, a working directory, and an approved set of files. There are two ways to start one - ask your editor agent, or talk to Oga directly from the terminal.</p>
+        <p class="docs-eyebrow">Docs / Hand off work</p>
+        <h1>Hand off your first piece of work</h1>
+        <p class="docs-intro">You don't fill in a form. You ask the coding agent you already use, in plain language, and it sets the work up for you.</p>
 
-        <h2 id="from-your-agent">From your editor agent</h2>
-        <p>Once Claude Code, Codex, or OpenCode is connected over MCP, it can call Oga's <code>delegate</code> tool on your behalf. Just ask for the work in plain language:</p>
+        <h2 id="ask">Ask for it in plain language</h2>
+        <p>Once your agent is connected, ask for the work the way you'd ask a colleague:</p>
         <div class="docs-callout">
-          <p>"Delegate the failing test suite fix to a fast model."</p>
-          <p>"Send the changelog write-up to opencode while I keep working on the API."</p>
+          <p>"Send the failing test suite off to a fast model."</p>
+          <p>"Have someone else write the changelog while I keep going on the API."</p>
         </div>
-        <p>Your agent writes the brief, names a working directory, and either lets Oga pick the account and model or names one explicitly. It gets back a task ID the moment dispatch succeeds - the worker then runs unattended on its own account.</p>
-        <p>Naming nothing sends the work to your <a href="/docs/setup.html#enable-models">loved model</a> if you've set one; otherwise Oga scores every enabled model on every connected account and picks the best fit for the kind of work described.</p>
+        <p>Your agent writes the brief, names the folder the work happens in, and either lets Oga choose the account and model or names one itself. You get an ID back as soon as the work starts. From there it runs on its own account, unattended.</p>
 
-        <h2 id="from-the-terminal">From the terminal</h2>
-        <p><code>oga oga</code> opens a conversation with an assistant that plans in prose and delegates through Oga for you - no editor needed:</p>
-        <pre><code>oga oga --worker &lt;profile&gt; \
-  --goal "I am adding billing to the API. Plan it, and send the mechanical parts out."</code></pre>
-        <p>The assistant calls <code>delegate</code> with a full brief and a cheap model while you keep typing to it. When a worker finishes, its report lands back in the same conversation.</p>
-        <p><code>--print</code> runs the same session without the full-screen terminal, for scripting or a headless run:</p>
-        <pre><code>oga oga --worker &lt;profile&gt; --print --goal "get the release branch green"</code></pre>
+        <h2 id="worth-it">What's worth handing off</h2>
+        <p>Handing off costs you a brief and a wait. It pays for itself on work with its own finish line — build this screen, port this module, review this branch, research this question. It doesn't pay for a rename, a typo, or a one-line change: by the time you've described those, you could have done them.</p>
+        <p>The same goes for anything you're standing over. Work you'd interrupt every two minutes belongs in your own session.</p>
 
-        <h2 id="what-a-task-can-touch">What a task can touch</h2>
-        <p>Every delegated task carries an approved <strong>scope</strong> - a <code>read</code> and a <code>write</code> list of paths, relative to the working directory. <code>read: ["**"]</code> is the common default; a narrower <code>write</code> list keeps a task's edits inside the directories it's meant to change. Once approved for a project, the same scope is reused on later tasks without asking again.</p>
+        <h2 id="files">What it's allowed to touch</h2>
+        <p>Every piece of work carries the area you approved: what it may read, and what it may change. Reading the whole folder and writing to one part of it is the usual shape.</p>
+        <ul>
+          <li>Naming a folder covers everything inside it.</li>
+          <li><code>**</code> means the whole folder you're working in.</li>
+          <li>A path that doesn't exist yet means only itself. If the work will create files under a new folder, write <code>out/**</code>, not <code>out</code>.</li>
+        </ul>
+        <p>Approving an area once is enough — later work in the same project reuses it without asking again. The area is a permission, not a reading list; which files actually get opened is up to whoever does the work.</p>
+
+        <h2 id="who">Who ends up doing it</h2>
+        <p>Name nothing, and the work goes to your <a href="/docs/setup.html#default-model">loved model</a> if you set one. Otherwise Oga reads what you asked for and picks the best fit among the models you've turned on. Name an account and a model and it goes exactly there.</p>
 
         <div class="docs-next">
-          <a href="/docs/follow.html">Next: Follow a task &rarr;</a>
+          <a href="/docs/follow.html">Next: Check on the work &rarr;</a>
         </div>
       </article>
 
       <aside class="docs-toc" aria-label="On this page">
         <p class="docs-nav-label">On this page</p>
         <ul>
-          <li><a href="#from-your-agent">From your editor agent</a></li>
-          <li><a href="#from-the-terminal">From the terminal</a></li>
-          <li><a href="#what-a-task-can-touch">What a task can touch</a></li>
+          <li><a href="#ask">Ask in plain language</a></li>
+          <li><a href="#worth-it">What's worth handing off</a></li>
+          <li><a href="#files">What it can touch</a></li>
+          <li><a href="#who">Who does it</a></li>
         </ul>
       </aside>
     </div>

@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Watch a delegated task for free, read its full record, answer a question, and resume it.">
+  <meta name="description" content="Be told when work settles, read the full record, answer a question, or pick a task back up.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Follow a task</title>
+  <title>Oga docs - Check on the work</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
@@ -13,7 +13,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header docs-header">
+  <header class="site-header">
     <a class="wordmark" href="/">
       <img src="/logo.svg" alt="Oga logo" width="32" height="32">
       <span aria-hidden="true">Oga</span>
@@ -29,11 +29,11 @@
           <ul class="docs-nav-list">
             <li><a href="/docs/">Overview</a></li>
             <li><a href="/docs/install.html">Install</a></li>
-            <li><a href="/docs/setup.html">Setup</a></li>
-            <li><a href="/docs/delegate.html">Delegate a task</a></li>
-            <li><a href="/docs/follow.html" aria-current="page">Follow a task</a></li>
-            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-            <li><a href="/docs/data.html">Where data lives</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html" aria-current="page">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
           </ul>
         </nav>
       </details>
@@ -43,55 +43,56 @@
         <ul class="docs-nav-list">
           <li><a href="/docs/">Overview</a></li>
           <li><a href="/docs/install.html">Install</a></li>
-          <li><a href="/docs/setup.html">Setup</a></li>
-          <li><a href="/docs/delegate.html">Delegate a task</a></li>
-          <li><a href="/docs/follow.html" aria-current="page">Follow a task</a></li>
-          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-          <li><a href="/docs/data.html">Where data lives</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html" aria-current="page">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
         </ul>
       </nav>
 
       <article class="docs-content">
-        <p class="docs-eyebrow">Docs / Follow a task</p>
-        <h1>Follow a task without paying for it</h1>
-        <p class="docs-intro">A delegated task runs unattended. Following it should cost you nothing while it works - Oga gives you a few ways to check in, from free to full detail.</p>
+        <p class="docs-eyebrow">Docs / Check on the work</p>
+        <h1>Get told, instead of watching</h1>
+        <p class="docs-intro">Work you handed off runs on its own. Waiting for it should cost you nothing — so the point isn't to keep looking, it's to be told the moment something happens.</p>
 
-        <h2 id="watch">Watch: the free default</h2>
-        <p><code>oga watch</code> is a background process that sleeps for free and prints one line the moment a task asks a question, fails, or finishes:</p>
+        <h2 id="be-told">Be told when it's done</h2>
+        <p><code>oga watch</code> waits quietly and prints one line the moment the work asks a question, fails, or finishes. Run it in the background and forget it:</p>
         <pre><code>oga watch 8f2c1a94-... --timeout 30m &amp;</code></pre>
-        <p>It connects to the broker's event socket for instant delivery, and falls back to reading the local store if the socket isn't there. In Claude Code, a backgrounded command that exits re-invokes the agent - so running <code>oga watch</code> in the background <em>is</em> the notification. Several task IDs can be watched at once: <code>oga watch &lt;id&gt; &lt;id&gt; &lt;id&gt;</code>.</p>
+        <p>Waiting costs nothing while it waits. In Claude Code, a background command that finishes wakes the agent up again — so this <em>is</em> the notification. Wait on several at once by naming several IDs: <code>oga watch &lt;id&gt; &lt;id&gt; &lt;id&gt;</code>.</p>
+        <p>The Oga app shows the same thing on screen: what's running, what's waiting on you, and everything that happened inside a run.</p>
 
-        <h2 id="inspect">Inspect: the full record</h2>
-        <p>When you need the complete picture - output, scope, spend, and completion - read one task in full:</p>
+        <h2 id="read-it">Read the whole thing</h2>
+        <p>When you want the full picture — what came back, what the work was allowed to touch, and what it cost:</p>
         <pre><code>oga inspect &lt;task-id&gt;</code></pre>
-        <p><code>oga tasks</code> lists today's tasks by state, so you can find one before inspecting it or starting a new one.</p>
+        <p><code>oga tasks</code> lists today's, so you can find the one you mean first.</p>
 
-        <h2 id="reply">Reply: answer a question</h2>
-        <p>A task can pause on a question mid-run - it lands in a <code>needs_input</code> state. Answering it is a job for your editor agent: ask it to reply to the task, and it calls the <code>reply</code> tool on the same provider session so the worker picks up exactly where it left off.</p>
+        <h2 id="answer">Answer a question it asked</h2>
+        <p>Work can stop partway and ask you something it can't decide on its own. Ask your coding agent to answer it — the reply goes back into the same session, and the work picks up exactly where it stopped rather than starting over.</p>
 
-        <h2 id="resume">Resume: pick a task back up</h2>
-        <p>A task that failed, was cancelled, or is blocked can be retried on its own session - the same files it already read, the same reasoning it already did, are still there:</p>
+        <h2 id="pick-up">Pick it back up</h2>
+        <p>Work that failed, was cancelled, or got stuck can carry on in the same session. The files it already read and the thinking it already did are still there:</p>
         <pre><code>oga resume &lt;task-id&gt;
-oga resume &lt;task-id&gt; -m "the approved area covers tests - continue there"</code></pre>
-        <p>A task that already <strong>completed</strong> can be resumed too, as a follow-up - but an instruction is required, since there's nothing to retry without one:</p>
-        <pre><code>oga resume &lt;task-id&gt; -m "move the state dot to the title's tail"</code></pre>
+oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code></pre>
+        <p>Work that already finished can be picked up too, as a follow-up. Then you have to say what you want different — there's nothing to retry on its own:</p>
+        <pre><code>oga resume &lt;task-id&gt; -m "move the status dot to the end of the title"</code></pre>
 
         <div class="docs-callout">
-          <p>Check <code>oga tasks</code> before starting new work. If a task already owns the file or feature you're about to touch, resume it instead of dispatching a duplicate.</p>
+          <p>Check <code>oga tasks</code> before you start something new. If a piece of work already covers the file or feature you're about to touch, pick that one back up instead of running two against each other.</p>
         </div>
 
         <div class="docs-next">
-          <a href="/docs/worktrees.html">Next: Worktrees &amp; PRs &rarr;</a>
+          <a href="/docs/worktrees.html">Next: Branches &amp; pull requests &rarr;</a>
         </div>
       </article>
 
       <aside class="docs-toc" aria-label="On this page">
         <p class="docs-nav-label">On this page</p>
         <ul>
-          <li><a href="#watch">Watch</a></li>
-          <li><a href="#inspect">Inspect</a></li>
-          <li><a href="#reply">Reply</a></li>
-          <li><a href="#resume">Resume</a></li>
+          <li><a href="#be-told">Be told when it's done</a></li>
+          <li><a href="#read-it">Read the whole thing</a></li>
+          <li><a href="#answer">Answer a question</a></li>
+          <li><a href="#pick-up">Pick it back up</a></li>
         </ul>
       </aside>
     </div>

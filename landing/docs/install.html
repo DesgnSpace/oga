@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Install the Oga app, the oga command line, and the Homebrew tap.">
+  <meta name="description" content="Three ways to get Oga onto your Mac, and how to confirm it's running.">
   <meta name="color-scheme" content="light dark">
   <title>Oga docs - Install</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
@@ -13,7 +13,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header docs-header">
+  <header class="site-header">
     <a class="wordmark" href="/">
       <img src="/logo.svg" alt="Oga logo" width="32" height="32">
       <span aria-hidden="true">Oga</span>
@@ -29,11 +29,11 @@
           <ul class="docs-nav-list">
             <li><a href="/docs/">Overview</a></li>
             <li><a href="/docs/install.html" aria-current="page">Install</a></li>
-            <li><a href="/docs/setup.html">Setup</a></li>
-            <li><a href="/docs/delegate.html">Delegate a task</a></li>
-            <li><a href="/docs/follow.html">Follow a task</a></li>
-            <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-            <li><a href="/docs/data.html">Where data lives</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
           </ul>
         </nav>
       </details>
@@ -43,55 +43,55 @@
         <ul class="docs-nav-list">
           <li><a href="/docs/">Overview</a></li>
           <li><a href="/docs/install.html" aria-current="page">Install</a></li>
-          <li><a href="/docs/setup.html">Setup</a></li>
-          <li><a href="/docs/delegate.html">Delegate a task</a></li>
-          <li><a href="/docs/follow.html">Follow a task</a></li>
-          <li><a href="/docs/worktrees.html">Worktrees &amp; PRs</a></li>
-          <li><a href="/docs/data.html">Where data lives</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
         </ul>
       </nav>
 
       <article class="docs-content">
         <p class="docs-eyebrow">Docs / Install</p>
-        <h1>Install Oga</h1>
-        <p class="docs-intro">Oga requires macOS 14 or later. Windows and Linux are coming soon.</p>
+        <h1>Get Oga onto your Mac</h1>
+        <p class="docs-intro">Oga needs macOS 14 or later. Windows and Linux aren't ready yet.</p>
 
-        <h2 id="curl">Install with curl</h2>
-        <p>Downloads and installs the app in one step:</p>
+        <h2 id="curl">Install in one command</h2>
+        <p>Downloads Oga and puts it in your Applications folder:</p>
         <pre><code>curl -fsSL https://downloads.desgn.space/oga/install.sh | sh</code></pre>
 
         <h2 id="homebrew">Install with Homebrew</h2>
-        <p>Oga ships its own cask through a tap:</p>
+        <p>If you already use Homebrew:</p>
         <pre><code>brew install --cask DesgnSpace/tap/oga</code></pre>
 
-        <h2 id="source">Build from source</h2>
-        <p>For contributors, or to run a build ahead of a release:</p>
+        <h2 id="source">Build it yourself</h2>
+        <p>For contributors, or to run something ahead of a release:</p>
         <pre><code>git clone https://github.com/yondifon/oga.git
 cd oga
 bun install
 make install</code></pre>
-        <p>A source build installs as <strong>Oga (local)</strong>, next to a released Oga without replacing it. Only one can run at a time - they share port <code>7331</code> and <code>~/.oga</code> - so quit one before opening the other. <code>make install</code> quits whichever is open, launches the one it just built, and points <code>oga</code> in <code>~/.local/bin</code> at it.</p>
+        <p>A build of your own installs as <strong>Oga (local)</strong>, alongside a released Oga rather than replacing it. Only one can run at a time — they share the same port and the same folder — so quit one before opening the other. <code>make install</code> quits whichever is open, starts the one it just built, and points the <code>oga</code> command at it.</p>
 
-        <h2 id="confirm">Confirm it's running</h2>
-        <p>The broker answers on <code>127.0.0.1:7331</code> once it's up:</p>
+        <h2 id="confirm">Check that it's running</h2>
+        <p>Opening the app starts everything Oga needs. To confirm it answered:</p>
         <pre><code>curl http://127.0.0.1:7331/health</code></pre>
 
-        <h2 id="cli">The <code>oga</code> command</h2>
-        <p><code>make install</code> links the compiled binary onto your <code>PATH</code> as <code>oga</code>. It carries its own runtime, so every command works with no Bun and no checkout. Run <code>oga</code> with no arguments any time for a list of commands and a first-run walkthrough.</p>
+        <h2 id="cli">Use Oga from the terminal</h2>
+        <p>Oga also gives you an <code>oga</code> command. It carries everything it needs, so it works without a checkout or any other tooling. Run <code>oga</code> on its own to see what it can do and how to start.</p>
 
         <div class="docs-next">
-          <a href="/docs/setup.html">Next: Setup - profiles, accounts, and connecting your agent &rarr;</a>
+          <a href="/docs/setup.html">Next: Set up the accounts that do the work &rarr;</a>
         </div>
       </article>
 
       <aside class="docs-toc" aria-label="On this page">
         <p class="docs-nav-label">On this page</p>
         <ul>
-          <li><a href="#curl">Install with curl</a></li>
-          <li><a href="#homebrew">Install with Homebrew</a></li>
-          <li><a href="#source">Build from source</a></li>
-          <li><a href="#confirm">Confirm it's running</a></li>
-          <li><a href="#cli">The oga command</a></li>
+          <li><a href="#curl">One command</a></li>
+          <li><a href="#homebrew">Homebrew</a></li>
+          <li><a href="#source">Build it yourself</a></li>
+          <li><a href="#confirm">Check it's running</a></li>
+          <li><a href="#cli">From the terminal</a></li>
         </ul>
       </aside>
     </div>
