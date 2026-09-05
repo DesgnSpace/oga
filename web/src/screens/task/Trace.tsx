@@ -26,7 +26,6 @@ import {
   DisclosureIcon,
   FollowUpIcon,
   HandoffIcon,
-  CheckIcon,
   CloseIcon,
   ReplyIcon,
   ResponseIcon,
@@ -198,10 +197,12 @@ function CommandTerminal({
           {output}
         </pre>
       )}
-      <div className="trace-terminal-outcome" role="status">
-        {failed ? <CloseIcon size={14} /> : <CheckIcon size={14} />}
-        {failed ? "Failed" : "Succeeded"}
-      </div>
+      {failed && (
+        <div className="trace-terminal-outcome" role="status">
+          <CloseIcon size={14} />
+          Failed
+        </div>
+      )}
     </div>
   );
 }

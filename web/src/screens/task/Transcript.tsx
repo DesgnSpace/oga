@@ -9,8 +9,13 @@ import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking
 import { ChevronIcon, FollowUpIcon, ReplyIcon, ResponseIcon, SteerIcon } from "@/ui/icons";
 import { AttachmentsRow } from "./Attachments";
 import { ReviewContent } from "./CodeReview";
-import { TraceRows, useShowThinking } from "./Trace";
+import { TraceRows } from "./Trace";
 import type { Bubble, ResponseBlock, TranscriptItem, WorkSegment } from "./transcriptModel";
+
+/** Whether anything in this transcript is worth turning "Show thinking" on for. */
+export function transcriptHasThinking(items: TranscriptItem[]): boolean {
+  return items.some((item) => item.type === "work" && compositionHasThinking(item.segment.composition));
+}
 
 const BUBBLE_MARKER_ICONS = {
   resume: FollowUpIcon,
@@ -229,20 +234,19 @@ function TranscriptRow({ item, cwd }: { item: NonWorkTranscriptItem; cwd?: strin
   }
 }
 
-export function Transcript({ items, cwd }: { items: TranscriptItem[]; cwd?: string }) {
+export function Transcript({
+  items,
+  cwd,
+  showThinking = false,
+}: {
+  items: TranscriptItem[];
+  cwd?: string;
+  showThinking?: boolean;
+}) {
   const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(new Map());
-  const [showThinking, toggleThinking] = useShowThinking();
-  const hasThinking = items.some((item) => item.type === "work" && compositionHasThinking(item.segment.composition));
 
   return (
     <div className="transcript">
-      {hasThinking && (
-        <div className="transcript-options">
-          <button className="text-button" type="button" aria-pressed={showThinking} onClick={toggleThinking}>
-            {showThinking ? "Hide thinking" : "Show thinking"}
-          </button>
-        </div>
-      )}
       {items.map((item) => (
         item.type === "work" ? (
           <TranscriptWork

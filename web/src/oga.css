@@ -131,6 +131,7 @@ a {
 }
 
 .app-shell {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -162,7 +163,11 @@ a {
 }
 
 .toast-viewport {
-    position: fixed;
+    /* Anchored to .app-shell (which already tracks the window's own box)
+       rather than the true viewport: position:fixed combined with the
+       window-zoom feature (menuCommands.ts) miscomputes right/bottom
+       offsets in WebKit, letting the toast render past the window edge. */
+    position: absolute;
     z-index: 1100;
     right: var(--space-4);
     bottom: var(--space-4);
@@ -512,7 +517,8 @@ a {
     margin: 0;
     min-height: auto;
     gap: var(--space-2);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: visible;
 }
 
 .title-bar-row .title-bar-secondary-row .title-bar-secondary-spacer {
@@ -2045,6 +2051,22 @@ h1 {
     line-height: 1;
 }
 
+.composer-thinking-toggle {
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.composer-thinking-toggle:hover,
+.composer-thinking-toggle[aria-pressed="true"] {
+    color: var(--color-accent);
+}
+
 .composer-note {
     margin: 0;
     color: var(--color-text-muted);
@@ -2577,11 +2599,6 @@ h1 {
     border: 0;
 }
 
-.transcript-options {
-    display: flex;
-    justify-content: flex-end;
-    padding-bottom: var(--space-2);
-}
 
 .transcript-work {
     display: flex;

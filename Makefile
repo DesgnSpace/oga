@@ -221,6 +221,7 @@ major minor fix:
 
 _publish: check-publish-tools sync-version
 	@bash scripts/publish.sh
+	@$(MAKE) --no-print-directory deploy-landing
 
 clean:
 	rm -rf $(DIST)

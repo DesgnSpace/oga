@@ -8,6 +8,7 @@ follow it, or operate without the app open.
 | Command | What it does |
 | --- | --- |
 | `oga serve` | Run the local broker. |
+| `oga delegate "<task>"` | Start a task and print its ID. `-` reads the task from stdin. |
 | `oga watch <task-id>...` | Stream task events until a watched task settles. |
 | `oga tail` | Stream broker events. |
 | `oga query "question"` | Find files and symbols. Add `--limit` or `--code`. |
@@ -26,8 +27,20 @@ follow it, or operate without the app open.
 
 ## Task actions
 
-Ask a connected coding agent to delegate new bounded work. It returns a task
-ID. Follow it with:
+Ask a connected coding agent to delegate new bounded work, or start it here:
+
+```sh
+oga delegate "Port the CSV importer to the new parser and keep its tests green."
+oga delegate - < brief.md
+```
+
+`--worker`, `--model`, and `--difficulty` choose who runs it; `--worktree` gives
+it its own checkout and branch; `--cwd` runs it somewhere other than the current
+directory; `--json` prints the task record instead of a line. Scope comes from
+the project's saved grant for that account. With no grant the task falls back to
+the whole directory, and the output says so.
+
+Either way you get a task ID. Follow it with:
 
 ```sh
 oga watch <task-id> --timeout 30m &
