@@ -1,10 +1,5 @@
 # Changelog
 
-All notable changes to Oga are documented here.
-
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and Oga uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## Unreleased
 
 ### Added
@@ -33,28 +28,3 @@ and Oga uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Packaged the broker sidecar for supported macOS architectures.
 - Located the bundled broker beside the app executable.
 - Let Tauri handle app notarization during publishing.
-
-## 0.0.4 - 2026-08-26
-
-### Added
-
-- Linked ignored project paths into task worktrees by default.
-- Kept interrupted work on hold for recovery.
-
-### Fixed
-
-- Preserved task holds during handoff.
-- Settled dependent tasks after direct completion.
-
-## 0.0.3 - 2026-08-24
-
-### Added
-
-- Added the product landing page.
-- Added Pages deployment for the landing site.
-
-## 0.0.2 - 2026-08-24
-
-### Fixed
-
-- Loaded release environment values safely during publishing.

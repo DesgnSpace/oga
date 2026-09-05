@@ -102,7 +102,6 @@ ${nav}
       <article class="docs-content">
         <p class="docs-eyebrow">Docs / Changelog</p>
         <h1>What changed</h1>
-        <p class="docs-intro">Release notes for Oga.</p>
           ${content}
       </article>
     </div>
