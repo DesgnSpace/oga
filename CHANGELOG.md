@@ -4,6 +4,7 @@
 
 ### Added
 
+- Guided new desktop users to connect their AI before delegating work.
 - Add task text search for MCP and `oga tasks --query`.
 - Added per-kind default model rules with `oga love --when`.
 - Added `oga query --limit` and `oga query --code`.
