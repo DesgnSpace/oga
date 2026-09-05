@@ -101,6 +101,8 @@ pub struct DispatchRequest {
     pub caller_id: Option<String>,
     /// The caller's own start time, unparsed. Absent means start now.
     pub start_at: Option<String>,
+    /// Paths handed to the worker alongside the prompt.
+    pub attachments: Vec<String>,
 }
 
 impl DispatchRequest {
@@ -137,6 +139,7 @@ impl DispatchRequest {
             memories: Vec::new(),
             caller_id: None,
             start_at: None,
+            attachments: Vec::new(),
         }
     }
 
@@ -443,6 +446,7 @@ impl Dispatcher {
             queued_follow_ups: None,
             queued_follow_up_items: None,
             hold: None,
+            attachments: request.attachments.clone(),
         };
         let prompt = WorkerPromptInput {
             task: request.prompt,
@@ -1303,6 +1307,9 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
     let completion = task.completion.as_ref().map(encode).transpose()?;
     let attempts = encode(&task.attempts)?;
     let selection = plan.task_selection.as_ref().map(encode).transpose()?;
+    let attachments = (!task.attachments.is_empty())
+        .then(|| encode(&task.attachments))
+        .transpose()?;
     let links = task
         .worktree
         .as_ref()
@@ -1312,7 +1319,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
         .transpose()?;
     store.transaction(|tx| {
         tx.execute(
-            "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 task.id,
                 kind_string(task.kind.unwrap_or(TaskKind::Delegated)),
@@ -1349,6 +1356,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 task.created_at,
                 task.updated_at,
                 selection,
+                attachments,
             ],
         )?;
         for blocker in &plan.dependencies {

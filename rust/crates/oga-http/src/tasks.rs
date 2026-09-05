@@ -42,6 +42,7 @@ pub(crate) struct DispatchBody {
     pub depends_on: Option<Vec<String>>,
     pub on_blocker_failure: Option<OnBlockerFailure>,
     pub start_at: Option<String>,
+    pub attachments: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +164,13 @@ pub(crate) async fn dispatch_body(
             "title must be between 1 and 60 characters",
         ));
     }
+    if let Some(attachments) = &body.attachments
+        && (attachments.len() > 20 || attachments.iter().any(String::is_empty))
+    {
+        return Err(HttpError::bad_request(
+            "attachments must contain at most 20 non-empty paths",
+        ));
+    }
     if !(1..=200).contains(&tldr.chars().count()) {
         return Err(HttpError::bad_request(
             "tldr must be between 1 and 200 characters",
@@ -223,6 +231,7 @@ pub(crate) async fn dispatch_body(
     request.selection = Some(route.decision);
     request.worker_prompt = Some(worker_prompt);
     request.start_at = body.start_at;
+    request.attachments = body.attachments.unwrap_or_default();
     Ok(state.dispatcher.dispatch(request).await?.task)
 }
 

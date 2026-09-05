@@ -12,6 +12,7 @@
 - Added scheduled starts for delegated and resumed work.
 - Added task-specific next-step guidance to MCP responses.
 - Added queued follow-up instructions when a running worker cannot accept them.
+- Showed the files and images handed to a worker beside the request that sent them.
 - Added public documentation for installation, setup, delegation, task follow-up, worktrees, local data, and release notes.
 
 ### Changed

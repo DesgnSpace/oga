@@ -437,6 +437,8 @@ pub struct DispatchRequest {
     pub on_blocker_failure: Option<oga_domain::OnBlockerFailure>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 impl DispatchRequest {

@@ -7,6 +7,7 @@ import { MarkdownContent } from "@/domain/markdown";
 import { compositionHasThinking, type ActivityComposition } from "@/domain/activity";
 import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
 import { ChevronIcon, FollowUpIcon, ReplyIcon, ResponseIcon, SteerIcon } from "@/ui/icons";
+import { AttachmentsRow } from "./Attachments";
 import { ReviewContent } from "./CodeReview";
 import { TraceRows, useShowThinking } from "./Trace";
 import type { Bubble, ResponseBlock, TranscriptItem, WorkSegment } from "./transcriptModel";
@@ -39,7 +40,7 @@ function itemKey(item: TranscriptItem): string {
   }
 }
 
-function TranscriptBubble({ bubble }: { bubble: Bubble }) {
+function TranscriptBubble({ bubble, cwd }: { bubble: Bubble; cwd?: string }) {
   const full = bubble.text;
   const previewRef = React.useRef<HTMLDivElement>(null);
   const [hasMore, setHasMore] = React.useState<boolean>();
@@ -91,6 +92,7 @@ function TranscriptBubble({ bubble }: { bubble: Bubble }) {
             <ReviewContent source={stripTransportMarkup(bubble.rawText)} language="json" />
           </details>
         )}
+        <AttachmentsRow paths={bubble.attachments} cwd={cwd} />
       </div>
     </div>
   );
@@ -216,10 +218,10 @@ function TranscriptWork({
 
 type NonWorkTranscriptItem = Exclude<TranscriptItem, { type: "work" }>;
 
-function TranscriptRow({ item }: { item: NonWorkTranscriptItem }) {
+function TranscriptRow({ item, cwd }: { item: NonWorkTranscriptItem; cwd?: string }) {
   switch (item.type) {
     case "bubble":
-      return <TranscriptBubble bubble={item.bubble} />;
+      return <TranscriptBubble bubble={item.bubble} cwd={cwd} />;
     case "response":
       return <TranscriptResponse block={item.block} question={false} />;
     case "question":
@@ -227,7 +229,7 @@ function TranscriptRow({ item }: { item: NonWorkTranscriptItem }) {
   }
 }
 
-export function Transcript({ items }: { items: TranscriptItem[] }) {
+export function Transcript({ items, cwd }: { items: TranscriptItem[]; cwd?: string }) {
   const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(new Map());
   const [showThinking, toggleThinking] = useShowThinking();
   const hasThinking = items.some((item) => item.type === "work" && compositionHasThinking(item.segment.composition));
@@ -257,7 +259,7 @@ export function Transcript({ items }: { items: TranscriptItem[] }) {
             key={itemKey(item)}
           />
         ) : (
-          <TranscriptRow item={item} key={itemKey(item)} />
+          <TranscriptRow item={item} cwd={cwd} key={itemKey(item)} />
         )
       ))}
     </div>

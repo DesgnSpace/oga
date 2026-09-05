@@ -390,6 +390,13 @@ pub fn tool_list() -> Value {
                 DELEGATE_START_AT_DESCRIPTION,
             ),
         ),
+        (
+            "attachments".into(),
+            described(
+                json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 20 }),
+                "Absolute paths to files or images to hand the worker alongside the prompt, shown next to the request in the task detail screen.",
+            ),
+        ),
     ]);
     field_property(&mut delegate);
     tools.push(tool(

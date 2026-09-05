@@ -348,7 +348,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
                   {state.loadingEarlier && <span className="transcript-load-earlier-spinner" />}
                 </div>
               )}
-              <Transcript items={transcriptItems} />
+              <Transcript items={transcriptItems} cwd={task.cwd} />
             </div>
           </>
         )}

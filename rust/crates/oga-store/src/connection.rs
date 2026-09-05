@@ -10,7 +10,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::schema::{
     LATEST_SCHEMA_VERSION, create_fresh_schema, migrate_v37_to_v38, migrate_v38_to_v39,
-    migrate_v39_to_v40,
+    migrate_v39_to_v40, migrate_v40_to_v41,
 };
 
 pub const BUSY_TIMEOUT_MS: u64 = 5000;
@@ -166,6 +166,7 @@ impl Store {
                 37 => migrate_v37_to_v38(connection)?,
                 38 => migrate_v38_to_v39(connection)?,
                 39 => migrate_v39_to_v40(connection)?,
+                40 => migrate_v40_to_v41(connection)?,
                 _ => break,
             }
             version += 1;
