@@ -14,10 +14,10 @@ Two things reach for it.
 
 ## Check the task list first
 
-Before any new task or continuation, use `tasks` to list active and recent work.
-Resume the task that already owns the same file, feature, or command instead of
-creating a duplicate. If stale child state remains, cancel the child and resume
-the parent with fresh instructions.
+Before any new task or continuation, search active history with
+`tasks(query: "feature, file, or command")`. Resume the matching task instead
+of creating a duplicate. If stale child state remains, cancel the child and
+resume the parent with fresh instructions.
 
 After `resume` returns, start `oga watch <taskId>` immediately. Treat it
 ending or printing an event as the required trigger to call `inspect` before

@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 
 use oga_domain::{
-    ConsumerCursor, MemoryEntry, Profile, ProfileFailure, ProfileSuccess, ScopeGrant, SpendTotals,
-    Task, TaskEvent, TaskHold, TaskKind, TaskScope, TaskState, TaskTurn, TaskTurnStatus,
+    ArchivedFilter, ConsumerCursor, ListOrder, MemoryEntry, Profile, ProfileFailure,
+    ProfileSuccess, ScopeGrant, SpendTotals, StateFilter, Task, TaskEvent, TaskHold, TaskKind,
+    TaskListQuery, TaskMatch, TaskScope, TaskState, TaskTurn, TaskTurnStatus,
 };
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 
@@ -241,6 +242,20 @@ impl Grants<'_> {
 pub struct Tasks<'a> {
     store: &'a Store,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSearchResult {
+    pub id: String,
+    pub matched: TaskMatch,
+    pub state: TaskState,
+    pub title: Option<String>,
+    pub tldr: Option<String>,
+    pub cwd: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub archived_at: Option<String>,
+}
+
 impl Tasks<'_> {
     pub fn insert(&self, task: &Task) -> Result<(), StoreError> {
         let kind = task.kind.unwrap_or(TaskKind::Delegated);
@@ -252,6 +267,94 @@ impl Tasks<'_> {
     pub fn get(&self, id: &str) -> Result<Option<Task>, StoreError> {
         self.store.with_connection(|c| c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at FROM tasks WHERE id=?", [id], task_from_row).optional().map_err(Into::into))
     }
+    pub fn search(&self, query: &TaskListQuery) -> Result<Vec<TaskSearchResult>, StoreError> {
+        let text = query
+            .query
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| StoreError::Refusal("task search needs query".into()))?;
+        let pattern = format!("%{}%", escape_like(text));
+        let mut clauses = vec!["kind != 'orchestrator'".to_owned()];
+        let mut values = vec![pattern.clone(), pattern.clone()];
+
+        match query.archived.unwrap_or(ArchivedFilter::Active) {
+            ArchivedFilter::Active => clauses.push("archived_at IS NULL".into()),
+            ArchivedFilter::Only => clauses.push("archived_at IS NOT NULL".into()),
+            ArchivedFilter::Include => {}
+        }
+        if let Some(state) = &query.state {
+            match state {
+                StateFilter::One(state) => {
+                    clauses.push("state = ?".into());
+                    values.push(state.as_str().into());
+                }
+                StateFilter::Many(states) => {
+                    clauses.push(format!(
+                        "state IN ({})",
+                        std::iter::repeat_n("?", states.len())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ));
+                    values.extend(states.iter().map(|state| state.as_str().to_owned()));
+                }
+            }
+        }
+        if let Some(since) = &query.since {
+            clauses.push("updated_at >= ?".into());
+            values.push(since.clone());
+        }
+        if let Some(until) = &query.until {
+            clauses.push("updated_at < ?".into());
+            values.push(until.clone());
+        }
+        if let Some(profile) = &query.profile {
+            clauses.push("profile_id = ?".into());
+            values.push(profile.clone());
+        }
+        if let Some(parent) = &query.parent {
+            clauses.push("(id = ? OR parent_task_id = ?)".into());
+            values.extend([parent.clone(), parent.clone()]);
+        }
+        clauses.push("(title LIKE ? ESCAPE '\\' COLLATE NOCASE OR tldr LIKE ? ESCAPE '\\' COLLATE NOCASE OR prompt LIKE ? ESCAPE '\\' COLLATE NOCASE)".into());
+        values.extend([pattern.clone(), pattern.clone(), pattern.clone()]);
+        values.extend([pattern.clone(), pattern]);
+
+        let order = if query.order == Some(ListOrder::Oldest) {
+            "ASC"
+        } else {
+            "DESC"
+        };
+        let sql = format!(
+            "SELECT id, state, title, tldr, cwd, created_at, updated_at, archived_at, CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'title' WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'tldr' ELSE 'prompt' END FROM tasks WHERE {} ORDER BY CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, updated_at {order}, id {order}",
+            clauses.join(" AND ")
+        );
+        self.store.with_connection(|connection| {
+            let mut statement = connection.prepare(&sql)?;
+            let rows = statement
+                .query_map(params_from_iter(values.iter()), |row| {
+                    let matched = match row.get::<_, String>(8)?.as_str() {
+                        "title" => TaskMatch::Title,
+                        "tldr" => TaskMatch::Tldr,
+                        _ => TaskMatch::Prompt,
+                    };
+                    let state = decode::<TaskState>(&format!("\"{}\"", row.get::<_, String>(1)?))
+                        .map_err(store_row_error)?;
+                    Ok(TaskSearchResult {
+                        id: row.get(0)?,
+                        matched,
+                        state,
+                        title: row.get(2)?,
+                        tldr: row.get(3)?,
+                        cwd: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                        archived_at: row.get(7)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+    }
     pub fn set_state(&self, id: &str, state: TaskState, now: &str) -> Result<bool, StoreError> {
         self.store.transaction(|tx| {
             Ok(tx.execute(
@@ -260,6 +363,12 @@ impl Tasks<'_> {
             )? != 0)
         })
     }
+}
+
+fn escape_like(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 fn kind_string(kind: TaskKind) -> &'static str {
     match kind {

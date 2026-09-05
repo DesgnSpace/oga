@@ -97,6 +97,7 @@ its own runtime, so every command below works with no Bun and no checkout.
 | `oga serve` | Run the broker. The menu-bar app starts it for you. |
 | `oga watch <task-id>...` | Wait for a task; prints one line when it settles. |
 | `oga inflight` | List the tasks still running, so you know what a restart interrupts. |
+| `oga tasks --query <text>` | Search active task history by title, summary, or prompt. |
 | `oga config [cwd]` | Print the effective config for a directory — profiles, models, routes, worker rules — and which file each setting came from. |
 | `oga love [worker/model]` | Show or set the model used for work that names no model. Add `--clear` to return to per-task selection or `--global` to apply the choice to every project. |
 | `oga version` | Print which build this is. |
@@ -176,7 +177,7 @@ Every tool is available over MCP (`http://127.0.0.1:7331/mcp`) and the REST API.
 | `models` | List preferred, enabled models ready for `delegate`. |
 | `wait` | Block briefly for progress or attention. |
 | `inspect` | Full record of one task. |
-| `tasks` | List tasks by state, time, profile, or fan-out batch. |
+| `tasks` | Search tasks by text, state, time, profile, or fan-out batch. |
 | `reply` | Answer a `needs_input` question on the same provider session. |
 | `resume` | Retry a failed, cancelled, or blocked task on the same session. |
 | `handoff` | Move a dead task to a different profile, keeping the same task ID. |

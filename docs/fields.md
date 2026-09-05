@@ -93,12 +93,12 @@ Before delegating a new task, list recent ones and see just enough to tell
 them apart:
 
 ```
-tasks(fields: ["label"])
+tasks(query: "task file or feature", fields: ["label"])
 ```
 
 Each row returns `{id, state, title, tldr}` (plus `archivedAt` when set) —
-enough to recognise a task that already touched the file or feature, so it can
-be resumed instead of re-delegated.
+plus `match: "title" | "tldr" | "prompt"`, so you can resume a task that
+already touched the file or feature instead of re-delegating.
 
 ### Picking up a dispatched task
 

@@ -114,6 +114,29 @@ fn task(id: &str, state: TaskState) -> Task {
 }
 
 #[tokio::test]
+async fn task_search_returns_the_matching_field() {
+    let (_directory, server) = test_server();
+    let task = task("search-task", TaskState::Completed);
+    insert(&server, &task);
+    server
+        .state()
+        .store
+        .transaction(|connection| {
+            connection.execute(
+                "UPDATE tasks SET title='Search task history' WHERE id=?",
+                [&task.id],
+            )?;
+            Ok(())
+        })
+        .expect("title updates");
+
+    let body = tool_body(&call(&server, "tasks", json!({ "query": "SEARCH" })).await);
+
+    assert_eq!(body[0]["id"], task.id);
+    assert_eq!(body[0]["match"], "title");
+}
+
+#[tokio::test]
 async fn cancelling_a_worktree_task_offers_the_checkout_it_left_behind() {
     let (directory, server) = test_server();
     let checkout = directory.path().join("checkout");
