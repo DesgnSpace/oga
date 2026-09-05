@@ -275,6 +275,21 @@ Two rules carry the semantics:
   layer has; `provider` is required then, and `model` falls back to the
   provider's default.
 
+Profile `env` is one field. A project `env` map replaces the user `env` map
+for that profile, and every value supports a leading `$HOME` or `~`. For a
+Claude profile, set `CLAUDE_CONFIG_DIR` in `env` to choose its account state:
+
+```yaml
+profiles:
+  claude-work:
+    env:
+      CLAUDE_CONFIG_DIR: $HOME/.claude-work
+```
+
+The same resolved environment runs Claude tasks and reads `claude /usage`.
+Without an override, `claude` uses `~/.claude`; every other Claude profile
+uses `~/.<profile-id>`. Log into each directory once with the Claude CLI.
+
 To restrict a project to a chosen set of accounts, name them in `only`. Every
 id it leaves out is excluded in that scope — nothing else narrows the list:
 

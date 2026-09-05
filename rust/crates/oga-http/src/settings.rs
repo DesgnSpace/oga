@@ -22,6 +22,7 @@ use oga_domain::{
     UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
+use oga_providers::environment_for;
 use oga_routing::{
     claude_models, claude_models_from_catalog, format_rfc3339_ms, now_ms, parse_antigravity_models,
     parse_codex_models, parse_opencode_models, parse_opencode_v2_models, parse_pi_models,
@@ -1013,9 +1014,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    for (key, value) in &profile.env {
-        command.env(key, expand_home(value));
-    }
+    command.envs(environment_for(profile));
     let output = timeout(PROVIDER_TIMEOUT, command.output())
         .await
         .map_err(|_| ())?
@@ -1513,13 +1512,17 @@ fn unsupported_usage(profile: &Profile, reason: &str) -> ProfileUsage {
 /// `claude -p "/usage" --output-format json` runs as a local command: zero
 /// API turns, zero cost.
 async fn claude_usage(profile: &Profile) -> ProfileUsage {
+    claude_usage_with_program(profile, "claude").await
+}
+
+async fn claude_usage_with_program(profile: &Profile, program: &str) -> ProfileUsage {
     let Ok(dir) = tempfile::tempdir() else {
         return unsupported_usage(
             profile,
             "claude /usage failed: could not create scratch dir",
         );
     };
-    let mut command = Command::new("claude");
+    let mut command = Command::new(program);
     command
         .args(["-p", "/usage", "--output-format", "json"])
         .current_dir(dir.path())
@@ -1527,9 +1530,7 @@ async fn claude_usage(profile: &Profile) -> ProfileUsage {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    for (key, value) in &profile.env {
-        command.env(key, expand_home(value));
-    }
+    command.envs(environment_for(profile));
     let output = match timeout(USAGE_TIMEOUT, command.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {
@@ -2043,6 +2044,43 @@ mod usage_tests {
         assert_eq!(claude_result_text("{\"result\": \"line one\"}"), "line one");
         assert_eq!(claude_result_text("not json"), "");
         assert_eq!(claude_result_text("{\"other\": 1}"), "");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn claude_usage_uses_the_profile_config_directory() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let program = directory.path().join("claude");
+        fs::write(
+            &program,
+            "#!/bin/sh\ncase \"$CLAUDE_CONFIG_DIR\" in\n  */profile-config) printf '%s\\n' '{\"result\":\"Current session: 77% used\"}' ;;\n  *) printf '%s\\n' '{\"result\":\"no limit lines\"}' ;;\nesac\n",
+        )
+        .expect("fake claude");
+        let mut permissions = fs::metadata(&program).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&program, permissions).expect("make fake claude executable");
+
+        let mut profile = Profile {
+            id: "claude-me".into(),
+            label: "Claude me".into(),
+            provider: Provider::Claude,
+            default_model: "configured-default".into(),
+            enabled: true,
+            env: Default::default(),
+            capabilities: Vec::new(),
+            command: None,
+        };
+        profile
+            .env
+            .insert("CLAUDE_CONFIG_DIR".into(), "/tmp/profile-config".into());
+        let usage =
+            claude_usage_with_program(&profile, program.to_str().expect("utf-8 path")).await;
+
+        assert!(usage.supported);
+        assert_eq!(usage.windows[0].used_percent, 77.0);
     }
 
     #[test]
