@@ -147,6 +147,12 @@ and none of it is configurable:
 - **Whether questions are allowed.** Dispatching with `allowQuestions: false`
   replaces the question marker with an instruction to report blocked instead.
   That is the caller's decision per task, not the project's.
+- **Where a worker stops.** The preamble draws the line: an obstacle that is
+  local, reversible, inside scope and does not change the deliverable — a
+  stray generated file in the way of a checkout, a stale lockfile, a missing
+  directory — is the worker's to clear and report. Only an obstacle needing
+  the caller — a credential, a scope or product decision, an irreversible or
+  out-of-scope action — is a blocker.
 - **The scope line.** It records the caller-approved area and shapes the context
   map. It is not an OS boundary or a reading list.
 - **Section order.** The worker rules section always sits between the scope
