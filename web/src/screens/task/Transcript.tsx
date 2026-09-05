@@ -125,7 +125,7 @@ function TranscriptResponse({ block, question }: { block: ResponseBlock; questio
     return (
       <div className={className}>
         {marker}
-        <p className="detail-response-label">The task failed</p>
+        <p className="detail-response-label">{block.awaitingDecision ? "Waiting on your decision" : "The task failed"}</p>
         <ReviewContent source={block.text} language="plain" />
       </div>
     );

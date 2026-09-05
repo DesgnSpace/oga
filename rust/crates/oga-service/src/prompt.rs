@@ -10,10 +10,12 @@ use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskScope, TaskSta
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const PREAMBLE: [&str; 3] = [
+const PREAMBLE: [&str; 5] = [
     "Worker mode: you are executing an assigned Oga task.",
     "Continue the assigned brief directly. Do not use Oga to delegate, resume, or manage another task, and do not create a child task for the same work.",
     "If a clearly separate continuation is needed, state why it is separate, emit a compact caller-facing pointer with the child task ID and title, and let the caller start `oga watch <childTaskId>` immediately. The caller uses `inspect` after settlement. Do not include prompt or output in the pointer.",
+    "Clear obstacles yourself. When the thing in the way is local, reversible, inside scope, and does not change what the task delivers — a stray generated file blocking a checkout, a stale lockfile, a missing directory, a tool needing a flag — decide, apply the fix, retry, and note it in the report.",
+    "Stop only when the obstacle needs the caller: a credential, a scope or product decision, or an action that is irreversible or outside scope. A blocker is a decision you cannot make, not a step that failed once.",
 ];
 
 const DELIVERY_RULES: [&str; 3] = [
@@ -676,6 +678,20 @@ mod tests {
         assert!(prompt.contains("do the thing"));
         assert!(prompt.contains("src/**"));
         assert!(prompt.contains("OGA_NEEDS_INPUT"));
+    }
+
+    #[test]
+    fn prompt_tells_the_worker_to_clear_recoverable_obstacles() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            ..WorkerPromptInput::default()
+        });
+        assert!(prompt.contains("Clear obstacles yourself"));
+        assert!(prompt.contains("stray generated file blocking a checkout"));
+        assert!(
+            prompt
+                .contains("A blocker is a decision you cannot make, not a step that failed once.")
+        );
     }
 
     #[test]

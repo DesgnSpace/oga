@@ -3,7 +3,7 @@
 // between them as a collapsible block ahead of its reply.
 // Ported from rust/crates/oga-ui/src/task_detail/transcript.rs — keep behavior identical.
 
-import type { Task, TaskAttempt, TaskEventView, TaskState } from "@/bridge/types";
+import type { Task, TaskAttempt, TaskCompletion, TaskEventView, TaskState } from "@/bridge/types";
 import {
   ActivityStory,
   deriveTurnIds,
@@ -41,6 +41,8 @@ export interface ResponseBlock {
   /** `undefined` means settled with nothing to show — "No response yet". */
   text?: string;
   error: boolean;
+  /** An error run that stopped on something only a person can settle, rather than on a failure. */
+  awaitingDecision?: boolean;
   /** Set when this reply follows a follow-up, an answer, a steer, or a
    * handoff — never on the response to the original request. */
   marker?: "response";
@@ -206,10 +208,22 @@ function bubbleFallback(kind: BubbleKind): string {
 /** Reads a past attempt's reply off the attempt row itself, since that is the one place its curated answer lives. */
 function attemptResolver(attempt: TaskAttempt, index: number): (segment: TaskEventView[]) => ResponseBlock | undefined {
   return (segment) => {
-    if (attempt.error) return { id: attemptResponseId(index), text: attempt.error, error: true };
+    if (attempt.error) {
+      return {
+        id: attemptResponseId(index),
+        text: attempt.error,
+        error: true,
+        awaitingDecision: awaitsDecision(attempt.completion),
+      };
+    }
     if (attempt.output !== "") return { id: attemptResponseId(index), text: attempt.output, error: false };
     return messageResponse(segment);
   };
+}
+
+/** A run stopped on a permission or an authority the worker never held is waiting on a person, not broken. */
+function awaitsDecision(completion: TaskCompletion | undefined): boolean {
+  return completion?.code === "permission_denied" || completion?.code === "needs_authority";
 }
 
 /** Sentinel ids for past-attempt responses: negative and below `REQUEST_ID`, never a real event id. */
