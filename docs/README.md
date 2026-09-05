@@ -5,6 +5,7 @@
 | [routing.md](routing.md) | Choosing a profile, model, and effort — `.oga.yaml`, availability, quota |
 | [routing-defaults.md](routing-defaults.md) | What routing does before anyone configures it — the shipped numbers, and what gives way when |
 | [fields.md](fields.md) | Response shape selector — per-tool defaults, group table, worked examples |
+| [next.md](next.md) | What a response tells the caller to do next — the `next` array, and what decides it |
 | [follow-along.md](follow-along.md) | Following a task without paying for it — watch / inspect |
 | [caller-cursor.md](caller-cursor.md) | How a task remembers who dispatched it — the caller column, stdio identity, and delivery resolution |
 | [complete.md](complete.md) | Asserting completion when the worker never attested it |

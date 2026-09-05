@@ -94,7 +94,8 @@ async fn initialize_advertises_protocol_and_instructions() {
     let instructions = response["result"]["instructions"]
         .as_str()
         .expect("instructions");
-    assert!(instructions.contains("stale child state"));
+    assert!(instructions.contains("oga watch <taskId>"));
+    assert!(instructions.contains("Worker mode"));
 }
 
 #[tokio::test]
