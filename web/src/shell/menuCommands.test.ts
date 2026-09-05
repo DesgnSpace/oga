@@ -1,11 +1,7 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { fireEvent } from "@testing-library/react";
 import type { Transport } from "@/bridge/transport";
 import { MENU_EVENT } from "@/bridge/types";
-
-afterEach(() => {
-  localStorage.removeItem("oga:zoom-index");
-});
 
 function fakeTransport() {
   const listeners = new Map<string, Array<(payload: unknown) => void>>();
@@ -157,17 +153,14 @@ describe("subscribeMenuCommands", () => {
     expect(document.documentElement.style.zoom).toBe(before);
   });
 
-  it("persists the zoom level to storage so it survives a reload", async () => {
+  it("opens at actual size on every launch", async () => {
     const fake = fakeTransport();
     const { subscribeMenuCommands } = await freshMenuCommands(fake.transport);
     const sidebar = fakeSidebar();
     subscribeMenuCommands(() => ({ sidebar: sidebar as never, route: { kind: "home" }, navigate: mock() }));
     fake.emit(MENU_EVENT, "zoom-reset");
 
-    fake.emit(MENU_EVENT, "zoom-in");
-
-    // Default zoom index is 2 (the 1.0 step); zoom-in advances it to 3.
-    expect(localStorage.getItem("oga:zoom-index")).toBe("3");
+    expect(document.documentElement.style.zoom).toBe("1");
   });
 
   it("stops reacting to the Cmd+Shift+= shortcut once unsubscribed", async () => {

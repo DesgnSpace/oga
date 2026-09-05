@@ -12,20 +12,13 @@ import { focusTaskSearch } from "./taskSearch";
 
 const ZOOM_STEPS = [0.75, 0.85, 1, 1.1, 1.25, 1.4, 1.6, 1.8, 2] as const;
 const DEFAULT_ZOOM_INDEX = ZOOM_STEPS.indexOf(1);
-const ZOOM_STORAGE_KEY = "oga:zoom-index";
 
-function loadZoomIndex(): number {
-  if (typeof localStorage === "undefined") return DEFAULT_ZOOM_INDEX;
-  const stored = Number(localStorage.getItem(ZOOM_STORAGE_KEY));
-  return Number.isInteger(stored) && stored >= 0 && stored < ZOOM_STEPS.length ? stored : DEFAULT_ZOOM_INDEX;
-}
-
-let zoomIndex = loadZoomIndex();
+// Zoom lasts for the window's lifetime; every launch opens at actual size.
+let zoomIndex = DEFAULT_ZOOM_INDEX;
 
 function applyZoom(): void {
   if (typeof document === "undefined") return;
   (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(ZOOM_STEPS[zoomIndex]);
-  if (typeof localStorage !== "undefined") localStorage.setItem(ZOOM_STORAGE_KEY, String(zoomIndex));
 }
 
 function zoomIn(): void {
