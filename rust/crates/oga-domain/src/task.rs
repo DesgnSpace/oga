@@ -410,6 +410,9 @@ pub struct Task {
     /// Present only while pending: what this task is waiting on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hold: Option<TaskHoldView>,
+    /// Paths handed to the worker alongside the prompt at dispatch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
 }
 
 impl Task {

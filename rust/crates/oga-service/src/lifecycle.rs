@@ -135,7 +135,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
     store.with_connection(|connection| {
         let mut task = connection
             .query_row(
-                "SELECT id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at FROM tasks WHERE id=?",
+                "SELECT id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,attachments_json FROM tasks WHERE id=?",
                 [task_id],
                 task_from_row,
             )
@@ -204,6 +204,11 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             ));
         }
     };
+    let attachments = row
+        .get::<_, Option<String>>(36)?
+        .map(|value| decode_json::<Vec<String>>(&value, 36))
+        .transpose()?
+        .unwrap_or_default();
     Ok(Task {
         id: row.get(0)?,
         kind: Some(kind),
@@ -241,6 +246,7 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         queued_follow_ups: None,
         queued_follow_up_items: None,
         hold: None,
+        attachments,
     })
 }
 

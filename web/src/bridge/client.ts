@@ -151,6 +151,11 @@ export function readImagePreview(path: string): Promise<BridgeResult<ImagePrevie
   return command<ImagePreview>("read_image_preview", { path });
 }
 
+/** Opens an attachment in its OS default app, same as double-clicking it. */
+export function openAttachment(path: string): Promise<BridgeResult<void>> {
+  return command<void>("open_attachment", { path });
+}
+
 /** Grays out or re-enables a native menu item by its `oga-menu-command` id. */
 export function setMenuItemEnabled(id: string, enabled: boolean): Promise<BridgeResult<void>> {
   return command<void>("set_menu_item_enabled", { id, enabled });

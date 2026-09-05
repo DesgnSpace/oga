@@ -265,6 +265,15 @@ export function ChangedFilesIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function AttachmentIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M4 2h5.2L12 4.8V14H4z" />
+      <path d="M6 6.5h4M6 9h4M6 11.5h2.5" />
+    </Svg>
+  );
+}
+
 export function ScopeIcon({ size = 16, className }: IconProps) {
   return (
     <svg

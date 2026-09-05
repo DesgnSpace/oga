@@ -64,6 +64,18 @@ fn read_image_preview(path: String) -> Result<ImagePreview, String> {
     Ok(ImagePreview { bytes, mime })
 }
 
+/// Opens an attachment with the OS's default handler for its file type,
+/// same as double-clicking it in Finder or Explorer.
+#[tauri::command]
+fn open_attachment<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<(), String> {
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|error| format!("Could not open the file: {error}"))
+}
+
 fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("image/png")
@@ -189,6 +201,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             bridge::broker_watch_task,
             bridge::broker_unwatch_task,
             read_image_preview,
+            open_attachment,
             commands::set_menu_item_enabled,
             open_external_link
         ])

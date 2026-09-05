@@ -81,6 +81,7 @@ fn task(id: &str, cwd: &str, state: TaskState) -> Task {
         queued_follow_ups: None,
         queued_follow_up_items: None,
         hold: None,
+        attachments: Vec::new(),
     }
 }
 

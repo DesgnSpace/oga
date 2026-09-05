@@ -254,6 +254,7 @@ impl McpServer {
             .map_err(|error| McpError::InvalidParams(format!("worktree: {error}")))?;
         request.depends_on = string_array(args.get("dependsOn"), "dependsOn")?;
         request.start_at = optional_string(args, "startAt");
+        request.attachments = string_array(args.get("attachments"), "attachments")?;
         request.on_blocker_failure = match optional_string(args, "onBlockerFailure").as_deref() {
             Some("run") => OnBlockerFailure::Run,
             Some("hold") | None => OnBlockerFailure::Hold,

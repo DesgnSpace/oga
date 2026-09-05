@@ -111,6 +111,7 @@ export interface Task {
   queuedFollowUps?: number;
   queuedFollowUpItems?: string[];
   hold?: TaskHoldView;
+  attachments?: string[];
 }
 
 export interface TaskAttempt {

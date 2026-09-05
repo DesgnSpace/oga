@@ -59,6 +59,9 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
     if let Some(hold) = &task.hold {
         view.insert("hold".into(), json!(hold));
     }
+    if !task.attachments.is_empty() {
+        view.insert("attachments".into(), json!(task.attachments));
+    }
 
     if want.contains("profileId") {
         view.insert("profileId".into(), json!(task.profile_id));

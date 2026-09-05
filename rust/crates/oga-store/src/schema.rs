@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 40;
+pub const LATEST_SCHEMA_VERSION: i64 = 41;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -99,7 +99,8 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
        worktree_branch TEXT,
        worktree_links_json TEXT,
        caller_id TEXT,
-       cost_usd_estimated INTEGER
+       cost_usd_estimated INTEGER,
+       attachments_json TEXT CHECK(attachments_json IS NULL OR json_valid(attachments_json))
     );
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
@@ -239,7 +240,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
     );
-     INSERT INTO schema_migrations(version, name) VALUES (40, 'task search indexes');"#;
+     INSERT INTO schema_migrations(version, name) VALUES (41, 'task attachments');"#;
 
 /// One row per file or symbol, with its derived search text written in the same statement.
 const CONTEXT_ENTITIES: &str = r#"      CREATE TABLE context_entities (
@@ -472,6 +473,16 @@ pub fn migrate_v39_to_v40(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS tasks_tldr_nocase ON tasks(tldr COLLATE NOCASE);
         CREATE INDEX IF NOT EXISTS tasks_prompt_nocase ON tasks(prompt COLLATE NOCASE);
         INSERT INTO schema_migrations(version, name) VALUES (40, 'task search indexes');
+        COMMIT;"#,
+    )?;
+    Ok(())
+}
+
+pub fn migrate_v40_to_v41(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"BEGIN IMMEDIATE;
+        ALTER TABLE tasks ADD COLUMN attachments_json TEXT;
+        INSERT INTO schema_migrations(version, name) VALUES (41, 'task attachments');
         COMMIT;"#,
     )?;
     Ok(())

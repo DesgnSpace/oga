@@ -431,6 +431,7 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
         queued_follow_ups: None,
         queued_follow_up_items: None,
         hold: None,
+        attachments: Vec::new(),
     })
 }
 
