@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+
+- Cleaned up the task activity timeline for Claude runs: shell commands now show a short summary instead of the full command line, and consecutive commands fold into one row with a count.
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
 - Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
 - `oga handoff <task-id> --worker <name>` moves a task to another worker or model from the terminal, keeping its id, request, and place in line.

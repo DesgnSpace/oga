@@ -619,14 +619,18 @@ function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
     preview = undefined;
   } else if (event.kind === "command") {
     style = "work";
-    const command = event.presentation?.type === "command" ? event.presentation.command : undefined;
+    const presentation = event.presentation?.type === "command" ? event.presentation : undefined;
     const output = expansion?.type === "command" ? expansion.output : undefined;
     preview = state !== "failed" ? (output !== undefined ? singleLine(output) : undefined) : undefined;
-    target =
-      command ??
+    // The command the run actually issued, not the shell around it — the whole
+    // line is one click away in the terminal below.
+    const subject =
+      presentation?.text ??
+      presentation?.command ??
       event.target ??
       event.detail ??
       (event.title.trim() !== "" ? event.title : undefined);
+    target = subject !== undefined ? relativePaths(subject, cwd) : undefined;
     result = workResult(event, cwd);
   } else if (event.kind === "file" || event.kind === "retry") {
     style = "work";
