@@ -33,7 +33,7 @@ use crate::{
     complete::{self, CompletionAssertion},
     handoff::{self, HandoffRequest},
     holds::{HoldSweep, HoldSweepReport},
-    lifecycle::{self, ActiveRuns, MapFoldHook, NoopMapFoldHook, RunOptions},
+    lifecycle::{self, ActiveRuns, RunOptions},
     prompt::{self, WorkerPromptInput},
     reconcile,
     reply::{self, ReplyRequest},
@@ -96,7 +96,6 @@ pub struct DispatchRequest {
     pub on_blocker_failure: OnBlockerFailure,
     pub selection: Option<SelectionDecision>,
     pub worker_prompt: Option<String>,
-    pub context_map: Option<String>,
     pub memories: Vec<MemoryEntry>,
     pub caller_id: Option<String>,
     /// The caller's own start time, unparsed. Absent means start now.
@@ -135,7 +134,6 @@ impl DispatchRequest {
             on_blocker_failure: OnBlockerFailure::Hold,
             selection: None,
             worker_prompt: None,
-            context_map: None,
             memories: Vec::new(),
             caller_id: None,
             start_at: None,
@@ -213,7 +211,6 @@ pub struct DispatchResult {
 pub struct Dispatcher {
     store: Arc<Store>,
     runner: ProviderRunner,
-    map_fold: Arc<dyn MapFoldHook>,
     active: ActiveRuns,
 }
 
@@ -224,14 +221,8 @@ impl Dispatcher {
         Self {
             store,
             runner,
-            map_fold: Arc::new(NoopMapFoldHook),
             active: ActiveRuns::default(),
         }
-    }
-
-    pub fn with_map_fold_hook(mut self, hook: Arc<dyn MapFoldHook>) -> Self {
-        self.map_fold = hook;
-        self
     }
 
     pub fn store(&self) -> &Arc<Store> {
@@ -461,7 +452,6 @@ impl Dispatcher {
             worker_prompt: request
                 .worker_prompt
                 .unwrap_or_else(|| DEFAULT_WORKER_PROMPT.to_owned()),
-            context_map: request.context_map,
             memories: if request.memories.is_empty() {
                 self.store
                     .repositories()
@@ -561,7 +551,6 @@ impl Dispatcher {
                 task,
                 profile,
                 prompt,
-                dispatcher.map_fold.clone(),
                 RunOptions {
                     session_id,
                     active: dispatcher.active.clone(),

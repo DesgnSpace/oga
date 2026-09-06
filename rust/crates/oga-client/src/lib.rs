@@ -11,10 +11,10 @@ mod loopback;
 use std::{collections::BTreeMap, time::Duration};
 
 use oga_domain::{
-    ArchivedFilter, ConsumerDelivery, ContextFile, Difficulty, EventKind, EventPointer,
-    MemoryEntry, MemoryProject, ProfileFailure, ProfileView, ScopeGrant, SpendTotals, Task,
-    TaskCompletion, TaskEventView, TaskHoldView, TaskScope, TaskState, TaskSummary, TaskTopic,
-    TaskTurn, WorktreeOption,
+    ArchivedFilter, ConsumerDelivery, Difficulty, EventKind, EventPointer, MemoryEntry,
+    MemoryProject, ProfileFailure, ProfileView, ScopeGrant, SpendTotals, Task, TaskCompletion,
+    TaskEventView, TaskHoldView, TaskScope, TaskState, TaskSummary, TaskTopic, TaskTurn,
+    WorktreeOption,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -368,25 +368,9 @@ pub struct ModelSettingsModel {
     pub available_globally: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MapResponse {
-    pub markdown: String,
-    pub files: Vec<ContextFile>,
-    pub omitted: MapOmitted,
-}
-
-/// How many paths the answer left out, not whether it left any out.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MapOmitted {
-    pub outside_scope: u64,
-    pub gone: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MapInitResponse {
+pub struct QueryInitResponse {
     pub file_count: u64,
     pub symbol_count: u64,
     pub partial: bool,
@@ -608,81 +592,13 @@ pub struct ProfilePatch {
     pub env: Option<BTreeMap<String, Value>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MapTier {
-    Skeleton,
-    Full,
-}
-
-impl MapTier {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Skeleton => "skeleton",
-            Self::Full => "full",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MapQuery {
-    pub task: String,
-    pub paths: Vec<String>,
-    pub symbols: Vec<String>,
-    pub depth: Option<u64>,
-    pub question: Option<String>,
-    pub tier: Option<MapTier>,
-    pub limit: Option<u64>,
-    pub code: bool,
-}
-
-impl MapQuery {
-    pub fn new(task: impl Into<String>) -> Self {
-        Self {
-            task: task.into(),
-            ..Self::default()
-        }
-    }
-
-    pub fn path(mut self, path: impl Into<String>) -> Self {
-        self.paths.push(path.into());
-        self
-    }
-
-    pub fn symbol(mut self, symbol: impl Into<String>) -> Self {
-        self.symbols.push(symbol.into());
-        self
-    }
-
-    pub fn depth(mut self, depth: u64) -> Self {
-        self.depth = Some(depth);
-        self
-    }
-
-    pub fn question(mut self, question: impl Into<String>) -> Self {
-        self.question = Some(question.into());
-        self
-    }
-
-    pub fn tier(mut self, tier: MapTier) -> Self {
-        self.tier = Some(tier);
-        self
-    }
-
-    pub fn limit(mut self, limit: u64) -> Self {
-        self.limit = Some(limit);
-        self
-    }
-
-    pub fn code(mut self, code: bool) -> Self {
-        self.code = code;
-        self
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryRequest {
     pub cwd: String,
     pub question: String,
+    /// The task whose read scope the answer must stay inside, when the lookup
+    /// runs for one.
+    pub task: Option<String>,
     pub limit: Option<u64>,
     pub code: bool,
 }
@@ -692,9 +608,15 @@ impl QueryRequest {
         Self {
             cwd: cwd.into(),
             question: question.into(),
+            task: None,
             limit: None,
             code: false,
         }
+    }
+
+    pub fn task(mut self, task: impl Into<String>) -> Self {
+        self.task = Some(task.into());
+        self
     }
 
     pub fn limit(mut self, limit: u64) -> Self {
@@ -709,12 +631,12 @@ impl QueryRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MapInitRequest {
+pub struct QueryInitRequest {
     pub cwd: String,
     pub force: bool,
 }
 
-impl MapInitRequest {
+impl QueryInitRequest {
     pub fn new(cwd: impl Into<String>) -> Self {
         Self {
             cwd: cwd.into(),

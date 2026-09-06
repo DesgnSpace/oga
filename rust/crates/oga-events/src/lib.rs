@@ -2701,7 +2701,7 @@ fn segment_role(segment: &str) -> Segment {
         // reaches for a search tool, and the row reads better saying so.
         "oga" | "oga-cli" => match rest.first().copied() {
             Some("query") => CommandRole::Search,
-            Some("map" | "tasks" | "inspect" | "models" | "health") => CommandRole::Inspect,
+            Some("tasks" | "inspect" | "models" | "health") => CommandRole::Inspect,
             _ => return Segment::Unknown,
         },
         "gh" => match (rest.first().copied(), rest.get(1).copied()) {

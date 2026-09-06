@@ -10,7 +10,7 @@ use std::{
 use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_client::{
     CompletionRequest, DispatchRequest, EventFrame, EventStreamQuery, HandoffRequest,
-    LoopbackClient, MapInitRequest, MapQuery, QueryRequest, ResumeRequest, StateQuery,
+    LoopbackClient, QueryInitRequest, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
     DEFAULT_WORKER_PROMPT, LoveDestination, ResolvedProfiles, canonical_cwd, global_cwd,
@@ -343,10 +343,10 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
                 " incrementally"
             }
         );
-        let mut request = MapInitRequest::new(cwd.display().to_string());
+        let mut request = QueryInitRequest::new(cwd.display().to_string());
         request.force = force;
         let response = client
-            .init_map(&request)
+            .init_query_index(&request)
             .await
             .map_err(|error| query_broker_error(&client, error))?;
         println!(
@@ -380,11 +380,14 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
                 "unknown task: {task_id} — call tasks to list recent task ids"
             )));
         }
-        let request = MapQuery::new(task_id)
-            .question(question)
-            .limit(options.limit)
-            .code(options.code);
-        client.map(&request).await.map(|response| response.markdown)
+        client
+            .query(
+                &QueryRequest::new(cwd.display().to_string(), question)
+                    .task(task_id)
+                    .limit(options.limit)
+                    .code(options.code),
+            )
+            .await
     } else {
         client
             .query(

@@ -1,8 +1,8 @@
 use std::fs;
 
 use oga_context::{
-    BuildOptions, ContextIndex, ContextTarget, LearnRouteProposal, QueryOptions, QuestionOptions,
-    RenderTier, adapters, extract_symbols,
+    BuildOptions, ContextIndex, ContextTarget, LearnRouteProposal, QuestionOptions, adapters,
+    extract_symbols,
 };
 use oga_domain::{SymbolKind, Task, TaskScope};
 use oga_store::Store;
@@ -621,20 +621,9 @@ fn builds_symbols_and_answers_an_exact_name() {
 
     let result = index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("context map builds");
+        .expect("index builds");
     assert_eq!(result.file_count, 1);
     assert_eq!(result.symbol_count, 1);
-
-    let files = index
-        .files(fixture.project.path())
-        .expect("mapped files read");
-    assert_eq!(files[0].path, "src/auth.ts");
-    assert_eq!(files[0].lang, "typescript");
-    assert_eq!(files[0].symbols[0].name, "checkAuth");
-    assert_eq!(
-        files[0].symbols[0].doc.as_deref(),
-        Some("Verify the caller token.")
-    );
 
     let result = index
         .question(&fixture.target(), "where is checkAuth handled")
@@ -651,7 +640,7 @@ fn reports_an_honest_miss() {
     let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("context map builds");
+        .expect("index builds");
 
     let result = index
         .question(&fixture.target(), "kubernetes ingress controller")
@@ -676,7 +665,7 @@ fn limits_question_results_and_reads_current_source_for_code() {
     let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("context map builds");
+        .expect("index builds");
 
     let result = index
         .question_with_options(
@@ -706,7 +695,7 @@ fn filters_scope_and_reconciles_a_move() {
     let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("context map builds");
+        .expect("index builds");
 
     let target = ContextTarget::new(
         fixture.project.path(),
@@ -716,17 +705,12 @@ fn filters_scope_and_reconciles_a_move() {
         },
     );
     let result = index
-        .list(
-            &target,
-            &QueryOptions {
-                paths: vec!["src/".into()],
-                tier: Some(RenderTier::Index),
-                ..QueryOptions::default()
-            },
-        )
-        .expect("scoped map reads");
-    assert_eq!(result.files.len(), 1);
-    assert_eq!(result.outside_scope, 1);
+        .question(&target, "where is other")
+        .expect("scoped question answers");
+    assert!(
+        result.candidates.is_empty(),
+        "src/other.ts is outside the task's read scope"
+    );
 
     fs::rename(
         fixture.project.path().join("src/auth.ts"),
@@ -735,17 +719,13 @@ fn filters_scope_and_reconciles_a_move() {
     .expect("source file moves");
     let result = index
         .reconcile(fixture.project.path(), BuildOptions::default())
-        .expect("context map reconciles");
+        .expect("index reconciles");
     assert!(result.changed);
     assert_eq!(result.moved, 1);
-    let paths = index
-        .files(fixture.project.path())
-        .expect("reconciled files read")
-        .into_iter()
-        .map(|file| file.path)
-        .collect::<Vec<_>>();
-    assert!(paths.contains(&"src/verify.ts".into()));
-    assert!(!paths.contains(&"src/auth.ts".into()));
+    let moved = index
+        .question(&fixture.target(), "where is checkAuth handled")
+        .expect("question follows the move");
+    assert_eq!(moved.candidates[0].path, "src/verify.ts");
 }
 
 #[test]
@@ -756,7 +736,7 @@ fn a_learned_route_outranks_everything_the_parser_found() {
     let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("context map builds");
+        .expect("index builds");
 
     let learned = index
         .learn_routes(
@@ -810,7 +790,7 @@ fn learned_routes_follow_symbol_renames() {
     let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("context map builds");
+        .expect("index builds");
     index
         .learn_routes(
             &fixture.task(),
@@ -1074,7 +1054,7 @@ fn marks_the_file_budget_as_partial() {
                 max_symbols: 5_000,
             },
         )
-        .expect("partial context map builds");
+        .expect("partial index builds");
     assert!(result.partial);
     assert_eq!(result.file_count, 1);
 }

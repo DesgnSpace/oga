@@ -21,15 +21,17 @@ task:
 
 - `{{brief}}` — the task itself.
 - `{{scope}}` — what the work may read and change.
-- `{{context_map}}` — the code map, or nothing when there is none.
 - `{{memories}}` — the project facts section, or nothing when there are none.
 - `{{attribution}}` — the supervision stamp section, or nothing when off.
 - `{{reporting}}` — how the worker signals questions and blockers.
 - `{{task_id}}`, `{{provider}}`, `{{model}}`, `{{effort}}` — the run itself.
 
-Anything else in `{{braces}}` is left exactly as written. The section
-placeholders expand to a whole section or nothing, since there is no
-conditional syntax to skip a heading with.
+Anything else in `{{braces}}` is left exactly as written, so a typo shows up
+instead of disappearing. The one exception is `{{context_map}}`, which Oga
+used to fill and no longer does: a prompt that still names it renders nothing
+there rather than printing the words. The section placeholders expand to a
+whole section or nothing, since there is no conditional syntax to skip a
+heading with.
 
 One thing is structurally required, because without it there is no
 delegation to perform: the task slot. A prompt without `{{brief}}` gets the

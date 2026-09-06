@@ -205,8 +205,7 @@ pub use holds::{
     due_holds, get_hold, touch_hold,
 };
 pub use lifecycle::{
-    ActiveRuns, LifecycleError, MapFoldHook, NoopMapFoldHook, RunOutcome, run_task,
-    run_task_and_release, run_task_with_hook,
+    ActiveRuns, LifecycleError, RunOutcome, run_task, run_task_and_release, run_task_with_prompt,
 };
 pub use prompt::{
     WorkerOutcome, WorkerPromptInput, assemble_worker_prompt, classify_failure,

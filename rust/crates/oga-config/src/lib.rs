@@ -30,7 +30,7 @@ pub const PROMPTS_KEY: &str = "prompts";
 /// The worker prompt a fresh settings file starts from, editable in Settings
 /// or overridden per project from `.oga.yaml`. It is a default, not a frame:
 /// plain text that is sent as written once `{{brief}}`, `{{scope}}`,
-/// `{{context_map}}`, `{{memories}}`, `{{attribution}}`, and `{{reporting}}`
+/// `{{memories}}`, `{{attribution}}`, and `{{reporting}}`
 /// are filled in per task, with the run itself as `{{task_id}}`,
 /// `{{provider}}`, `{{model}}`, `{{effort}}`. A user who deletes everything
 /// and writes one sentence gets one sentence sent. Code adds nothing except
@@ -57,8 +57,6 @@ pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "11. Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.\n",
     "12. Run the relevant checks before reporting completion, and say what you ran. Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.\n",
     "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`. After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists.\n",
-    "\n",
-    "{{context_map}}\n",
     "\n",
     "{{memories}}\n",
     "\n",
@@ -1400,7 +1398,7 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
 
 /// The worker prompt one `.oga.yaml` writes for its own scope: plain text
 /// that is sent as written, with `{{brief}}` marking where the task lands,
-/// alongside `{{scope}}`, `{{context_map}}`, `{{memories}}`,
+/// alongside `{{scope}}`, `{{memories}}`,
 /// `{{attribution}}`, `{{reporting}}`, and the run itself as `{{task_id}}`,
 /// `{{provider}}`, `{{model}}`, `{{effort}}`. A value without `{{brief}}`
 /// keeps working: resolution gives it the slot first through
