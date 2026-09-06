@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- Dialogs now dim everything behind them: page scrollbars and menus no longer float above the overlay while a settings or usage window is open.
 - The follow-up box now keeps your text if a send fails, disables itself while sending, and lets Escape clear a draft.
 - The keyboard hint under the follow-up box now names the action it actually triggers (queue, reply, or continue) instead of always saying "send".
 - Fixed the read-only scope indicator on the follow-up box showing the same "active" color as the editable one.

@@ -6,6 +6,7 @@ import { Modal } from "./Modal";
 afterEach(() => {
   cleanup();
   document.body.style.overflow = "";
+  document.body.classList.remove("modal-open");
 });
 
 function Harness() {
@@ -77,5 +78,37 @@ describe("Modal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("marks the body while open so the page behind stands down", () => {
+    render(<Harness />);
+    expect(document.body.classList.contains("modal-open")).toBe(false);
+
+    fireEvent.click(screen.getByText("Open settings"));
+    expect(document.body.classList.contains("modal-open")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(document.body.classList.contains("modal-open")).toBe(false);
+  });
+
+  it("keeps the mark until the last of several open dialogs closes", () => {
+    const { rerender } = render(
+      <>
+        <Modal open onClose={() => {}} labelledBy="first-title">
+          <h1 id="first-title">First</h1>
+        </Modal>
+        <Modal open onClose={() => {}} labelledBy="second-title">
+          <h1 id="second-title">Second</h1>
+        </Modal>
+      </>,
+    );
+    expect(document.body.classList.contains("modal-open")).toBe(true);
+
+    rerender(
+      <Modal open onClose={() => {}} labelledBy="second-title">
+        <h1 id="second-title">Second</h1>
+      </Modal>,
+    );
+    expect(document.body.classList.contains("modal-open")).toBe(true);
   });
 });
