@@ -285,6 +285,15 @@ pub fn choose_model(
     // keyed to the prompt's own read, since those exist to catch a caller
     // under-stating the work, not to be told what to think by it.
     let kind_from_caller = options.kind.is_some();
+    // Three tiers, in order: the caller's own class, else the class the
+    // prompt confidently reads, else general. `demand.task_class` already is
+    // that second-and-third tier collapsed into one value — `general` carries
+    // no signals of its own in the classifier's table, so it is the fold's
+    // starting point and never something a prompt scores its way into; every
+    // class the prompt confidently reads outscores it, and matching nothing
+    // leaves it exactly where it started. A rule pinned to `general` is
+    // therefore what a caller's blank kind and an illegible prompt both land
+    // on, without the classifier's own reads ever being second-guessed.
     let love_class = options
         .kind
         .and_then(WorkKind::as_class)

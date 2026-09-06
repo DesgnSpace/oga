@@ -2427,6 +2427,59 @@ fn a_caller_named_class_reaches_its_loved_model_over_the_prompts_own_read() {
     );
 }
 
+// Nobody named a kind, and the prompt reads as nothing in particular: the
+// rule pinned to general is what runs, not the catch-all — general is the
+// floor, not one class among equals. A prompt that does read confidently
+// still outranks it, with no kind named either way.
+#[test]
+fn a_blank_kind_over_an_illegible_prompt_floors_at_general() {
+    let catalog = models();
+    let workers = profiles();
+    let settings = love_rules(vec![
+        rule("sonnet", Some("claude"), &[WorkKind::General], None),
+        rule(
+            "opencode/big-pickle",
+            Some("opencode"),
+            &[WorkKind::Build],
+            None,
+        ),
+        rule("haiku", Some("claude"), &[], None),
+    ]);
+
+    // Nothing about this prompt reads as any class in particular.
+    let floored = choose_model(
+        "Draft the release notes from this changelog.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(floored.model, "sonnet", "{}", floored.reason);
+    assert!(
+        floored.reason.contains("loved for general work"),
+        "{}",
+        floored.reason
+    );
+    assert!(
+        !floored.reason.contains("the kind you named"),
+        "{}",
+        floored.reason
+    );
+
+    // The same prompt, still with no stated kind, reading as build work:
+    // the classifier's own confident read still wins over the general floor.
+    let read = choose_model(
+        "Implement the thing described in the plan.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(read.model, "opencode/big-pickle", "{}", read.reason);
+}
+
 #[test]
 fn classification_matches_the_shipped_signal_table() {
     assert_eq!(
