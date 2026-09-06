@@ -10,18 +10,14 @@ use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskScope, TaskSta
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const PREAMBLE: [&str; 5] = [
+/// The mechanical core no worker runs without: the role it is in, and the ban
+/// on handing its own brief onward. A worker that could delegate, resume, or
+/// manage tasks would loop work back into the broker on its own account, so
+/// this stays in code. Everything else — obstacles, lookup habits, delivery —
+/// ships as editable worker rules the user can rewrite or delete.
+const PREAMBLE: [&str; 2] = [
     "Worker mode: you are executing an assigned Oga task.",
     "Continue the assigned brief directly. Do not use Oga to delegate, resume, or manage another task, and do not create a child task for the same work.",
-    "If a clearly separate continuation is needed, state why it is separate, emit a compact caller-facing pointer with the child task ID and title, and let the caller start `oga watch <childTaskId>` immediately. The caller uses `inspect` after settlement. Do not include prompt or output in the pointer.",
-    "Clear obstacles yourself. When the thing in the way is local, reversible, inside scope, and does not change what the task delivers — a stray generated file blocking a checkout, a stale lockfile, a missing directory, a tool needing a flag — decide, apply the fix, retry, and note it in the report.",
-    "Stop only when the obstacle needs the caller: a credential, a scope or product decision, or an action that is irreversible or outside scope. A blocker is a decision you cannot make, not a step that failed once.",
-];
-
-const DELIVERY_RULES: [&str; 3] = [
-    "Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.",
-    "Commit the work, push the branch, and open a pull request with `gh pr create --base main`.",
-    "After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists.",
 ];
 
 /// Where a worker's stamp points back to.
@@ -121,8 +117,6 @@ fn attribution_lines(attribution: &WorkerAttribution) -> Vec<String> {
     ]
 }
 
-const DISCOVERY_POINTER: &str = "Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.";
-
 /// Inputs for the full prompt sent to a fresh provider session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkerPromptInput {
@@ -154,12 +148,7 @@ pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
         .iter()
         .map(|line| (*line).to_owned())
         .collect::<Vec<_>>();
-    parts.extend([
-        String::new(),
-        DISCOVERY_POINTER.to_owned(),
-        String::new(),
-        input.task.clone(),
-    ]);
+    parts.extend([String::new(), input.task.clone()]);
     if let Some(scope) = &input.scope {
         parts.extend([String::new(), scope_line(scope)]);
     }
@@ -191,8 +180,6 @@ pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
             facts,
         ]);
     }
-    parts.extend([String::new(), "## Delivery".into()]);
-    parts.extend(DELIVERY_RULES.iter().map(|rule| (*rule).to_owned()));
     if let Some(attribution) = &input.attribution {
         parts.extend([String::new(), "## Attribution".into()]);
         parts.extend(attribution_lines(attribution));
@@ -205,7 +192,6 @@ pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
         } else {
             "Do not ask questions. If required information or authority is missing, report a blocked result.".into()
         },
-        "Before signing off, verify the work: run relevant checks available in your environment and report each check and result in TL;DR; quote failures exactly.".into(),
         "Before signing off, run `oga relearn '<json>'` exactly once, where `<json>` is an array of `{\"hints\":[...],\"path\":\"<file you actually read>\",\"symbol\":\"<optional symbol in it>\"}`. `hints` are the words that identify each location — order does not matter. Pass every reusable source route learned this run, or `[]` if none. Never pass the placeholder shape itself.".into(),
         "If work cannot be completed, end with: OGA_BLOCKED: <permission_denied|needs_authority|worker_error> | <short reason>".into(),
     ]);
@@ -803,17 +789,18 @@ mod tests {
     }
 
     #[test]
-    fn prompt_tells_the_worker_to_clear_recoverable_obstacles() {
+    fn prompt_keeps_only_the_mechanical_core() {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Clear obstacles yourself"));
-        assert!(prompt.contains("stray generated file blocking a checkout"));
-        assert!(
-            prompt
-                .contains("A blocker is a decision you cannot make, not a step that failed once.")
-        );
+        assert!(prompt.contains("Worker mode: you are executing an assigned Oga task."));
+        assert!(prompt.contains("Do not use Oga to delegate"));
+        assert!(!prompt.contains("Clear obstacles yourself"));
+        assert!(!prompt.contains("stray generated file blocking a checkout"));
+        assert!(!prompt.contains("oga query"));
+        assert!(!prompt.contains("gh pr create"));
+        assert!(!prompt.contains("## Delivery"));
     }
 
     #[test]

@@ -13,6 +13,12 @@ worker:
 The project prompt replaces the prompt configured for that project. Use
 `oga config` to inspect the effective worker rules.
 
+The starting rules live in Settings, where you can rewrite or delete them.
+They cover how workers treat small reversible obstacles, how they look code
+up (`oga query` first), and how they deliver (checks, then a commit, a push,
+and a pull request). If you already customized your rules, an upgrade never
+touches them; if you never did, the new defaults arrive on their own.
+
 Worker rules should state durable project conventions and delivery expectations.
 Do not put credentials or temporary task status in them.
 

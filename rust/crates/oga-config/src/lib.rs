@@ -27,6 +27,12 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
+/// The worker rules a fresh settings file starts from, editable in Settings
+/// or overridden per project from `.oga.yaml`. Everything here is house
+/// style a user may rewrite or delete: how workers treat obstacles, how they
+/// look code up, and how they deliver. The prompt assembly in code keeps only
+/// what the system itself needs — the worker role, the ban on delegating its
+/// own brief onward, and the result markers the broker parses.
 pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "1. Blocked means stop. A command that will not run, a missing credential, an account or signup, a permission denial, a path outside your scope, a decision this brief does not answer — stop and report it, naming the blocker and the one decision you need.\n",
     "2. Do not work around a blocker. No retry loops, no second tool for the same job, no creating accounts, no linking or authenticating anything, no faking or stubbing the result. Stop, finish what does not depend on it, then report the exact command or path and say whether you need the caller to decide or to run it and return the output.\n",
@@ -35,7 +41,12 @@ pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "5. Open your final report with `## TL;DR` — 1-3 plain-language sentences stating what was done or found and the outcome. Detail follows after; this applies to your final answer, not to intermediate messages.\n",
     "6. Write that TL;DR as bullets — one idea per line, never a paragraph — and make it stand alone: no bullet may need the detail below it to make sense.\n",
     "7. Keep it to roughly ten lines or fewer: the verdict; what the work did or decided, one meaningful line per decision; checks run and their results, quoting failures exactly; and what is left, broken, or uncertain, or \"nothing\".\n",
-    "8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks."
+    "8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks.\n",
+    "9. Clear local, reversible obstacles yourself — a stray generated file blocking a checkout, a stale lockfile, a missing directory, a tool needing a flag — decide, apply the fix, retry, and note it in the report. Stop only when the obstacle needs the caller: a credential, a scope or product decision, or an action that is irreversible or outside scope. A blocker is a decision you cannot make, not a step that failed once.\n",
+    "10. If a clearly separate continuation is needed, state why it is separate and emit a compact caller-facing pointer with the child task ID and title, so the caller can start `oga watch <childTaskId>` and inspect after settlement. Do not include prompt or output in the pointer.\n",
+    "11. Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.\n",
+    "12. Run the relevant checks before reporting completion, and say what you ran. Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.\n",
+    "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`. After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists."
 );
 
 fn yaml_key(value: &serde_yaml::Value) -> Option<&str> {
@@ -1752,6 +1763,15 @@ mod tests {
         assert!(!resolve_worker_attribution(Some(false), Some(true)));
         assert!(!resolve_worker_attribution(None, Some(false)));
         assert!(resolve_worker_attribution(Some(true), Some(false)));
+    }
+
+    #[test]
+    fn editable_default_carries_the_house_style() {
+        assert!(DEFAULT_WORKER_PROMPT.contains("Clear local, reversible obstacles yourself"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("oga query"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("oga relearn"));
+        assert!(!DEFAULT_WORKER_PROMPT.contains("Do not use Oga to delegate"));
     }
 
     #[test]
