@@ -1290,6 +1290,7 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                     json!({
                         "id": model.id,
                         "label": model.label,
+                        "contextWindow": model.context_window,
                         "enabled": enabled,
                         "inheritedEnabled": inherited_enabled,
                         "hasEnabledOverride": project_model.as_ref().is_some_and(|setting| setting.enabled.is_some()),

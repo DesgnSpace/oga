@@ -5,6 +5,7 @@
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
 - Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
 - Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
+- The task footer now shows how full the worker's context is, and how far it has grown since the run started.
 
 ### Fixed
 
