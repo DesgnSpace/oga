@@ -77,15 +77,13 @@ env = os.environ
 platform = {"signature": env["SIGNATURE"], "url": env["ARCHIVE_URL"]}
 with open(env["CHANGELOG"]) as f:
     changelog = f.read()
-match = re.search(r"^## " + re.escape(env["VERSION"]) + r"(?:\\s+-[^\\n]*)?\\n(.*?)(?=^## |\\Z)", changelog, re.MULTILINE | re.DOTALL)
-if not match:
-    raise SystemExit(f"release notes missing for version {env['VERSION']}")
-notes = match.group(1).strip()
+match = re.search(r"^## " + re.escape(env["VERSION"]) + r"(?:\s+-[^\n]*)?\n(.*?)(?=^## |\Z)", changelog, re.MULTILINE | re.DOTALL)
+notes = match.group(1).strip() if match else ""
 with open(env["MANIFEST"], "w") as f:
     json.dump({"version": env["VERSION"], "notes": notes, "pub_date": env["RELEASED_AT"], "platforms": {"darwin-aarch64": platform, "darwin-x86_64": platform}}, f, indent=2)
     f.write("\n")
 with open(env["LATEST"], "w") as f:
-    json.dump({"version": env["VERSION"], "url": env["ZIP_URL"], "dmgUrl": env["DMG_URL"], "releasedAt": env["RELEASED_AT"]}, f)
+    json.dump({"version": env["VERSION"], "url": env["ZIP_URL"], "dmgUrl": env["DMG_URL"], "releasedAt": env["RELEASED_AT"], "notes": notes}, f)
     f.write("\n")
 with open(env["EXISTING_JSON"]) as f:
     existing = json.load(f)
