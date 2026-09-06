@@ -213,6 +213,24 @@ pub fn router(state: HttpState) -> Router {
         .with_state(state)
 }
 
+/// Run a handler's blocking work on the blocking pool instead of the async
+/// executor. The runtime has one worker thread per core, so a handful of
+/// handlers walking the filesystem or driving SQLite inline is enough to pin
+/// every one of them and stall every other request, streams included.
+pub(crate) async fn run_blocking<T, F>(work: F) -> Result<T, HttpError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, HttpError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|error| {
+            Err(HttpError::internal(format!(
+                "the broker could not finish this request: {error}"
+            )))
+        })
+}
+
 pub(crate) fn parse_json<T: DeserializeOwned>(body: &[u8]) -> Result<T, HttpError> {
     serde_json::from_slice(body).map_err(|_| HttpError::bad_request("invalid JSON body"))
 }

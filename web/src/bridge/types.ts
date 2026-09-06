@@ -465,6 +465,8 @@ export interface PromptConfig {
 export interface ModelSettingsModel {
   id: string;
   label: string;
+  /** The model's published window, when the catalog knows one. Absent means unknown, never zero. */
+  contextWindow?: number;
   enabled: boolean;
   inheritedEnabled: boolean;
   hasEnabledOverride: boolean;

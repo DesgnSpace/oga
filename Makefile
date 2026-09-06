@@ -184,15 +184,19 @@ install: app-bundle
 		fi; \
 	fi
 
-# Local asset links get a version query so the edge cache cannot serve an
-# older stylesheet or image next to new HTML.
+# Local preview only, written under dist/ next to deploy output.
 changelog:
-	bun scripts/changelog-to-html.mjs
+	mkdir -p $(DIST)
+	bun scripts/changelog-to-html.mjs $(DIST)/changelog.html
 
-deploy-landing: changelog
+deploy-landing:
 	rm -rf $(DIST)/landing
 	mkdir -p $(DIST)
 	cp -R landing $(DIST)/landing
+	bun scripts/changelog-to-html.mjs $(DIST)/landing/docs/changelog.html
+	rm $(DIST)/landing/docs/changelog.template.html
+	# Local asset links get a version query so the edge cache cannot serve an
+	# older stylesheet or image next to new HTML.
 	sed -i '' -E 's/(src|srcset|href)="([A-Za-z0-9_./-]+\.(css|png|svg))"/\1="\2?v=$(BUILD_STAMP)"/g' $(DIST)/landing/index.html
 	bunx wrangler pages deploy $(DIST)/landing --project-name oga --env-file /dev/null
 

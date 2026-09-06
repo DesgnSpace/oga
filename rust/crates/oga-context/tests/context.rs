@@ -1,11 +1,10 @@
 use std::fs;
-use std::time::Duration;
 
 use oga_context::{
     BuildOptions, ContextIndex, ContextTarget, LearnRouteProposal, QueryOptions, QuestionOptions,
-    RenderTier, clean_comment, extract_symbols,
+    RenderTier, adapters, extract_symbols,
 };
-use oga_domain::{SourceLang, Task, TaskScope};
+use oga_domain::{SymbolKind, Task, TaskScope};
 use oga_store::Store;
 use tempfile::{TempDir, tempdir};
 
@@ -40,10 +39,269 @@ impl Fixture {
         )
         .expect("other fixture writes");
     }
+
+    fn task(&self) -> Task {
+        Task {
+            id: "task-context".into(),
+            profile_id: "profile-context".into(),
+            model: "model-context".into(),
+            cwd: self.project.path().display().to_string(),
+            scope: everything(),
+            ..Task::default()
+        }
+    }
+
+    fn target(&self) -> ContextTarget {
+        ContextTarget::new(self.project.path(), everything())
+    }
+}
+
+fn everything() -> TaskScope {
+    TaskScope {
+        read: vec!["**".into()],
+        write: vec!["**".into()],
+    }
+}
+
+fn names(path: &str, source: &str) -> Vec<String> {
+    extract_symbols(path, source)
+        .expect("an adapter owns the fixture")
+        .symbols
+        .into_iter()
+        .map(|symbol| symbol.name)
+        .collect()
 }
 
 #[test]
-fn builds_symbols_and_ranks_exact_questions() {
+fn every_adapter_query_compiles_for_every_extension_it_claims() {
+    for adapter in adapters() {
+        for extension in adapter.extensions() {
+            let path = format!("fixture.{extension}");
+            assert!(
+                extract_symbols(&path, "").is_some(),
+                "{} rejected .{extension}",
+                adapter.name()
+            );
+        }
+    }
+}
+
+#[test]
+fn extracts_rust_declarations_of_every_kind() {
+    let source = [
+        "//! Module docs.",
+        "/// The build budget.",
+        "pub const BUILD_BUDGET: u64 = 2;",
+        "static COUNTER: u32 = 0;",
+        "pub struct Parsed {",
+        "    pub count: usize,",
+        "}",
+        "pub enum Kind { Fn, Class }",
+        "pub trait Adapter { fn name(&self) -> &'static str; }",
+        "impl Adapter for Rust {",
+        "    fn name(&self) -> &'static str { \"rust\" }",
+        "}",
+        "pub type Alias = Result<(), String>;",
+        "pub mod inner { pub fn helper() {} }",
+        "macro_rules! shout { () => {} }",
+        "pub fn extract(source: &str) -> usize { let local = 1; local }",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("src/lib.rs", &source).expect("rust parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "BUILD_BUDGET"),
+            (SymbolKind::Static, "COUNTER"),
+            (SymbolKind::Struct, "Parsed"),
+            (SymbolKind::Field, "Parsed::count"),
+            (SymbolKind::Enum, "Kind"),
+            (SymbolKind::Variant, "Kind::Fn"),
+            (SymbolKind::Variant, "Kind::Class"),
+            (SymbolKind::Trait, "Adapter"),
+            (SymbolKind::Method, "Adapter::name"),
+            (SymbolKind::Impl, "Rust"),
+            (SymbolKind::Method, "Rust::name"),
+            (SymbolKind::Type, "Alias"),
+            (SymbolKind::Module, "inner"),
+            (SymbolKind::Fn, "inner::helper"),
+            (SymbolKind::Macro, "shout"),
+            (SymbolKind::Fn, "extract"),
+        ]
+    );
+    let budget = &extracted.symbols[0];
+    assert_eq!(budget.doc.as_deref(), Some("The build budget."));
+    assert_eq!(budget.signature, "pub const BUILD_BUDGET: u64 = 2;");
+    assert!(budget.exported);
+    assert!(!extracted.symbols[1].exported);
+}
+
+#[test]
+fn skips_rust_test_modules_and_test_cases() {
+    let source = [
+        "pub fn ship() {}",
+        "#[test]",
+        "fn ship_sends_everything() {}",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    fn helper_that_should_not_answer_questions() {}",
+        "}",
+    ]
+    .join("\n");
+    assert_eq!(names("src/lib.rs", &source), vec!["ship"]);
+}
+
+#[test]
+fn extracts_typescript_and_tsx_declarations() {
+    let source = [
+        "export const MAX_ROWS = 50;",
+        "export type TaskState = \"queued\" | \"running\";",
+        "export interface TaskRow { id: string }",
+        "export enum Phase { Idle = \"idle\" }",
+        "/** Shows the task list. */",
+        "export function TaskList({ rows }: { rows: TaskRow[] }) {",
+        "  return <ul>{rows.map((row) => <li key={row.id}>{row.id}</li>)}</ul>;",
+        "}",
+        "export default class Store {",
+        "  private items: string[] = [];",
+        "  add(item: string): void { this.items.push(item); }",
+        "}",
+        "const localOnly = 1;",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("web/src/TaskList.tsx", &source).expect("tsx parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.exported))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "MAX_ROWS", true),
+            (SymbolKind::Type, "TaskState", true),
+            (SymbolKind::Trait, "TaskRow", true),
+            (SymbolKind::Field, "TaskRow.id", true),
+            (SymbolKind::Enum, "Phase", true),
+            (SymbolKind::Variant, "Phase.Idle", true),
+            (SymbolKind::Fn, "TaskList", true),
+            (SymbolKind::Class, "Store", true),
+            (SymbolKind::Field, "Store.items", false),
+            (SymbolKind::Method, "Store.add", true),
+            (SymbolKind::Const, "localOnly", false),
+        ]
+    );
+    assert_eq!(
+        extracted.symbols[6].doc.as_deref(),
+        Some("Shows the task list.")
+    );
+}
+
+#[test]
+fn extracts_swift_types_extensions_and_members() {
+    let source = [
+        "public struct ContentView: View {",
+        "    /// The current count.",
+        "    @State private var count = 0",
+        "    func bump() { count += 1 }",
+        "}",
+        "extension ContentView {",
+        "    static let title = \"Oga\"",
+        "}",
+        "protocol Refreshable { func refresh() async }",
+        "enum Phase: String { case idle }",
+        "typealias Handler = (Int) -> Void",
+        "let sharedLimit = 42",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("App/ContentView.swift", &source).expect("swift parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Struct, "ContentView"),
+            (SymbolKind::Field, "ContentView::count"),
+            (SymbolKind::Method, "ContentView::bump"),
+            (SymbolKind::Impl, "ContentView"),
+            (SymbolKind::Field, "ContentView::title"),
+            (SymbolKind::Trait, "Refreshable"),
+            (SymbolKind::Method, "Refreshable::refresh"),
+            (SymbolKind::Enum, "Phase"),
+            (SymbolKind::Variant, "Phase::idle"),
+            (SymbolKind::Type, "Handler"),
+            (SymbolKind::Const, "sharedLimit"),
+        ]
+    );
+    assert!(
+        !extracted.symbols[1].exported,
+        "private var is not exported"
+    );
+    assert_eq!(
+        extracted.symbols[1].doc.as_deref(),
+        Some("The current count.")
+    );
+}
+
+#[test]
+fn extracts_markdown_headings_with_their_level_and_section() {
+    let source = [
+        "# Install Oga",
+        "",
+        "Some text.",
+        "",
+        "## Install with Homebrew",
+        "",
+        "```sh",
+        "# Not a heading",
+        "```",
+        "",
+        "## Build from source",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("README.md", &source).expect("markdown parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| {
+            (
+                symbol.qualified.as_str(),
+                symbol.signature.as_str(),
+                symbol.line,
+                symbol.end_line,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            ("Install Oga", "# Install Oga", 1, 11),
+            (
+                "Install Oga > Install with Homebrew",
+                "## Install with Homebrew",
+                5,
+                10
+            ),
+            (
+                "Install Oga > Build from source",
+                "## Build from source",
+                11,
+                11
+            ),
+        ]
+    );
+}
+
+#[test]
+fn builds_symbols_and_answers_an_exact_name() {
     let fixture = Fixture::new();
     fixture.write_auth(
         "/** Verify the caller token. */\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
@@ -60,21 +318,41 @@ fn builds_symbols_and_ranks_exact_questions() {
         .files(fixture.project.path())
         .expect("mapped files read");
     assert_eq!(files[0].path, "src/auth.ts");
+    assert_eq!(files[0].lang, "typescript");
     assert_eq!(files[0].symbols[0].name, "checkAuth");
-
-    let target = ContextTarget::new(
-        fixture.project.path(),
-        TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
+    assert_eq!(
+        files[0].symbols[0].doc.as_deref(),
+        Some("Verify the caller token.")
     );
+
     let result = index
-        .question(&target, "where is checkAuth handled")
+        .question(&fixture.target(), "where is checkAuth handled")
         .expect("question ranks context");
     assert_eq!(result.candidates[0].path, "src/auth.ts");
     assert_eq!(result.candidates[0].symbol.as_deref(), Some("checkAuth"));
     assert!(result.markdown.contains("src/auth.ts:2#checkAuth"));
+}
+
+#[test]
+fn reports_an_honest_miss() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("context map builds");
+
+    let result = index
+        .question(&fixture.target(), "kubernetes ingress controller")
+        .expect("question answers");
+    assert!(result.candidates.is_empty());
+    assert!(
+        result
+            .markdown
+            .starts_with("No confident match for \"kubernetes ingress controller\""),
+        "{}",
+        result.markdown
+    );
 }
 
 #[test]
@@ -88,17 +366,10 @@ fn limits_question_results_and_reads_current_source_for_code() {
     index
         .build(fixture.project.path(), BuildOptions::default())
         .expect("context map builds");
-    let target = ContextTarget::new(
-        fixture.project.path(),
-        TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
-    );
 
     let result = index
         .question_with_options(
-            &target,
+            &fixture.target(),
             "where is checkAuth handled",
             QuestionOptions {
                 limit: Some(1),
@@ -155,6 +426,7 @@ fn filters_scope_and_reconciles_a_move() {
         .reconcile(fixture.project.path(), BuildOptions::default())
         .expect("context map reconciles");
     assert!(result.changed);
+    assert_eq!(result.moved, 1);
     let paths = index
         .files(fixture.project.path())
         .expect("reconciled files read")
@@ -166,75 +438,58 @@ fn filters_scope_and_reconciles_a_move() {
 }
 
 #[test]
-fn learns_routes_and_verifies_changed_worktree_sources() {
+fn a_learned_route_outranks_everything_the_parser_found() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth(token: string): boolean { return !!token; }\n");
+    fixture.write_other();
     let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
         .expect("context map builds");
 
-    let task = Task {
-        id: "task-context".into(),
-        profile_id: "profile-context".into(),
-        model: "model-context".into(),
-        cwd: fixture.project.path().display().to_string(),
-        scope: TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
-        ..Task::default()
-    };
     let learned = index
         .learn_routes(
-            &task,
+            &fixture.task(),
             &[LearnRouteProposal {
-                hints: vec!["auth".into(), "check".into()],
+                hints: vec!["front door".into()],
                 path: "src/auth.ts".into(),
                 symbol: Some("checkAuth".into()),
             }],
         )
         .expect("route learns");
     assert_eq!(learned.accepted, 1);
-    let routes = index
-        .learned_routes(fixture.project.path(), "auth check")
-        .expect("learned routes read");
-    assert_eq!(routes[0].path, "src/auth.ts");
-    assert_eq!(routes[0].symbol.as_deref(), Some("checkAuth"));
-    let target = ContextTarget::new(
-        fixture.project.path(),
-        TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
-    );
+
     let answer = index
-        .question(&target, "auth check")
+        .question(&fixture.target(), "front door")
         .expect("learned route answers questions");
     assert_eq!(answer.candidates[0].symbol.as_deref(), Some("checkAuth"));
+    assert_eq!(answer.candidates.len(), 1, "a hint is decisive");
+}
 
-    let checkout = tempdir().expect("checkout directory is creatable");
-    fs::create_dir_all(checkout.path().join("src"))
-        .expect("checkout source directory is creatable");
-    fs::copy(
-        fixture.project.path().join("src/auth.ts"),
-        checkout.path().join("src/auth.ts"),
-    )
-    .expect("source copies to checkout");
-    fs::write(
-        checkout.path().join("src/auth.ts"),
-        "export function checkAuth(token: string): boolean { return token !== ''; }\n",
-    )
-    .expect("checkout source changes");
-    let verification = index
-        .verify_worktree(
-            fixture.project.path(),
-            checkout.path(),
-            &["src/auth.ts".into()],
+#[test]
+fn a_route_rejects_a_symbol_that_is_not_there() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("map builds");
+
+    let result = index
+        .learn_routes(
+            &fixture.task(),
+            &[LearnRouteProposal {
+                hints: vec!["auth".into()],
+                path: "src/auth.ts".into(),
+                symbol: Some("missingSymbol".into()),
+            }],
         )
-        .expect("worktree verifies");
-    assert!(verification[0].changed);
-    assert!(verification[0].file.is_some());
+        .expect("route proposal is judged");
+    assert_eq!(result.accepted, 0);
+    assert_eq!(
+        result.rejected[0].reason,
+        "symbol missingSymbol is not present in src/auth.ts"
+    );
 }
 
 #[test]
@@ -245,20 +500,9 @@ fn learned_routes_follow_symbol_renames() {
     index
         .build(fixture.project.path(), BuildOptions::default())
         .expect("context map builds");
-    let task = Task {
-        id: "task-context".into(),
-        profile_id: "profile-context".into(),
-        model: "model-context".into(),
-        cwd: fixture.project.path().display().to_string(),
-        scope: TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
-        ..Task::default()
-    };
     index
         .learn_routes(
-            &task,
+            &fixture.task(),
             &[LearnRouteProposal {
                 hints: vec!["auth".into(), "check".into()],
                 path: "src/auth.ts".into(),
@@ -266,41 +510,29 @@ fn learned_routes_follow_symbol_renames() {
             }],
         )
         .expect("route learns");
-    let target = ContextTarget::new(
-        fixture.project.path(),
-        TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
-    );
 
     fixture.write_auth(
-        "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return token !== ''; }\n",
+        "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
     );
     index
         .reconcile(fixture.project.path(), BuildOptions::default())
         .expect("map reconciles the edit");
     let answer = index
-        .question(&target, "auth check")
+        .question(&fixture.target(), "auth check")
         .expect("edited file still routes");
     assert_eq!(answer.candidates[0].symbol.as_deref(), Some("checkAuth"));
     assert_eq!(answer.candidates[0].line, 5);
     assert!(answer.markdown.contains("src/auth.ts:5#checkAuth"));
 
-    fixture.write_auth(
-        "export function verifyToken(token: string): boolean { return token !== ''; }\n",
-    );
-    index
+    fixture.write_auth("export function verifyToken(token: string): boolean { return !!token; }\n");
+    let reconciled = index
         .reconcile(fixture.project.path(), BuildOptions::default())
         .expect("map reconciles the rename");
+    assert_eq!(reconciled.routes_confirmed, 1);
     let answer = index
-        .question(&target, "auth check")
+        .question(&fixture.target(), "auth check")
         .expect("question still answers");
     assert_eq!(answer.candidates[0].symbol.as_deref(), Some("verifyToken"));
-    let routes = index
-        .learned_routes(fixture.project.path(), "auth check")
-        .expect("learned routes read");
-    assert_eq!(routes[0].symbol.as_deref(), Some("verifyToken"));
 }
 
 #[test]
@@ -311,20 +543,9 @@ fn learned_routes_follow_file_moves_during_reconcile() {
     index
         .build(fixture.project.path(), BuildOptions::default())
         .expect("map builds");
-    let task = Task {
-        id: "task-context".into(),
-        profile_id: "profile-context".into(),
-        model: "model-context".into(),
-        cwd: fixture.project.path().display().to_string(),
-        scope: TaskScope {
-            read: vec!["**".into()],
-            write: Vec::new(),
-        },
-        ..Task::default()
-    };
     index
         .learn_routes(
-            &task,
+            &fixture.task(),
             &[LearnRouteProposal {
                 hints: vec!["auth".into(), "check".into()],
                 path: "src/auth.ts".into(),
@@ -337,17 +558,21 @@ fn learned_routes_follow_file_moves_during_reconcile() {
         fixture.project.path().join("src/security.ts"),
     )
     .expect("file moves");
-    index
+    let reconciled = index
         .reconcile(fixture.project.path(), BuildOptions::default())
         .expect("map reconciles the move");
-    let routes = index
-        .learned_routes(fixture.project.path(), "auth check")
-        .expect("routes read");
-    assert_eq!(routes[0].path, "src/security.ts");
+    assert_eq!(
+        reconciled.route_moves[0].to_path.as_str(),
+        "src/security.ts"
+    );
+    let answer = index
+        .question(&fixture.target(), "auth check")
+        .expect("moved route answers");
+    assert_eq!(answer.candidates[0].path, "src/security.ts");
 }
 
 #[test]
-fn learned_routes_follow_file_and_symbol_renames() {
+fn learned_routes_follow_a_file_and_symbol_rename_together() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth() { return true; }\n");
     let index = ContextIndex::new(&fixture.store);
@@ -364,29 +589,26 @@ fn learned_routes_follow_file_and_symbol_renames() {
             },
         )
         .expect("route learns");
-    fs::rename(
-        fixture.project.path().join("src/auth.ts"),
-        fixture.project.path().join("src/login.ts"),
-    )
-    .expect("file moves");
+    fs::remove_file(fixture.project.path().join("src/auth.ts")).expect("old file goes");
     fs::write(
         fixture.project.path().join("src/login.ts"),
         "export function verifyLogin() { return true; }\n",
     )
     .expect("renamed source writes");
+
     let result = index
         .reconcile(fixture.project.path(), BuildOptions::default())
         .expect("map reconciles the rename");
     assert_eq!(result.route_moves.len(), 1);
-    let route = index
-        .learned_routes(fixture.project.path(), "auth check")
+    let answer = index
+        .question(&fixture.target(), "auth check")
         .expect("route resolves");
-    assert_eq!(route[0].path, "src/login.ts");
-    assert_eq!(route[0].symbol.as_deref(), Some("verifyLogin"));
+    assert_eq!(answer.candidates[0].path, "src/login.ts");
+    assert_eq!(answer.candidates[0].symbol.as_deref(), Some("verifyLogin"));
 }
 
 #[test]
-fn learned_routes_match_synonyms_and_dedupe_entity_aliases() {
+fn learned_routes_match_synonyms_and_keep_one_row_per_target() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth() { return true; }\n");
     let index = ContextIndex::new(&fixture.store);
@@ -406,13 +628,13 @@ fn learned_routes_match_synonyms_and_dedupe_entity_aliases() {
             .expect("route learns");
     }
     for question in ["auth", "login", "sign in"] {
+        let answer = index
+            .question(&fixture.target(), question)
+            .expect("synonym route resolves");
         assert_eq!(
-            index
-                .learned_routes(fixture.project.path(), question)
-                .expect("synonym route resolves")[0]
-                .symbol
-                .as_deref(),
-            Some("checkAuth")
+            answer.candidates[0].symbol.as_deref(),
+            Some("checkAuth"),
+            "{question}"
         );
     }
     let count: i64 = fixture
@@ -460,7 +682,7 @@ fn learned_route_aliases_are_capped() {
 }
 
 #[test]
-fn validates_worktree_routes_against_checkout_before_origin_catches_up() {
+fn validates_worktree_routes_against_the_checkout_before_the_origin_catches_up() {
     let fixture = Fixture::new();
     fixture.write_auth("export function oldAuth() { return true; }\n");
     let index = ContextIndex::new(&fixture.store);
@@ -477,9 +699,6 @@ fn validates_worktree_routes_against_checkout_before_origin_catches_up() {
     )
     .expect("checkout source writes");
     let task = Task {
-        id: "task-worktree-context".into(),
-        profile_id: "profile-context".into(),
-        model: "model-context".into(),
         cwd: checkout.path().display().to_string(),
         worktree: Some(oga_domain::TaskWorktree {
             origin_cwd: fixture.project.path().display().to_string(),
@@ -487,11 +706,7 @@ fn validates_worktree_routes_against_checkout_before_origin_catches_up() {
             branch: "task/context".into(),
             links: None,
         }),
-        scope: TaskScope {
-            read: vec!["**".into()],
-            write: vec!["**".into()],
-        },
-        ..Task::default()
+        ..fixture.task()
     };
     let result = index
         .learn_routes(
@@ -507,63 +722,35 @@ fn validates_worktree_routes_against_checkout_before_origin_catches_up() {
 }
 
 #[test]
-fn folds_only_in_tree_corrections_and_keeps_them_out_of_missing_symbols() {
+fn a_worktree_answer_reports_the_line_in_the_checkout() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth() { return true; }\n");
     let index = ContextIndex::new(&fixture.store);
-    let task = Task {
-        id: "task-corrections".into(),
-        cwd: fixture.project.path().display().to_string(),
-        output: "## Map corrections\nsrc/auth.ts — Auth entry point.\nsrc/auth.ts:checkAuth — Checks the token.\nsrc/auth.ts:missing — Ignore this.\n".into(),
-        ..Task::default()
-    };
-    index.fold_task(&task).expect("task corrections fold");
-    let file = index
-        .files(fixture.project.path())
-        .expect("corrected file reads")[0]
-        .clone();
-    assert_eq!(file.purpose.as_deref(), Some("Auth entry point."));
-    assert_eq!(
-        file.symbols[0].purpose.as_deref(),
-        Some("Checks the token.")
-    );
-    assert!(!file.symbols.iter().any(|symbol| symbol.name == "missing"));
-}
-
-#[test]
-fn resolves_relative_imports_for_graph_importance() {
-    let fixture = Fixture::new();
-    fs::write(
-        fixture.project.path().join("src/zzz.ts"),
-        "export function shared() { return true; }\n",
-    )
-    .expect("hub fixture writes");
-    fs::write(
-        fixture.project.path().join("src/aaa.ts"),
-        "export function lonely() { return true; }\n",
-    )
-    .expect("leaf fixture writes");
-    for name in ["one", "two", "three"] {
-        fs::write(
-            fixture.project.path().join(format!("src/{name}.ts")),
-            "import { shared } from './zzz';\nexport function useShared() { shared(); }\n",
-        )
-        .expect("caller fixture writes");
-    }
-    let index = ContextIndex::new(&fixture.store);
     index
         .build(fixture.project.path(), BuildOptions::default())
-        .expect("importance map builds");
-    let files = index
-        .files(fixture.project.path())
-        .expect("importance files read");
-    let hub = files.iter().find(|file| file.path == "src/zzz.ts").unwrap();
-    let leaf = files.iter().find(|file| file.path == "src/aaa.ts").unwrap();
-    assert!(hub.importance > leaf.importance);
+        .expect("origin map builds");
+
+    let checkout = tempdir().expect("checkout directory is creatable");
+    fs::create_dir_all(checkout.path().join("src"))
+        .expect("checkout source directory is creatable");
+    fs::write(
+        checkout.path().join("src/auth.ts"),
+        "// the checkout added a header\n\nexport function checkAuth() { return true; }\n",
+    )
+    .expect("checkout source writes");
+
+    let answer = index
+        .question(
+            &ContextTarget::worktree(checkout.path(), fixture.project.path(), everything()),
+            "check auth",
+        )
+        .expect("worktree question answers");
+    assert_eq!(answer.candidates[0].path, "src/auth.ts");
+    assert_eq!(answer.candidates[0].line, 3);
 }
 
 #[test]
-fn marks_file_budget_as_partial() {
+fn marks_the_file_budget_as_partial() {
     let fixture = Fixture::new();
     fixture.write_auth("export const auth = true;\n");
     fixture.write_other();
@@ -573,7 +760,6 @@ fn marks_file_budget_as_partial() {
             fixture.project.path(),
             BuildOptions {
                 max_files: 1,
-                budget: Duration::from_secs(2),
                 max_symbols: 5_000,
             },
         )
@@ -583,119 +769,27 @@ fn marks_file_budget_as_partial() {
 }
 
 #[test]
-fn extracts_supported_declarations_without_comment_or_string_noise() {
-    let source = [
-        "import { value } from './value';",
-        "export function setMemory(cwd, key, value, expectedVersion?) { return 1 }",
-        "function helper() {}",
-        "export default function main() {}",
-        "export class Foo extends Bar {}",
-        "interface Ignored {}",
-        "export enum IgnoredEnum { value }",
-        "export type Memory = string;",
-        "const arrow = (value) => value;",
-        "const twoLines = (value) =>",
-        "  value + 1;",
-        "const long = (value: number): string => {",
-        "  return String(value);",
-        "};",
-        "export async function many(a, b, c, d, e): Promise<void> {}",
-    ]
-    .join("\n");
-    let extracted = extract_symbols(&source, SourceLang::Ts, None);
-    let names = extracted
-        .symbols
-        .iter()
-        .map(|symbol| symbol.name.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        vec![
-            "setMemory",
-            "helper",
-            "main",
-            "Foo",
-            "Memory",
-            "long",
-            "many"
-        ]
-    );
-    assert_eq!(
-        extracted.symbols[0].params.as_deref(),
-        Some("cwd, key, value, expectedVersion?")
-    );
-    assert_eq!(extracted.symbols[5].returns.as_deref(), Some("string"));
-    assert_eq!(extracted.symbols[6].params.as_deref(), Some("a, b, c, …"));
-    assert_eq!(
-        clean_comment("/** Signs the outgoing request. */").as_deref(),
-        Some("Signs the outgoing request.")
-    );
-    assert_eq!(clean_comment("// Copyright 2026").as_deref(), None);
+fn reconcile_reparses_only_what_changed() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("map builds");
 
-    let noisy_braces = [
-        "const message = '} {';",
-        "// const fake = 1",
-        "const template = `x { y }`;",
-        "export function okay() { return message; }",
-    ]
-    .join("\n");
-    let extracted = extract_symbols(&noisy_braces, SourceLang::Ts, None);
-    assert!(!extracted.unparsed);
-    assert_eq!(
-        extracted
-            .symbols
-            .iter()
-            .map(|symbol| symbol.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["message", "template", "okay"]
-    );
+    let idle = index
+        .reconcile(fixture.project.path(), BuildOptions::default())
+        .expect("idle reconcile");
+    assert!(!idle.changed);
+    assert_eq!(idle.refreshed, 0);
 
-    let broken = extract_symbols("function broken( {", SourceLang::Ts, None);
-    assert!(broken.unparsed);
-    assert_eq!(
-        broken.unparsed_reason.as_deref(),
-        Some("TypeScript syntax scan failed")
-    );
-
-    let swift = extract_symbols(
-        "public struct ContentView: View {}\nstruct Helper {}\nfunc add(a: Int, b: Int = 5) -> Int { a + b }\n",
-        SourceLang::Swift,
-        None,
-    );
-    assert_eq!(
-        swift
-            .symbols
-            .iter()
-            .map(|symbol| (symbol.name.as_str(), symbol.kind, symbol.exported))
-            .collect::<Vec<_>>(),
-        vec![
-            ("ContentView", oga_domain::SymbolKind::View, true),
-            ("Helper", oga_domain::SymbolKind::Struct, false),
-            ("add", oga_domain::SymbolKind::Fn, false),
-        ]
-    );
-    assert_eq!(swift.symbols[2].params.as_deref(), Some("a, b"));
-    assert_eq!(swift.symbols[2].returns.as_deref(), Some("Int"));
-
-    let generic = extract_symbols(
-        "def check():\n    return True\n",
-        SourceLang::Generic,
-        Some(oga_context::GenericLanguage::Python),
-    );
-    assert_eq!(generic.symbols[0].name, "check");
-
-    let object = extract_symbols(
-        "const serveOptions = {\n  async fetch(request) {\n    return items.map((item) => item);\n  },\n};\nexport function after() { return 1 }\n",
-        SourceLang::Ts,
-        None,
-    );
-    assert_eq!(
-        object
-            .symbols
-            .iter()
-            .map(|symbol| symbol.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["serveOptions", "after"]
-    );
-    assert!(object.symbols[0].params.is_none());
+    fixture.write_auth("export function checkAuth() { return false; }\nexport const tries = 3;\n");
+    let changed = index
+        .reconcile(fixture.project.path(), BuildOptions::default())
+        .expect("reconcile after an edit");
+    assert!(changed.changed);
+    assert_eq!(changed.refreshed, 1);
+    assert_eq!(changed.file_count, 2);
+    assert_eq!(changed.symbol_count, 3);
 }

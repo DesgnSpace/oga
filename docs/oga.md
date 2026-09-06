@@ -11,8 +11,8 @@ follow it, or operate without the app open.
 | `oga delegate "<task>"` | Start a task and print its ID. `-` reads the task from stdin. |
 | `oga watch <task-id>...` | Stream task events until a watched task settles. |
 | `oga tail` | Stream broker events. |
-| `oga query "question"` | Find files and symbols. Add `--limit` or `--code`. |
-| `oga relearn` | Refresh a project map or save source routes. |
+| `oga query "question"` | Find the place in the code that answers a question. Add `--limit` or `--code`. |
+| `oga relearn` | Pick up what changed on disk, or save a hint. Add `--force` to read the project again from scratch. |
 | `oga love` | Read or set defaults for unnamed work. |
 | `oga inflight` | List work a broker restart would interrupt. |
 | `oga tasks [--query <text>]` | List today's tasks, or search active history. |
@@ -20,10 +20,37 @@ follow it, or operate without the app open.
 | `oga archive` / `oga restore` | Hide or restore task records. |
 | `oga cancel <task-id>...` | Stop a task. |
 | `oga resume <task-id>` | Continue a task, optionally with `-m` or `--start-at`. |
+| `oga handoff <task-id>` | Move a task to another worker or model with `--worker`, `--model`, `--effort`. |
 | `oga complete <task-id>` | Mark a task complete. |
 | `oga cleanup` | Preview removable activity and worktrees. |
 | `oga config [cwd]` | Print resolved profiles, models, routes, and worker rules. |
 | `oga version` | Print build information. |
+
+## Finding code
+
+`oga query` takes a question in plain words and answers with the file, line,
+and name that hold the answer:
+
+```sh
+oga query "where does the sandbox binary path come from"
+oga query --code --limit 1 "how a saved route survives a rename"
+```
+
+It knows functions, methods, types, classes, protocols, enum cases, constants,
+fields, modules, macros, and documentation headings, across Rust, TypeScript,
+TSX, JavaScript, Swift, and Markdown.
+
+When one place is clearly the answer, you get one line. When several could be,
+you get up to `--limit` of them, each with the words it matched. When nothing
+fits, it says so instead of guessing.
+
+`oga relearn` picks up whatever changed on disk. Add `--force` to read the
+whole project again. You can also teach it where something lives, so the words
+you use for it land there next time:
+
+```sh
+oga relearn "front door|entry point" rust/apps/oga-cli/src/main.rs#run
+```
 
 ## Task actions
 
@@ -52,7 +79,10 @@ there is news, `1` on timeout, and `2` for invalid input.
 
 Use `oga inspect <task-id>` before acting on a settled task. Resume failed,
 cancelled, or blocked work with `oga resume`; use `-m` when the next run needs
-an instruction. Archive hides a record without deleting it. `cleanup` is the
+an instruction. Move a task to a different account or model with
+`oga handoff <task-id> --worker <name>`; it keeps its id, request, and place in
+line, and one still waiting on other work or on a start time keeps waiting.
+Archive hides a record without deleting it. `cleanup` is the
 only command that permanently removes task activity.
 
 Before starting work, search for a task on the same feature, file, or command:
