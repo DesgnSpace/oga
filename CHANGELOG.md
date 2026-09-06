@@ -6,6 +6,7 @@
 
 - Fixed the task header's options menu opening clipped inside the header strip.
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
+- Named the task or worker in toast notifications, so you can tell which one is archiving, stopping, or updating.
 - Kept the app responsive while several workers look up code in a project at once.
 - Fixed the Usage window leaving a large empty gap below your spending data.
 - Took a task out of the task list the moment you archive it, and put it back the moment you restore it, instead of waiting for a reload.
