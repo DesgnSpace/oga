@@ -1,50 +1,37 @@
+//! Which files the index reads. A file is a candidate when an adapter owns
+//! its extension, git is not ignoring it, and it is not a lockfile.
+
 use std::fs::{self, DirEntry, Metadata};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
-use oga_domain::SourceLang;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GenericLanguage {
-    Python,
-    Go,
-    Rust,
-    Java,
-    Kotlin,
-    Php,
-    Ruby,
-    C,
-    Cpp,
-    Csharp,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LanguageEntry {
-    pub lang: SourceLang,
-    pub generic: Option<GenericLanguage>,
-}
+use crate::lang;
 
 #[derive(Debug, Clone)]
-pub struct ContextWalkFile {
+pub struct WalkFile {
     pub path: String,
-    pub entry: LanguageEntry,
-    pub metadata: Metadata,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct WalkOptions {
-    pub max_files: usize,
-    pub budget: Duration,
+    pub size: u64,
+    pub mtime_ms: i64,
 }
 
 #[derive(Debug, Default)]
 pub struct WalkResult {
-    pub files: Vec<ContextWalkFile>,
+    pub files: Vec<WalkFile>,
+    /// True when the walk stopped at `max_files` before seeing the whole tree.
     pub partial: bool,
 }
 
-const EXCLUDED_DIRS: &[&str] = &["node_modules", "dist", ".build", ".git"];
+const EXCLUDED_DIRS: &[&str] = &[
+    "node_modules",
+    "dist",
+    "target",
+    ".build",
+    ".git",
+    ".next",
+    ".venv",
+    "vendor",
+];
+
 const LOCKFILES: &[&str] = &[
     "package-lock.json",
     "bun.lock",
@@ -71,149 +58,78 @@ struct IgnoreGroup {
     rules: Vec<IgnoreRule>,
 }
 
-pub fn walk_context_files(cwd: &Path, options: WalkOptions) -> WalkResult {
-    let started = Instant::now();
+pub fn walk_files(cwd: &Path, max_files: usize) -> WalkResult {
     let mut result = WalkResult::default();
     let mut ignores = Vec::new();
-    let mut walked_files = 0;
-    walk_directory(
-        cwd,
-        cwd,
-        options,
-        started,
-        &mut ignores,
-        &mut walked_files,
-        &mut result,
-    );
+    walk_directory(cwd, cwd, max_files, &mut ignores, &mut result);
+    result
+        .files
+        .sort_by(|left, right| left.path.cmp(&right.path));
     result
 }
 
-pub fn mapped_extension(path: &str) -> Option<LanguageEntry> {
-    let extension = Path::new(path)
-        .extension()
-        .and_then(|value| value.to_str())?
-        .to_ascii_lowercase();
-    let entry = match extension.as_str() {
-        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => LanguageEntry {
-            lang: SourceLang::Ts,
-            generic: None,
-        },
-        "swift" => LanguageEntry {
-            lang: SourceLang::Swift,
-            generic: None,
-        },
-        "py" => generic(GenericLanguage::Python),
-        "rb" => generic(GenericLanguage::Ruby),
-        "go" => generic(GenericLanguage::Go),
-        "rs" => generic(GenericLanguage::Rust),
-        "java" => generic(GenericLanguage::Java),
-        "kt" => generic(GenericLanguage::Kotlin),
-        "php" => generic(GenericLanguage::Php),
-        "c" | "h" => generic(GenericLanguage::C),
-        "cpp" | "cc" | "hpp" | "hh" => generic(GenericLanguage::Cpp),
-        "cs" => generic(GenericLanguage::Csharp),
-        _ => return None,
-    };
-    Some(entry)
-}
-
-fn generic(language: GenericLanguage) -> LanguageEntry {
-    LanguageEntry {
-        lang: SourceLang::Generic,
-        generic: Some(language),
-    }
+/// True when some adapter would parse this path.
+pub fn is_indexable(path: &str) -> bool {
+    lang::adapter_for(path).is_some()
 }
 
 fn walk_directory(
     cwd: &Path,
     directory: &Path,
-    options: WalkOptions,
-    started: Instant,
+    max_files: usize,
     ignores: &mut Vec<IgnoreGroup>,
-    walked_files: &mut usize,
     result: &mut WalkResult,
 ) {
     if result.partial {
         return;
     }
-    if started.elapsed() > options.budget {
-        result.partial = true;
+    let Ok(entries) = read_sorted(directory) else {
         return;
-    }
-
-    let entries = match read_sorted(directory) {
-        Ok(entries) => entries,
-        Err(_) => return,
     };
     let group_start = ignores.len();
-    let ignore_path = directory.join(".gitignore");
-    if let Ok(source) = fs::read_to_string(&ignore_path) {
-        let base = relative_path(cwd, directory);
+    if let Ok(source) = fs::read_to_string(directory.join(".gitignore")) {
         ignores.push(IgnoreGroup {
-            base,
+            base: relative_path(cwd, directory),
             rules: parse_ignore_rules(&source),
         });
     }
 
     let mut directories = Vec::new();
     for entry in entries {
-        if result.partial || started.elapsed() > options.budget {
-            result.partial = true;
-            break;
-        }
         let name = entry.file_name();
         let name = name.to_string_lossy();
         let path = entry.path();
-        let metadata = match entry.metadata() {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
+        let Ok(metadata) = entry.metadata() else {
+            continue;
         };
         let relative = relative_path(cwd, &path);
         if metadata.is_dir() {
-            if !EXCLUDED_DIRS.iter().any(|excluded| *excluded == name)
-                && !is_ignored(ignores, &relative, true)
-            {
+            if !EXCLUDED_DIRS.contains(&name.as_ref()) && !is_ignored(ignores, &relative, true) {
                 directories.push(path);
             }
             continue;
         }
-        if !metadata.is_file() {
-            continue;
-        }
-        *walked_files += 1;
-        if *walked_files > options.max_files {
-            result.partial = true;
-            break;
-        }
-        let Some(entry) = mapped_extension(&relative) else {
-            continue;
-        };
-        if LOCKFILES.iter().any(|lockfile| *lockfile == name)
+        if !metadata.is_file()
+            || !is_indexable(&relative)
+            || LOCKFILES.contains(&name.as_ref())
             || is_ignored(ignores, &relative, false)
         {
             continue;
         }
-        result.files.push(ContextWalkFile {
+        if result.files.len() == max_files {
+            result.partial = true;
+            break;
+        }
+        result.files.push(WalkFile {
             path: relative,
-            entry,
-            metadata,
+            size: metadata.len(),
+            mtime_ms: mtime_ms(&metadata),
         });
     }
 
-    if !result.partial && started.elapsed() > options.budget {
-        result.partial = true;
-    }
     if !result.partial {
         for directory in directories {
-            walk_directory(
-                cwd,
-                &directory,
-                options,
-                started,
-                ignores,
-                walked_files,
-                result,
-            );
+            walk_directory(cwd, &directory, max_files, ignores, result);
             if result.partial {
                 break;
             }
@@ -306,7 +222,7 @@ fn is_ignored(groups: &[IgnoreGroup], path: &str, is_dir: bool) -> bool {
     verdict
 }
 
-pub fn mtime_ms(metadata: &Metadata) -> i64 {
+fn mtime_ms(metadata: &Metadata) -> i64 {
     metadata
         .modified()
         .ok()

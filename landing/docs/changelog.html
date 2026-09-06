@@ -53,6 +53,16 @@
         <p class="docs-eyebrow">Docs / Changelog</p>
         <h1>What changed</h1>
           <h2>Unreleased</h2>
+          <h3>Changed</h3>
+          <ul>
+          <li><code>oga query</code> now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.</li>
+          <li>Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.</li>
+          <li>Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.</li>
+          </ul>
+          <h3>Fixed</h3>
+          <ul>
+          <li><code>oga relearn --force</code> reads the project again from scratch instead of failing.</li>
+          </ul>
           <h2>0.0.6 - 2026-09-05</h2>
           <h3>Added</h3>
           <ul>
