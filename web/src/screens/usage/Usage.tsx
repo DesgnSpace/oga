@@ -265,7 +265,7 @@ function Heatmap({
             </span>
           ))}
         </div>
-        <div className="usage-heatmap-grid" role="img" aria-label={`Daily activity for ${label}`}>
+        <div className={`usage-heatmap-grid usage-heatmap-grid-${calendar.weeks.length}`} role="img" aria-label={`Daily activity for ${label}`}>
           {calendar.weeks.flatMap((week) =>
             week.map((cell) => (
               <span
