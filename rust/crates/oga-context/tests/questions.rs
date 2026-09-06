@@ -93,6 +93,32 @@ const QUESTIONS: &[(&str, &str, &str)] = &[
         "rust/crates/oga-context/src/lang/swift.rs",
         "separator",
     ),
+    (
+        "updater endpoints the desktop app polls",
+        "rust/apps/oga-desktop/tauri.conf.json",
+        "endpoints",
+    ),
+    (
+        "traffic light position of the main window",
+        "rust/apps/oga-desktop/tauri.conf.json",
+        "trafficLightPosition",
+    ),
+    (
+        "cargo workspace package table",
+        "rust/Cargo.toml",
+        "workspace.package",
+    ),
+    ("workspace members glob", "rust/Cargo.toml", "members"),
+    (
+        "does the packaging matrix fail fast",
+        "rust/packaging/release.yml",
+        "fail-fast",
+    ),
+    (
+        "the package workflow build matrix",
+        "rust/packaging/release.yml",
+        "matrix",
+    ),
 ];
 
 #[test]
@@ -195,6 +221,84 @@ fn an_unchanged_project_reconciles_without_reparsing() {
     assert_eq!(reconciled.refreshed, 0);
     assert_eq!(reconciled.file_count, built.file_count);
     assert_eq!(reconciled.symbol_count, built.symbol_count);
+}
+
+/// Python, Go and PHP have no source in this repository, so their questions
+/// run against a project written for them.
+#[test]
+fn answers_questions_about_python_go_and_php_sources() {
+    let project = tempdir().expect("project directory is creatable");
+    fs::write(
+        project.path().join("router.py"),
+        "class RouteHealer:\n\
+         \x20   \"\"\"Repairs a saved route after a rename.\"\"\"\n\n\
+         \x20   def rebuild_route_table(self, rows):\n\
+         \x20       return len(rows)\n",
+    )
+    .expect("python fixture writes");
+    fs::write(
+        project.path().join("broker.go"),
+        "package broker\n\n\
+         const MaxInFlightWorkers = 8\n\n\
+         type Broker struct{}\n\n\
+         func (b *Broker) DrainPendingEvents() int { return 0 }\n",
+    )
+    .expect("go fixture writes");
+    fs::write(
+        project.path().join("Invoice.php"),
+        "<?php\n\n\
+         enum PaymentState: string\n\
+         {\n\
+         \x20   case Refunded = 'refunded';\n\
+         }\n\n\
+         class InvoiceRenderer\n\
+         {\n\
+         \x20   public function renderMonthlySummary(): string { return ''; }\n\
+         }\n",
+    )
+    .expect("php fixture writes");
+
+    let (_database, store) = fixture_store();
+    let index = ContextIndex::new(&store);
+    index
+        .build(project.path(), BuildOptions::default())
+        .expect("polyglot fixture index builds");
+    let target = ContextTarget::new(project.path(), readable());
+
+    for (question, path, symbol) in [
+        (
+            "rebuild the route table",
+            "router.py",
+            "rebuild_route_table",
+        ),
+        (
+            "which class repairs a saved route",
+            "router.py",
+            "RouteHealer",
+        ),
+        ("drain pending events", "broker.go", "DrainPendingEvents"),
+        (
+            "how many workers may be in flight",
+            "broker.go",
+            "MaxInFlightWorkers",
+        ),
+        (
+            "render the monthly summary",
+            "Invoice.php",
+            "renderMonthlySummary",
+        ),
+        ("which case marks a refund", "Invoice.php", "Refunded"),
+    ] {
+        let answer = index
+            .question_with_options(&target, question, QuestionOptions::default())
+            .expect("polyglot question answers");
+        let top = answer.candidates.first().expect("polyglot question hits");
+        assert_eq!(
+            (top.path.as_str(), top.symbol.as_deref()),
+            (path, Some(symbol)),
+            "{question:?}"
+        );
+    }
 }
 
 fn repository_root() -> PathBuf {

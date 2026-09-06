@@ -26,9 +26,10 @@ choice.
 
 `--when` accepts the classes `context`, `mechanical`, `build`, `reasoning`,
 `general`, and the subjects `ui`, `backend`, `database`, `docs`, `tests`,
-`review`, `research`, `refactor` (`frontend` also means `ui`). Oga reads the
-subject off the task text, or takes it from `oga delegate --kind <subject>`
-when the text never says so.
+`review`, `research`, `refactor`. `frontend`, `db`, `doc`, and `test` are read
+as `ui`, `database`, `docs`, and `tests`. Oga reads the subject off the task
+text; `oga delegate --kind <subject>` names it instead, and replaces whatever
+the text reads like.
 
 When several rules match one task, the subject rule wins over the class rule,
 and the class rule wins over the rule with no `when`. Within one tier the

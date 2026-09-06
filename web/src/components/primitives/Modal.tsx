@@ -16,6 +16,21 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+// Open dialogs mark the body so the page layer behind them can stand down
+// (its overlay scrollbars would otherwise paint above the dim). Counted:
+// dialogs stack, and the mark lifts only when the last one closes.
+let openModalCount = 0;
+
+function markModalOpen(): void {
+  openModalCount += 1;
+  if (openModalCount === 1) document.body.classList.add("modal-open");
+}
+
+function markModalClosed(): void {
+  openModalCount = Math.max(0, openModalCount - 1);
+  if (openModalCount === 0) document.body.classList.remove("modal-open");
+}
+
 export interface ModalProps {
   open: boolean;
   onClose: () => void;
@@ -31,6 +46,7 @@ export function Modal({ open, onClose, labelledBy, children, className }: ModalP
   useEffect(() => {
     if (!open) return;
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    markModalOpen();
 
     const shouldLockBodyScroll = getComputedStyle(document.body).overflow !== "hidden";
     const previousOverflow = shouldLockBodyScroll ? document.body.style.overflow : undefined;
@@ -65,6 +81,7 @@ export function Modal({ open, onClose, labelledBy, children, className }: ModalP
 
     document.addEventListener("keydown", onKeydown);
     return () => {
+      markModalClosed();
       document.removeEventListener("keydown", onKeydown);
       if (shouldLockBodyScroll) document.body.style.overflow = previousOverflow ?? "";
       openerRef.current?.focus();

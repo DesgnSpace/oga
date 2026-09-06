@@ -2,6 +2,7 @@ import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "@/App";
 import { installNativeChrome } from "@/shell/nativeChrome";
+import { installOverlayScroll } from "@/ui/overlay-scroll";
 import "@/oga.css";
 import "./index.css";
 
@@ -39,6 +40,7 @@ function applyPlatformClass(): void {
 
 applyPlatformClass();
 installNativeChrome();
+installOverlayScroll();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root element");

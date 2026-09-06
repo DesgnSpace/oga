@@ -2966,7 +2966,10 @@ fn worker_config_json(
     let own = layers.project.as_ref();
     let mut worker = Map::new();
     if let Some((prompt, layer)) = read_worker_prompt(own)?.zip(own) {
-        worker.insert("workerPrompt".into(), json!(prompt));
+        worker.insert(
+            "workerPrompt".into(),
+            json!(oga_config::ensure_brief_slot(&prompt)),
+        );
         worker.insert("source".into(), json!(layer.path));
         return Ok(Value::Object(worker));
     }
@@ -2976,7 +2979,10 @@ fn worker_config_json(
         .or(read_worker_prompt(layers.user.as_ref())?)
         .or_else(|| saved.everywhere.clone())
         .unwrap_or_else(|| DEFAULT_WORKER_PROMPT.to_owned());
-    worker.insert("workerPrompt".into(), json!(prompt));
+    worker.insert(
+        "workerPrompt".into(),
+        json!(oga_config::ensure_brief_slot(&prompt)),
+    );
     Ok(Value::Object(worker))
 }
 
@@ -3371,9 +3377,26 @@ fn work_label(when: &[WorkKind]) -> String {
     label
 }
 
+/// Rules in the order they win a task, so the table reads the way routing
+/// decides: subject rules, then class rules, then the one that takes the rest.
+fn by_precedence(rules: &oga_config::LoveRules) -> Vec<&oga_config::LoveRule> {
+    let tier = |rule: &oga_config::LoveRule| {
+        if rule.when.is_empty() {
+            2
+        } else if rule.when.iter().any(|kind| kind.as_topic().is_some()) {
+            0
+        } else {
+            1
+        }
+    };
+    let mut ordered = rules.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|rule| tier(rule));
+    ordered
+}
+
 fn love_table(rules: &oga_config::LoveRules) -> Vec<String> {
-    let rows = rules
-        .iter()
+    let rows = by_precedence(rules)
+        .into_iter()
         .map(|rule| {
             let thinking = if rule.destinations.iter().all(|d| d.effort.is_none()) {
                 "as needed".to_owned()
@@ -4237,7 +4260,7 @@ mod tests {
         };
         let worker = worker_config_json(&layers, &saved("saved rules")).unwrap();
 
-        assert_eq!(worker["workerPrompt"], "project rules");
+        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nproject rules");
         assert_eq!(worker["source"], "/work/.oga.yaml");
     }
 
@@ -4255,7 +4278,7 @@ mod tests {
         };
         let worker = worker_config_json(&layers, &saved("saved rules")).unwrap();
 
-        assert_eq!(worker["workerPrompt"], "saved rules");
+        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nsaved rules");
         assert!(worker.get("source").is_none());
     }
 
@@ -4270,7 +4293,7 @@ mod tests {
         };
         let worker = worker_config_json(&layers, &SavedWorkerPrompts::default()).unwrap();
 
-        assert_eq!(worker["workerPrompt"], "user rules");
+        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nuser rules");
     }
 
     #[test]

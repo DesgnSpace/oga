@@ -1079,7 +1079,7 @@ async fn settings_routes() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(prompt["value"], "Use the fixture.");
+    assert_eq!(prompt["value"], "{{brief}}\n\nUse the fixture.");
 
     let (status, models) = json_response(
         request(
@@ -1185,7 +1185,7 @@ async fn a_project_file_owns_its_worker_rules() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(prompt["value"], "1. Read first.");
+    assert_eq!(prompt["value"], "{{brief}}\n\n1. Read first.");
     assert_eq!(prompt["configPath"], format!("{cwd}/.oga.yaml"));
 
     let (status, refused) = json_response(

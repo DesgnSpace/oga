@@ -69,7 +69,10 @@ Four steps, all inside `lang/`:
 3. Write `lang/<language>.rs` implementing `LanguageAdapter`: the extensions it
    owns, the grammar, the query, how the language joins a nested name, what
    counts as public, and — where it matters — which comments document the
-   declaration below them and which files or declarations are noise.
+   declaration below them and which files or declarations are noise. When the
+   tree alone gets a symbol wrong, `refine` corrects it: it is how a Go method
+   picks up its receiver, a Python docstring comes out of the body, and a
+   config key inside a list gets its position.
 4. Register it in `lang::adapters()`.
 
 The engine handles the rest. Nesting comes from byte containment, so a function
@@ -77,7 +80,8 @@ inside a type becomes a method, a value outside one becomes a constant, and
 anything declared inside a function body is dropped as local. Signatures stop
 at the node's `body` field, or at the end of the first line when there is none.
 
-Shipping today: Rust, TypeScript/TSX/JavaScript, Swift, Markdown.
+Shipping today: Rust, TypeScript/TSX/JavaScript, Swift, Python, Go, PHP,
+Markdown, JSON, TOML, YAML.
 
 ## Kinds
 
@@ -86,3 +90,13 @@ and a protocol are both `trait`; an `impl` block and a Swift `extension` are
 both `impl`; a namespace and a module are both `module`. Markdown headings are
 `heading`, and a heading's line range covers its whole section, so an answer
 points at the section that holds the prose.
+
+## Config files
+
+JSON, TOML and YAML have no declarations, so every key is a symbol and the
+qualified name is its dotted path: `updater.endpoints[0].url`,
+`workspace.package.version`. A key that holds a container is a `module`, a key
+that holds a scalar is a `field`, and an entry in a list is known by its
+position. Values are not indexed; a value shorter than 64 characters rides
+along in the signature so a question can be asked with the value and land on
+the key that holds it. Lockfiles are skipped whatever their format.
