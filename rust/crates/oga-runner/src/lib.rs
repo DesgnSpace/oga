@@ -7,7 +7,7 @@ pub use confinement::{
 };
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt, io,
     path::PathBuf,
     process::ExitStatus,
@@ -93,6 +93,9 @@ pub struct RunRequest {
     pub argv: Vec<String>,
     pub cwd: PathBuf,
     pub env: BTreeMap<String, String>,
+    /// Variables the child has to run without, even when the broker exports
+    /// them.
+    pub env_remove: BTreeSet<String>,
     pub timeout: Option<Duration>,
 }
 
@@ -103,6 +106,7 @@ impl RunRequest {
             argv,
             cwd: cwd.into(),
             env: BTreeMap::new(),
+            env_remove: BTreeSet::new(),
             timeout: None,
         }
     }
@@ -117,6 +121,7 @@ impl RunRequest {
             argv: command.argv,
             cwd: cwd.into(),
             env: command.env,
+            env_remove: command.env_remove,
             timeout: None,
         }
     }
@@ -341,6 +346,9 @@ impl ProviderRunner {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        for key in &request.env_remove {
+            command.env_remove(key);
+        }
         detach_process_group(&mut command);
         let mut child = command.spawn().map_err(|source| RunnerError::Spawn {
             cwd: request.cwd.clone(),

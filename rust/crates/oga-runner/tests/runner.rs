@@ -166,6 +166,31 @@ async fn streams_stderr_and_bounds_malformed_and_oversized_output() {
     assert!(stderr.stdout.contains("fake provider completed"));
 }
 
+/// Some providers read meaning from whether a variable exists at all, so a
+/// value the broker exports has to be taken away from the child rather than
+/// overwritten.
+#[tokio::test]
+async fn env_remove_takes_an_inherited_variable_away_from_the_child() {
+    let temp = TempDir::new().expect("temporary directory");
+    // SAFETY: test-only env mutation; only the fake provider reads this.
+    unsafe { std::env::set_var("FAKE_PROVIDER_PROBE", "from-the-broker") };
+
+    let inherited = runner(512, 512)
+        .run(fake("probe-env", temp.path()))
+        .await
+        .expect("probe result");
+    assert!(
+        inherited
+            .stderr
+            .contains("FAKE_PROVIDER_PROBE=from-the-broker")
+    );
+
+    let mut request = fake("probe-env", temp.path());
+    request.env_remove.insert("FAKE_PROVIDER_PROBE".into());
+    let removed = runner(512, 512).run(request).await.expect("probe result");
+    assert!(removed.stderr.contains("FAKE_PROVIDER_PROBE=<absent>"));
+}
+
 #[tokio::test]
 async fn timeout_escalates_and_returns_a_timed_out_result() {
     let temp = TempDir::new().expect("temporary directory");

@@ -111,6 +111,13 @@ describe("organize", () => {
     expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["needs", "blocked", "failed", "running", "done"]);
   });
 
+  it("sorts by when work started under newest-first", () => {
+    const started = { ...task("started", "/work/oga", "completed"), createdAt: "2026-07-29T08:00:00Z", updatedAt: "2026-07-30T09:00:00Z" };
+    const newer = { ...task("newer", "/work/oga", "completed"), createdAt: "2026-07-29T09:00:00Z", updatedAt: "2026-07-29T09:00:00Z" };
+    const groups = organize([started, newer], undefined, "none", "recent");
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["newer", "started"]);
+  });
+
   it("treats unparseable dates as old under updated sort", () => {
     const invalid = { ...task("invalid", "/work/oga", "completed"), updatedAt: "not-a-date" };
     const old = { ...task("old", "/work/oga", "completed"), updatedAt: "2026-07-29T08:00:00Z" };

@@ -358,6 +358,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
         {task && (
           <TaskControls
             task={task}
+            events={events}
             onChanged={refreshDetail}
             thinkingToggle={hasThinking ? { active: showThinking, onToggle: toggleThinking } : undefined}
           />

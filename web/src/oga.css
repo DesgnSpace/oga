@@ -130,6 +130,56 @@ a {
     outline-offset: 2px;
 }
 
+/* Overlay scrollbars: thin, hidden at rest, revealed while scrolling or on
+   hover or keyboard focus. The native bar stays draggable and keyboard
+   scrolling still works; only the paint changes. A delegated scroll listener
+   adds .is-scrolling while a pane moves and removes it shortly after it
+   stops. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    background-clip: content-box;
+    transition: background-color 250ms ease;
+}
+
+*:hover,
+*.is-scrolling,
+*:focus-within {
+    scrollbar-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent) transparent;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*.is-scrolling::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--color-text-muted) 85%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *::-webkit-scrollbar-thumb {
+        transition: none;
+    }
+}
+
 .app-shell {
     position: relative;
     display: flex;
@@ -770,7 +820,8 @@ a {
 .sidebar-list-shell {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     overscroll-behavior: contain;
 }
 
@@ -1264,16 +1315,19 @@ h1 {
     border-color: var(--color-accent);
 }
 
-.task-action-menu {
-    position: relative;
+/* The header menu portals to the body so the title bar's own clipping
+   (which truncates the stats row at narrow widths) cannot clip it. Pinned
+   next to its trigger with fixed positioning, above surrounding content. */
+.task-action-menu-portal {
+    position: fixed;
+    z-index: 100;
+    max-width: calc(100vw - 16px);
 }
 
-.task-action-menu-items {
-    position: absolute;
-    z-index: 2;
-    top: 100%;
-    right: 0;
-    margin-top: var(--space-1);
+.task-action-menu-portal .menu-panel {
+    max-height: inherit;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 /* The native-feeling menu panel shared by the header's "more actions"
@@ -2007,6 +2061,10 @@ h1 {
     outline: none;
 }
 
+.composer-input:disabled {
+    opacity: 0.6;
+}
+
 .composer-footer {
     display: flex;
     align-items: center;
@@ -2049,6 +2107,10 @@ h1 {
     color: var(--color-success);
     font-size: var(--text-sm);
     line-height: 1;
+}
+
+.composer-scope-read-only .composer-scope-dot {
+    color: var(--color-text-muted);
 }
 
 .composer-thinking-toggle {
@@ -2910,7 +2972,6 @@ h1 {
     border-top: 1px solid var(--color-border);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    scrollbar-color: var(--color-text-muted) transparent;
 }
 
 .trace-terminal-output::after {
@@ -3377,7 +3438,7 @@ select {
 
 .modal-dialog-usage {
     width: min(92vw, 72rem);
-    height: min(88dvh, 48rem);
+    max-height: min(88dvh, 48rem);
 }
 
 .modal-dialog-usage .modal-body {

@@ -7,6 +7,7 @@ import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
 import { toast } from "@/state/toast";
+import { workerToastName } from "@/lib/toast-subject";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
 import type {
   CleanupSettings,
@@ -590,7 +591,9 @@ function WorkersPanel({
       if (deleting) return;
       setDeleteId(undefined);
       setDeleting(true);
-      const lifecycle = toast.pending("Removing worker");
+      const name = workerToastName(state.profiles.find((profile) => profile.id === id)?.label);
+      const quoted = name ? `"${name}"` : undefined;
+      const lifecycle = toast.pending(quoted ? `Removing worker ${quoted}` : "Removing worker");
       const result = await broker.deleteProfile(id);
       if (result.ok) {
         lifecycle.dismiss();
@@ -598,11 +601,11 @@ function WorkersPanel({
         if (expandedId === id) setExpandedId(undefined);
         await onRefresh();
       } else {
-        lifecycle.error("Couldn't remove worker", { description: "Try again.", detail: result.error.message });
+        lifecycle.error(quoted ? `Couldn't remove worker ${quoted}` : "Couldn't remove worker", { description: "Try again.", detail: result.error.message });
       }
       setDeleting(false);
     },
-    [deleting, expandedId, onRefresh, setState],
+    [deleting, expandedId, onRefresh, setState, state.profiles],
   );
 
   const handleToggle = useCallback(
@@ -625,10 +628,11 @@ function WorkersPanel({
             profile.id === profileId && profile.enabled === enabled ? { ...profile, enabled: !enabled } : profile,
           ),
         }));
-        toast.error("Couldn't update worker", { description: "Try again.", detail: result.error.message });
+        const name = workerToastName(state.profiles.find((profile) => profile.id === profileId)?.label);
+        toast.error(name ? `Couldn't update worker "${name}"` : "Couldn't update worker", { description: "Try again.", detail: result.error.message });
       }
     },
-    [onRefresh, setState],
+    [onRefresh, setState, state.profiles],
   );
 
   const handleRefresh = useCallback(async () => {
@@ -1148,7 +1152,8 @@ function ProfileEditor({
       .filter(Boolean);
     setSaving(true);
     setSaveError(undefined);
-    const lifecycle = toast.pending(isNew ? "Adding worker" : "Saving worker");
+    const workerName = workerToastName(labelValue) ?? labelValue;
+    const lifecycle = toast.pending(isNew ? `Adding worker "${workerName}"` : `Saving worker "${workerName}"`);
     const modelValue = model.trim() || undefined;
     if (profile) {
       const result = await broker.updateProfile(profile.id, {
@@ -1168,7 +1173,7 @@ function ProfileEditor({
         onClose();
         await onRefresh();
       } else {
-        lifecycle.error("Couldn't save worker", { description: "Check the details and try again.", detail: result.error.message });
+        lifecycle.error(`Couldn't save worker "${workerName}"`, { description: "Check the details and try again.", detail: result.error.message });
         setSaveError("Couldn't save these changes. Try again.");
         setSaving(false);
       }
@@ -1189,7 +1194,7 @@ function ProfileEditor({
         onClose();
         await onRefresh();
       } else {
-        lifecycle.error("Couldn't add worker", { description: "Check the details and try again.", detail: result.error.message });
+        lifecycle.error(`Couldn't add worker "${workerName}"`, { description: "Check the details and try again.", detail: result.error.message });
         setSaveError("Couldn't add this worker. Try again.");
         setSaving(false);
       }

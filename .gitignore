@@ -38,6 +38,9 @@ examples/
 .oga-test/
 .oga-analysis/
 
+# Generated at deploy time from CHANGELOG.md; `make changelog` rebuilds it locally.
+landing/docs/changelog.html
+
 # Scratch and planning
 .plans/
 scratchpad/

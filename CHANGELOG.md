@@ -4,14 +4,28 @@
 
 ### Changed
 
+- Cleaned up the task activity timeline for Claude runs: shell commands now show a short summary instead of the full command line, and consecutive commands fold into one row with a count.
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
 - Answers cite Rust, TypeScript, TSX, JavaScript, Swift, Python, Go, PHP, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
 - Asking about a setting lands on the exact line in a JSON, TOML, or YAML file, named by its full path through the file, so "sparkle feed url" points at the key that holds it.
+- `oga handoff <task-id> --worker <name>` moves a task to another worker or model from the terminal, keeping its id, request, and place in line.
 - Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
+- The task footer now shows how full the worker's context is, and how far it has grown since the run started.
+- Scrollbars in the task list and other panes now stay hidden until you scroll or hover, appearing as a thin overlay instead of a permanent bar.
 
 ### Fixed
 
+- The follow-up box now keeps your text if a send fails, disables itself while sending, and lets Escape clear a draft.
+- The keyboard hint under the follow-up box now names the action it actually triggers (queue, reply, or continue) instead of always saying "send".
+- Fixed the read-only scope indicator on the follow-up box showing the same "active" color as the editable one.
 - `oga relearn --force` reads the project again from scratch instead of failing.
+- Fixed the task header's options menu opening clipped inside the header strip.
+- Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
+- Named the task or worker in toast notifications, so you can tell which one is archiving, stopping, or updating.
+- Kept the app responsive while several workers look up code in a project at once.
+- Fixed the Usage window leaving a large empty gap below your spending data.
+- Took a task out of the task list the moment you archive it, and put it back the moment you restore it, instead of waiting for a reload.
+- Sorted "Newest first" by when you started a task, instead of repeating "Recently updated".
 
 ## 0.0.6 - 2026-09-05
 
