@@ -72,21 +72,39 @@ pub struct Ranking {
 }
 
 impl Ranking {
-    pub fn add_route(&mut self, route: &LearnedRoute, symbol: SymbolRow, overlap: usize) {
+    /// A taught hint outranks anything the parser found, but only a route
+    /// whose whole alias set *is* the question settles the answer by itself.
+    /// One shared word among several routes — "adapter" taught for three
+    /// unrelated files — must compete like everything else, not each claim
+    /// sole confidence and get picked by an arbitrary tiebreak.
+    pub fn add_route(
+        &mut self,
+        route: &LearnedRoute,
+        symbol: SymbolRow,
+        terms: &[String],
+        weights: &TermWeights,
+    ) {
+        let matched = terms
+            .iter()
+            .filter(|term| {
+                route
+                    .aliases
+                    .split_whitespace()
+                    .any(|alias| alias == term.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let weighted = matched.iter().map(|term| weights.of(term)).sum::<f64>();
         let score = if route.exact {
-            ROUTE_EXACT
+            ROUTE_EXACT + weighted * NAME_TERM
         } else {
-            ROUTE_HINTED + overlap as f64 * 1_000.0
+            ROUTE_HINTED + weighted * NAME_TERM
         };
         self.insert(Scored {
-            matched: route
-                .aliases
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect(),
+            matched,
             symbol,
             score,
-            decisive: true,
+            decisive: route.exact,
         });
     }
 
@@ -171,8 +189,9 @@ impl Ranking {
         }
     }
 
-    /// Best first, ties broken by path so the same question keeps answering
-    /// the same way.
+    /// Best first. A score tie goes to whichever matched more of the
+    /// question, then to path, so the same question keeps answering the
+    /// same way instead of turning on an arbitrary tiebreak.
     pub fn ranked(self) -> Vec<Scored> {
         let mut ranked = self.scored.into_values().collect::<Vec<_>>();
         ranked.sort_by(|left, right| {
@@ -180,6 +199,7 @@ impl Ranking {
                 .score
                 .partial_cmp(&left.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.matched.len().cmp(&left.matched.len()))
                 .then_with(|| left.symbol.path.cmp(&right.symbol.path))
                 .then_with(|| left.symbol.line.cmp(&right.symbol.line))
         });
