@@ -354,9 +354,10 @@ interface TraceRowViewProps {
   onToggle: (path: string, startsExpanded: boolean) => void;
   onOpenPreview: (expansion: ContentExpansion, filePath: string | undefined, imageDataUrl?: string) => void;
   cwd?: string;
+  insideGroup?: boolean;
 }
 
-function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd }: TraceRowViewProps) {
+function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd, insideGroup = false }: TraceRowViewProps) {
   const isOpen = expanded.get(path) ?? row.startsExpanded;
   const hasControl = traceRowOffersExpansion(row);
   const controlLabel = row.expansion
@@ -365,6 +366,7 @@ function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd }: Tra
       ? "Hide details"
       : "Show details";
   const running = row.state === "running";
+  const ownsRunningAnimation = running && (!insideGroup || row.children.length > 0);
   const rowClass = `trace-row trace-row-${row.style} trace-state-${row.state}${
     row.isStepStart ? " trace-row-step-start" : ""
   }${row.marker !== undefined ? " trace-row-turn-boundary" : ""}`;
@@ -385,7 +387,7 @@ function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd }: Tra
   );
 
   return (
-    <article className={rowClass} data-state={row.state} data-running={running ? "true" : undefined}>
+    <article className={rowClass} data-state={row.state} data-running={ownsRunningAnimation ? "true" : undefined}>
       {hasControl ? (
         <button
           className="trace-row-main trace-row-main-toggle"
@@ -418,6 +420,7 @@ function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd }: Tra
               onToggle={onToggle}
               onOpenPreview={onOpenPreview}
               cwd={cwd}
+              insideGroup
               key={child.id}
             />
           ))}
