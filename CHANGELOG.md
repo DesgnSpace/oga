@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
+- Named the task or worker in toast notifications, so you can tell which one is archiving, stopping, or updating.
 
 ## 0.0.6 - 2026-09-05
 

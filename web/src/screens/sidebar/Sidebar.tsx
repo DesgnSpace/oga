@@ -17,7 +17,20 @@ import {
   RestoreIcon,
 } from "@/ui/icons";
 import { SearchField } from "@/components/SearchField";
-import { canComplete, canPause, canResume, executeArchive, executeCancel, executeComplete, executeResume } from "@/screens/task/Actions";
+import {
+  archiveTitles,
+  canComplete,
+  canPause,
+  canResume,
+  completeTitles,
+  executeArchive,
+  executeCancel,
+  executeComplete,
+  executeResume,
+  resumeTitles,
+  stopTitles,
+  type TaskToastTitles,
+} from "@/screens/task/Actions";
 import { isExplainedWait, taskStatusLabel, waitLabel } from "@/screens/task/format";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -101,7 +114,7 @@ function rowMenuSections(
   task: TaskSummary,
   run: (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
+    titles: TaskToastTitles,
   ) => void,
   offline: boolean,
 ): MenuAction[][] {
@@ -113,7 +126,7 @@ function rowMenuSections(
       label: "Stop",
       icon: <CancelIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeCancel(task.id), "Stopping task"),
+      onSelect: () => run(() => executeCancel(task.id), stopTitles(task)),
     });
   }
   if (canResume(task)) {
@@ -122,7 +135,7 @@ function rowMenuSections(
       label: "Resume",
       icon: <PlayIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeResume(task.id), "Resuming task"),
+      onSelect: () => run(() => executeResume(task.id), resumeTitles(task)),
     });
   }
 
@@ -132,7 +145,7 @@ function rowMenuSections(
       label: archived ? "Restore" : "Archive",
       icon: archived ? <RestoreIcon /> : <ArchiveIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeArchive(task.id, !archived), archived ? "Restoring task" : "Archiving task"),
+      onSelect: () => run(() => executeArchive(task.id, !archived), archiveTitles(task, archived)),
     },
   ];
   if (canComplete(task)) {
@@ -141,7 +154,7 @@ function rowMenuSections(
       label: "Mark as completed",
       icon: <CheckIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeComplete(task.id), "Completing task"),
+      onSelect: () => run(() => executeComplete(task.id), completeTitles(task)),
     });
   }
 
@@ -464,17 +477,17 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   const runRowAction = useCallback(
     (
       action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-      pendingTitle: string,
+      titles: TaskToastTitles,
     ) => {
       setRowMenu(null);
       const run = () => {
-        const lifecycle = toast.pending(pendingTitle, { retry: run });
+        const lifecycle = toast.pending(titles.pending, { retry: run });
         void action().then((result) => {
           if (result.ok) {
             lifecycle.dismiss();
             void sidebarRef.refresh();
           } else {
-            lifecycle.error("Couldn't update task", { description: "Try again.", detail: result.error.message });
+            lifecycle.error(`Couldn't ${titles.failure}`, { description: "Try again.", detail: result.error.message });
           }
         }).catch((error: unknown) => {
           lifecycle.error("Couldn't reach Oga", { description: "Check the connection and try again.", detail: error instanceof Error ? error.message : String(error) });
