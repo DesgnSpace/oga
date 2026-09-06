@@ -3380,7 +3380,7 @@ select {
 
 .modal-dialog-usage {
     width: min(92vw, 72rem);
-    height: min(88dvh, 48rem);
+    max-height: min(88dvh, 48rem);
 }
 
 .modal-dialog-usage .modal-body {

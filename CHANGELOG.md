@@ -6,6 +6,7 @@
 
 - Fixed the task header's options menu opening clipped inside the header strip.
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
+- Fixed the Usage window leaving a large empty gap below your spending data.
 - Took a task out of the task list the moment you archive it, and put it back the moment you restore it, instead of waiting for a reload.
 - Sorted "Newest first" by when you started a task, instead of repeating "Recently updated".
 
