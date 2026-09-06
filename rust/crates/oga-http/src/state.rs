@@ -44,37 +44,42 @@ pub async fn get_state(
     State(state): State<HttpState>,
     Query(query): Query<StateQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let summary = query.view.as_deref() == Some("summary");
-    let compact = query.compact.as_deref() == Some("1");
-    let archived = archived_filter(query.archived.as_deref());
-    let limit = query.limit.unwrap_or(50).clamp(1, 2_000);
-    let profiles = public_profiles(&state.store)?;
-    let (tasks, tasks_has_more) = list_tasks(&state.store, archived, summary, limit)?;
-    let memory_projects = list_memory_projects(&state.store)?;
-    let spend = spend_totals(&state.store)?;
+    let store = state.store.clone();
+    let body = run_read(move || {
+        let summary = query.view.as_deref() == Some("summary");
+        let compact = query.compact.as_deref() == Some("1");
+        let archived = archived_filter(query.archived.as_deref());
+        let limit = query.limit.unwrap_or(50).clamp(1, 2_000);
+        let profiles = public_profiles(&store)?;
+        let (tasks, tasks_has_more) = list_tasks(&store, archived, summary, limit)?;
+        let memory_projects = list_memory_projects(&store)?;
+        let spend = spend_totals(&store)?;
 
-    let mut body = serde_json::Map::new();
-    body.insert("profiles".into(), serde_json::to_value(profiles).unwrap());
-    body.insert("tasks".into(), tasks);
-    if summary {
-        body.insert("tasksHasMore".into(), json!(tasks_has_more));
-    }
-    if !compact {
+        let mut body = serde_json::Map::new();
+        body.insert("profiles".into(), serde_json::to_value(profiles).unwrap());
+        body.insert("tasks".into(), tasks);
+        if summary {
+            body.insert("tasksHasMore".into(), json!(tasks_has_more));
+        }
+        if !compact {
+            body.insert(
+                "profileFailures".into(),
+                serde_json::to_value(list_profile_failures(&store)?).unwrap(),
+            );
+            body.insert(
+                "grants".into(),
+                serde_json::to_value(list_grants(&store)?).unwrap(),
+            );
+        }
         body.insert(
-            "profileFailures".into(),
-            serde_json::to_value(list_profile_failures(&state.store)?).unwrap(),
+            "memoryProjects".into(),
+            serde_json::to_value(memory_projects).unwrap(),
         );
-        body.insert(
-            "grants".into(),
-            serde_json::to_value(list_grants(&state.store)?).unwrap(),
-        );
-    }
-    body.insert(
-        "memoryProjects".into(),
-        serde_json::to_value(memory_projects).unwrap(),
-    );
-    body.insert("spend".into(), serde_json::to_value(spend).unwrap());
-    Ok(Json(Value::Object(body)))
+        body.insert("spend".into(), serde_json::to_value(spend).unwrap());
+        Ok(Value::Object(body))
+    })
+    .await?;
+    Ok(Json(body))
 }
 
 pub async fn get_task(
