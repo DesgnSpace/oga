@@ -117,17 +117,45 @@ fn attribution_lines(attribution: &WorkerAttribution) -> Vec<String> {
     ]
 }
 
+/// Who is running, for `{{task_id}}`, `{{provider}}`, `{{model}}`, and
+/// `{{effort}}` substitution. Always known on fresh launches.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptIdentity {
+    pub task_id: String,
+    pub provider: String,
+    pub model: String,
+    pub effort: Option<String>,
+}
+
+impl PromptIdentity {
+    pub fn new(
+        task_id: &str,
+        provider: oga_domain::Provider,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Self {
+        Self {
+            task_id: task_id.to_owned(),
+            provider: provider.as_str().to_owned(),
+            model: model.to_owned(),
+            effort: effort.map(str::to_owned),
+        }
+    }
+}
+
 /// Inputs for the full prompt sent to a fresh provider session.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkerPromptInput {
     pub task: String,
     pub allow_questions: bool,
     pub scope: Option<TaskScope>,
+    /// The template when it holds `{{brief}}`, else a legacy rules block.
     pub worker_prompt: String,
     pub context_map: Option<String>,
     pub memories: Vec<MemoryEntry>,
     /// `None` silences the stamp: the project turned attribution off.
     pub attribution: Option<WorkerAttribution>,
+    pub identity: PromptIdentity,
 }
 
 /// The provider's final text and Oga's interpretation of it.
@@ -143,59 +171,161 @@ pub struct WorkerOutcome {
 }
 
 /// Assemble the stable worker document used for a new provider session.
+///
+/// A prompt holding `{{brief}}` is the template: sections, order, and
+/// headings are the user's, and code only substitutes the values the system
+/// knows. Anything else is a legacy rules block and keeps the previous fixed
+/// skeleton, so prompts customized before templates existed run untouched.
 pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
     let mut parts = PREAMBLE
         .iter()
         .map(|line| (*line).to_owned())
         .collect::<Vec<_>>();
-    parts.extend([String::new(), input.task.clone()]);
-    if let Some(scope) = &input.scope {
-        parts.extend([String::new(), scope_line(scope)]);
-    }
-    if !input.worker_prompt.trim().is_empty() {
+    if input.worker_prompt.contains("{{brief}}") {
+        let template = input.worker_prompt.trim();
+        let values = template_values(input);
         parts.extend([
             String::new(),
-            "## Worker rules".into(),
-            input.worker_prompt.trim().into(),
+            render_template(template, &values),
+            String::new(),
         ]);
+        if !template.contains("{{attribution}}")
+            && let Some(attribution) = &input.attribution
+        {
+            parts.extend([String::new(), "## Attribution".into()]);
+            parts.extend(attribution_lines(attribution));
+        }
+        if !template.contains("{{reporting}}") {
+            parts.extend([String::new(), "## Reporting".into()]);
+            parts.extend(reporting_lines(input.allow_questions));
+        }
+    } else {
+        parts.extend([String::new(), input.task.clone()]);
+        if let Some(scope) = &input.scope {
+            parts.extend([String::new(), scope_line(scope)]);
+        }
+        if !input.worker_prompt.trim().is_empty() {
+            parts.extend([
+                String::new(),
+                "## Worker rules".into(),
+                input.worker_prompt.trim().into(),
+            ]);
+        }
+        if let Some(context_map) = input
+            .context_map
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            parts.extend([String::new(), context_map.trim().to_owned()]);
+        }
+        if !input.memories.is_empty() {
+            parts.extend([String::new(), memories_section(&input.memories)]);
+        }
+        if let Some(attribution) = &input.attribution {
+            parts.extend([String::new(), "## Attribution".into()]);
+            parts.extend(attribution_lines(attribution));
+        }
+        parts.extend([String::new(), "## Reporting".into()]);
+        parts.extend(reporting_lines(input.allow_questions));
     }
-    if let Some(context_map) = input
+    parts.join("\n")
+}
+
+/// One substitution pass over the template. Known `{{names}}` become the
+/// run's values; anything else is left verbatim, so a typo degrades to
+/// visible text rather than a silent drop.
+fn render_template(template: &str, values: &[(&str, String)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find("{{") {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 2..];
+        match after.find("}}") {
+            Some(close) => {
+                let name = after[..close].trim();
+                match values.iter().find(|(key, _)| *key == name) {
+                    Some((_, value)) => out.push_str(value),
+                    None => out.push_str(&rest[open..open + 2 + close + 2]),
+                }
+                rest = &after[close + 2..];
+            }
+            None => {
+                out.push_str(&rest[open..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Every value a template may name. `{{memories}}`, `{{context_map}}`, and
+/// `{{attribution}}` expand to a whole section or nothing: a placeholder
+/// language with no conditionals cannot skip a heading, so the section goes
+/// down with the placeholder.
+fn template_values(input: &WorkerPromptInput) -> Vec<(&str, String)> {
+    let scope = input.scope.as_ref().map(scope_line).unwrap_or_default();
+    let context_map = input
         .context_map
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-    {
-        parts.extend([String::new(), context_map.trim().to_owned()]);
-    }
-    if !input.memories.is_empty() {
-        let facts = input
-            .memories
-            .iter()
-            .map(|memory| format!("- {}: {}", memory.key, memory.value))
-            .collect::<Vec<_>>()
-            .join("\n");
-        parts.extend([
-            String::new(),
-            "## Memories".into(),
-            "Treat these project facts as shared context. If one conflicts with the task or current files, report the conflict.".into(),
-            facts,
-        ]);
-    }
-    if let Some(attribution) = &input.attribution {
-        parts.extend([String::new(), "## Attribution".into()]);
-        parts.extend(attribution_lines(attribution));
-    }
-    parts.extend([
-        String::new(),
-        "## Reporting".into(),
-        if input.allow_questions {
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_owned();
+    let memories = if input.memories.is_empty() {
+        String::new()
+    } else {
+        memories_section(&input.memories)
+    };
+    let attribution = input
+        .attribution
+        .as_ref()
+        .map(|attribution| {
+            let mut lines = vec!["## Attribution".to_owned()];
+            lines.extend(attribution_lines(attribution));
+            lines.join("\n")
+        })
+        .unwrap_or_default();
+    let mut reporting = vec!["## Reporting".to_owned()];
+    reporting.extend(reporting_lines(input.allow_questions));
+    vec![
+        ("brief", input.task.clone()),
+        ("scope", scope),
+        ("task_id", input.identity.task_id.clone()),
+        ("provider", input.identity.provider.clone()),
+        ("model", input.identity.model.clone()),
+        ("effort", input.identity.effort.clone().unwrap_or_default()),
+        ("context_map", context_map),
+        ("memories", memories),
+        ("attribution", attribution),
+        ("reporting", reporting.join("\n")),
+    ]
+}
+
+fn memories_section(memories: &[MemoryEntry]) -> String {
+    let facts = memories
+        .iter()
+        .map(|memory| format!("- {}: {}", memory.key, memory.value))
+        .collect::<Vec<_>>()
+        .join("\n");
+    [
+        "## Memories".to_owned(),
+        "Treat these project facts as shared context. If one conflicts with the task or current files, report the conflict.".to_owned(),
+        facts,
+    ]
+    .join("\n")
+}
+
+fn reporting_lines(allow_questions: bool) -> Vec<String> {
+    vec![
+        if allow_questions {
             "If a product choice, secret, destructive action, or new authority is required, stop and end with: OGA_NEEDS_INPUT: <one clear question>".into()
         } else {
             "Do not ask questions. If required information or authority is missing, report a blocked result.".into()
         },
         "Before signing off, run `oga relearn '<json>'` exactly once, where `<json>` is an array of `{\"hints\":[...],\"path\":\"<file you actually read>\",\"symbol\":\"<optional symbol in it>\"}`. `hints` are the words that identify each location — order does not matter. Pass every reusable source route learned this run, or `[]` if none. Never pass the placeholder shape itself.".into(),
         "If work cannot be completed, end with: OGA_BLOCKED: <permission_denied|needs_authority|worker_error> | <short reason>".into(),
-    ]);
-    parts.join("\n")
+    ]
 }
 
 /// Render the scope sentence shared by fresh prompts and continuation prompts.
@@ -801,6 +931,93 @@ mod tests {
         assert!(!prompt.contains("oga query"));
         assert!(!prompt.contains("gh pr create"));
         assert!(!prompt.contains("## Delivery"));
+    }
+
+    #[test]
+    fn template_substitutes_values_and_keeps_user_order() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            allow_questions: true,
+            scope: Some(TaskScope {
+                read: vec!["src/**".into()],
+                write: vec!["src/**".into()],
+            }),
+            worker_prompt:
+                "{{reporting}}\n\n{{brief}}\n\n{{scope}}\n\n{{memories}}\n\n{{attribution}}".into(),
+            context_map: None,
+            memories: vec![MemoryEntry {
+                cwd: "/work".into(),
+                key: "a".into(),
+                value: "b".into(),
+                version: 1,
+                created_at: "now".into(),
+                updated_at: "now".into(),
+            }],
+            attribution: Some(WorkerAttribution {
+                provider: "claude".into(),
+                model: "opus".into(),
+                effort: None,
+            }),
+            identity: PromptIdentity {
+                task_id: "t-1".into(),
+                provider: "claude".into(),
+                model: "opus".into(),
+                effort: None,
+            },
+        });
+        let reporting_at = prompt.find("## Reporting").expect("reporting");
+        let brief_at = prompt.find("do the thing").expect("brief");
+        let scope_at = prompt.find("src/**").expect("scope");
+        let memories_at = prompt.find("## Memories").expect("memories");
+        let attribution_at = prompt.find("## Attribution").expect("attribution");
+        assert!(reporting_at < brief_at && brief_at < scope_at);
+        assert!(scope_at < memories_at && memories_at < attribution_at);
+        assert!(prompt.contains("- a: b"));
+        assert!(!prompt.contains("{{"));
+        assert_eq!(
+            prompt.matches("## Reporting").count(),
+            1,
+            "reporting is placed, not appended twice"
+        );
+    }
+
+    #[test]
+    fn template_without_reporting_or_attribution_appends_them() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            worker_prompt: "{{brief}}".into(),
+            attribution: Some(WorkerAttribution {
+                provider: "claude".into(),
+                model: "opus".into(),
+                effort: Some("high".into()),
+            }),
+            ..WorkerPromptInput::default()
+        });
+        assert!(prompt.contains("Oga: Done with Oga claude/opus (effort high)"));
+        assert!(prompt.contains("OGA_BLOCKED"));
+    }
+
+    #[test]
+    fn template_leaves_unknown_placeholders_verbatim() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            worker_prompt: "{{brief}}\n\n{{typo}}".into(),
+            ..WorkerPromptInput::default()
+        });
+        assert!(prompt.contains("{{typo}}"));
+    }
+
+    #[test]
+    fn legacy_rules_without_brief_keep_the_fixed_skeleton() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            worker_prompt: "1. My old rule.".into(),
+            ..WorkerPromptInput::default()
+        });
+        assert!(prompt.contains("## Worker rules"));
+        assert!(prompt.contains("1. My old rule."));
+        assert!(prompt.contains("## Reporting"));
+        assert!(!prompt.contains("{{"));
     }
 
     #[test]

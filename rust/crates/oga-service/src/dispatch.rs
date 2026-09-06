@@ -471,6 +471,12 @@ impl Dispatcher {
                 request.memories
             },
             attribution,
+            identity: prompt::PromptIdentity::new(
+                &task.id,
+                profile.provider,
+                &task.model,
+                request.effort.as_deref(),
+            ),
         };
         let hold = hold.map(|mut hold| {
             hold.task_id = task.id.clone();
@@ -937,6 +943,12 @@ impl Dispatcher {
                             scope: Some(task.scope.clone()),
                             worker_prompt: DEFAULT_WORKER_PROMPT.to_owned(),
                             attribution: prompt::attribution_for_task(&task, profile.provider),
+                            identity: prompt::PromptIdentity::new(
+                                &task.id,
+                                profile.provider,
+                                &task.model,
+                                task.effort.as_deref(),
+                            ),
                             ..WorkerPromptInput::default()
                         },
                     };
@@ -1007,6 +1019,12 @@ impl Dispatcher {
                         scope: Some(queued.scope.clone()),
                         worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
                         attribution: prompt::attribution_for_task(&queued, profile.provider),
+                        identity: prompt::PromptIdentity::new(
+                            &queued.id,
+                            profile.provider,
+                            &queued.model,
+                            queued.effort.as_deref(),
+                        ),
                         ..WorkerPromptInput::default()
                     };
                     self.launch_task(queued, profile, prompt, None);

@@ -13,11 +13,26 @@ worker:
 The project prompt replaces the prompt configured for that project. Use
 `oga config` to inspect the effective worker rules.
 
-The starting rules live in Settings, where you can rewrite or delete them.
-They cover how workers treat small reversible obstacles, how they look code
-up (`oga query` first), and how they deliver (checks, then a commit, a push,
-and a pull request). If you already customized your rules, an upgrade never
-touches them; if you never did, the new defaults arrive on their own.
+The starting prompt lives in Settings, where you can rewrite or delete it.
+It is a template for the whole message a worker receives: reorder the
+sections, rewrite one, or drop one. Placeholders are filled in per task:
+
+- `{{brief}}` — the task itself.
+- `{{scope}}` — what the work may read and change.
+- `{{context_map}}` — the code map, when there is one.
+- `{{memories}}` — the project facts section, when there are any.
+- `{{attribution}}` — the Done-with-Oga stamp section, when enabled.
+- `{{reporting}}` — how the worker signals questions and blockers.
+- `{{task_id}}`, `{{provider}}`, `{{model}}`, `{{effort}}` — the run itself.
+
+A prompt without `{{brief}}` is read the old way, as a rules block inside a
+fixed layout, so anything customized before templates existed keeps working
+untouched. If you never customized, the new template arrives on its own.
+
+Three things stay outside the template because the system depends on them:
+the two opening lines (the worker role and the ban on handing its own brief
+onward), the exact question and blocker markers the broker parses, and the
+attribution wording, which has its own off switch below.
 
 Worker rules should state durable project conventions and delivery expectations.
 Do not put credentials or temporary task status in them.

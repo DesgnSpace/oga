@@ -27,13 +27,21 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
-/// The worker rules a fresh settings file starts from, editable in Settings
-/// or overridden per project from `.oga.yaml`. Everything here is house
-/// style a user may rewrite or delete: how workers treat obstacles, how they
-/// look code up, and how they deliver. The prompt assembly in code keeps only
-/// what the system itself needs — the worker role, the ban on delegating its
-/// own brief onward, and the result markers the broker parses.
+/// The worker prompt a fresh settings file starts from, editable in Settings
+/// or overridden per project from `.oga.yaml`. It is a template, not a rules
+/// block: `{{brief}}`, `{{scope}}`, `{{context_map}}`, `{{memories}}`,
+/// `{{attribution}}`, and `{{reporting}}` are filled in per task, and
+/// `{{task_id}}`, `{{provider}}`, `{{model}}`, `{{effort}}` name the run.
+/// Everything else here is house style a user may reorder, rewrite, or
+/// delete. The prompt assembly in code keeps only what the system itself
+/// needs — the worker role, the ban on delegating its own brief onward, and
+/// the result markers the broker parses.
 pub const DEFAULT_WORKER_PROMPT: &str = concat!(
+    "{{brief}}\n",
+    "\n",
+    "{{scope}}\n",
+    "\n",
+    "## Worker rules\n",
     "1. Blocked means stop. A command that will not run, a missing credential, an account or signup, a permission denial, a path outside your scope, a decision this brief does not answer — stop and report it, naming the blocker and the one decision you need.\n",
     "2. Do not work around a blocker. No retry loops, no second tool for the same job, no creating accounts, no linking or authenticating anything, no faking or stubbing the result. Stop, finish what does not depend on it, then report the exact command or path and say whether you need the caller to decide or to run it and return the output.\n",
     "3. Partial work is a valid result. Finish what is unblocked, then report what you stopped on.\n",
@@ -46,7 +54,15 @@ pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "10. If a clearly separate continuation is needed, state why it is separate and emit a compact caller-facing pointer with the child task ID and title, so the caller can start `oga watch <childTaskId>` and inspect after settlement. Do not include prompt or output in the pointer.\n",
     "11. Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.\n",
     "12. Run the relevant checks before reporting completion, and say what you ran. Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.\n",
-    "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`. After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists."
+    "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`. After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists.\n",
+    "\n",
+    "{{context_map}}\n",
+    "\n",
+    "{{memories}}\n",
+    "\n",
+    "{{attribution}}\n",
+    "\n",
+    "{{reporting}}"
 );
 
 fn yaml_key(value: &serde_yaml::Value) -> Option<&str> {
@@ -1018,13 +1034,17 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
     Ok(Some(rules))
 }
 
-/// The worker rules one `.oga.yaml` writes for its own scope. `prompt` is the
-/// whole table: whatever it holds ships verbatim under `## Worker rules`, read
-/// again on every dispatch. `attribution` is the only other key: `false`
-/// turns off the Done-with-Oga line workers stamp on commits and pull
-/// requests, `true` (or leaving it out) leaves it on. Any other key is a rule
-/// the writer expects Oga to honour and Oga would silently drop, so it fails
-/// the read instead.
+/// The worker prompt one `.oga.yaml` writes for its own scope. It is a
+/// template: `{{brief}}` marks where the task lands, alongside `{{scope}}`,
+/// `{{context_map}}`, `{{memories}}`, `{{attribution}}`, `{{reporting}}`,
+/// and the run itself as `{{task_id}}`, `{{provider}}`, `{{model}}`,
+/// `{{effort}}`. A value without `{{brief}}` is read the old way, as a rules
+/// block appended to the fixed skeleton, so prompts customized before
+/// templates existed keep working untouched. `attribution` is the only other
+/// key: `false` turns off the Done-with-Oga line workers stamp on commits
+/// and pull requests, `true` (or leaving it out) leaves it on. Any other key
+/// is a rule the writer expects Oga to honour and Oga would silently drop,
+/// so it fails the read instead.
 pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>, ConfigError> {
     let Some(layer) = layer else {
         return Ok(None);
@@ -1766,7 +1786,12 @@ mod tests {
     }
 
     #[test]
-    fn editable_default_carries_the_house_style() {
+    fn editable_default_is_a_template_carrying_the_house_style() {
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{brief}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{scope}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{memories}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{attribution}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{reporting}}"));
         assert!(DEFAULT_WORKER_PROMPT.contains("Clear local, reversible obstacles yourself"));
         assert!(DEFAULT_WORKER_PROMPT.contains("oga query"));
         assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
