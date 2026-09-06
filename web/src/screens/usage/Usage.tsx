@@ -3,6 +3,7 @@ import { broker } from "@/bridge/client";
 import type { UsageBreakdown, UsageDay, UsagePeriod, UsageResponse } from "@/bridge/types";
 import { formatCost, formatTokenCount } from "@/lib/format";
 import { BackArrowIcon, ForwardArrowIcon } from "@/ui/icons";
+import { buildDailySeries, topBreakdown, type DailyPoint, type ModelBar } from "./charts";
 import {
   addMonths,
   buildHeatmapMonth,
@@ -16,6 +17,12 @@ import {
 
 type UsageTab = "overview" | "models";
 type ModelSort = "cost" | "tokens" | "tasks";
+type OverviewView = "grid" | "charts";
+
+const VIEWS: ReadonlyArray<{ id: OverviewView; label: string }> = [
+  { id: "grid", label: "Grid" },
+  { id: "charts", label: "Charts" },
+];
 
 const TABS: ReadonlyArray<{ id: UsageTab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -146,6 +153,7 @@ function OverviewPanel({
   currentStreakDays: number;
   longestStreakDays: number;
 }) {
+  const [view, setView] = useState<OverviewView>("grid");
   const cards: ReadonlyArray<{ label: string; value: string }> = [
     { label: "Tasks", value: period.tasks.toLocaleString("en-US") },
     { label: "Cost", value: formatCost(period.costUsd) ?? "$0.00" },
@@ -166,7 +174,24 @@ function OverviewPanel({
           </div>
         ))}
       </dl>
-      <Heatmap days={period.days} start={period.start} end={period.end} />
+      <div className="usage-period-switch" role="group" aria-label="Activity view">
+        {VIEWS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            aria-pressed={view === entry.id}
+            className={`usage-period-option${view === entry.id ? " usage-period-option-active" : ""}`}
+            onClick={() => setView(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+      {view === "grid" ? (
+        <Heatmap days={period.days} start={period.start} end={period.end} />
+      ) : (
+        <UsageCharts period={period} />
+      )}
     </div>
   );
 }
@@ -273,6 +298,128 @@ function intensityLevel(cost: number, max: number): number {
   if (ratio <= 0.5) return 2;
   if (ratio <= 0.75) return 3;
   return 4;
+}
+
+const CHART_BREAKDOWN_LIMIT = 8;
+
+function UsageCharts({ period }: { period: UsagePeriod }) {
+  const series = useMemo(() => buildDailySeries(period.days, period.start, period.end), [period.days, period.start, period.end]);
+  const bars = useMemo(() => topBreakdown(period.breakdown, CHART_BREAKDOWN_LIMIT), [period.breakdown]);
+  return (
+    <div className="usage-charts">
+      <LineChart label="Cost over time" series={series} value={(point) => point.costUsd} formatValue={(value) => formatCost(value) ?? "$0.00"} />
+      <LineChart label="Tokens over time" series={series} value={(point) => point.tokens} formatValue={formatTokenCount} />
+      <ModelBarChart bars={bars} />
+    </div>
+  );
+}
+
+const CHART_WIDTH = 600;
+const CHART_HEIGHT = 160;
+const CHART_PAD_LEFT = 46;
+const CHART_PAD_TOP = 12;
+const CHART_PAD_BOTTOM = 20;
+const CHART_PLOT_WIDTH = CHART_WIDTH - CHART_PAD_LEFT;
+const CHART_PLOT_HEIGHT = CHART_HEIGHT - CHART_PAD_TOP - CHART_PAD_BOTTOM;
+const CHART_BASELINE_Y = CHART_PAD_TOP + CHART_PLOT_HEIGHT;
+
+function LineChart({
+  label,
+  series,
+  value,
+  formatValue,
+}: {
+  label: string;
+  series: DailyPoint[];
+  value: (point: DailyPoint) => number;
+  formatValue: (value: number) => string;
+}) {
+  const max = Math.max(0, ...series.map(value));
+  const isEmpty = max <= 0;
+  const points = series.map((point, index) => ({
+    x: CHART_PAD_LEFT + (series.length <= 1 ? CHART_PLOT_WIDTH / 2 : (index / (series.length - 1)) * CHART_PLOT_WIDTH),
+    y: max <= 0 ? CHART_BASELINE_Y : CHART_PAD_TOP + CHART_PLOT_HEIGHT - (value(point) / max) * CHART_PLOT_HEIGHT,
+    point,
+  }));
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaPath =
+    points.length > 0
+      ? `${linePath} L${points[points.length - 1].x.toFixed(1)},${CHART_BASELINE_Y} L${points[0].x.toFixed(1)},${CHART_BASELINE_Y} Z`
+      : "";
+  return (
+    <div className="usage-chart">
+      <h3 className="usage-chart-title">{label}</h3>
+      <svg
+        className="usage-chart-svg"
+        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
+        role="img"
+        aria-label={isEmpty ? `${label}, no activity in this period` : `${label}, peak ${formatValue(max)}`}
+      >
+        <line x1={CHART_PAD_LEFT} y1={CHART_BASELINE_Y} x2={CHART_WIDTH} y2={CHART_BASELINE_Y} className="usage-chart-axis" />
+        <text x={CHART_PAD_LEFT - 6} y={CHART_BASELINE_Y} className="usage-chart-axis-label" textAnchor="end">
+          {formatValue(0)}
+        </text>
+        {!isEmpty && (
+          <>
+            <line x1={CHART_PAD_LEFT} y1={CHART_PAD_TOP} x2={CHART_WIDTH} y2={CHART_PAD_TOP} className="usage-chart-gridline" />
+            <text x={CHART_PAD_LEFT - 6} y={CHART_PAD_TOP + 4} className="usage-chart-axis-label" textAnchor="end">
+              {formatValue(max)}
+            </text>
+            <path d={areaPath} className="usage-chart-area" />
+            <path d={linePath} className="usage-chart-line" />
+            {points.map(({ x, y, point }) => (
+              <g key={point.date}>
+                <circle cx={x} cy={y} r={6} className="usage-chart-dot-hit">
+                  <title>{`${point.date} · ${formatValue(value(point))}`}</title>
+                </circle>
+                <circle cx={x} cy={y} r={2.5} className="usage-chart-dot" />
+              </g>
+            ))}
+          </>
+        )}
+        {series.length > 0 && (
+          <>
+            <text x={CHART_PAD_LEFT} y={CHART_HEIGHT - 4} className="usage-chart-axis-label" textAnchor="start">
+              {formatShortDate(series[0].date)}
+            </text>
+            <text x={CHART_WIDTH} y={CHART_HEIGHT - 4} className="usage-chart-axis-label" textAnchor="end">
+              {formatShortDate(series[series.length - 1].date)}
+            </text>
+          </>
+        )}
+      </svg>
+      {isEmpty && <p className="usage-chart-empty">No activity in this period.</p>}
+    </div>
+  );
+}
+
+function formatShortDate(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function ModelBarChart({ bars }: { bars: ReadonlyArray<ModelBar> }) {
+  const max = Math.max(0, ...bars.map((bar) => bar.costUsd));
+  const isEmpty = bars.length === 0 || max <= 0;
+  return (
+    <div className="usage-chart">
+      <h3 className="usage-chart-title">Cost by model</h3>
+      {isEmpty ? (
+        <p className="usage-chart-empty">No usage by model in this period.</p>
+      ) : (
+        <ul className="usage-bar-chart">
+          {bars.map((bar) => (
+            <li className="usage-bar-row" key={bar.label}>
+              <span className="usage-bar-label">{bar.label}</span>
+              <span className="usage-bar-track">
+                <span className="usage-bar-fill" style={{ width: `${(bar.costUsd / max) * 100}%` }} />
+              </span>
+              <span className="usage-bar-value">{formatCost(bar.costUsd) ?? "$0.00"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function ModelsPanel({

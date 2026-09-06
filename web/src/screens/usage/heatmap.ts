@@ -42,7 +42,7 @@ function formatDate(year: number, month: number, date: number): string {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(date).padStart(2, "0")}`;
 }
 
-function parseLocal(date: string): Date | undefined {
+export function parseLocal(date: string): Date | undefined {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!match) return undefined;
   const year = Number(match[1]);
@@ -55,7 +55,7 @@ function parseLocal(date: string): Date | undefined {
   return check;
 }
 
-function toKey(date: Date): string {
+export function toKey(date: Date): string {
   return formatDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
 }
 
