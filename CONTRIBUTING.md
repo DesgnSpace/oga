@@ -24,9 +24,9 @@ event socket protocol, watch exit codes, and the public task view contract.
 
 ## Changelog
 
-Update `CHANGELOG.md` with every user-visible change. Run `make changelog`
-before reviewing or deploying the landing site; it regenerates
-`landing/docs/changelog.html` from that file.
+Update `CHANGELOG.md` with every user-visible change. The changelog page is
+built from it during `make deploy-landing`, so never commit
+`landing/docs/changelog.html`; run `make changelog` only for a local preview.
 
 ## Code style
 
