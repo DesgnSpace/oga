@@ -272,6 +272,7 @@ pub async fn run_task(
         allow_questions: task.allow_questions,
         scope: Some(task.scope.clone()),
         worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
+        attribution: crate::prompt::attribution_for_task(&task),
         ..WorkerPromptInput::default()
     };
     run_task_and_release(
@@ -352,6 +353,7 @@ pub(crate) async fn run_task_and_release_with_active(
                     allow_questions: queued.allow_questions,
                     scope: Some(queued.scope.clone()),
                     worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
+                    attribution: crate::prompt::attribution_for_task(&queued),
                     ..WorkerPromptInput::default()
                 },
             ));

@@ -20,9 +20,101 @@ const PREAMBLE: [&str; 5] = [
 
 const DELIVERY_RULES: [&str; 3] = [
     "Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.",
-    "Commit the work without an AI attribution trailer, push the branch, and open a pull request with `gh pr create --base main`.",
+    "Commit the work, push the branch, and open a pull request with `gh pr create --base main`.",
     "After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists.",
 ];
+
+/// Where a worker's stamp points back to.
+pub const ATTRIBUTION_EMAIL: &str = "oga@desgn.space";
+
+/// The run this prompt was built for. Rendered verbatim into the attribution
+/// instruction below, so the stamp always names the worker that ran.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkerAttribution {
+    pub profile: String,
+    pub model: String,
+    pub effort: Option<String>,
+}
+
+impl WorkerAttribution {
+    /// `opencode/gpt-5 (effort high)`, or `opencode/gpt-5` when no effort ran.
+    pub fn summary(&self) -> String {
+        match self
+            .effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            Some(effort) => format!("{}/{} (effort {effort})", self.profile, self.model),
+            None => format!("{}/{}", self.profile, self.model),
+        }
+    }
+
+    /// The git trailer stamped on commits the worker creates.
+    pub fn trailer(&self) -> String {
+        format!("Oga: Done with Oga {}", self.summary())
+    }
+}
+
+/// Stamp this run unless the project turned attribution off. A config that
+/// cannot be read fails open: attribution stays on, the default.
+pub fn attribution_for(
+    cwd: &std::path::Path,
+    profile: &str,
+    model: &str,
+    effort: Option<&str>,
+) -> Option<WorkerAttribution> {
+    let attribution = WorkerAttribution {
+        profile: profile.to_owned(),
+        model: model.to_owned(),
+        effort: effort.map(str::to_owned),
+    };
+    let layers = match oga_config::load_config_layers(Some(cwd)) {
+        Ok(layers) => layers,
+        Err(_) => return Some(attribution),
+    };
+    let project = oga_config::read_worker_attribution(layers.project.as_ref())
+        .ok()
+        .flatten();
+    let user = oga_config::read_worker_attribution(layers.user.as_ref())
+        .ok()
+        .flatten();
+    oga_config::resolve_worker_attribution(project, user).then_some(attribution)
+}
+
+/// Same as [`attribution_for`], but read from the project the task was
+/// delegated against: a worktree task runs in a checkout whose own directory
+/// holds no `.oga.yaml`, so the origin directory decides.
+pub fn attribution_for_task(task: &oga_domain::Task) -> Option<WorkerAttribution> {
+    let cwd = task
+        .worktree
+        .as_ref()
+        .map(|worktree| worktree.origin_cwd.as_str())
+        .unwrap_or(task.cwd.as_str());
+    attribution_for(
+        std::path::Path::new(cwd),
+        &task.profile_id,
+        &task.model,
+        task.effort.as_deref(),
+    )
+}
+
+/// The attribution block appended to the worker prompt. Kept as one function
+/// so commits and pull requests always stamp the same words.
+fn attribution_lines(attribution: &WorkerAttribution) -> Vec<String> {
+    vec![
+        "Stamp what you ship so the tool stays visible. This is on by default; skip it only when the project's own worker rules forbid tool attribution, or when the commit already carries an Oga trailer.".into(),
+        format!(
+            "- Commits you create: end each message with the trailer `{}` on its own line.",
+            attribution.trailer()
+        ),
+        "- Pull requests you open: end the body with a footer on its own lines:".into(),
+        "  ---".into(),
+        format!("  Done with Oga {}", attribution.summary()),
+        format!("  {ATTRIBUTION_EMAIL}"),
+        "- Use these words exactly as written here. Never stamp the same commit twice, and never add attribution to anything the user wrote themselves.".into(),
+    ]
+}
 
 const DISCOVERY_POINTER: &str = "Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.";
 
@@ -35,6 +127,8 @@ pub struct WorkerPromptInput {
     pub worker_prompt: String,
     pub context_map: Option<String>,
     pub memories: Vec<MemoryEntry>,
+    /// `None` silences the stamp: the project turned attribution off.
+    pub attribution: Option<WorkerAttribution>,
 }
 
 /// The provider's final text and Oga's interpretation of it.
@@ -94,6 +188,10 @@ pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
     }
     parts.extend([String::new(), "## Delivery".into()]);
     parts.extend(DELIVERY_RULES.iter().map(|rule| (*rule).to_owned()));
+    if let Some(attribution) = &input.attribution {
+        parts.extend([String::new(), "## Attribution".into()]);
+        parts.extend(attribution_lines(attribution));
+    }
     parts.extend([
         String::new(),
         "## Reporting".into(),
@@ -711,6 +809,47 @@ mod tests {
             prompt
                 .contains("A blocker is a decision you cannot make, not a step that failed once.")
         );
+    }
+
+    #[test]
+    fn prompt_stamps_the_real_destination_and_nothing_else() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            attribution: Some(WorkerAttribution {
+                profile: "opencode".into(),
+                model: "gpt-5".into(),
+                effort: Some("high".into()),
+            }),
+            ..WorkerPromptInput::default()
+        });
+        assert!(prompt.contains("## Attribution"));
+        assert!(prompt.contains("Oga: Done with Oga opencode/gpt-5 (effort high)"));
+        assert!(prompt.contains("Done with Oga opencode/gpt-5 (effort high)"));
+        assert!(prompt.contains(ATTRIBUTION_EMAIL));
+        assert!(prompt.contains("Never stamp the same commit twice"));
+        assert!(!prompt.contains("without an AI attribution trailer"));
+    }
+
+    #[test]
+    fn prompt_leaves_effort_off_and_stays_silent_when_opted_out() {
+        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            attribution: Some(WorkerAttribution {
+                profile: "opencode".into(),
+                model: "gpt-5".into(),
+                effort: None,
+            }),
+            ..WorkerPromptInput::default()
+        });
+        assert!(prompt.contains("Oga: Done with Oga opencode/gpt-5"));
+        assert!(!prompt.contains("(effort"));
+
+        let silent = assemble_worker_prompt(&WorkerPromptInput {
+            task: "do the thing".into(),
+            ..WorkerPromptInput::default()
+        });
+        assert!(!silent.contains("## Attribution"));
+        assert!(!silent.contains("Done with Oga"));
     }
 
     #[test]

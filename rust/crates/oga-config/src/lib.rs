@@ -1009,8 +1009,11 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
 
 /// The worker rules one `.oga.yaml` writes for its own scope. `prompt` is the
 /// whole table: whatever it holds ships verbatim under `## Worker rules`, read
-/// again on every dispatch. Any other key is a rule the writer expects Oga to
-/// honour and Oga would silently drop, so it fails the read instead.
+/// again on every dispatch. `attribution` is the only other key: `false`
+/// turns off the Done-with-Oga line workers stamp on commits and pull
+/// requests, `true` (or leaving it out) leaves it on. Any other key is a rule
+/// the writer expects Oga to honour and Oga would silently drop, so it fails
+/// the read instead.
 pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>, ConfigError> {
     let Some(layer) = layer else {
         return Ok(None);
@@ -1023,7 +1026,7 @@ pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
         .ok_or_else(|| invalid(&layer.path, "worker", WORKER_SHAPE))?;
     if let Some(key) = table.keys().find_map(|key| {
         let key = yaml_key(key)?;
-        (key != "prompt").then_some(key)
+        (key != "prompt" && key != "attribution").then_some(key)
     }) {
         return Err(invalid(
             &layer.path,
@@ -1048,7 +1051,36 @@ pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
         .transpose()
 }
 
-const WORKER_SHAPE: &str = "worker takes one key, prompt, holding the rules text";
+const WORKER_SHAPE: &str =
+    "worker takes prompt, holding the rules text, and an optional attribution flag";
+
+/// Whether this scope stamps worker output with the Done-with-Oga line.
+/// `None` means the file says nothing and the next scope up decides.
+pub fn read_worker_attribution(layer: Option<&ConfigLayer>) -> Result<Option<bool>, ConfigError> {
+    let Some(layer) = layer else {
+        return Ok(None);
+    };
+    let Some(worker) = layer.root.get("worker") else {
+        return Ok(None);
+    };
+    let table = worker
+        .as_mapping()
+        .ok_or_else(|| invalid(&layer.path, "worker", WORKER_SHAPE))?;
+    table
+        .get("attribution")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| invalid(&layer.path, "worker.attribution", "must be true or false"))
+        })
+        .transpose()
+}
+
+/// Attribution is on unless somebody turns it off. The project file wins over
+/// the all-projects file; either `false` silences the stamp.
+pub fn resolve_worker_attribution(project: Option<bool>, user: Option<bool>) -> bool {
+    project.or(user).unwrap_or(true)
+}
 
 fn parse_model_override(
     value: &serde_yaml::Value,
@@ -1701,8 +1733,25 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "invalid config /work/.oga.yaml at worker.tldr_sentences: unknown key; worker takes one key, prompt, holding the rules text"
+            "invalid config /work/.oga.yaml at worker.tldr_sentences: unknown key; worker takes prompt, holding the rules text, and an optional attribution flag"
         );
+    }
+
+    #[test]
+    fn worker_attribution_defaults_on_and_resolves_project_first() {
+        assert!(read_worker_attribution(None).unwrap().is_none());
+        let on = layer("/work/.oga.yaml", "worker:\n  attribution: true\n");
+        let off = layer("/work/.oga.yaml", "worker:\n  attribution: false\n");
+        let prompt_only = layer("/work/.oga.yaml", "worker:\n  prompt: rules\n");
+        assert_eq!(read_worker_attribution(Some(&on)).unwrap(), Some(true));
+        assert_eq!(read_worker_attribution(Some(&off)).unwrap(), Some(false));
+        assert_eq!(read_worker_attribution(Some(&prompt_only)).unwrap(), None);
+        let bad = layer("/work/.oga.yaml", "worker:\n  attribution: sometimes\n");
+        assert!(read_worker_attribution(Some(&bad)).is_err());
+        assert!(resolve_worker_attribution(None, None));
+        assert!(!resolve_worker_attribution(Some(false), Some(true)));
+        assert!(!resolve_worker_attribution(None, Some(false)));
+        assert!(resolve_worker_attribution(Some(true), Some(false)));
     }
 
     #[test]

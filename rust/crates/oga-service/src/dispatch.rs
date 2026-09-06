@@ -448,6 +448,12 @@ impl Dispatcher {
             hold: None,
             attachments: request.attachments.clone(),
         };
+        let attribution = prompt::attribution_for(
+            &workspace,
+            &profile.id,
+            &task.model,
+            request.effort.as_deref(),
+        );
         let prompt = WorkerPromptInput {
             task: request.prompt,
             allow_questions: request.allow_questions,
@@ -464,6 +470,7 @@ impl Dispatcher {
             } else {
                 request.memories
             },
+            attribution,
         };
         let hold = hold.map(|mut hold| {
             hold.task_id = task.id.clone();
@@ -929,6 +936,7 @@ impl Dispatcher {
                             allow_questions: task.allow_questions,
                             scope: Some(task.scope.clone()),
                             worker_prompt: DEFAULT_WORKER_PROMPT.to_owned(),
+                            attribution: prompt::attribution_for_task(&task),
                             ..WorkerPromptInput::default()
                         },
                     };
@@ -998,6 +1006,7 @@ impl Dispatcher {
                         allow_questions: queued.allow_questions,
                         scope: Some(queued.scope.clone()),
                         worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
+                        attribution: prompt::attribution_for_task(&queued),
                         ..WorkerPromptInput::default()
                     };
                     self.launch_task(queued, profile, prompt, None);
