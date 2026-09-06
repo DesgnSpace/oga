@@ -79,6 +79,12 @@ oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code
         <p>When you need a completed task to do more, give it a new instruction:</p>
         <pre><code>oga resume &lt;task-id&gt; -m "move the status dot to the end of the title"</code></pre>
 
+        <h2 id="move">Move it to another worker</h2>
+        <p>When the account behind a task is out of usage, or the work belongs on a stronger model, move it without losing the task:</p>
+        <pre><code>oga handoff &lt;task-id&gt; --worker claude
+oga handoff &lt;task-id&gt; --model opus</code></pre>
+        <p>It keeps its id, its request, and its place in line. A task waiting on other work, or on a start time you set, keeps waiting — it just runs somewhere else when its turn comes.</p>
+
         <div class="docs-callout">
           <p>Search <code>oga tasks --query "feature, file, or command"</code> before you start something new. If it finds related work, pick that task back up instead of running two against each other.</p>
         </div>
@@ -95,6 +101,7 @@ oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code
           <li><a href="#read-it">Read the whole thing</a></li>
           <li><a href="#answer">Answer a question</a></li>
           <li><a href="#pick-up">Pick it back up</a></li>
+          <li><a href="#move">Move it to another worker</a></li>
         </ul>
       </aside>
     </div>

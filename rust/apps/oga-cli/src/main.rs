@@ -9,8 +9,8 @@ use std::{
 
 use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_client::{
-    CompletionRequest, DispatchRequest, EventFrame, EventStreamQuery, LoopbackClient,
-    MapInitRequest, MapQuery, QueryRequest, ResumeRequest, StateQuery,
+    CompletionRequest, DispatchRequest, EventFrame, EventStreamQuery, HandoffRequest,
+    LoopbackClient, MapInitRequest, MapQuery, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
     DEFAULT_WORKER_PROMPT, canonical_cwd, global_cwd, load_config_layers, load_profiles,
@@ -152,6 +152,7 @@ async fn run(args: Vec<String>) -> CliResult<i32> {
         "restore" => run_archive(&args[1..], false).await,
         "cancel" => run_cancel(&args[1..]).await,
         "resume" => run_resume(&args[1..]).await,
+        "handoff" => run_handoff(&args[1..]).await,
         "complete" => run_complete(&args[1..]).await,
         "cleanup" => run_cleanup(&args[1..]).await,
         "config" => run_config(&args[1..]).await,
@@ -710,6 +711,9 @@ Usage: oga <command> [options]
   resume <task-id>     Resume a task, optionally with -m instruction. Add
                        --start-at 4h (or an exact time) to have it start later
                        instead of now.
+  handoff <task-id>    Move a task to another worker or model, keeping its id,
+                       request, and place in line. Add --worker, --model, or
+                       --effort. Works before it starts and while it runs.
   complete <task-id>   Mark a task complete.
   cleanup              Free the disk that old finished work is holding. Shows
                        what would go and deletes nothing until you say so.
@@ -730,7 +734,7 @@ First run:
 
 fn unknown_command_message(command: &str) -> String {
     format!(
-        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
+        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, handoff, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
     )
 }
 
@@ -1208,6 +1212,97 @@ async fn run_resume(args: &[String]) -> CliResult<i32> {
         println!("Scheduled {} {}", response.id, task_title(&task));
     } else {
         println!("Resumed {} {}", response.id, task_title(&task));
+    }
+    Ok(0)
+}
+
+#[derive(Debug, Clone, Default)]
+struct HandoffCliOptions {
+    json: bool,
+    worker: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+}
+
+fn parse_handoff_args(args: &[String]) -> CliResult<(HandoffCliOptions, Vec<String>)> {
+    let mut options = HandoffCliOptions::default();
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].clone();
+        let mut take = |flag: &str| {
+            index += 1;
+            args.get(index)
+                .cloned()
+                .ok_or_else(|| CliError::new(format!("{flag} needs a value")))
+        };
+        match arg.as_str() {
+            "--json" => options.json = true,
+            "--worker" => options.worker = Some(take("--worker")?),
+            "--model" => options.model = Some(take("--model")?),
+            "--effort" => options.effort = Some(take("--effort")?),
+            value if value.starts_with("--worker=") => {
+                options.worker = Some(value.trim_start_matches("--worker=").to_owned());
+            }
+            value if value.starts_with("--model=") => {
+                options.model = Some(value.trim_start_matches("--model=").to_owned());
+            }
+            value if value.starts_with("--effort=") => {
+                options.effort = Some(value.trim_start_matches("--effort=").to_owned());
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::new(format!("unknown option: {value}")));
+            }
+            value => values.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    Ok((options, values))
+}
+
+async fn run_handoff(args: &[String]) -> CliResult<i32> {
+    let (options, values) = parse_handoff_args(args)?;
+    let id = values.first().ok_or_else(|| {
+        CliError::new("usage: oga handoff <task-id> [--worker name] [--model name] [--effort high]")
+    })?;
+    if values.len() != 1 {
+        return Err(CliError::new("handoff takes one task id"));
+    }
+    if options.worker.is_none() && options.model.is_none() {
+        return Err(CliError::new(
+            "handoff needs a destination: pass --worker, --model, or both",
+        ));
+    }
+    let client = broker_client()?;
+    let task = resolve_task(&client, id).await?;
+    let request = HandoffRequest {
+        profile: options.worker,
+        model: options.model,
+        effort: options.effort,
+        ..HandoffRequest::default()
+    };
+    let response = client.handoff_task(&task.id, &request).await?;
+    let waiting = response.state == TaskState::Pending;
+    let worker = response.profile_id.as_deref().unwrap_or(&task.profile_id);
+    let model = response.model.as_deref().unwrap_or(&task.model);
+    if options.json {
+        print_json(&json!({
+            "id": response.id,
+            "state": response.state,
+            "title": task_title(&task),
+            "profileId": worker,
+            "model": model,
+            "action": "handed off",
+        }))?;
+    } else {
+        println!(
+            "Moved {} {} to {worker} on {model}",
+            response.id,
+            task_title(&task)
+        );
+        if waiting {
+            println!("It still waits its turn before it starts.");
+        }
     }
     Ok(0)
 }
@@ -3548,6 +3643,25 @@ mod tests {
         assert_eq!(options.limit, 1);
         assert!(options.code);
         assert_eq!(question, ["where is auth"]);
+    }
+
+    #[test]
+    fn parses_handoff_options_and_the_task_id() {
+        let args = vec![
+            "--worker=claude".into(),
+            "--model".into(),
+            "opus".into(),
+            "--effort=high".into(),
+            "tsk_1".into(),
+        ];
+        let (options, values) = parse_handoff_args(&args).unwrap();
+        assert_eq!(options.worker.as_deref(), Some("claude"));
+        assert_eq!(options.model.as_deref(), Some("opus"));
+        assert_eq!(options.effort.as_deref(), Some("high"));
+        assert_eq!(values, ["tsk_1"]);
+
+        assert!(parse_handoff_args(&["--worker".into()]).is_err());
+        assert!(parse_handoff_args(&["--nope".into()]).is_err());
     }
 
     #[test]
