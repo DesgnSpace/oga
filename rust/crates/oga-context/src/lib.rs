@@ -1,42 +1,25 @@
-//! Project context maps, source symbols, FTS ranking, scope filtering, and
-//! learned source routes.
+//! The project code index: tree-sitter parsing behind `oga query` and
+//! `oga relearn`.
+//!
+//! `lang` holds one adapter per language, `symbols` runs an adapter's query
+//! over a parsed tree, `walk` decides which files are candidates, `store`
+//! reads and writes SQLite, `query` ranks an answer, `routes` keeps the hints
+//! people taught the project, and `index` ties them together.
 
 mod index;
+mod lang;
+mod query;
+mod routes;
+mod store;
 mod symbols;
 mod text;
 mod walk;
 
 pub use index::{
-    BUILD_BUDGET, BuildOptions, BuildResult, ContextError, ContextIndex, ContextResult,
-    ContextTarget, LearnRouteProposal, LearnRouteRejection, LearnRoutesResult, MAP_SCHEME,
-    MAX_BUILD_FILES, MAX_FILE_BYTES, MAX_SYMBOLS_PER_CWD, MAX_SYMBOLS_PER_FILE, QueryOptions,
-    QuestionCandidate, QuestionOptions, ReconcileResult, RenderTier, RouteMove,
-    WorktreeVerification,
+    BuildOptions, BuildResult, ContextError, ContextIndex, ContextResult, ContextTarget,
+    LearnRouteProposal, LearnRouteRejection, LearnRoutesResult, QueryOptions, QuestionCandidate,
+    QuestionOptions, ReconcileResult, RenderTier,
 };
-pub use symbols::{ExtractedFile, ExtractedSymbol, extract_refs, extract_symbols};
-pub use text::{
-    FTS_STOP_WORDS, MAP_STOP_WORDS, clean_comment, fts_query, hint_key, identifier_tokens,
-    normalize_word, prompt_terms, raw_words, words,
-};
-pub use walk::{
-    ContextWalkFile, GenericLanguage, LanguageEntry, WalkOptions, WalkResult, mapped_extension,
-    mtime_ms, walk_context_files,
-};
-
-/// Build a project map through the supplied store.
-pub fn build_context_map(
-    store: &oga_store::Store,
-    cwd: impl AsRef<std::path::Path>,
-    options: BuildOptions,
-) -> Result<BuildResult, ContextError> {
-    ContextIndex::new(store).build(cwd, options)
-}
-
-/// Reconcile only files whose metadata changed, preserving entity identities.
-pub fn reconcile_context_map(
-    store: &oga_store::Store,
-    cwd: impl AsRef<std::path::Path>,
-    options: BuildOptions,
-) -> Result<ReconcileResult, ContextError> {
-    ContextIndex::new(store).reconcile(cwd, options)
-}
+pub use lang::{LanguageAdapter, adapters};
+pub use routes::RouteMove;
+pub use symbols::{ExtractedFile, ExtractedSymbol, extract_symbols};

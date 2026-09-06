@@ -26,10 +26,7 @@ pub mod store;
 pub mod task;
 pub mod util;
 
-pub use context::{
-    ContextFile, ContextFileProject, ContextMapRow, ContextMapState, ContextRefs, ContextSymbol,
-    MapFileStatus, SourceLang, SymbolKind,
-};
+pub use context::{ContextFile, ContextMapRow, ContextMapState, ContextSymbol, SymbolKind};
 pub use delivery::{ConsumerCursor, ConsumerDelivery, DeliveryStatus};
 pub use diff::{TaskDiff, TaskDiffBasis, TaskDiffFile, TaskDiffFileStatus};
 pub use event::{
