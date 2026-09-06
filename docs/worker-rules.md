@@ -47,8 +47,7 @@ Do not put credentials or temporary task status in them.
 
 Work a delegated worker ships carries a short stamp naming the provider type,
 model, and effort that ran it: a `Co-Authored-By:` trailer on commits it
-creates, so git credits the run, and a footer on pull request bodies it
-opens.
+creates, so git credits the run.
 It is on by default, and it never names your own profile — only the provider
 behind it, such as `claude`.
 

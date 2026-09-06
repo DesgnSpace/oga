@@ -38,14 +38,6 @@ impl WorkerAttribution {
         }
     }
 
-    /// The footer stamped on pull request bodies the worker opens.
-    pub fn footer(&self) -> String {
-        format!(
-            "Supervised by Oga ({}) — <{ATTRIBUTION_EMAIL}>",
-            self.summary()
-        )
-    }
-
     /// The git trailer stamped on commits the worker creates. Shaped so git
     /// reads it as a co-author.
     pub fn trailer(&self) -> String {
@@ -111,9 +103,6 @@ fn attribution_lines(attribution: &WorkerAttribution) -> Vec<String> {
             "- Commits you create: end each message with the trailer `{}` on its own line.",
             attribution.trailer()
         ),
-        "- Pull requests you open: end the body with a footer on its own lines:".into(),
-        "  ---".into(),
-        format!("  {}", attribution.footer()),
         "- Use these words exactly as written here. Never stamp the same commit twice, and never add attribution to anything the user wrote themselves.".into(),
     ]
 }
@@ -979,9 +968,7 @@ mod tests {
         assert!(
             prompt.contains("Co-Authored-By: Oga (on claude/opus, high effort) <oga@desgn.space>")
         );
-        assert!(
-            prompt.contains("Supervised by Oga (on claude/opus, high effort) — <oga@desgn.space>")
-        );
+        assert!(!prompt.contains("Supervised by Oga"));
         assert!(prompt.contains(ATTRIBUTION_EMAIL));
         assert!(prompt.contains("Never stamp the same commit twice"));
         assert!(!prompt.contains("without an AI attribution trailer"));
