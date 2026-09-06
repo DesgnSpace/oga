@@ -475,23 +475,22 @@ impl<'a> ContextIndex<'a> {
         question: &str,
         terms: &[String],
     ) -> Result<Vec<Scored>, ContextError> {
+        let (_, total) = index_store::counts(self.store, index_cwd)?;
+        let weights = TermWeights::new(
+            &index_store::term_hits(self.store, index_cwd, terms)?,
+            total,
+        );
         let mut ranking = Ranking::default();
         for route in routes::matching(self.store, index_cwd, question, terms)? {
-            let overlap = routes::overlap(&route, terms);
-            if !route.exact && overlap == 0 {
+            if !route.exact && routes::overlap(&route, terms) == 0 {
                 continue;
             }
             let Some(symbol) = self.route_target(index_cwd, &route)? else {
                 routes::forget(self.store, route.id)?;
                 continue;
             };
-            ranking.add_route(&route, symbol, overlap);
+            ranking.add_route(&route, symbol, terms, &weights);
         }
-        let (_, total) = index_store::counts(self.store, index_cwd)?;
-        let weights = TermWeights::new(
-            &index_store::term_hits(self.store, index_cwd, terms)?,
-            total,
-        );
         let question_key = name_key(question);
         let mut keys = vec![question_key.clone()];
         keys.extend(terms.iter().cloned());
@@ -757,8 +756,10 @@ struct Reachable {
     gone: usize,
 }
 
-/// One anchor when the ranking was sure, otherwise every candidate with the
-/// words it matched, so the reader can pick.
+/// One bare anchor when the ranking landed on a single sure answer, otherwise
+/// every candidate the caller may read, ranked, each with the words it
+/// matched so the reader can judge them instead of trusting one arbitrary
+/// pick.
 fn answer_lines(
     candidates: &[QuestionCandidate],
     kept: &[Scored],
@@ -766,16 +767,16 @@ fn answer_lines(
     confident: bool,
     code: bool,
 ) -> Vec<String> {
-    let shown = if confident { 1 } else { candidates.len() };
+    let bare = confident && candidates.len() == 1;
     let mut lines = Vec::new();
-    for (candidate, scored) in candidates.iter().zip(kept).take(shown) {
+    for (candidate, scored) in candidates.iter().zip(kept) {
         let anchor = entry_line(
             &candidate.path,
             candidate.symbol.as_deref(),
             Vec::new(),
             Some(candidate.line),
         );
-        lines.push(if confident {
+        lines.push(if bare {
             anchor
         } else {
             let matched = terms
