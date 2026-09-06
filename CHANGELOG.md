@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The Usage activity grid is now a compact, centred strip with weekday labels aligned to its rows.
 - `oga query` now returns every strong match, ranked, instead of collapsing to one arbitrary pick when a word was taught as a hint for several unrelated places. Adding or dropping a word no longer flips the answer between unrelated files for no visible reason.
 
 ## 0.0.7 - 2026-09-06
