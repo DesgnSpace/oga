@@ -102,11 +102,14 @@ export interface ComposerRequest {
   instruction: string | undefined;
 }
 
+/** Return false to keep the draft text (the send failed); anything else clears it. */
+export type ComposerSend = (request: ComposerRequest) => Promise<boolean | void> | boolean | void;
+
 export interface ConversationComposerProps {
   routing: ConversationInputRouting;
   scope?: TaskScope;
   queued: string[];
-  onSend: (request: ComposerRequest) => void;
+  onSend: ComposerSend;
   onRemoveQueued: (index: number) => void;
   thinkingToggle?: { active: boolean; onToggle: () => void };
 }
@@ -116,20 +119,27 @@ const COMPOSER_MAX_HEIGHT = 160;
 
 export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQueued, thinkingToggle }: ConversationComposerProps) {
   const [draft, setDraft] = React.useState("");
-  const disabled = isSendDisabled(routing, draft);
+  const [sending, setSending] = React.useState(false);
+  const disabled = isSendDisabled(routing, draft) || sending;
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const label = actionLabel(routing);
 
-  const submit = (mode: ComposerSendMode) => {
-    if (isSendDisabled(routing, draft)) return;
+  const submit = async (mode: ComposerSendMode) => {
+    if (isSendDisabled(routing, draft) || sending) return;
     const text = draft.trim();
-    setDraft("");
-    onSend({ mode, instruction: text === "" ? undefined : text });
+    setSending(true);
+    try {
+      const cleared = await onSend({ mode, instruction: text === "" ? undefined : text });
+      if (cleared !== false) setDraft("");
+    } finally {
+      setSending(false);
+    }
   };
 
-  const scopeLabel = scope ? (scope.write.length === 0 ? "Read only" : "Can edit") : undefined;
+  const readOnlyScope = scope ? scope.write.length === 0 : false;
+  const scopeLabel = scope ? (readOnlyScope ? "Read only" : "Can edit") : undefined;
   const scopeHelp = scope
-    ? scope.write.length === 0
+    ? readOnlyScope
       ? "This run can read files but not change them."
       : "This run can change files."
     : undefined;
@@ -179,11 +189,17 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
           rows={1}
           placeholder={placeholder(routing)}
           value={draft}
+          disabled={sending}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
-              submit("primary");
+              void submit("primary");
+              return;
+            }
+            if (event.key === "Escape" && draft !== "") {
+              event.preventDefault();
+              setDraft("");
             }
           }}
           aria-label={placeholder(routing)}
@@ -201,14 +217,16 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
               </button>
             )}
             {scopeLabel && (
-              <span className="composer-scope" title={scopeHelp}>
+              <span className={readOnlyScope ? "composer-scope composer-scope-read-only" : "composer-scope"} title={scopeHelp}>
                 <span className="composer-scope-dot" aria-hidden="true">●</span>
                 {scopeLabel}
               </span>
             )}
           </div>
           <div className="composer-footer-right">
-            <span className="composer-hint" aria-hidden="true">⌘↵ to send</span>
+            <span className="composer-hint" aria-hidden="true">
+              {draft !== "" ? "Esc to clear · " : ""}⌘↵ to {label.toLowerCase()}
+            </span>
             {routing.type === "steer-and-queue" && (
               <button
                 className="composer-send-now"
@@ -216,14 +234,14 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
                 disabled={disabled}
                 aria-label="Send now — interrupts the running worker"
                 title="Send now — interrupts the running worker"
-                onClick={() => submit("steer")}
+                onClick={() => void submit("steer")}
               >
                 Send now
               </button>
             )}
             <button className="composer-submit" type="submit" disabled={disabled} title={`${label} — ⌘/Ctrl+Enter`}>
               <SendIcon />
-              {label}
+              {sending ? "Sending…" : label}
             </button>
           </div>
         </div>

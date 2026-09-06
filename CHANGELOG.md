@@ -8,6 +8,9 @@
 
 ### Fixed
 
+- The follow-up box now keeps your text if a send fails, disables itself while sending, and lets Escape clear a draft.
+- The keyboard hint under the follow-up box now names the action it actually triggers (queue, reply, or continue) instead of always saying "send".
+- Fixed the read-only scope indicator on the follow-up box showing the same "active" color as the editable one.
 - `oga relearn --force` reads the project again from scratch instead of failing.
 - Fixed the task header's options menu opening clipped inside the header strip.
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.

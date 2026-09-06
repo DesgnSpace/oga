@@ -2010,6 +2010,10 @@ h1 {
     outline: none;
 }
 
+.composer-input:disabled {
+    opacity: 0.6;
+}
+
 .composer-footer {
     display: flex;
     align-items: center;
@@ -2052,6 +2056,10 @@ h1 {
     color: var(--color-success);
     font-size: var(--text-sm);
     line-height: 1;
+}
+
+.composer-scope-read-only .composer-scope-dot {
+    color: var(--color-text-muted);
 }
 
 .composer-thinking-toggle {
