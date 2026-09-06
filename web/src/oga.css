@@ -36,6 +36,17 @@
     --topbar-height: 40px;
     --control-height-small: 24px;
     --macos-titlebar-inset: 92px;
+    /* Overlay order, top first: notifications stay legible above the dim,
+       the modal owns the rest of the page, body-portalled menus sit below
+       it, in-page popovers below those. Bare z-index values elsewhere are
+       local to their own stacking context and never compete with these. */
+    --z-sticky: 1;
+    --z-raised: 2;
+    --z-popover: 3;
+    --z-context-menu: 4;
+    --z-menu: 100;
+    --z-modal: 200;
+    --z-toast: 1100;
     font-family: var(--font-sans);
     font-size: var(--text-lg);
     line-height: 1.5;
@@ -218,7 +229,7 @@ a {
        window-zoom feature (menuCommands.ts) miscomputes right/bottom
        offsets in WebKit, letting the toast render past the window edge. */
     position: absolute;
-    z-index: 1100;
+    z-index: var(--z-toast);
     right: var(--space-4);
     bottom: var(--space-4);
     width: min(360px, calc(100vw - var(--space-4) * 2));
@@ -409,7 +420,7 @@ a {
 #app-recovery {
     position: fixed;
     inset: 0;
-    z-index: 100;
+    z-index: var(--z-menu);
     display: grid;
     align-content: center;
     justify-items: center;
@@ -619,7 +630,7 @@ a {
 
 .sidebar-resize-handle {
     position: absolute;
-    z-index: 2;
+    z-index: var(--z-raised);
     top: 0;
     right: -3px;
     bottom: 0;
@@ -704,7 +715,7 @@ a {
 
 .filter-popover {
     position: absolute;
-    z-index: 3;
+    z-index: var(--z-popover);
     top: calc(100% + var(--space-1));
     right: 0;
     width: 232px;
@@ -839,7 +850,7 @@ a {
 
 .sidebar-row-context-menu {
     position: absolute;
-    z-index: 4;
+    z-index: var(--z-context-menu);
 }
 
 /* No rules between rows: the list separates on space and fill alone, the way
@@ -1320,7 +1331,7 @@ h1 {
    next to its trigger with fixed positioning, above surrounding content. */
 .task-action-menu-portal {
     position: fixed;
-    z-index: 100;
+    z-index: var(--z-menu);
     max-width: calc(100vw - 16px);
 }
 
@@ -1490,7 +1501,7 @@ h1 {
 
 .changed-files-resize-handle {
     position: absolute;
-    z-index: 2;
+    z-index: var(--z-raised);
     top: 0;
     bottom: 0;
     left: -3px;
@@ -1621,7 +1632,7 @@ h1 {
 
 .changed-files-tree-popover-panel {
     position: absolute;
-    z-index: 2;
+    z-index: var(--z-raised);
     top: 100%;
     right: 0;
     width: 280px;
@@ -3382,7 +3393,7 @@ select {
 .modal-overlay {
     position: fixed;
     inset: 0;
-    z-index: 200;
+    z-index: var(--z-modal);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3398,6 +3409,21 @@ select {
 @keyframes modal-overlay-fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
+}
+
+/* While a modal is open the page behind is fully covered, but native overlay
+   scrollbars still paint above the dim: the compositor draws them over every
+   page layer, no z-index reaches them. So the page layer shows none until
+   the dialog closes. The dialog and the toast stack live outside
+   .app-layout and keep their own scrollbars. */
+body.modal-open .app-layout,
+body.modal-open .app-layout * {
+    scrollbar-width: none;
+}
+
+body.modal-open .app-layout::-webkit-scrollbar,
+body.modal-open .app-layout *::-webkit-scrollbar {
+    display: none;
 }
 
 .modal-dialog {
@@ -3417,7 +3443,7 @@ select {
     position: absolute;
     top: var(--space-3);
     right: var(--space-3);
-    z-index: 2;
+    z-index: var(--z-raised);
     border: 0;
 }
 
@@ -3816,7 +3842,7 @@ select {
 .settings-rail-header {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-sticky);
     padding: var(--space-5) var(--space-4) var(--space-3);
     background: var(--color-sidebar);
 }
@@ -4456,7 +4482,7 @@ select {
     position: absolute;
     top: 50%;
     left: var(--space-3);
-    z-index: 1;
+    z-index: var(--z-sticky);
     color: var(--color-text);
     pointer-events: none;
     transform: translateY(-50%);
@@ -4641,7 +4667,7 @@ select {
 .settings-switch input {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: var(--z-sticky);
     width: 100%;
     height: 100%;
     margin: 0;
