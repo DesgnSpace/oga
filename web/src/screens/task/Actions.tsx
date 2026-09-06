@@ -695,8 +695,8 @@ export function TaskControls({
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
     titles: TaskToastTitles,
-  ) => {
-    if (busy) return;
+  ): Promise<boolean> => {
+    if (busy) return false;
     setBusy(true);
     const lifecycle = toast.pending(titles.pending);
     try {
@@ -705,45 +705,44 @@ export function TaskControls({
       if (result.ok) {
         lifecycle.success(titles.success);
         onChanged();
-      } else {
-        const failure = actionFailure(result.error, titles.failure);
-        lifecycle.error(failure.title, failure.options);
+        return true;
       }
+      const failure = actionFailure(result.error, titles.failure);
+      lifecycle.error(failure.title, failure.options);
+      return false;
     } catch (error) {
       setBusy(false);
       const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
+      return false;
     }
   };
 
-  const handleSend = (request: ComposerRequest) => {
+  const handleSend = (request: ComposerRequest): Promise<boolean> => {
     if (request.instruction === undefined) {
-       if (isResume(routing)) void run(() => executeResume(task.id), resumeTitles(task));
-      return;
+      if (isResume(routing)) return run(() => executeResume(task.id), resumeTitles(task));
+      return Promise.resolve(true);
     }
     const instruction = request.instruction;
     if (routing.type === "reply") {
-      void run(() => executeReply(task.id, instruction, task.scope), replyTitles(task));
-      return;
+      return run(() => executeReply(task.id, instruction, task.scope), replyTitles(task));
     }
     if (
       (routing.type === "steer-and-queue" && request.mode === "steer") ||
       (routing.type === "steer" && request.mode === "steer")
     ) {
-      void run(() => executeSteer(task.id, instruction), instructionTitles(task));
-      return;
+      return run(() => executeSteer(task.id, instruction), instructionTitles(task));
     }
     if ((routing.type === "steer-and-queue" && request.mode === "primary") || routing.type === "queue") {
-      void run(() => executeQueue(task.id, instruction), followUpTitles(task));
-      return;
+      return run(() => executeQueue(task.id, instruction), followUpTitles(task));
     }
     if (routing.type === "resume") {
-      void run(() => executeResume(task.id, { instruction, scope: task.scope }), resumeTitles(task));
-      return;
+      return run(() => executeResume(task.id, { instruction, scope: task.scope }), resumeTitles(task));
     }
     if (routing.type === "steer" && request.mode === "primary") {
-      void run(() => executeSteer(task.id, instruction), instructionTitles(task));
+      return run(() => executeSteer(task.id, instruction), instructionTitles(task));
     }
+    return Promise.resolve(true);
   };
 
   const removeQueued = (index: number) => void run(() => executeRemoveFollowUp(task.id, index), removeFollowUpTitles(task));

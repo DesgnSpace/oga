@@ -53,7 +53,6 @@
         <p class="docs-eyebrow">Docs / Changelog</p>
         <h1>What changed</h1>
           <h2>Unreleased</h2>
-          <h3>Changed</h3>
           <ul>
           <li><code>oga query</code> now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.</li>
           <li>Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.</li>
@@ -61,6 +60,9 @@
           </ul>
           <h3>Fixed</h3>
           <ul>
+          <li>The follow-up box now keeps your text if a send fails, disables itself while sending, and lets Escape clear a draft.</li>
+          <li>The keyboard hint under the follow-up box now names the action it actually triggers (queue, reply, or continue) instead of always saying &quot;send&quot;.</li>
+          <li>Fixed the read-only scope indicator on the follow-up box showing the same &quot;active&quot; color as the editable one.</li>
           <li><code>oga relearn --force</code> reads the project again from scratch instead of failing.</li>
           <li>Fixed the task header's options menu opening clipped inside the header strip.</li>
           <li>Fixed workers on your main Claude account failing with &quot;Not logged in&quot; while the same account worked in the terminal.</li>
