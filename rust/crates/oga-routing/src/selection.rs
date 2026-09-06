@@ -4,7 +4,9 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use oga_config::{LoveRule, ResolvedModelSettings, model_enabled, profile_enabled};
+use oga_config::{
+    LoveDestination, LoveRule, ResolvedModelSettings, model_enabled, profile_enabled,
+};
 use oga_domain::{
     Difficulty, ModelInfo, Profile, ProfileUsage, RoutePreference, SelectionRejection,
     SelectionRelaxation, SelectionStage, TaskClass, TaskTopic, WorkKind,
@@ -409,39 +411,71 @@ pub fn choose_model(
     // A love rule is the caller's standing answer to the question selection
     // would otherwise ask for this kind of work, so it stands in for the class
     // policy the way a named model does — the class still prices the effort
-    // unless the rule set one. It gives way the moment it cannot take the work:
-    // the point of loving a model is to stop choosing, not to buy a way for a
-    // dispatch to fail.
+    // unless the rule set one. The chain reads top to bottom: the first
+    // destination that can take the work runs it, and whatever was skipped
+    // says so on the way past. It gives way the moment no destination can
+    // take the work: the point of loving a model is to stop choosing, not to
+    // buy a way for a dispatch to fail.
     if let Some(loved) = extra.settings.love.for_task(demand.task_class, topic)
         && options.model_hint.is_none()
         && options.profile_id.is_none()
     {
-        let pick = screened
+        let defaults: HashMap<&str, &str> = profiles
             .iter()
-            .filter(|item| loved.names_model(&item.model.profile_id, &item.model.id))
-            .min_by(|a, b| a.used.unwrap_or(0.0).total_cmp(&b.used.unwrap_or(0.0)));
-        let skipped: Option<String> = match pick {
-            None => Some(loved_skip_reason(loved, &rejected)),
-            Some(pick) => {
-                if pick.status.map(|s| s.state) == Some(AvailabilityState::Unavailable) {
-                    Some(
-                        pick.status
-                            .map(|s| s.reason.clone())
-                            .expect("state checked"),
-                    )
-                } else if is_exhausted(pick) {
-                    Some(format!(
-                        "{}% of its usage window is spent",
-                        pick.used.expect("exhausted")
-                    ))
-                } else {
-                    None
-                }
-            }
+            .map(|profile| (profile.id.as_str(), profile.default_model.as_str()))
+            .collect();
+        let default_of = |profile_id: &str| defaults.get(profile_id).copied();
+        let model_matches = |destination: &LoveDestination, profile_id: &str, model: &str| {
+            destination.matches(profile_id, model, default_of(profile_id))
         };
-        if let Some(pick) = pick
-            && skipped.is_none()
-        {
+        // Why one destination was not among the candidates. The screening
+        // pass has already said this per model, so its wording is reused
+        // rather than guessed at a second time; nothing said means no account
+        // listed the model at all.
+        let skip_reason = |destination: &LoveDestination| -> String {
+            rejected
+                .iter()
+                .find(|row| {
+                    destination.matches(&row.profile_id, &row.model, default_of(&row.profile_id))
+                })
+                .map(|row| row.reason.clone())
+                .unwrap_or_else(|| "no connected account offers it".into())
+        };
+        let mut skipped: Vec<(String, String)> = Vec::new();
+        let mut pick: Option<(&Screened, usize)> = None;
+        for (index, destination) in loved.destinations.iter().enumerate() {
+            let candidate = screened
+                .iter()
+                .filter(|item| model_matches(destination, &item.model.profile_id, &item.model.id))
+                .min_by(|a, b| a.used.unwrap_or(0.0).total_cmp(&b.used.unwrap_or(0.0)));
+            let Some(candidate) = candidate else {
+                skipped.push((destination.label(), skip_reason(destination)));
+                continue;
+            };
+            if candidate.status.map(|s| s.state) == Some(AvailabilityState::Unavailable) {
+                skipped.push((
+                    destination.label(),
+                    candidate
+                        .status
+                        .map(|s| s.reason.clone())
+                        .expect("state checked"),
+                ));
+                continue;
+            }
+            if is_exhausted(candidate) {
+                skipped.push((
+                    destination.label(),
+                    format!(
+                        "{}% of its usage window is spent",
+                        candidate.used.expect("exhausted")
+                    ),
+                ));
+                continue;
+            }
+            pick = Some((candidate, index));
+            break;
+        }
+        if let Some((pick, index)) = pick {
             let ctx = LovedContext {
                 demand: &demand,
                 difficulty,
@@ -450,6 +484,8 @@ pub fn choose_model(
                 heuristic_agreed,
                 options,
                 topic,
+                index,
+                skipped,
             };
             return Ok(finish_loved_route(
                 pick,
@@ -460,13 +496,11 @@ pub fn choose_model(
             ));
         }
         let matched = loved.matching_kind(demand.task_class, topic);
-        warnings.push(format!(
-            "{} is loved here{} but could not take this task: {}; this went to the usual choice \
-             for {} work instead",
-            loved.label(),
-            love_kind_suffix(matched),
-            skipped.unwrap_or_default(),
-            matched.map_or(demand.task_class.as_str(), WorkKind::as_str)
+        warnings.push(loved_miss_warning(
+            loved,
+            matched,
+            &skipped,
+            demand.task_class,
         ));
     }
 
@@ -834,6 +868,10 @@ struct LovedContext<'a> {
     heuristic_agreed: bool,
     options: &'a RoutePreferences,
     topic: Option<TaskTopic>,
+    /// Which destination in the rule's chain ran, and the earlier ones it
+    /// passed on the way there.
+    index: usize,
+    skipped: Vec<(String, String)>,
 }
 
 /// Build the loved-model route once a candidate cleared everything. The class
@@ -854,9 +892,12 @@ fn finish_loved_route<'a>(
         heuristic_agreed,
         options,
         topic,
+        index,
+        skipped,
     } = ctx;
+    let destination = &loved.destinations[index];
     let traits = model_traits(pick.model);
-    let rule_effort = loved_effort(pick.model, loved);
+    let rule_effort = loved_effort(pick.model, destination.effort.as_deref());
     let projected = rule_effort
         .clone()
         .map(|effort| crate::effort::ProjectedEffort {
@@ -879,6 +920,23 @@ fn finish_loved_route<'a>(
         ));
     }
     let mut route_warnings = warnings.clone();
+    if !skipped.is_empty() {
+        let details = skipped
+            .iter()
+            .map(|(label, reason)| format!("{label} ({reason})"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        route_warnings.push(format!(
+            "{} {} loved before {} but could not take this task: {details}; sent here instead",
+            skipped
+                .iter()
+                .map(|(label, _)| label.as_str())
+                .collect::<Vec<_>>()
+                .join(" and "),
+            if skipped.len() == 1 { "is" } else { "are" },
+            loved.destinations[index].label(),
+        ));
+    }
     if options.difficulty.is_some() && !heuristic_agreed {
         route_warnings.push(heuristic_note(&demand.reason, difficulty));
     }
@@ -899,7 +957,8 @@ fn finish_loved_route<'a>(
             love_route_reason(
                 loved,
                 loved.matching_kind(demand.task_class, topic),
-                rule_effort.as_deref()
+                rule_effort.as_deref(),
+                index,
             )
         ),
         candidates: vec![ModelCandidate {
@@ -916,12 +975,39 @@ fn finish_loved_route<'a>(
 }
 
 /// Why the route ended here, naming the rule that decided it: the kind of work
-/// it claims, or the whole scope when it is the catch-all.
-fn love_route_reason(loved: &LoveRule, matched: Option<WorkKind>, effort: Option<&str>) -> String {
+/// it claims, or the whole scope when it is the catch-all. A destination past
+/// the first says its place in the chain, so the record shows the task did
+/// not run where it was first meant to.
+fn love_route_reason(
+    loved: &LoveRule,
+    matched: Option<WorkKind>,
+    effort: Option<&str>,
+    index: usize,
+) -> String {
     let effort = effort.map_or_else(String::new, |effort| format!(" at {effort} effort"));
+    let chosen = &loved.destinations[index];
+    if index == 0 {
+        return match matched {
+            None => format!(
+                "sent to the loved model, the default {}{effort}",
+                if loved.scope == "project" {
+                    "for this project"
+                } else {
+                    "everywhere"
+                }
+            ),
+            Some(kind) => format!(
+                "sent to {}, loved for {} work{effort}",
+                loved.label(),
+                kind.as_str()
+            ),
+        };
+    }
+    let place = ordinal(index);
     match matched {
         None => format!(
-            "sent to the loved model, the default {}{effort}",
+            "sent to {}, the {place} loved model, the default {}{effort}",
+            chosen.label(),
             if loved.scope == "project" {
                 "for this project"
             } else {
@@ -929,11 +1015,58 @@ fn love_route_reason(loved: &LoveRule, matched: Option<WorkKind>, effort: Option
             }
         ),
         Some(kind) => format!(
-            "sent to {}, loved for {} work{effort}",
-            loved.label(),
+            "sent to {}, {place} loved choice for {} work{effort}",
+            chosen.label(),
             kind.as_str()
         ),
     }
+}
+
+/// Second, third, fourth: the place of a destination past the first.
+fn ordinal(index: usize) -> String {
+    match index {
+        1 => "second".into(),
+        2 => "third".into(),
+        3 => "fourth".into(),
+        4 => "fifth".into(),
+        _ => format!("{}th", index + 1),
+    }
+}
+
+/// What the fallback path says when no destination could take the work: the
+/// whole chain and why each link failed, so the usual choice it fell back to
+/// does not look like the plan.
+fn loved_miss_warning(
+    loved: &LoveRule,
+    matched: Option<WorkKind>,
+    skipped: &[(String, String)],
+    task_class: TaskClass,
+) -> String {
+    let usual = format!(
+        "this went to the usual choice for {} work instead",
+        matched.map_or(task_class.as_str(), WorkKind::as_str)
+    );
+    if skipped.len() <= 1 {
+        let reason = skipped
+            .first()
+            .map(|(_, reason)| reason.as_str())
+            .unwrap_or("no connected account offers it");
+        return format!(
+            "{} is loved here{} but could not take this task: {reason}; {usual}",
+            loved.label(),
+            love_kind_suffix(matched),
+        );
+    }
+    let details = skipped
+        .iter()
+        .map(|(label, reason)| format!("{label} ({reason})"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "{} are loved here{} but none could take this task: {details}; {usual}",
+        loved.chain_label(),
+        love_kind_suffix(matched),
+    )
 }
 
 /// How a warning names the rule that was skipped: the kind of work it claims,
@@ -945,8 +1078,8 @@ fn love_kind_suffix(matched: Option<WorkKind>) -> String {
     }
 }
 
-fn loved_effort(model: &ModelInfo, loved: &LoveRule) -> Option<String> {
-    let requested = loved.effort.as_deref()?;
+fn loved_effort(model: &ModelInfo, requested: Option<&str>) -> Option<String> {
+    let requested = requested?;
     let levels = model.efforts.as_deref()?;
     if levels.is_empty() {
         return None;
@@ -964,17 +1097,6 @@ fn loved_effort(model: &ModelInfo, loved: &LoveRule) -> Option<String> {
         .max_by_key(|(index, _)| *index)
         .map(|(_, level)| level.clone())
         .or_else(|| levels.first().cloned())
-}
-
-/// Why the loved model was not among the candidates. The screening pass has
-/// already said this per model, so its wording is reused rather than guessed
-/// at a second time; nothing said means no account listed the model at all.
-fn loved_skip_reason(loved: &LoveRule, rejected: &[SelectionRejection]) -> String {
-    rejected
-        .iter()
-        .find(|row| loved.names_model(&row.profile_id, &row.model))
-        .map(|row| row.reason.clone())
-        .unwrap_or_else(|| "no connected account offers it".into())
 }
 
 /// The caller-named pair under audit.

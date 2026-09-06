@@ -537,8 +537,20 @@ function workLabel(when: WorkKind[]): string {
   return [first, ...rest.map((label) => label.toLowerCase())].join(", ");
 }
 
+function destinationLabel(destination: { profileId?: string; model?: string }): string {
+  if (destination.profileId && destination.model) return `${destination.profileId} · ${destination.model}`;
+  return destination.profileId ?? destination.model ?? "";
+}
+
 function modelLabel(rule: LoveRule): string {
-  return rule.profileId ? `${rule.profileId} · ${rule.model}` : rule.model;
+  const chain = rule.models?.length ? rule.models : [rule];
+  return chain.map(destinationLabel).filter(Boolean).join(" → ");
+}
+
+function effortLabel(rule: LoveRule): string {
+  const chain = rule.models?.length ? rule.models : [rule];
+  if (chain.every((destination) => !destination.effort)) return "effort to suit the task";
+  return `${chain.map((destination) => destination.effort ?? "as needed").join(" → ")} effort`;
 }
 
 /** Where work that names no model goes, kind of work by kind of work. */
@@ -552,11 +564,11 @@ function FavouriteModels({ rules }: { rules: LoveRule[] }) {
           <li className="settings-favourite-rule" key={`${rule.model}-${index}`}>
             <span className="settings-favourite-work">{workLabel(rule.when)}</span>
             <span className="settings-favourite-model">{modelLabel(rule)}</span>
-            <span className="settings-muted">{rule.effort ? `${rule.effort} effort` : "effort to suit the task"}</span>
+            <span className="settings-muted">{effortLabel(rule)}</span>
           </li>
         ))}
       </ul>
-      <p className="settings-helper">A task that names no model goes to the model listed for that kind of work.</p>
+      <p className="settings-helper">A task that names no model goes to the first listed model for that kind of work that can take it.</p>
     </div>
   );
 }

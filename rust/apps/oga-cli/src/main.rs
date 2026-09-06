@@ -13,8 +13,9 @@ use oga_client::{
     LoopbackClient, MapInitRequest, MapQuery, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
-    DEFAULT_WORKER_PROMPT, canonical_cwd, global_cwd, load_config_layers, load_profiles,
-    mask_secret_env, read_config_file, read_worker_prompt, update_config_file,
+    DEFAULT_WORKER_PROMPT, LoveDestination, ResolvedProfiles, canonical_cwd, global_cwd,
+    load_config_layers, load_profiles, mask_secret_env, read_config_file, read_worker_prompt,
+    update_config_file,
 };
 use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
@@ -56,7 +57,7 @@ const CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const HOLD_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the broker checks whether the host was suspended under it.
 const WAKE_WATCH_INTERVAL: Duration = Duration::from_secs(30);
-const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nKinds are context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor, comma-separated.";
+const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <first> <second> ...              try each destination in order, moving on when one cannot take the work\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nEach destination is worker:model:effort with the model or the effort left out: 'claude' alone means its default model, 'claude:high' means that effort on it.\nKinds are context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor, comma-separated.";
 const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --kind <kind>          Name the subject: ui, backend, database, docs, tests, review, research, refactor.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
 type CliResult<T> = Result<T, CliError>;
 
@@ -690,11 +691,12 @@ Usage: oga <command> [options]
                        task, use watch.
   query "<question>"   Ask in plain words and get the file, line, and name that
                        answer it. --limit N sets how many; --code prints the code.
-  love [worker:model[:effort]]  Send work that names no model to one model. Add
-                       --when ui,review to send only those kinds of
-                       work there. Run it bare to see this project's rules,
-                       --clear to go back to choosing per task, --global for
-                       every project.
+  love [worker:model[:effort]]...  Send work that names no model to the first
+                        destination that can take it. Add
+                        --when ui,review to send only those kinds of
+                        work there. Run it bare to see this project's rules,
+                        --clear to go back to choosing per task, --global for
+                        every project.
   relearn              Pick up what changed on disk so query stays current, or
                        teach it where something lives. Add --force to read the
                        project again from scratch.
@@ -3096,7 +3098,7 @@ async fn run_love(args: &[String]) -> CliResult<i32> {
     let LoveArgs {
         global,
         clear,
-        target,
+        targets,
         when,
     } = parse_love_args(args)?;
     let cwd = if global {
@@ -3112,82 +3114,99 @@ async fn run_love(args: &[String]) -> CliResult<i32> {
     } else {
         "in this project"
     };
-    if let Some(target) = target {
-        let (profile_id, rest) = target.split_once(':').ok_or_else(|| {
-            CliError::new(format!(
-                "name the worker and model with ':', like 'oga love claude:opus'\n{LOVE_USAGE}"
-            ))
-        })?;
-        let (model, effort) = rest
-            .rsplit_once(':')
-            .filter(|(_, effort)| {
-                ["minimal", "low", "medium", "high", "xhigh", "max"].contains(effort)
-            })
-            .map_or((rest, None), |(model, effort)| (model, Some(effort)));
-        if profile_id.is_empty() || model.is_empty() {
-            return Err(CliError::new(format!(
-                "name the worker and model with ':', like 'oga love claude:opus'\n{LOVE_USAGE}"
-            )));
-        }
+    if !targets.is_empty() {
         let profiles = load_profiles(profiles_from_store(), Some(&cwd))?;
-        let profile = profiles
-            .profiles
+        let mut destinations = Vec::new();
+        let mut was_off = false;
+        let mut unlisted: Vec<(String, String)> = Vec::new();
+        for target in &targets {
+            let (destination, off, missing) =
+                love_target_destination(target, &profiles, &cwd).await?;
+            was_off = was_off || off;
+            if missing
+                && let (Some(profile_id), Some(model)) =
+                    (destination.profile_id.clone(), destination.model.clone())
+            {
+                unlisted.push((profile_id, model));
+            }
+            destinations.push(destination);
+        }
+        if let Some(duplicated) = destinations
             .iter()
-            .find(|profile| profile.id == profile_id)
-            .ok_or_else(|| {
-                let connected = profiles
-                    .profiles
-                    .iter()
-                    .map(|profile| profile.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                CliError::new(format!(
-                    "no worker called {profile_id}. Connected: {}",
-                    if connected.is_empty() {
-                        "none"
-                    } else {
-                        &connected
-                    }
-                ))
-            })?;
-        if !profile.enabled {
+            .enumerate()
+            .find(|(index, destination)| destinations[..*index].contains(destination))
+            .map(|(_, destination)| destination.triple())
+        {
             return Err(CliError::new(format!(
-                "{profile_id} is turned off, so nothing can be sent there. Turn it on first."
+                "'{duplicated}' names the same destination twice"
             )));
         }
-        let (was_off, unlisted) = love_target_status(&cwd, profile_id, model, profile).await?;
         let replaced = replaced_rules(&current, &when);
         let next = update_love_text(
             &snapshot.text,
             &LoveEdit::Set {
-                profile_id: profile_id.to_owned(),
-                model: model.to_owned(),
+                destinations: destinations.clone(),
                 when: when.clone(),
-                effort: effort.map(str::to_owned),
                 turn_on: was_off,
             },
         );
         update_config_file(Some(&cwd), &snapshot.revision, &next)?;
-        println!(
-            "{profile_id}/{model} now takes {} {scope_label}.",
-            work_label(&when).to_lowercase()
-        );
-        if let Some(effort) = effort {
-            println!("It thinks at {effort} effort on that work.");
-        }
-        for rule in replaced
-            .iter()
-            .filter(|rule| !rule.names_model(profile_id, model))
-        {
-            println!("It replaces {}.", rule.label());
-        }
-        if was_off {
-            println!("It was turned off here, so it is back on.");
-        }
-        if unlisted {
+        let chain = LoveDestination::chain_label(&destinations);
+        if destinations.len() == 1 {
+            let destination = &destinations[0];
+            let profile_id = destination.profile_id.as_deref().unwrap_or("");
             println!(
-                "{profile_id} did not list this model. Check the spelling if work sent there fails to start."
+                "{chain} now takes {} {scope_label}.",
+                work_label(&when).to_lowercase()
             );
+            if let Some(effort) = &destination.effort {
+                println!("It thinks at {effort} effort on that work.");
+            }
+            for rule in replaced
+                .iter()
+                .filter(|rule| !rule_names_new_destination(rule, &destinations, &profiles))
+            {
+                println!("It replaces {}.", rule.label());
+            }
+            if was_off {
+                println!("It was turned off here, so it is back on.");
+            }
+            if !unlisted.is_empty() {
+                println!(
+                    "{profile_id} did not list this model. Check the spelling if work sent there fails to start."
+                );
+            }
+        } else {
+            println!(
+                "{chain} now take {} {scope_label}, in that order.",
+                work_label(&when).to_lowercase()
+            );
+            let thinking = destinations
+                .iter()
+                .filter_map(|destination| {
+                    destination
+                        .effort
+                        .as_deref()
+                        .map(|effort| format!("{} thinks at {effort} effort", destination.label()))
+                })
+                .collect::<Vec<_>>();
+            if !thinking.is_empty() {
+                println!("{}.", thinking.join(", "));
+            }
+            for rule in replaced
+                .iter()
+                .filter(|rule| !rule_names_new_destination(rule, &destinations, &profiles))
+            {
+                println!("They replace {}.", rule.label());
+            }
+            if was_off {
+                println!("One of them was turned off here, so it is back on.");
+            }
+            for (profile_id, model) in &unlisted {
+                println!(
+                    "{profile_id} did not list {model}. Check the spelling if work sent there fails to start."
+                );
+            }
         }
         println!("Written to {}.", snapshot.path.display());
         return Ok(0);
@@ -3232,7 +3251,7 @@ async fn run_love(args: &[String]) -> CliResult<i32> {
 struct LoveArgs {
     global: bool,
     clear: bool,
-    target: Option<String>,
+    targets: Vec<String>,
     when: Vec<WorkKind>,
 }
 
@@ -3258,15 +3277,17 @@ fn parse_love_args(args: &[String]) -> CliResult<LoveArgs> {
                     "unknown option '{flag}'\n{LOVE_USAGE}"
                 )));
             }
-            target if parsed.target.is_none() => parsed.target = Some(target.to_owned()),
-            extra => {
-                return Err(CliError::new(format!(
-                    "'{extra}' is one model too many; love one at a time\n{LOVE_USAGE}"
-                )));
+            target => {
+                if parsed.targets.iter().any(|existing| existing == target) {
+                    return Err(CliError::new(format!(
+                        "'{target}' names the same destination twice\n{LOVE_USAGE}"
+                    )));
+                }
+                parsed.targets.push(target.to_owned());
             }
         }
     }
-    if parsed.clear && parsed.target.is_some() {
+    if parsed.clear && !parsed.targets.is_empty() {
         return Err(CliError::new(format!(
             "--clear takes no model\n{LOVE_USAGE}"
         )));
@@ -3354,10 +3375,19 @@ fn love_table(rules: &oga_config::LoveRules) -> Vec<String> {
     let rows = rules
         .iter()
         .map(|rule| {
+            let thinking = if rule.destinations.iter().all(|d| d.effort.is_none()) {
+                "as needed".to_owned()
+            } else {
+                rule.destinations
+                    .iter()
+                    .map(|d| d.effort.clone().unwrap_or_else(|| "as needed".into()))
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            };
             (
                 work_label(&rule.when),
-                rule.label(),
-                rule.effort.clone().unwrap_or_else(|| "as needed".into()),
+                rule.chain_label(),
+                thinking,
                 if rule.scope == "project" {
                     "this project"
                 } else {
@@ -3388,6 +3418,83 @@ fn love_table(rules: &oga_config::LoveRules) -> Vec<String> {
         )
     }));
     lines
+}
+
+/// One `oga love` destination, checked while it is written: the worker must be
+/// connected and on, the effort must be a real level, and the model must be
+/// one the worker lists. Answers the destination plus whether writing it
+/// switched the model back on and whether no catalog ever listed it.
+async fn love_target_destination(
+    target: &str,
+    profiles: &ResolvedProfiles,
+    cwd: &Path,
+) -> CliResult<(LoveDestination, bool, bool)> {
+    let destination = LoveDestination::parse(target)
+        .map_err(|message| CliError::new(format!("{message}\n{LOVE_USAGE}")))?;
+    let profile_id = destination.profile_id.as_deref().unwrap_or("");
+    let profile = profiles
+        .profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .ok_or_else(|| {
+            let connected = profiles
+                .profiles
+                .iter()
+                .map(|profile| profile.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            CliError::new(format!(
+                "no worker called {profile_id}. Connected: {}",
+                if connected.is_empty() {
+                    "none"
+                } else {
+                    &connected
+                }
+            ))
+        })?;
+    if !profile.enabled {
+        return Err(CliError::new(format!(
+            "{profile_id} is turned off, so nothing can be sent there. Turn it on first."
+        )));
+    }
+    let Some(model) = destination.model.clone() else {
+        return Ok((destination, false, false));
+    };
+    let (was_off, unlisted) = love_target_status(cwd, profile_id, &model, profile).await?;
+    Ok((destination, was_off, unlisted))
+}
+
+/// The model a worker runs when a destination leaves it out.
+fn profile_default<'a>(
+    profiles: &'a ResolvedProfiles,
+    profile_id: Option<&str>,
+) -> Option<&'a str> {
+    let wanted = profile_id?;
+    profiles
+        .profiles
+        .iter()
+        .find(|profile| profile.id == wanted)
+        .map(|profile| profile.default_model.as_str())
+}
+
+/// Whether a rule being replaced already sends work to one of the
+/// destinations just written, in which case there is nothing to announce.
+fn rule_names_new_destination(
+    rule: &oga_config::LoveRule,
+    destinations: &[LoveDestination],
+    profiles: &ResolvedProfiles,
+) -> bool {
+    destinations.iter().any(|destination| {
+        let model = destination
+            .model
+            .as_deref()
+            .or_else(|| profile_default(profiles, destination.profile_id.as_deref()));
+        rule.names_model(
+            destination.profile_id.as_deref().unwrap_or(""),
+            model.unwrap_or(""),
+            profile_default(profiles, destination.profile_id.as_deref()),
+        )
+    })
 }
 
 async fn love_target_status(
@@ -3456,10 +3563,8 @@ fn love_target_catalog_status(
 /// What one `oga love` run does to a config file's rules.
 enum LoveEdit {
     Set {
-        profile_id: String,
-        model: String,
+        destinations: Vec<LoveDestination>,
         when: Vec<WorkKind>,
-        effort: Option<String>,
         turn_on: bool,
     },
     Clear {
@@ -3475,30 +3580,68 @@ fn update_love_text(source: &str, edit: &LoveEdit) -> String {
     let mut rules = take_love_rules(&mut root);
     match edit {
         LoveEdit::Set {
-            profile_id,
-            model,
+            destinations,
             when,
-            effort,
             turn_on,
         } => {
             release_kinds(&mut rules, when);
-            let mut rule = serde_yaml::Mapping::new();
-            rule.insert("model".into(), format!("{profile_id}:{model}").into());
-            if !when.is_empty() {
+            // One destination naming a model keeps the legacy shape, so files
+            // written before the list read back unchanged. Anything else — a
+            // chain, or a worker standing for its default — goes under models.
+            let legacy = destinations.len() == 1 && destinations[0].model.is_some();
+            if legacy {
+                let destination = &destinations[0];
+                let mut rule = serde_yaml::Mapping::new();
+                let model = match &destination.profile_id {
+                    Some(profile_id) => format!(
+                        "{profile_id}:{}",
+                        destination.model.as_deref().unwrap_or("")
+                    ),
+                    None => destination.model.clone().unwrap_or_default(),
+                };
+                rule.insert("model".into(), model.into());
+                if !when.is_empty() {
+                    rule.insert(
+                        "when".into(),
+                        when.iter()
+                            .map(|kind| kind.as_str())
+                            .collect::<Vec<_>>()
+                            .into(),
+                    );
+                }
+                if let Some(effort) = &destination.effort {
+                    rule.insert("effort".into(), effort.as_str().into());
+                }
+                rules.push(serde_yaml::Value::Mapping(rule));
+            } else {
+                let mut rule = serde_yaml::Mapping::new();
                 rule.insert(
-                    "when".into(),
-                    when.iter()
-                        .map(|kind| kind.as_str())
+                    "models".into(),
+                    destinations
+                        .iter()
+                        .map(LoveDestination::triple)
                         .collect::<Vec<_>>()
                         .into(),
                 );
+                if !when.is_empty() {
+                    rule.insert(
+                        "when".into(),
+                        when.iter()
+                            .map(|kind| kind.as_str())
+                            .collect::<Vec<_>>()
+                            .into(),
+                    );
+                }
+                rules.push(serde_yaml::Value::Mapping(rule));
             }
-            if let Some(effort) = effort {
-                rule.insert("effort".into(), effort.as_str().into());
-            }
-            rules.push(serde_yaml::Value::Mapping(rule));
             if *turn_on {
-                switch_model_on(&mut root, profile_id, model);
+                for destination in destinations {
+                    if let (Some(profile_id), Some(model)) =
+                        (&destination.profile_id, &destination.model)
+                    {
+                        switch_model_on(&mut root, profile_id, model);
+                    }
+                }
             }
         }
         LoveEdit::Clear { when } if when.is_empty() => rules.clear(),
@@ -3742,10 +3885,23 @@ mod tests {
 
     fn set(profile_id: &str, model: &str, when: &[WorkKind], effort: Option<&str>) -> LoveEdit {
         LoveEdit::Set {
-            profile_id: profile_id.into(),
-            model: model.into(),
+            destinations: vec![LoveDestination {
+                profile_id: Some(profile_id.into()),
+                model: Some(model.into()),
+                effort: effort.map(str::to_owned),
+            }],
             when: when.to_vec(),
-            effort: effort.map(str::to_owned),
+            turn_on: false,
+        }
+    }
+
+    fn chain(targets: &[&str], when: &[WorkKind]) -> LoveEdit {
+        LoveEdit::Set {
+            destinations: targets
+                .iter()
+                .map(|target| LoveDestination::parse(target).expect("valid destination"))
+                .collect(),
+            when: when.to_vec(),
             turn_on: false,
         }
     }
@@ -3766,16 +3922,33 @@ mod tests {
         let rules = read_rules(&next);
 
         assert_eq!(rules.0.len(), 2);
-        assert_eq!(rules.for_class(TaskClass::Context).unwrap().model, "luna");
         assert_eq!(
             rules
                 .for_class(TaskClass::Context)
                 .unwrap()
+                .primary()
+                .model
+                .as_deref(),
+            Some("luna")
+        );
+        assert_eq!(
+            rules
+                .for_class(TaskClass::Context)
+                .unwrap()
+                .primary()
                 .effort
                 .as_deref(),
             Some("low")
         );
-        assert_eq!(rules.for_class(TaskClass::Build).unwrap().model, "opus");
+        assert_eq!(
+            rules
+                .for_class(TaskClass::Build)
+                .unwrap()
+                .primary()
+                .model
+                .as_deref(),
+            Some("opus")
+        );
         assert!(next.contains("value: 1"));
     }
 
@@ -3793,8 +3966,24 @@ mod tests {
         let next = update_love_text(&source, &set("claude", "opus", &[WorkKind::Build], None));
         let rules = read_rules(&next);
 
-        assert_eq!(rules.for_class(TaskClass::Context).unwrap().model, "luna");
-        assert_eq!(rules.for_class(TaskClass::Build).unwrap().model, "opus");
+        assert_eq!(
+            rules
+                .for_class(TaskClass::Context)
+                .unwrap()
+                .primary()
+                .model
+                .as_deref(),
+            Some("luna")
+        );
+        assert_eq!(
+            rules
+                .for_class(TaskClass::Build)
+                .unwrap()
+                .primary()
+                .model
+                .as_deref(),
+            Some("opus")
+        );
 
         // Clearing one kind leaves the rest of that rule standing.
         let cleared = update_love_text(
@@ -3805,7 +3994,15 @@ mod tests {
         );
         let rules = read_rules(&cleared);
         assert!(rules.for_class(TaskClass::Context).is_none());
-        assert_eq!(rules.for_class(TaskClass::Build).unwrap().model, "opus");
+        assert_eq!(
+            rules
+                .for_class(TaskClass::Build)
+                .unwrap()
+                .primary()
+                .model
+                .as_deref(),
+            Some("opus")
+        );
 
         // Clearing with no kind named takes every rule with it.
         let empty = update_love_text(&cleared, &LoveEdit::Clear { when: Vec::new() });
@@ -3819,10 +4016,12 @@ mod tests {
         let next = update_love_text(
             source,
             &LoveEdit::Set {
-                profile_id: "opencode".into(),
-                model: "luna".into(),
+                destinations: vec![LoveDestination {
+                    profile_id: Some("opencode".into()),
+                    model: Some("luna".into()),
+                    effort: None,
+                }],
                 when: vec![WorkKind::Context],
-                effort: None,
                 turn_on: true,
             },
         );
@@ -3831,10 +4030,18 @@ mod tests {
         assert!(!next.contains("loved: true"));
         assert!(!next.contains("enabled: false"));
         assert!(next.contains("enabled: true"));
-        assert_eq!(rules.for_class(TaskClass::Context).unwrap().model, "luna");
+        assert_eq!(
+            rules
+                .for_class(TaskClass::Context)
+                .unwrap()
+                .primary()
+                .model
+                .as_deref(),
+            Some("luna")
+        );
         let migrated = rules.for_class(TaskClass::Build).unwrap();
         assert_eq!(migrated.label(), "claude/opus");
-        assert_eq!(migrated.effort.as_deref(), Some("high"));
+        assert_eq!(migrated.primary().effort.as_deref(), Some("high"));
     }
 
     #[test]
@@ -3846,9 +4053,28 @@ mod tests {
             "--global".into(),
         ])
         .unwrap();
-        assert_eq!(parsed.target.as_deref(), Some("opencode:luna"));
+        assert_eq!(parsed.targets, ["opencode:luna"]);
         assert_eq!(parsed.when, [WorkKind::Context, WorkKind::Mechanical]);
         assert!(parsed.global);
+
+        let chained = parse_love_args(&[
+            "opencode:luna:max".into(),
+            "claude:opus:low".into(),
+            "--when=ui".into(),
+        ])
+        .unwrap();
+        assert_eq!(chained.targets, ["opencode:luna:max", "claude:opus:low"]);
+        assert_eq!(chained.when, [WorkKind::Ui]);
+
+        assert_eq!(
+            parse_love_args(&["claude:opus".into(), "claude:opus".into()])
+                .unwrap_err()
+                .0
+                .lines()
+                .next()
+                .unwrap(),
+            "'claude:opus' names the same destination twice"
+        );
 
         assert_eq!(
             parse_love_args(&["--when=refactoring".into()])
@@ -3875,10 +4101,57 @@ mod tests {
             rules
                 .for_task(TaskClass::General, Some(TaskTopic::Ui))
                 .unwrap()
-                .model,
-            "muse"
+                .primary()
+                .model
+                .as_deref(),
+            Some("muse")
         );
         assert!(source.contains("ui"));
+    }
+
+    #[test]
+    fn love_text_writes_a_chain_under_models_and_reads_it_back() {
+        let source = update_love_text(
+            "",
+            &chain(&["opencode:luna:max", "claude:opus:low"], &[WorkKind::Ui]),
+        );
+        assert!(source.contains("models:"));
+        assert!(!source.contains("model: opencode"));
+        let rules = read_rules(&source);
+        let rule = rules
+            .for_task(TaskClass::Build, Some(TaskTopic::Ui))
+            .unwrap();
+        assert_eq!(rule.triples(), vec!["opencode:luna:max", "claude:opus:low"]);
+        assert_eq!(rule.chain_label(), "opencode/luna → claude/opus");
+
+        // A worker alone keeps its meaning through the file.
+        let source = update_love_text("", &chain(&["claude"], &[]));
+        assert!(source.contains("models:"));
+        let rules = read_rules(&source);
+        let rule = rules.for_class(TaskClass::Build).unwrap();
+        assert_eq!(rule.primary().profile_id.as_deref(), Some("claude"));
+        assert_eq!(rule.primary().model, None);
+
+        // A single destination with a model keeps the legacy shape.
+        let source = update_love_text("", &set("claude", "opus", &[], Some("low")));
+        assert!(source.contains("model: claude:opus"));
+        assert!(!source.contains("models:"));
+    }
+
+    #[test]
+    fn love_table_shows_the_whole_chain() {
+        let source = update_love_text(
+            "",
+            &chain(&["opencode:luna:max", "claude:opus:low"], &[WorkKind::Ui]),
+        );
+        let lines = love_table(&read_rules(&source));
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines[1].contains("opencode/luna → claude/opus"),
+            "{}",
+            lines[1]
+        );
+        assert!(lines[1].contains("max → low"), "{}", lines[1]);
     }
 
     #[test]

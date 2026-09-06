@@ -501,6 +501,7 @@ pub async fn model_rows(
             only_enabled: query.only_enabled,
             query: query.query.clone(),
         },
+        &profiles,
     );
     if !include_usage || rows.is_empty() {
         return Ok(rows);
@@ -1300,7 +1301,11 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                         "capabilities": capabilities,
                         "inheritedCapabilities": inherited_capabilities,
                         "hasCapabilitiesOverride": project_model.as_ref().is_some_and(|setting| setting.capabilities.is_some()),
-                        "loved": love.names_model(&profile.id, &model.id),
+                        "loved": love.names_model(
+                            &profile.id,
+                            &model.id,
+                            Some(profile.default_model.as_str())
+                        ),
                         "availableGlobally": inherited_enabled,
                     })
                 })
@@ -1908,7 +1913,7 @@ mod catalog_tests {
 
         // Not refreshing must reuse the cached catalog rather than collapsing
         // back to the single configured-model fallback.
-        let models = discover_catalog(&[opencode], false).await;
+        let models = discover_catalog(&[opencode.clone()], false).await;
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"opencode-go/deepseek-v4-flash"));
@@ -1931,6 +1936,7 @@ mod catalog_tests {
                 only_preferred: Some(false),
                 ..Default::default()
             },
+            &[opencode.clone()],
         );
         assert_eq!(all_rows.len(), 2);
         assert!(all_rows.iter().all(|row| !row.enabled));

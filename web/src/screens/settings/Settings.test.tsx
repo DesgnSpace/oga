@@ -258,6 +258,32 @@ describe("workers list", () => {
     expect(screen.getByText("low effort")).toBeTruthy();
     expect(screen.queryByText("context")).toBeNull();
   });
+
+  it("reads a favourite chain first to last, with each thinking level", async () => {
+    const chained: ModelSettingsSnapshot = {
+      ...snapshot(),
+      love: [
+        {
+          model: "openai/gpt-5.6-luna",
+          profileId: "opencode-work",
+          when: ["context"],
+          effort: "low",
+          models: [
+            { profileId: "opencode-work", model: "openai/gpt-5.6-luna", effort: "low" },
+            { profileId: "claude-work", model: "opus", effort: "max" },
+          ],
+          scope: "project",
+        },
+      ],
+    };
+    setTransport(makeTransport(undefined, undefined, () => chained));
+    render(<SettingsPage />);
+
+    expect(
+      await screen.findByText("opencode-work · openai/gpt-5.6-luna → claude-work · opus"),
+    ).toBeTruthy();
+    expect(screen.getByText("low → max effort")).toBeTruthy();
+  });
 });
 
 describe("connections tab", () => {
