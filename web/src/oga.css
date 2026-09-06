@@ -1264,16 +1264,19 @@ h1 {
     border-color: var(--color-accent);
 }
 
-.task-action-menu {
-    position: relative;
+/* The header menu portals to the body so the title bar's own clipping
+   (which truncates the stats row at narrow widths) cannot clip it. Pinned
+   next to its trigger with fixed positioning, above surrounding content. */
+.task-action-menu-portal {
+    position: fixed;
+    z-index: 100;
+    max-width: calc(100vw - 16px);
 }
 
-.task-action-menu-items {
-    position: absolute;
-    z-index: 2;
-    top: 100%;
-    right: 0;
-    margin-top: var(--space-1);
+.task-action-menu-portal .menu-panel {
+    max-height: inherit;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 /* The native-feeling menu panel shared by the header's "more actions"
@@ -3377,7 +3380,7 @@ select {
 
 .modal-dialog-usage {
     width: min(92vw, 72rem);
-    height: min(88dvh, 48rem);
+    max-height: min(88dvh, 48rem);
 }
 
 .modal-dialog-usage .modal-body {

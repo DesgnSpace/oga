@@ -2,6 +2,7 @@
 // Ported from rust/crates/oga-ui/src/actions/mod.rs — keep behavior and copy identical.
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { broker } from "@/bridge/client";
 import type {
   BridgeError,
@@ -247,13 +248,24 @@ export function explainBlocked(
   };
 }
 
+/** Gap between the header trigger and its menu, and between the menu and the viewport edge. */
+const HEADER_MENU_MARGIN = 8;
+
+interface HeaderMenuPlacement {
+  top: number;
+  left: number;
+  maxHeight: number;
+}
+
 /** The header's ellipsis menu: cancel, archive, mark completed. */
 export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [confirmingCancel, setConfirmingCancel] = React.useState(false);
   const [handoffOpen, setHandoffOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = React.useState<HeaderMenuPlacement | null>(null);
+  const triggerRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const cancellable = canCancel(task);
   const completable = canComplete(task) && task.state !== "blocked";
   const handoffable = canHandoff(task);
@@ -263,7 +275,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
     if (!menuOpen) return;
     const closeOnPointer = (event: PointerEvent) => {
       const target = event.target as Node | null;
-      if (target && menuRef.current?.contains(target)) return;
+      if (target && (triggerRef.current?.contains(target) || panelRef.current?.contains(target))) return;
       setMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -274,6 +286,52 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
     return () => {
       document.removeEventListener("pointerdown", closeOnPointer);
       document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen]);
+
+  // The menu portals to the body: the title bar clips its own row to
+  // truncate the stats at narrow widths, and that clipping would clip an
+  // inline menu too.
+  React.useLayoutEffect(() => {
+    if (!menuOpen) {
+      setPlacement(null);
+      return;
+    }
+    const update = () => {
+      const trigger = triggerRef.current;
+      const panel = panelRef.current;
+      if (!trigger || !panel) return;
+      const triggerRect = trigger.getBoundingClientRect();
+      const { width, height } = panel.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const left = Math.max(
+        HEADER_MENU_MARGIN,
+        Math.min(triggerRect.right - width, viewportWidth - width - HEADER_MENU_MARGIN),
+      );
+      const below = triggerRect.bottom + HEADER_MENU_MARGIN;
+      let next: HeaderMenuPlacement;
+      if (below + height + HEADER_MENU_MARGIN <= viewportHeight) {
+        next = { top: below, left, maxHeight: viewportHeight - below - HEADER_MENU_MARGIN };
+      } else {
+        const above = triggerRect.top - height - HEADER_MENU_MARGIN;
+        next =
+          above >= HEADER_MENU_MARGIN
+            ? { top: above, left, maxHeight: Math.max(0, triggerRect.top - HEADER_MENU_MARGIN * 2) }
+            : { top: HEADER_MENU_MARGIN, left, maxHeight: viewportHeight - HEADER_MENU_MARGIN * 2 };
+      }
+      setPlacement((previous) =>
+        previous && previous.top === next.top && previous.left === next.left && previous.maxHeight === next.maxHeight
+          ? previous
+          : next,
+      );
+    };
+    update();
+    window.addEventListener("resize", update);
+    document.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      document.removeEventListener("scroll", update, true);
     };
   }, [menuOpen]);
 
@@ -359,7 +417,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
 
   return (
     <div className="task-detail-header-actions">
-      <div className="task-action-menu" ref={menuRef}>
+      <div className="task-action-menu" ref={triggerRef}>
         <button
           className="icon-button task-action-menu-trigger"
           type="button"
@@ -370,12 +428,22 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
         >
           <MoreIcon />
         </button>
-        {menuOpen && (
-          <div className="task-action-menu-items">
-            <MenuPanel sections={sections} onClose={() => setMenuOpen(false)} />
-          </div>
-        )}
       </div>
+      {menuOpen && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="task-action-menu-portal"
+            style={
+              placement
+                ? { top: placement.top, left: placement.left, maxHeight: placement.maxHeight }
+                : { visibility: "hidden" }
+            }
+          >
+            <MenuPanel sections={sections} onClose={() => setMenuOpen(false)} />
+          </div>,
+          document.body,
+        )}
       <Modal open={confirmingCancel} onClose={() => setConfirmingCancel(false)} labelledBy="cancel-dialog-title" className="modal-dialog-cancel">
         <h2 id="cancel-dialog-title">Stop this task?</h2>
         <p>The worker stops. You can resume it later.</p>
