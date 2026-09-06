@@ -39,8 +39,8 @@ pub use routing::{
     AccountFailure, ChosenRoute, DecidedBy, Difficulty, DifficultySource, EffortSource, ModelCost,
     ModelInfo, ModelInfoSource, ModelQuery, ModelSettingsRow, ModelUsageSummary, ObservedRateLimit,
     ProfileUsage, RateLimitByModel, RoutePreference, RoutingRecord, RunnerUp, SelectionDecision,
-    SelectionRejection, SelectionRelaxation, SelectionStage, TaskClass, TaskSelection, UsageQuery,
-    UsageSource, UsageWindow, UsageWindowKind,
+    SelectionRejection, SelectionRelaxation, SelectionStage, TaskClass, TaskSelection, TaskTopic,
+    UsageQuery, UsageSource, UsageWindow, UsageWindowKind, WorkKind,
 };
 pub use socket::{
     BatchEvent, BatchFrame, BatchTask, ErrorFrame, HelloFrame, HelloPayload, MAX_EVENT_OUTCOME,

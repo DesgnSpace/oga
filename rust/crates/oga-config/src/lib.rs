@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use oga_domain::{Profile, Provider, TaskClass};
+use oga_domain::{Profile, Provider, TaskClass, TaskTopic, WorkKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -22,8 +22,8 @@ const DEFAULT_MODELS: &[(Provider, &str)] = &[
 
 pub const EFFORT_LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 const EFFORT_MESSAGE: &str = "must be one of minimal, low, medium, high, xhigh, max";
-const KIND_LIST_MESSAGE: &str =
-    "must be a list of kinds of work: mechanical, context, build, reasoning, general";
+const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, context, build, reasoning, general, ui, \
+     backend, database, docs, tests, review, research, refactor";
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
@@ -104,15 +104,16 @@ pub struct ModelOverrides {
     pub by_profile: BTreeMap<String, BTreeMap<String, ModelOverride>>,
 }
 /// One standing answer to "where does work that names no model go": a model,
-/// the kinds of work it takes, and the reasoning effort it takes them at. An
-/// empty `when` is the catch-all, taking every kind no other rule claims.
+/// the kinds of work it takes, and the reasoning effort it takes them at. A
+/// kind is either a class of work or a subject; an empty `when` is the
+/// catch-all, taking every kind no other rule claims.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoveRule {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
-    pub when: Vec<TaskClass>,
+    pub when: Vec<WorkKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     pub scope: String,
@@ -127,6 +128,21 @@ impl LoveRule {
                 .profile_id
                 .as_deref()
                 .is_none_or(|named| named == profile_id)
+    }
+
+    /// The first kind on this rule that describes the task: its topic first,
+    /// then its class. `None` on the catch-all, which describes everything by
+    /// claiming nothing.
+    pub fn matching_kind(&self, class: TaskClass, topic: Option<TaskTopic>) -> Option<WorkKind> {
+        if let Some(topic) = topic
+            && let Some(kind) = self.when.iter().find(|kind| kind.as_topic() == Some(topic))
+        {
+            return Some(*kind);
+        }
+        self.when
+            .iter()
+            .find(|kind| kind.as_class() == Some(class))
+            .copied()
     }
 
     /// How the rule is written and read back: `<worker>/<model>`, or the bare
@@ -154,13 +170,28 @@ impl LoveRules {
         self.0.iter()
     }
 
+    /// The rule that owns this task: the one naming its subject first, then
+    /// the one naming its class, else the catch-all, else nothing. Within
+    /// one tier the file order wins, so the fleet reads top to bottom.
+    pub fn for_task(&self, class: TaskClass, topic: Option<TaskTopic>) -> Option<&LoveRule> {
+        if let Some(topic) = topic
+            && let Some(rule) = self
+                .0
+                .iter()
+                .find(|rule| rule.when.iter().any(|kind| kind.as_topic() == Some(topic)))
+        {
+            return Some(rule);
+        }
+        self.0
+            .iter()
+            .find(|rule| rule.when.iter().any(|kind| kind.as_class() == Some(class)))
+            .or_else(|| self.0.iter().find(|rule| rule.when.is_empty()))
+    }
+
     /// The rule that owns this kind of work: the one claiming it, else the
     /// catch-all, else nothing.
     pub fn for_class(&self, class: TaskClass) -> Option<&LoveRule> {
-        self.0
-            .iter()
-            .find(|rule| rule.when.contains(&class))
-            .or_else(|| self.0.iter().find(|rule| rule.when.is_empty()))
+        self.for_task(class, None)
     }
 
     /// Whether any rule sends work to this model.
@@ -914,7 +945,7 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
                 listed
                     .iter()
                     .map(|value| {
-                        value.as_str().and_then(TaskClass::parse).ok_or_else(|| {
+                        value.as_str().and_then(WorkKind::parse).ok_or_else(|| {
                             invalid(&layer.path, &format!("{field}.when"), KIND_LIST_MESSAGE)
                         })
                     })
@@ -952,16 +983,16 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
                 ),
             ));
         }
-        if let Some(class) = when
+        if let Some(kind) = when
             .iter()
-            .find(|class| rules.iter().any(|rule| rule.when.contains(class)))
+            .find(|kind| rules.iter().any(|rule| rule.when.contains(kind)))
         {
             return Err(invalid(
                 &layer.path,
                 "love",
                 &format!(
                     "two rules claim {} work; a kind of work belongs to one rule",
-                    class.as_str()
+                    kind.as_str()
                 ),
             ));
         }
@@ -1511,8 +1542,8 @@ mod tests {
                 "invalid config /work/.oga.yaml at love[0].kind: unknown field; each rule takes model, an optional when list of kinds, and an optional effort",
             ),
             (
-                "love:\n  - model: a\n    when: [refactor]\n",
-                "invalid config /work/.oga.yaml at love[0].when: must be a list of kinds of work: mechanical, context, build, reasoning, general",
+                "love:\n  - model: a\n    when: [refactoring]\n",
+                "invalid config /work/.oga.yaml at love[0].when: must be a list of kinds of work: mechanical, context, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor",
             ),
             (
                 "love:\n  - model: a\n    effort: enormous\n",
@@ -1530,6 +1561,96 @@ mod tests {
             .unwrap_err();
             assert_eq!(error.to_string(), message);
         }
+    }
+
+    #[test]
+    fn love_rules_read_subjects_and_aliases() {
+        let project = layer(
+            "/work/.oga.yaml",
+            r#"
+            love:
+              - model: opencode:muse
+                when: [frontend]
+              - model: codex:beast
+                when: [backend]
+              - model: claude:opus
+        "#,
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap();
+
+        // `frontend` is how people write it; the rule still answers to `ui`.
+        let ui = love
+            .for_task(TaskClass::Build, Some(TaskTopic::Ui))
+            .unwrap();
+        assert_eq!(ui.model, "muse");
+        assert_eq!(
+            ui.matching_kind(TaskClass::Build, Some(TaskTopic::Ui)),
+            Some(WorkKind::Ui)
+        );
+        let backend = love
+            .for_task(TaskClass::Reasoning, Some(TaskTopic::Backend))
+            .unwrap();
+        assert_eq!(backend.model, "beast");
+        // No subject: the class-only task falls to the catch-all.
+        assert_eq!(love.for_task(TaskClass::Build, None).unwrap().model, "opus");
+    }
+
+    #[test]
+    fn love_rules_prefer_a_subject_over_a_class_over_the_catch_all() {
+        let project = layer(
+            "/work/.oga.yaml",
+            r#"
+            love:
+              - model: a
+                when: [build]
+              - model: b
+                when: [refactor]
+              - model: c
+        "#,
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap();
+
+        // One task, two claims: the refactor rule wins over the build one.
+        assert_eq!(
+            love.for_task(TaskClass::Build, Some(TaskTopic::Refactor))
+                .unwrap()
+                .model,
+            "b"
+        );
+        // Class alone still lands on the class rule, not the catch-all.
+        assert_eq!(love.for_task(TaskClass::Build, None).unwrap().model, "a");
+        // A subject no rule names falls back to the class, then the catch-all.
+        assert_eq!(
+            love.for_task(TaskClass::Context, Some(TaskTopic::Ui))
+                .unwrap()
+                .model,
+            "c"
+        );
+    }
+
+    #[test]
+    fn love_rules_reject_a_subject_claimed_twice() {
+        let twice = layer(
+            "/work/.oga.yaml",
+            "love:\n  - model: a\n    when: [ui]\n  - model: b\n    when: [frontend]\n",
+        );
+        assert_eq!(
+            read_model_overrides(&ConfigLayers {
+                user: None,
+                project: Some(twice),
+            })
+            .unwrap_err()
+            .to_string(),
+            "invalid config /work/.oga.yaml at love: two rules claim ui work; a kind of work belongs to one rule"
+        );
     }
 
     #[test]

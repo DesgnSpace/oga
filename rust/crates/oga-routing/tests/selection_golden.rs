@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use oga_config::{DirectoryModelSettings, LoveRule, LoveRules, ResolvedModelSettings};
 use oga_domain::{
     Difficulty, FailureCode, ModelCost, ModelInfo, ModelInfoSource, Profile, ProfileFailure,
-    ProfileSuccess, ProfileUsage, Provider, RoutePreference, SelectionStage, TaskClass,
-    UsageSource, UsageWindow, UsageWindowKind,
+    ProfileSuccess, ProfileUsage, Provider, RoutePreference, SelectionStage, TaskClass, TaskTopic,
+    UsageSource, UsageWindow, UsageWindowKind, WorkKind,
 };
 use oga_routing::{
     AllowedModel, CLAUDE_EFFORTS, NamedPair, NoEligibleModel, PolicyRoute, RouteError,
@@ -1669,7 +1669,7 @@ fn loved(model_name: &str, profile_id: Option<&str>) -> ResolvedModelSettings {
 fn rule(
     model_name: &str,
     profile_id: Option<&str>,
-    when: &[TaskClass],
+    when: &[WorkKind],
     effort: Option<&str>,
 ) -> LoveRule {
     LoveRule {
@@ -1955,13 +1955,13 @@ fn love_rules_route_each_kind_of_work_to_its_own_model() {
         rule(
             "opencode/big-pickle",
             Some("opencode"),
-            &[TaskClass::Context, TaskClass::Mechanical],
+            &[WorkKind::Context, WorkKind::Mechanical],
             Some("low"),
         ),
         rule(
             "opencode/big-pickle",
             Some("opencode"),
-            &[TaskClass::Reasoning, TaskClass::Build],
+            &[WorkKind::Reasoning, WorkKind::Build],
             Some("max"),
         ),
         rule("haiku", Some("claude"), &[], None),
@@ -2029,6 +2029,76 @@ fn love_rules_route_each_kind_of_work_to_its_own_model() {
         warning.contains("opencode/opencode/big-pickle is loved here for context work")
             && warning.contains("the account is out of credits")
     }));
+}
+
+// A subject rule outranks a class rule for the same task; the caller's named
+// subject outranks the prompt's own signals.
+#[test]
+fn love_rules_prefer_the_subject_over_the_class() {
+    let catalog = models();
+    let workers = profiles();
+    let settings = love_rules(vec![
+        rule(
+            "opencode/big-pickle",
+            Some("opencode"),
+            &[WorkKind::Build],
+            None,
+        ),
+        rule("sonnet", Some("claude"), &[WorkKind::Ui], None),
+        rule("haiku", Some("claude"), &[], None),
+    ]);
+
+    // Build work about the UI goes to the UI rule, not the build rule.
+    let ui = choose_model(
+        "Implement the login UI component.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(ui.model, "sonnet");
+    assert!(ui.reason.contains("loved for ui work"), "{}", ui.reason);
+
+    // A subject the caller names applies even when the prompt never says so.
+    let named = choose_model(
+        "Implement the fix.",
+        &catalog,
+        &workers,
+        &RoutePreferences {
+            topic: Some(TaskTopic::Ui),
+            ..RoutePreferences::default()
+        },
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(named.model, "sonnet", "{}", named.reason);
+
+    // And it replaces the prompt's own subject rather than adding to it: UI
+    // words with a named refactor fall back to the class rule.
+    let replaced = choose_model(
+        "Implement the login UI component.",
+        &catalog,
+        &workers,
+        &RoutePreferences {
+            topic: Some(TaskTopic::Refactor),
+            ..RoutePreferences::default()
+        },
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(replaced.model, "opencode/big-pickle", "{}", replaced.reason);
+
+    // No subject anywhere: the class rule still decides.
+    let plain = choose_model(
+        "Implement the fix.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(plain.model, "opencode/big-pickle");
 }
 
 #[test]

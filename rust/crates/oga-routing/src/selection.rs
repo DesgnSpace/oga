@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use oga_config::{LoveRule, ResolvedModelSettings, model_enabled, profile_enabled};
 use oga_domain::{
     Difficulty, ModelInfo, Profile, ProfileUsage, RoutePreference, SelectionRejection,
-    SelectionRelaxation, SelectionStage, TaskClass,
+    SelectionRelaxation, SelectionStage, TaskClass, TaskTopic, WorkKind,
 };
 
 use crate::classify::{TaskDemand, classify_task};
@@ -60,6 +60,9 @@ pub struct RoutePreferences {
     pub preference: Option<RoutePreference>,
     pub model_hint: Option<String>,
     pub difficulty: Option<Difficulty>,
+    /// The subject of the work, named by the caller. Wins over whatever the
+    /// prompt reads like; absent means the prompt's own signals decide.
+    pub topic: Option<TaskTopic>,
     /// Restrict routing to one profile the caller already named, leaving only
     /// the model to choose. Within a named profile the policy allow order
     /// wins, since the caller picked the account and wants its best model for
@@ -199,6 +202,7 @@ pub fn choose_model(
 ) -> Result<ModelRoute, RouteError> {
     let demand = classify_task(prompt);
     let difficulty = options.difficulty.unwrap_or(demand.difficulty);
+    let topic = options.topic.or(demand.topic);
     let policy_route = extra
         .policy
         .and_then(|policy| policy.route_for_task(demand.task_class));
@@ -408,7 +412,7 @@ pub fn choose_model(
     // unless the rule set one. It gives way the moment it cannot take the work:
     // the point of loving a model is to stop choosing, not to buy a way for a
     // dispatch to fail.
-    if let Some(loved) = extra.settings.love.for_class(demand.task_class)
+    if let Some(loved) = extra.settings.love.for_task(demand.task_class, topic)
         && options.model_hint.is_none()
         && options.profile_id.is_none()
     {
@@ -445,6 +449,7 @@ pub fn choose_model(
                 floor,
                 heuristic_agreed,
                 options,
+                topic,
             };
             return Ok(finish_loved_route(
                 pick,
@@ -454,13 +459,14 @@ pub fn choose_model(
                 &rejected,
             ));
         }
+        let matched = loved.matching_kind(demand.task_class, topic);
         warnings.push(format!(
             "{} is loved here{} but could not take this task: {}; this went to the usual choice \
              for {} work instead",
             loved.label(),
-            love_kind_suffix(loved, demand.task_class),
+            love_kind_suffix(matched),
             skipped.unwrap_or_default(),
-            demand.task_class.as_str()
+            matched.map_or(demand.task_class.as_str(), WorkKind::as_str)
         ));
     }
 
@@ -827,6 +833,7 @@ struct LovedContext<'a> {
     floor: u8,
     heuristic_agreed: bool,
     options: &'a RoutePreferences,
+    topic: Option<TaskTopic>,
 }
 
 /// Build the loved-model route once a candidate cleared everything. The class
@@ -846,6 +853,7 @@ fn finish_loved_route<'a>(
         floor,
         heuristic_agreed,
         options,
+        topic,
     } = ctx;
     let traits = model_traits(pick.model);
     let rule_effort = loved_effort(pick.model, loved);
@@ -888,7 +896,11 @@ fn finish_loved_route<'a>(
         reason: format!(
             "{}; {}",
             demand.reason,
-            love_route_reason(loved, demand.task_class, rule_effort.as_deref())
+            love_route_reason(
+                loved,
+                loved.matching_kind(demand.task_class, topic),
+                rule_effort.as_deref()
+            )
         ),
         candidates: vec![ModelCandidate {
             profile_id: pick.model.profile_id.clone(),
@@ -905,10 +917,10 @@ fn finish_loved_route<'a>(
 
 /// Why the route ended here, naming the rule that decided it: the kind of work
 /// it claims, or the whole scope when it is the catch-all.
-fn love_route_reason(loved: &LoveRule, class: TaskClass, effort: Option<&str>) -> String {
+fn love_route_reason(loved: &LoveRule, matched: Option<WorkKind>, effort: Option<&str>) -> String {
     let effort = effort.map_or_else(String::new, |effort| format!(" at {effort} effort"));
-    match loved.when.is_empty() {
-        true => format!(
+    match matched {
+        None => format!(
             "sent to the loved model, the default {}{effort}",
             if loved.scope == "project" {
                 "for this project"
@@ -916,20 +928,20 @@ fn love_route_reason(loved: &LoveRule, class: TaskClass, effort: Option<&str>) -
                 "everywhere"
             }
         ),
-        false => format!(
+        Some(kind) => format!(
             "sent to {}, loved for {} work{effort}",
             loved.label(),
-            class.as_str()
+            kind.as_str()
         ),
     }
 }
 
 /// How a warning names the rule that was skipped: the kind of work it claims,
 /// or nothing when it takes everything else.
-fn love_kind_suffix(loved: &LoveRule, class: TaskClass) -> String {
-    match loved.when.is_empty() {
-        true => String::new(),
-        false => format!(" for {} work", class.as_str()),
+fn love_kind_suffix(matched: Option<WorkKind>) -> String {
+    match matched {
+        None => String::new(),
+        Some(kind) => format!(" for {} work", kind.as_str()),
     }
 }
 
