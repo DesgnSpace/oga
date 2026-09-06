@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Cleaned up the task activity timeline for Claude runs: shell commands now show a short summary instead of the full command line, and consecutive commands fold into one row with a count.
+
 ### Fixed
 
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.

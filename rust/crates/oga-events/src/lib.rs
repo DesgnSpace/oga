@@ -1241,6 +1241,7 @@ fn item_event_view(
                 }
                 None => {
                     presentation.kind = PresentationType::Command;
+                    presentation.text = Some(command_summary(&command));
                     presentation.command = Some(command);
                     presentation.exit_code = exit_code;
                 }
@@ -2210,6 +2211,7 @@ fn tool_presentation(
                     .or_else(|| state.and_then(search_output_outcome));
             } else {
                 presentation.kind = PresentationType::Command;
+                presentation.text = Some(command_summary(&command));
                 presentation.command = Some(command);
                 presentation.exit_code = state.and_then(exit_code);
             }
@@ -2483,7 +2485,7 @@ fn search_subject(input: &Map<String, Value>) -> Option<String> {
 /// What a shell command is really doing, so a row can say it and consecutive
 /// rows of the same kind can fold. Everything a shell can do that is not one of
 /// these stays an unclassified command.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CommandRole {
     Read,
     Search,
@@ -2493,7 +2495,7 @@ enum CommandRole {
     Check(CheckKind),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CheckKind {
     Lint,
     Types,
@@ -2610,11 +2612,18 @@ fn command_segments(command: &str) -> Vec<&str> {
         .collect()
 }
 
-fn segment_role(segment: &str) -> Segment {
-    let mut words = segment
+/// The words of one segment with its preamble taken off: a leading `VAR=value`
+/// is setup rather than the program, and `do`, `then` and `else` open a block
+/// the real command follows.
+fn command_words(segment: &str) -> impl Iterator<Item = &str> {
+    segment
         .split_whitespace()
-        // A leading `VAR=value` is setup, not the program being run.
-        .skip_while(|word| word.contains('=') && !word.starts_with('-'));
+        .skip_while(|word| word.contains('=') && !word.starts_with('-'))
+        .skip_while(|word| matches!(*word, "do" | "then" | "else"))
+}
+
+fn segment_role(segment: &str) -> Segment {
+    let mut words = command_words(segment);
     let Some(first) = words.next() else {
         return Segment::Ignored;
     };
@@ -2648,22 +2657,57 @@ fn segment_role(segment: &str) -> Segment {
             | "tr"
             | "xargs"
             | "tee"
+            // A loop or a branch is scaffolding; what it runs is in its body.
+            | "for"
+            | "while"
+            | "until"
+            | "if"
+            | "elif"
+            | "case"
+            | "done"
+            | "fi"
+            | "esac"
     ) {
         return Segment::Ignored;
     }
     if let Some(check) = check_role(program, &rest) {
         return Segment::Role(CommandRole::Check(check));
     }
+    // An in-place flag turns a reader into a writer, and the row would say the
+    // opposite of what happened.
+    if matches!(program, "sed" | "perl")
+        && rest
+            .iter()
+            .any(|word| word.starts_with("-i") || word.starts_with("-pi"))
+    {
+        return Segment::Unknown;
+    }
     let role = match program {
         "cat" | "head" | "tail" | "bat" | "sed" | "nl" | "less" | "more" => CommandRole::Read,
         "rg" | "grep" | "egrep" | "fgrep" | "ag" | "ack" | "ripgrep" => CommandRole::Search,
         "find" | "fd" | "fdfind" => CommandRole::Find,
         "ls" | "ll" | "tree" | "exa" | "eza" => CommandRole::List,
-        "wc" | "stat" | "du" | "file" | "basename" | "dirname" => CommandRole::Inspect,
+        "wc" | "stat" | "du" | "file" | "basename" | "dirname" | "sysctl" | "uname" | "date" => {
+            CommandRole::Inspect
+        }
         "git" => match rest.first().copied() {
             Some("grep") => CommandRole::Search,
             Some(
                 "log" | "diff" | "status" | "show" | "blame" | "branch" | "remote" | "ls-files",
+            ) => CommandRole::Inspect,
+            _ => return Segment::Unknown,
+        },
+        // Oga's own read-only subcommands: a worker reaches for them the way it
+        // reaches for a search tool, and the row reads better saying so.
+        "oga" | "oga-cli" => match rest.first().copied() {
+            Some("query") => CommandRole::Search,
+            Some("map" | "tasks" | "inspect" | "models" | "health") => CommandRole::Inspect,
+            _ => return Segment::Unknown,
+        },
+        "gh" => match (rest.first().copied(), rest.get(1).copied()) {
+            (
+                Some("pr" | "issue" | "run"),
+                Some("view" | "list" | "status" | "diff" | "checks"),
             ) => CommandRole::Inspect,
             _ => return Segment::Unknown,
         },
@@ -2708,10 +2752,45 @@ fn check_role(program: &str, rest: &[&str]) -> Option<CheckKind> {
     }
 }
 
+/// The part of a shell line a row has room for. Most of a line is plumbing —
+/// the directory it ran in, the redirection, the pager it piped into — and it
+/// buries the one program that did the work. The whole line stays under the
+/// row, in the terminal a reader can open.
+fn command_summary(command: &str) -> String {
+    let segments = command_segments(command);
+    let start = segments
+        .iter()
+        .position(|segment| !matches!(segment_role(segment), Segment::Ignored))
+        .unwrap_or(0);
+    // A command the model wrapped over several lines is still one command.
+    let mut words = Vec::new();
+    for segment in &segments[start..] {
+        let trimmed = segment.trim_end();
+        words.extend(command_words(trimmed.trim_end_matches('\\')));
+        if !trimmed.ends_with('\\') {
+            break;
+        }
+    }
+    if let Some(index) = words.iter().position(|word| is_redirection(word)) {
+        words.truncate(index);
+    }
+    if words.is_empty() {
+        return shell_body(command).trim().to_owned();
+    }
+    words.join(" ")
+}
+
+/// `2>&1`, `> log`, `2>/dev/null` — where a line stops saying what it did and
+/// starts saying where the output went.
+fn is_redirection(word: &str) -> bool {
+    word.trim_start_matches(|character: char| character.is_ascii_digit())
+        .starts_with(['>', '<'])
+}
+
 fn search_command_subject(command: &str) -> Option<String> {
     let role = command_role(command)?;
     role.shows_subject()
-        .then(|| cap(shell_body(command), 120).0)
+        .then(|| cap(&command_summary(command), 120).0)
 }
 
 fn search_command(input: &Map<String, Value>) -> Option<String> {
@@ -2839,7 +2918,7 @@ fn named(title: String) -> String {
 fn presentation_target(presentation: Option<&TaskEventPresentation>) -> Option<String> {
     presentation.and_then(|value| match value.kind {
         PresentationType::File => value.path.clone(),
-        PresentationType::Command => value.command.clone(),
+        PresentationType::Command => value.text.clone().or_else(|| value.command.clone()),
         PresentationType::Tool | PresentationType::Message | PresentationType::Todo => {
             value.text.clone()
         }
@@ -4836,10 +4915,9 @@ mod tests {
             Provider::Codex,
         );
         assert_eq!(shell.kind, EventKind::Command);
-        assert_eq!(
-            shell.target.as_deref(),
-            Some("/bin/zsh -lc \"sed -n '1,240p' README.md\"")
-        );
+        // The shell wrapper is plumbing: the row names the line the model
+        // wrote, and the full invocation stays in the expansion.
+        assert_eq!(shell.target.as_deref(), Some("sed -n '1,240p' README.md"));
     }
 
     #[test]
@@ -4865,10 +4943,7 @@ mod tests {
         assert_eq!(command.kind, EventKind::Command);
         assert_eq!(command.title, "Read file");
         assert_eq!(command.verb.as_deref(), Some("Read"));
-        assert_eq!(
-            command.target.as_deref(),
-            Some("/bin/zsh -lc \"sed -n '1,240p' README.md\"")
-        );
+        assert_eq!(command.target.as_deref(), Some("sed -n '1,240p' README.md"));
         assert_eq!(command.phase, EventPhase::Completed);
 
         let changed = event_view(
@@ -5053,10 +5128,12 @@ mod tests {
         assert_eq!(search.kind, EventKind::Tool);
         assert_eq!(search.title, "Search code");
         assert_eq!(search.verb.as_deref(), Some("Searched"));
+        // The pager is plumbing, not the search: the row names the pattern,
+        // and the full line stays in the expansion underneath.
         assert_eq!(
             search.target.as_deref(),
             Some(
-                "rg --files node_modules/@modelcontextprotocol/server node_modules/@modelcontextprotocol/core | head -n 120"
+                "rg --files node_modules/@modelcontextprotocol/server node_modules/@modelcontextprotocol/core"
             )
         );
         assert_eq!(search.phase, EventPhase::Completed);
@@ -6805,5 +6882,59 @@ mod tests {
         );
         assert_eq!(edit.title, "Edit file");
         assert_eq!(edit.target.as_deref(), Some("/repo/src/ssh/pending.ts"));
+    }
+
+    #[test]
+    fn command_summary_skips_setup_and_redirection() {
+        assert_eq!(
+            command_summary("cd /repo && rg -n \"block_on\" crates 2>/dev/null | head -20"),
+            "rg -n \"block_on\" crates"
+        );
+        assert_eq!(
+            command_summary("/bin/zsh -lc 'cd /repo && cargo test -p oga-http'"),
+            "cargo test -p oga-http"
+        );
+    }
+
+    #[test]
+    fn command_summary_keeps_an_in_place_edit_whole() {
+        // An in-place `sed` writes rather than reads; the summary must not
+        // trim it down to something that reads as a lookup.
+        let command = "sed -i '' -e 's/a/b/' src/main.rs";
+        assert_eq!(command_role(command), None);
+        assert_eq!(command_summary(command), command);
+    }
+
+    #[test]
+    fn worker_helper_tools_read_as_lookups() {
+        assert_eq!(
+            command_role("oga query \"where is the token refresh handled\""),
+            Some(CommandRole::Search)
+        );
+        assert_eq!(command_role("gh pr view 12"), Some(CommandRole::Inspect));
+    }
+
+    #[test]
+    fn claude_bash_row_carries_a_short_summary_beside_the_full_command() {
+        let command = "cd /repo && cargo check -p oga-events 2>&1 | tail -5";
+        let view = event_view(
+            &provider_event(
+                1,
+                "agent.hook",
+                serde_json::json!({
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_use_id": "toolu_summary",
+                    "tool_input": {"command": command}
+                }),
+            ),
+            Provider::Claude,
+        );
+        let presentation = view.presentation.as_ref().expect("command presentation");
+        assert_eq!(presentation.command.as_deref(), Some(command));
+        assert_eq!(
+            presentation.text.as_deref(),
+            Some("cargo check -p oga-events")
+        );
     }
 }

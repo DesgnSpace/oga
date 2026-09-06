@@ -43,7 +43,7 @@ describe("trace rows", () => {
     expect(rows[0].children.length === 0 && rows[0].event !== undefined).toBe(true);
   });
 
-  it("uses the command instead of an error payload for the collapsed title", () => {
+  it("uses the command summary instead of an error payload for the collapsed title", () => {
     const command = "cd /tmp && opencode run --format json --model opencode-go/minimax-m2.7";
     const commandEvent: TaskEventView = {
       ...event(1, "command", "Run command"),
@@ -52,7 +52,7 @@ describe("trace rows", () => {
       presentation: {
         type: "command",
         command,
-        text: '{"type":"error","error":{"data":{"statusCode":401}}}',
+        text: "opencode run --format json --model opencode-go/minimax-m2.7",
       },
       rawText: JSON.stringify({
         type: "tool_use",
@@ -73,8 +73,24 @@ describe("trace rows", () => {
       false,
     );
 
-    expect(rows[0].target).toBe(command);
+    expect(rows[0].target).toBe("opencode run --format json --model opencode-go/minimax-m2.7");
     expect(rows[0].expansion?.type).toBe("command");
+  });
+
+  it("falls back to the full command when no summary is present", () => {
+    const command = "cd /tmp && opencode run --format json";
+    const commandEvent: TaskEventView = {
+      ...event(1, "command", "Run command"),
+      source: "opencode",
+      verb: "Ran",
+      presentation: { type: "command", command },
+    };
+    const rows = TraceRowBuilder.rows(
+      [{ type: "chapter", id: 1, rows: [{ type: "work", event: commandEvent }] }],
+      "/repo",
+      false,
+    );
+    expect(rows[0].target).toBe(command);
   });
 
   it("keeps event targets when presentation is missing", () => {
