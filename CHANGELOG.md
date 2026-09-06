@@ -10,7 +10,7 @@
 ### Changed
 
 - The worker's default habits — clearing small reversible obstacles itself, looking code up with `oga query` first, and delivering through checks, a commit, and a pull request — moved out of the app into the worker rules you can rewrite or delete in Settings. If you already customized your rules, they stay exactly as you left them.
-- The worker prompt is now a template for the whole message a worker receives: reorder the sections, rewrite one, or drop one, with `{{brief}}`, `{{scope}}`, `{{memories}}`, `{{attribution}}`, and `{{reporting}}` filled in per task. Prompts customized before templates existed keep working untouched.
+- The worker prompt is now plain text you own top to bottom: reorder the sections, rewrite one, or drop one, with `{{brief}}`, `{{scope}}`, `{{memories}}`, `{{attribution}}`, and `{{reporting}}` filled in per task and nothing appended behind your back. Prompts customized before templates existed keep working untouched, gaining only the task slot first.
 - Cleaned up the task activity timeline for Claude runs: shell commands now show a short summary instead of the full command line, and consecutive commands fold into one row with a count.
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
 - Answers cite Rust, TypeScript, TSX, JavaScript, Swift, Python, Go, PHP, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.

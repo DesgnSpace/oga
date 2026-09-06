@@ -774,6 +774,9 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
         Some((prompt, path)) => (prompt, Some(path)),
         None => (saved, None),
     };
+    // The task slot is the one structural guarantee: prompts customized
+    // before templates existed get it first, words and order untouched.
+    let value = oga_config::ensure_brief_slot(&value);
     Ok(PromptConfig {
         cwd: cwd.to_owned(),
         scope: if cwd == global { "global" } else { "project" }.into(),

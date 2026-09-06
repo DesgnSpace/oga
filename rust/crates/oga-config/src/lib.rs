@@ -28,15 +28,17 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
 /// The worker prompt a fresh settings file starts from, editable in Settings
-/// or overridden per project from `.oga.yaml`. It is a template, not a rules
-/// block: `{{brief}}`, `{{scope}}`, `{{context_map}}`, `{{memories}}`,
-/// `{{attribution}}`, and `{{reporting}}` are filled in per task, and
-/// `{{task_id}}`, `{{provider}}`, `{{model}}`, `{{effort}}` name the run.
-/// Everything else here is house style a user may reorder, rewrite, or
-/// delete. The prompt assembly in code keeps only what the system itself
-/// needs — the worker role, the ban on delegating its own brief onward, and
-/// the result markers the broker parses.
+/// or overridden per project from `.oga.yaml`. It is a default, not a frame:
+/// plain text that is sent as written once `{{brief}}`, `{{scope}}`,
+/// `{{context_map}}`, `{{memories}}`, `{{attribution}}`, and `{{reporting}}`
+/// are filled in per task, with the run itself as `{{task_id}}`,
+/// `{{provider}}`, `{{model}}`, `{{effort}}`. A user who deletes everything
+/// and writes one sentence gets one sentence sent. Code adds nothing except
+/// the task slot itself, first, when it is missing.
 pub const DEFAULT_WORKER_PROMPT: &str = concat!(
+    "Worker mode: you are executing an assigned Oga task.\n",
+    "Continue the assigned brief directly. Do not use Oga to delegate, resume, or manage another task, and do not create a child task for the same work.\n",
+    "\n",
     "{{brief}}\n",
     "\n",
     "{{scope}}\n",
@@ -1034,17 +1036,17 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
     Ok(Some(rules))
 }
 
-/// The worker prompt one `.oga.yaml` writes for its own scope. It is a
-/// template: `{{brief}}` marks where the task lands, alongside `{{scope}}`,
-/// `{{context_map}}`, `{{memories}}`, `{{attribution}}`, `{{reporting}}`,
-/// and the run itself as `{{task_id}}`, `{{provider}}`, `{{model}}`,
-/// `{{effort}}`. A value without `{{brief}}` is read the old way, as a rules
-/// block appended to the fixed skeleton, so prompts customized before
-/// templates existed keep working untouched. `attribution` is the only other
-/// key: `false` turns off the Done-with-Oga line workers stamp on commits
-/// and pull requests, `true` (or leaving it out) leaves it on. Any other key
-/// is a rule the writer expects Oga to honour and Oga would silently drop,
-/// so it fails the read instead.
+/// The worker prompt one `.oga.yaml` writes for its own scope: plain text
+/// that is sent as written, with `{{brief}}` marking where the task lands,
+/// alongside `{{scope}}`, `{{context_map}}`, `{{memories}}`,
+/// `{{attribution}}`, `{{reporting}}`, and the run itself as `{{task_id}}`,
+/// `{{provider}}`, `{{model}}`, `{{effort}}`. A value without `{{brief}}`
+/// keeps working: resolution gives it the slot first through
+/// [`ensure_brief_slot`], leaving its words and order untouched.
+/// `attribution` is the only other key: `false` turns off the supervision
+/// line workers stamp on commits and pull requests, `true` (or leaving it
+/// out) leaves it on. Any other key is a rule the writer expects Oga to
+/// honour and Oga would silently drop, so it fails the read instead.
 pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>, ConfigError> {
     let Some(layer) = layer else {
         return Ok(None);
@@ -1084,6 +1086,19 @@ pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
 
 const WORKER_SHAPE: &str =
     "worker takes prompt, holding the rules text, and an optional attribution flag";
+
+/// The single structural guarantee: the task slot. A template holding
+/// `{{brief}}` is sent as written, nothing added. Anything older — plain
+/// rules from before templates existed — gets the slot first, where the task
+/// always landed, so existing prompts keep working with their words and
+/// order untouched.
+pub fn ensure_brief_slot(raw: &str) -> String {
+    if raw.contains("{{brief}}") {
+        raw.to_owned()
+    } else {
+        format!("{{{{brief}}}}\n\n{raw}")
+    }
+}
 
 /// Whether this scope stamps worker output with the Done-with-Oga line.
 /// `None` means the file says nothing and the next scope up decides.
@@ -1786,6 +1801,16 @@ mod tests {
     }
 
     #[test]
+    fn brief_slot_is_added_first_only_when_missing() {
+        assert_eq!(
+            ensure_brief_slot("{{brief}}\n\nBe terse."),
+            "{{brief}}\n\nBe terse."
+        );
+        assert_eq!(ensure_brief_slot("Be terse."), "{{brief}}\n\nBe terse.");
+        assert_eq!(ensure_brief_slot(""), "{{brief}}\n\n");
+    }
+
+    #[test]
     fn editable_default_is_a_template_carrying_the_house_style() {
         assert!(DEFAULT_WORKER_PROMPT.contains("{{brief}}"));
         assert!(DEFAULT_WORKER_PROMPT.contains("{{scope}}"));
@@ -1796,7 +1821,7 @@ mod tests {
         assert!(DEFAULT_WORKER_PROMPT.contains("oga query"));
         assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
         assert!(DEFAULT_WORKER_PROMPT.contains("oga relearn"));
-        assert!(!DEFAULT_WORKER_PROMPT.contains("Do not use Oga to delegate"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("Do not use Oga to delegate")); // default text, deletable
     }
 
     #[test]

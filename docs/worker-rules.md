@@ -14,25 +14,29 @@ The project prompt replaces the prompt configured for that project. Use
 `oga config` to inspect the effective worker rules.
 
 The starting prompt lives in Settings, where you can rewrite or delete it.
-It is a template for the whole message a worker receives: reorder the
-sections, rewrite one, or drop one. Placeholders are filled in per task:
+It is plain text you own, top to bottom: reorder the sections, rewrite one,
+or drop one, and nothing is added behind your back. Delete everything and
+write one sentence, and one sentence is sent. Placeholders are filled in per
+task:
 
 - `{{brief}}` — the task itself.
 - `{{scope}}` — what the work may read and change.
-- `{{context_map}}` — the code map, when there is one.
-- `{{memories}}` — the project facts section, when there are any.
-- `{{attribution}}` — the Done-with-Oga stamp section, when enabled.
+- `{{context_map}}` — the code map, or nothing when there is none.
+- `{{memories}}` — the project facts section, or nothing when there are none.
+- `{{attribution}}` — the supervision stamp section, or nothing when off.
 - `{{reporting}}` — how the worker signals questions and blockers.
 - `{{task_id}}`, `{{provider}}`, `{{model}}`, `{{effort}}` — the run itself.
 
-A prompt without `{{brief}}` is read the old way, as a rules block inside a
-fixed layout, so anything customized before templates existed keeps working
-untouched. If you never customized, the new template arrives on its own.
+Anything else in `{{braces}}` is left exactly as written. The section
+placeholders expand to a whole section or nothing, since there is no
+conditional syntax to skip a heading with.
 
-Three things stay outside the template because the system depends on them:
-the two opening lines (the worker role and the ban on handing its own brief
-onward), the exact question and blocker markers the broker parses, and the
-attribution wording, which has its own off switch below.
+One thing is structurally required, because without it there is no
+delegation to perform: the task slot. A prompt without `{{brief}}` gets the
+slot first, with your words and order untouched — that is how prompts
+customized before templates existed keep working. Everything else, including
+whether the worker may hand work onward and which markers it uses, lives in
+your text and yours alone.
 
 Worker rules should state durable project conventions and delivery expectations.
 Do not put credentials or temporary task status in them.

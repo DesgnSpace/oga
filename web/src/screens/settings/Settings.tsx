@@ -1779,7 +1779,7 @@ function PromptsPanel({
             readOnly={state.prompts.configPath !== undefined}
             aria-label="Worker instructions"
           />
-          <p className="settings-helper">The whole message a worker receives. Use {"{{brief}}"}, {"{{scope}}"}, {"{{memories}}"}, {"{{attribution}}"}, and {"{{reporting}}"} where each part should land.</p>
+          <p className="settings-helper">The whole message a worker receives, sent as written. Use {"{{brief}}"}, {"{{scope}}"}, {"{{memories}}"}, {"{{attribution}}"}, and {"{{reporting}}"} where each part should land; the task slot is added first when missing.</p>
           {state.prompts.configPath !== undefined ? (
             <p className="settings-helper">Set in {state.prompts.configPath}. Edit that file to change them.</p>
           ) : (

@@ -10,16 +10,6 @@ use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskScope, TaskSta
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The mechanical core no worker runs without: the role it is in, and the ban
-/// on handing its own brief onward. A worker that could delegate, resume, or
-/// manage tasks would loop work back into the broker on its own account, so
-/// this stays in code. Everything else — obstacles, lookup habits, delivery —
-/// ships as editable worker rules the user can rewrite or delete.
-const PREAMBLE: [&str; 2] = [
-    "Worker mode: you are executing an assigned Oga task.",
-    "Continue the assigned brief directly. Do not use Oga to delegate, resume, or manage another task, and do not create a child task for the same work.",
-];
-
 /// Where a worker's stamp points back to.
 pub const ATTRIBUTION_EMAIL: &str = "oga@desgn.space";
 
@@ -154,18 +144,35 @@ impl PromptIdentity {
 }
 
 /// Inputs for the full prompt sent to a fresh provider session.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerPromptInput {
     pub task: String,
     pub allow_questions: bool,
     pub scope: Option<TaskScope>,
-    /// The template when it holds `{{brief}}`, else a legacy rules block.
+    /// The template, resolved upstream with the brief slot ensured.
     pub worker_prompt: String,
     pub context_map: Option<String>,
     pub memories: Vec<MemoryEntry>,
     /// `None` silences the stamp: the project turned attribution off.
     pub attribution: Option<WorkerAttribution>,
     pub identity: PromptIdentity,
+}
+
+impl Default for WorkerPromptInput {
+    /// A bare input still renders the default template: continuations that
+    /// rebuild without a session have no resolved prompt of their own.
+    fn default() -> Self {
+        Self {
+            task: String::new(),
+            allow_questions: false,
+            scope: None,
+            worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
+            context_map: None,
+            memories: Vec::new(),
+            attribution: None,
+            identity: PromptIdentity::default(),
+        }
+    }
 }
 
 /// The provider's final text and Oga's interpretation of it.
@@ -180,65 +187,14 @@ pub struct WorkerOutcome {
     pub completion: TaskCompletion,
 }
 
-/// Assemble the stable worker document used for a new provider session.
-///
-/// A prompt holding `{{brief}}` is the template: sections, order, and
-/// headings are the user's, and code only substitutes the values the system
-/// knows. Anything else is a legacy rules block and keeps the previous fixed
-/// skeleton, so prompts customized before templates existed run untouched.
+/// Assemble the worker document sent to a new provider session. The prompt is
+/// the user's plain text, top to bottom: code substitutes the values it
+/// knows and sends what they wrote — no imposed sections, no mandatory
+/// headings, no reordering, nothing appended. The one guarantee is the task
+/// slot itself, ensured upstream: without `{{brief}}` there is no delegation
+/// to perform.
 pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
-    let mut parts = PREAMBLE
-        .iter()
-        .map(|line| (*line).to_owned())
-        .collect::<Vec<_>>();
-    if input.worker_prompt.contains("{{brief}}") {
-        let template = input.worker_prompt.trim();
-        let values = template_values(input);
-        parts.extend([
-            String::new(),
-            render_template(template, &values),
-            String::new(),
-        ]);
-        if !template.contains("{{attribution}}")
-            && let Some(attribution) = &input.attribution
-        {
-            parts.extend([String::new(), "## Attribution".into()]);
-            parts.extend(attribution_lines(attribution));
-        }
-        if !template.contains("{{reporting}}") {
-            parts.extend([String::new(), "## Reporting".into()]);
-            parts.extend(reporting_lines(input.allow_questions));
-        }
-    } else {
-        parts.extend([String::new(), input.task.clone()]);
-        if let Some(scope) = &input.scope {
-            parts.extend([String::new(), scope_line(scope)]);
-        }
-        if !input.worker_prompt.trim().is_empty() {
-            parts.extend([
-                String::new(),
-                "## Worker rules".into(),
-                input.worker_prompt.trim().into(),
-            ]);
-        }
-        if let Some(context_map) = input
-            .context_map
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            parts.extend([String::new(), context_map.trim().to_owned()]);
-        }
-        if !input.memories.is_empty() {
-            parts.extend([String::new(), memories_section(&input.memories)]);
-        }
-        if let Some(attribution) = &input.attribution {
-            parts.extend([String::new(), "## Attribution".into()]);
-            parts.extend(attribution_lines(attribution));
-        }
-        parts.extend([String::new(), "## Reporting".into()]);
-        parts.extend(reporting_lines(input.allow_questions));
-    }
-    parts.join("\n")
+    render_template(&input.worker_prompt, &template_values(input))
 }
 
 /// One substitution pass over the template. Known `{{names}}` become the
@@ -913,7 +869,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prompt_contains_scope_and_reporting() {
+    fn prompt_substitutes_values_through_placeholders() {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
             allow_questions: true,
@@ -921,6 +877,7 @@ mod tests {
                 read: vec!["src/**".into()],
                 write: vec!["src/**".into()],
             }),
+            worker_prompt: "{{brief}}\n\n{{scope}}\n\n{{reporting}}".into(),
             ..WorkerPromptInput::default()
         });
         assert!(prompt.contains("do the thing"));
@@ -929,18 +886,13 @@ mod tests {
     }
 
     #[test]
-    fn prompt_keeps_only_the_mechanical_core() {
+    fn one_sentence_in_one_sentence_out() {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
+            worker_prompt: "Be terse.".into(),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Worker mode: you are executing an assigned Oga task."));
-        assert!(prompt.contains("Do not use Oga to delegate"));
-        assert!(!prompt.contains("Clear obstacles yourself"));
-        assert!(!prompt.contains("stray generated file blocking a checkout"));
-        assert!(!prompt.contains("oga query"));
-        assert!(!prompt.contains("gh pr create"));
-        assert!(!prompt.contains("## Delivery"));
+        assert_eq!(prompt, "Be terse.");
     }
 
     #[test]
@@ -992,7 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn template_without_reporting_or_attribution_appends_them() {
+    fn dropped_sections_stay_dropped() {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
             worker_prompt: "{{brief}}".into(),
@@ -1003,10 +955,7 @@ mod tests {
             }),
             ..WorkerPromptInput::default()
         });
-        assert!(
-            prompt.contains("Supervised-by: Oga (on claude/opus, high effort) — oga@desgn.space")
-        );
-        assert!(prompt.contains("OGA_BLOCKED"));
+        assert_eq!(prompt, "do the thing");
     }
 
     #[test]
@@ -1020,22 +969,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_rules_without_brief_keep_the_fixed_skeleton() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            worker_prompt: "1. My old rule.".into(),
-            ..WorkerPromptInput::default()
-        });
-        assert!(prompt.contains("## Worker rules"));
-        assert!(prompt.contains("1. My old rule."));
-        assert!(prompt.contains("## Reporting"));
-        assert!(!prompt.contains("{{"));
-    }
-
-    #[test]
     fn prompt_stamps_the_real_destination_and_nothing_else() {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
+            worker_prompt: "{{brief}}\n\n{{attribution}}".into(),
             attribution: Some(WorkerAttribution {
                 provider: "claude".into(),
                 model: "opus".into(),
@@ -1059,6 +996,7 @@ mod tests {
     fn prompt_leaves_effort_off_and_stays_silent_when_opted_out() {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
+            worker_prompt: "{{brief}}\n\n{{attribution}}".into(),
             attribution: Some(WorkerAttribution {
                 provider: "claude".into(),
                 model: "opus".into(),
@@ -1071,6 +1009,7 @@ mod tests {
 
         let silent = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
+            worker_prompt: "{{brief}}\n\n{{attribution}}".into(),
             ..WorkerPromptInput::default()
         });
         assert!(!silent.contains("## Attribution"));
