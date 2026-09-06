@@ -4,6 +4,7 @@
 
 ### Added
 
+- Release manifests now include the release notes shown in the update prompt.
 - `oga love --when` now routes by subject as well as class: `oga love opencode:muse --when ui` sends UI work there, with `backend`, `database`, `docs`, `tests`, `review`, `research`, and `refactor` alongside the existing kinds. A subject rule wins over a class rule, and `oga delegate --kind <subject>` names the subject when the task text never says so.
 - `oga love` now takes an ordered list of destinations per rule, like `oga love opencode:luna:max claude:opus:low --when ui`. The first destination that can take the work runs it; when it is rate-limited, out of credits, or otherwise unavailable, the next one runs instead, and the task record says which one ran and why it was not the first. Each destination is `worker:model:effort` with the model or the effort left out.
 - Work a delegated worker ships now carries a short stamp naming the provider, model, and effort behind it: a `Co-Authored-By:` trailer on commits it creates, so git credits the run, and a footer on pull requests it opens. Turn it off per project with `worker: attribution: false` in `.oga.yaml`, or everywhere with the same key in `~/.oga.yaml`.
@@ -30,6 +31,8 @@
 ### Fixed
 
 - Usage activity grids and charts now fill the Usage window instead of staying in a narrow strip.
+- Grouped running steps now animate the group summary instead of every step row.
+- Removed the divider below the task search field so the sidebar reads as one column.
 - Usage summary tiles and activity views now use the full width of the Usage window.
 - Made the Usage window's summary tiles compact and sized the window to its content.
 - Naming a model by its short name (like `luna` for `openai/gpt-5.6-luna`) now resolves the same way everywhere a task can be sent, so a model you switched on is no longer refused as off, and one you switched off can no longer run. A short name that could mean more than one model is refused, listing the models it could mean, instead of guessing.

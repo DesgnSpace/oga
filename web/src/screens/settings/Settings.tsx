@@ -76,13 +76,6 @@ function defaultModelFor(provider: Provider): string {
   }
 }
 
-const SETTINGS_GROUPS: ReadonlyArray<{ label: string; tabs: readonly SettingsTab[] }> = [
-  { label: "Workspace", tabs: ["workers", "connections"] },
-  { label: "Worker context", tabs: ["memories", "prompts"] },
-  { label: "Application", tabs: ["storage", "about"] },
-];
-
-
 export default function SettingsPage({
   open = true,
   offline = false,
@@ -105,15 +98,10 @@ export default function SettingsPage({
   const wasOpen = useRef(false);
   const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
 
-  const visibleGroups = useMemo(() => {
+  const visibleTabs = useMemo(() => {
     const needle = sectionQuery.trim().toLowerCase();
-    return SETTINGS_GROUPS.map((group) => ({
-      ...group,
-      tabs: group.tabs.filter((tab) => !needle || tabLabel(tab).toLowerCase().includes(needle)),
-    })).filter((group) => group.tabs.length > 0);
+    return SETTINGS_TABS.filter((tab) => !needle || tabLabel(tab).toLowerCase().includes(needle));
   }, [sectionQuery]);
-
-  const visibleTabs = useMemo(() => visibleGroups.flatMap((group) => group.tabs), [visibleGroups]);
 
   const handleTabKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>, tab: SettingsTab) => {
@@ -255,32 +243,27 @@ export default function SettingsPage({
           <SearchField className="settings-section-search" value={sectionQuery} onChange={setSectionQuery} placeholder="Search settings" />
         </div>
         <nav className="settings-tabs" aria-label="Settings sections" role="tablist" aria-orientation="vertical">
-          {visibleGroups.length === 0 ? (
+          {visibleTabs.length === 0 ? (
             <p className="settings-rail-empty">No sections match &ldquo;{sectionQuery}&rdquo;.</p>
           ) : (
-            visibleGroups.map((group) => (
-              <div className="settings-section-group" key={group.label}>
-                <h2>{group.label}</h2>
-                {group.tabs.map((tab) => (
-                  <button
-                    key={tab}
-                    className={`settings-tab${activeTab === tab ? " settings-tab-active" : ""}`}
-                    type="button"
-                    role="tab"
-                    id={`settings-tab-${tab}`}
-                    tabIndex={activeTab === tab ? 0 : -1}
-                    aria-controls={`settings-panel-${tab}`}
-                    aria-selected={activeTab === tab}
-                    ref={(element) => {
-                      tabRefs.current[tab] = element;
-                    }}
-                    onKeyDown={(event) => handleTabKeyDown(event, tab)}
-                    onClick={() => setActiveTab(tab)}
-                  >
-                    <span>{tabLabel(tab)}</span>
-                  </button>
-                ))}
-              </div>
+            visibleTabs.map((tab) => (
+              <button
+                key={tab}
+                className={`settings-tab${activeTab === tab ? " settings-tab-active" : ""}`}
+                type="button"
+                role="tab"
+                id={`settings-tab-${tab}`}
+                tabIndex={activeTab === tab ? 0 : -1}
+                aria-controls={`settings-panel-${tab}`}
+                aria-selected={activeTab === tab}
+                ref={(element) => {
+                  tabRefs.current[tab] = element;
+                }}
+                onKeyDown={(event) => handleTabKeyDown(event, tab)}
+                onClick={() => setActiveTab(tab)}
+              >
+                <span>{tabLabel(tab)}</span>
+              </button>
             ))
           )}
         </nav>
