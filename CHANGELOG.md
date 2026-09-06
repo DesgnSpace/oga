@@ -40,6 +40,7 @@
 - Fixed the Usage window leaving a large empty gap below your spending data.
 - Took a task out of the task list the moment you archive it, and put it back the moment you restore it, instead of waiting for a reload.
 - Sorted "Newest first" by when you started a task, instead of repeating "Recently updated".
+- A shell command in the activity view no longer carries a green "Succeeded" line, which also appeared while the command was still running. Only a command that failed says so.
 
 ## 0.0.6 - 2026-09-05
 
