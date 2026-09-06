@@ -58,6 +58,7 @@ import { formatCost, taskWallTime } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
+import { taskToastTitles } from "@/lib/toast-titles";
 
 const FILTERS_LABEL = "Filter and sort tasks";
 
@@ -101,7 +102,7 @@ function rowMenuSections(
   task: TaskSummary,
   run: (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
+    titles: { pending: string; failure: string },
   ) => void,
   offline: boolean,
 ): MenuAction[][] {
@@ -113,7 +114,7 @@ function rowMenuSections(
       label: "Stop",
       icon: <CancelIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeCancel(task.id), "Stopping task"),
+      onSelect: () => run(() => executeCancel(task.id), taskToastTitles(task, "stop")),
     });
   }
   if (canResume(task)) {
@@ -122,7 +123,7 @@ function rowMenuSections(
       label: "Resume",
       icon: <PlayIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeResume(task.id), "Resuming task"),
+      onSelect: () => run(() => executeResume(task.id), taskToastTitles(task, "resume")),
     });
   }
 
@@ -132,7 +133,7 @@ function rowMenuSections(
       label: archived ? "Restore" : "Archive",
       icon: archived ? <RestoreIcon /> : <ArchiveIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeArchive(task.id, !archived), archived ? "Restoring task" : "Archiving task"),
+      onSelect: () => run(() => executeArchive(task.id, !archived), taskToastTitles(task, archived ? "restore" : "archive")),
     },
   ];
   if (canComplete(task)) {
@@ -141,7 +142,7 @@ function rowMenuSections(
       label: "Mark as completed",
       icon: <CheckIcon />,
       disabled: offline,
-      onSelect: () => run(() => executeComplete(task.id), "Completing task"),
+      onSelect: () => run(() => executeComplete(task.id), taskToastTitles(task, "complete")),
     });
   }
 
@@ -464,20 +465,20 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   const runRowAction = useCallback(
     (
       action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-      pendingTitle: string,
+      titles: { pending: string; failure: string },
     ) => {
       setRowMenu(null);
       const run = () => {
-        const lifecycle = toast.pending(pendingTitle, { retry: run });
+        const lifecycle = toast.pending(titles.pending, { retry: run });
         void action().then((result) => {
           if (result.ok) {
             lifecycle.dismiss();
             void sidebarRef.refresh();
           } else {
-            lifecycle.error("Couldn't update task", { description: "Try again.", detail: result.error.message });
+            lifecycle.error(titles.failure, { description: "Try again.", detail: result.error.message });
           }
         }).catch((error: unknown) => {
-          lifecycle.error("Couldn't reach Oga", { description: "Check the connection and try again.", detail: error instanceof Error ? error.message : String(error) });
+          lifecycle.error(titles.failure, { description: "Check the connection and try again.", detail: error instanceof Error ? error.message : String(error) });
         });
       };
       run();

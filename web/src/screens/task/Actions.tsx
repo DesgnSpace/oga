@@ -21,6 +21,7 @@ import { ComposerRequest, ConversationComposer, isResume, routingForState } from
 import { isExplainedWait, nextTryLabel } from "./format";
 import { TaskMetadata } from "./TaskMetadata";
 import { toast } from "@/state/toast";
+import { taskToastTitles, type TaskToastAction } from "@/lib/toast-titles";
 
 /** Any task-like value with just the state a menu needs to gate on. */
 export type TaskLike = { state: TaskState; archivedAt?: string };
@@ -90,14 +91,18 @@ export function canHandoff(task: TaskLike): boolean {
   return task.state !== "completed";
 }
 
-function actionFailure(error: BridgeError, action: string): { title: string; options: { description?: string; detail?: string } } {
+function actionFailure(error: BridgeError, failureTitle: string): { title: string; options: { description?: string; detail?: string } } {
   if (error.status !== undefined) {
-    return { title: `Couldn't ${action}`, options: { description: "Try again.", detail: error.message } };
+    return { title: failureTitle, options: { description: "Try again.", detail: error.message } };
   }
   return {
-    title: "Couldn't reach Oga",
+    title: failureTitle,
     options: { description: "Check the connection and try again.", detail: error.message },
   };
+}
+
+function titlesFor(task: { title?: string; tldr?: string; prompt?: string }, action: TaskToastAction) {
+  return taskToastTitles(task, action);
 }
 
 export interface BlockedExplanation {
@@ -192,25 +197,24 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
 
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
-    successTitle: string,
+    titles: { pending: string; success: string; failure: string },
   ) => {
     if (busy) return;
     setBusy(true);
-    const lifecycle = toast.pending(pendingTitle);
+    const lifecycle = toast.pending(titles.pending);
     try {
       const result = await action();
       setBusy(false);
       if (result.ok) {
-        lifecycle.success(successTitle);
+        lifecycle.success(titles.success);
         onChanged();
       } else {
-        const failure = actionFailure(result.error, "update this task");
+        const failure = actionFailure(result.error, titles.failure);
         lifecycle.error(failure.title, failure.options);
       }
     } catch (error) {
       setBusy(false);
-      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, "update this task");
+      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
     }
   };
@@ -251,7 +255,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
         disabled: busy,
         onSelect: () => {
           setMenuOpen(false);
-          void run(() => executeArchive(task.id, !archived), archived ? "Restoring task" : "Archiving task", archived ? "Task restored" : "Task archived");
+          void run(() => executeArchive(task.id, !archived), titlesFor(task, archived ? "restore" : "archive"));
         },
       },
       ...(completable
@@ -263,7 +267,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
               disabled: busy,
               onSelect: () => {
                 setMenuOpen(false);
-                void run(() => executeComplete(task.id), "Completing task", "Task marked completed");
+                void run(() => executeComplete(task.id), titlesFor(task, "complete"));
               },
             },
           ]
@@ -302,7 +306,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
             type="button"
             onClick={() => {
               setConfirmingCancel(false);
-              void run(() => executeCancel(task.id), "Stopping task", "Task stopped");
+              void run(() => executeCancel(task.id), titlesFor(task, "stop"));
             }}
           >
             Stop task
@@ -402,20 +406,21 @@ function HandoffDialog({
     event.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
-    const lifecycle = toast.pending("Moving task");
+    const titles = titlesFor(task, "move");
+    const lifecycle = toast.pending(titles.pending);
     try {
       const result = await executeHandoff(task.id, workerId, modelId);
       setBusy(false);
       if (result.ok) {
-        lifecycle.success("Task moved to another worker");
+        lifecycle.success(titles.success);
         onChanged();
       } else {
-        const failure = actionFailure(result.error, "move this task");
+        const failure = actionFailure(result.error, titles.failure);
         lifecycle.error(failure.title, failure.options);
       }
     } catch (error) {
       setBusy(false);
-      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, "move this task");
+      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
     }
   };
@@ -475,20 +480,19 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
 
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
-    successTitle: string,
+    titles: { pending: string; success: string; failure: string },
   ) => {
     if (busy) return;
     setBusy(true);
-    const lifecycle = toast.pending(pendingTitle);
+    const lifecycle = toast.pending(titles.pending);
     const result = await action();
     setBusy(false);
     if (result.ok) {
-      lifecycle.success(successTitle);
+      lifecycle.success(titles.success);
       onChanged();
       return;
     }
-    const failure = actionFailure(result.error, "update this task");
+    const failure = actionFailure(result.error, titles.failure);
     lifecycle.error(failure.title, failure.options);
   };
 
@@ -501,7 +505,7 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
           className="task-action task-action-primary"
           type="button"
           disabled={busy}
-          onClick={() => void run(() => executeResume(task.id), "Resuming task", "Task resumed")}
+          onClick={() => void run(() => executeResume(task.id), titlesFor(task, "resume"))}
         >
           Continue now
         </button>
@@ -509,7 +513,7 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
           className="task-action"
           type="button"
           disabled={busy}
-          onClick={() => void run(() => executeCancel(task.id), "Stopping task", "Task stopped")}
+          onClick={() => void run(() => executeCancel(task.id), titlesFor(task, "stop"))}
         >
           Stop task
         </button>
@@ -540,60 +544,59 @@ export function TaskControls({
 
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
-    successTitle: string,
+    titles: { pending: string; success: string; failure: string },
   ) => {
     if (busy) return;
     setBusy(true);
-    const lifecycle = toast.pending(pendingTitle);
+    const lifecycle = toast.pending(titles.pending);
     try {
       const result = await action();
       setBusy(false);
       if (result.ok) {
-        lifecycle.success(successTitle);
+        lifecycle.success(titles.success);
         onChanged();
       } else {
-        const failure = actionFailure(result.error, "update this task");
+        const failure = actionFailure(result.error, titles.failure);
         lifecycle.error(failure.title, failure.options);
       }
     } catch (error) {
       setBusy(false);
-      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, "update this task");
+      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
     }
   };
 
   const handleSend = (request: ComposerRequest) => {
     if (request.instruction === undefined) {
-       if (isResume(routing)) void run(() => executeResume(task.id), "Resuming task", "Task resumed");
+       if (isResume(routing)) void run(() => executeResume(task.id), titlesFor(task, "resume"));
       return;
     }
     const instruction = request.instruction;
     if (routing.type === "reply") {
-      void run(() => executeReply(task.id, instruction, task.scope), "Sending reply", "Reply sent");
+      void run(() => executeReply(task.id, instruction, task.scope), titlesFor(task, "reply"));
       return;
     }
     if (
       (routing.type === "steer-and-queue" && request.mode === "steer") ||
       (routing.type === "steer" && request.mode === "steer")
     ) {
-      void run(() => executeSteer(task.id, instruction), "Sending instruction", "Instruction sent");
+      void run(() => executeSteer(task.id, instruction), titlesFor(task, "steer"));
       return;
     }
     if ((routing.type === "steer-and-queue" && request.mode === "primary") || routing.type === "queue") {
-      void run(() => executeQueue(task.id, instruction), "Queueing follow-up", "Follow-up queued");
+      void run(() => executeQueue(task.id, instruction), titlesFor(task, "queue"));
       return;
     }
     if (routing.type === "resume") {
-      void run(() => executeResume(task.id, { instruction, scope: task.scope }), "Resuming task", "Task resumed");
+      void run(() => executeResume(task.id, { instruction, scope: task.scope }), titlesFor(task, "resume"));
       return;
     }
     if (routing.type === "steer" && request.mode === "primary") {
-      void run(() => executeSteer(task.id, instruction), "Sending instruction", "Instruction sent");
+      void run(() => executeSteer(task.id, instruction), titlesFor(task, "steer"));
     }
   };
 
-  const removeQueued = (index: number) => void run(() => executeRemoveFollowUp(task.id, index), "Removing follow-up", "Follow-up removed");
+  const removeQueued = (index: number) => void run(() => executeRemoveFollowUp(task.id, index), titlesFor(task, "remove-follow-up"));
   const explanation = task.state === "blocked" || task.state === "failed"
     ? explainBlocked(task.completion, task.scope)
     : undefined;
@@ -610,21 +613,21 @@ export function TaskControls({
             </details>
           )}
           <div className="blocked-task-actions">
-            <button className="task-action" type="button" disabled={busy} onClick={() => void run(() => executeComplete(task.id), "Completing task", "Task marked completed")}>
+            <button className="task-action" type="button" disabled={busy} onClick={() => void run(() => executeComplete(task.id), titlesFor(task, "complete"))}>
               Mark as completed
             </button>
             {explanation.suggestedScope && (
               <button
                 className="task-action task-action-primary"
                 type="button"
-                onClick={() => void run(() => executeResume(task.id, { scope: explanation.suggestedScope }), "Resuming task", "Task resumed")}
+                onClick={() => void run(() => executeResume(task.id, { scope: explanation.suggestedScope }), titlesFor(task, "resume"))}
               >
                 {explanation.deniedPaths.length > 0
                   ? `Continue with access to ${explanation.deniedPaths.join(", ")}`
                   : "Continue with wider access"}
               </button>
             )}
-            <button className="task-action" type="button" onClick={() => void run(() => executeResume(task.id), "Resuming task", "Task resumed")}>
+            <button className="task-action" type="button" onClick={() => void run(() => executeResume(task.id), titlesFor(task, "resume"))}>
               Continue as-is
             </button>
           </div>

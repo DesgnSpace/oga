@@ -7,6 +7,7 @@ import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
 import { toast } from "@/state/toast";
+import { workerToastTitles } from "@/lib/toast-titles";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
 import type {
   CleanupSettings,
@@ -588,9 +589,11 @@ function WorkersPanel({
   const handleDelete = useCallback(
     async (id: string) => {
       if (deleting) return;
+      const label = state.profiles.find((profile) => profile.id === id)?.label;
+      const titles = workerToastTitles(label, "remove");
       setDeleteId(undefined);
       setDeleting(true);
-      const lifecycle = toast.pending("Removing worker");
+      const lifecycle = toast.pending(titles.pending);
       const result = await broker.deleteProfile(id);
       if (result.ok) {
         lifecycle.dismiss();
@@ -598,15 +601,16 @@ function WorkersPanel({
         if (expandedId === id) setExpandedId(undefined);
         await onRefresh();
       } else {
-        lifecycle.error("Couldn't remove worker", { description: "Try again.", detail: result.error.message });
+        lifecycle.error(titles.failure, { description: "Try again.", detail: result.error.message });
       }
       setDeleting(false);
     },
-    [deleting, expandedId, onRefresh, setState],
+    [deleting, expandedId, onRefresh, setState, state.profiles],
   );
 
   const handleToggle = useCallback(
     async (profileId: string, enabled: boolean) => {
+      const label = state.profiles.find((profile) => profile.id === profileId)?.label;
       setState((s) => ({
         ...s,
         profiles: s.profiles.map((profile) => (profile.id === profileId ? { ...profile, enabled } : profile)),
@@ -625,10 +629,10 @@ function WorkersPanel({
             profile.id === profileId && profile.enabled === enabled ? { ...profile, enabled: !enabled } : profile,
           ),
         }));
-        toast.error("Couldn't update worker", { description: "Try again.", detail: result.error.message });
+        toast.error(workerToastTitles(label, "update").failure, { description: "Try again.", detail: result.error.message });
       }
     },
-    [onRefresh, setState],
+    [onRefresh, setState, state.profiles],
   );
 
   const handleRefresh = useCallback(async () => {
@@ -945,7 +949,7 @@ function WorkerModelsSection({
           modelSettings: finishModelUpdate(s.modelSettings, key, { ok: true, snapshot: result.value }),
         }));
       } else {
-        toast.error("Couldn't update model settings", { description: "Try again.", detail: result.error.message });
+        toast.error(workerToastTitles(profile.label, "models").failure, { description: "Try again.", detail: result.error.message });
         setState((s) => ({
           ...s,
           modelSettings: finishModelUpdate(s.modelSettings, key, { ok: false, status: result.error.status }),
@@ -1148,7 +1152,8 @@ function ProfileEditor({
       .filter(Boolean);
     setSaving(true);
     setSaveError(undefined);
-    const lifecycle = toast.pending(isNew ? "Adding worker" : "Saving worker");
+    const titles = workerToastTitles(labelValue, isNew ? "add" : "save");
+    const lifecycle = toast.pending(titles.pending);
     const modelValue = model.trim() || undefined;
     if (profile) {
       const result = await broker.updateProfile(profile.id, {
@@ -1168,7 +1173,7 @@ function ProfileEditor({
         onClose();
         await onRefresh();
       } else {
-        lifecycle.error("Couldn't save worker", { description: "Check the details and try again.", detail: result.error.message });
+        lifecycle.error(titles.failure, { description: "Check the details and try again.", detail: result.error.message });
         setSaveError("Couldn't save these changes. Try again.");
         setSaving(false);
       }
@@ -1189,7 +1194,7 @@ function ProfileEditor({
         onClose();
         await onRefresh();
       } else {
-        lifecycle.error("Couldn't add worker", { description: "Check the details and try again.", detail: result.error.message });
+        lifecycle.error(titles.failure, { description: "Check the details and try again.", detail: result.error.message });
         setSaveError("Couldn't add this worker. Try again.");
         setSaving(false);
       }
