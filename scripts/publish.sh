@@ -68,14 +68,21 @@ LATEST="$TMP_DIR/latest"
 RELEASES_JSON="$TMP_DIR/releases.json"
 EXISTING_JSON="$TMP_DIR/releases-existing.json"
 curl -fsS "$BASE_URL/releases.json" -o "$EXISTING_JSON" || printf '{"latest":"","releases":[]}\n' > "$EXISTING_JSON"
-VERSION="$VERSION" SIGNATURE="$SIGNATURE" RELEASED_AT="$RELEASED_AT" \
+VERSION="$VERSION" SIGNATURE="$SIGNATURE" RELEASED_AT="$RELEASED_AT" CHANGELOG="$ROOT/CHANGELOG.md" \
 ARCHIVE_URL="$BASE_URL/$ARCHIVE_NAME" ZIP_URL="$BASE_URL/$ZIP_NAME" DMG_URL="$BASE_URL/$DMG_NAME" \
 MANIFEST="$MANIFEST" LATEST="$LATEST" RELEASES_JSON="$RELEASES_JSON" EXISTING_JSON="$EXISTING_JSON" python3 - <<'PY'
 import json, os
+import re
 env = os.environ
 platform = {"signature": env["SIGNATURE"], "url": env["ARCHIVE_URL"]}
+with open(env["CHANGELOG"]) as f:
+    changelog = f.read()
+match = re.search(r"^## " + re.escape(env["VERSION"]) + r"(?:\\s+-[^\\n]*)?\\n(.*?)(?=^## |\\Z)", changelog, re.MULTILINE | re.DOTALL)
+if not match:
+    raise SystemExit(f"release notes missing for version {env['VERSION']}")
+notes = match.group(1).strip()
 with open(env["MANIFEST"], "w") as f:
-    json.dump({"version": env["VERSION"], "notes": "", "pub_date": env["RELEASED_AT"], "platforms": {"darwin-aarch64": platform, "darwin-x86_64": platform}}, f, indent=2)
+    json.dump({"version": env["VERSION"], "notes": notes, "pub_date": env["RELEASED_AT"], "platforms": {"darwin-aarch64": platform, "darwin-x86_64": platform}}, f, indent=2)
     f.write("\n")
 with open(env["LATEST"], "w") as f:
     json.dump({"version": env["VERSION"], "url": env["ZIP_URL"], "dmgUrl": env["DMG_URL"], "releasedAt": env["RELEASED_AT"]}, f)
