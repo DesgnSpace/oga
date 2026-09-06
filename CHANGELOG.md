@@ -10,6 +10,7 @@
 - `oga handoff <task-id> --worker <name>` moves a task to another worker or model from the terminal, keeping its id, request, and place in line.
 - Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
 - The task footer now shows how full the worker's context is, and how far it has grown since the run started.
+- Scrollbars in the task list and other panes now stay hidden until you scroll or hover, appearing as a thin overlay instead of a permanent bar.
 
 ### Fixed
 
