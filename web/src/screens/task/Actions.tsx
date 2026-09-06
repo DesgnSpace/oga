@@ -2,6 +2,7 @@
 // Ported from rust/crates/oga-ui/src/actions/mod.rs — keep behavior and copy identical.
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { broker } from "@/bridge/client";
 import type {
   BridgeError,
@@ -20,6 +21,7 @@ import { MarkdownContent } from "@/domain/markdown";
 import { ComposerRequest, ConversationComposer, isResume, routingForState } from "./Composer";
 import { isExplainedWait, nextTryLabel } from "./format";
 import { TaskMetadata } from "./TaskMetadata";
+import { taskToastName } from "@/lib/toast-subject";
 import { toast } from "@/state/toast";
 
 /** Any task-like value with just the state a menu needs to gate on. */
@@ -100,6 +102,92 @@ function actionFailure(error: BridgeError, action: string): { title: string; opt
   };
 }
 
+/**
+ * Toast wording for one task action across its whole lifecycle: what is
+ * starting, what finished, and what failed. The task name keeps each toast
+ * pointed at the task it acts on; without a name the generic wording stands.
+ */
+export interface TaskToastTitles {
+  pending: string;
+  success: string;
+  /** Completes `Couldn't ${failure}`, naming the same task. */
+  failure: string;
+}
+
+export interface TaskToastSource {
+  title?: string;
+  prompt?: string;
+  promptPreview?: string;
+}
+
+export function taskToastTitles(
+  task: TaskToastSource,
+  named: (quoted: string) => { pending: string; success: string; failure: string },
+  generic: { pending: string; success: string; failure: string },
+): TaskToastTitles {
+  const name = taskToastName(task);
+  if (!name) return generic;
+  return named(`"${name}"`);
+}
+
+export function resumeTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Resuming ${name}`, success: `${name} resumed`, failure: `resume ${name}` }),
+    { pending: "Resuming task", success: "Task resumed", failure: "resume this task" });
+}
+
+export function stopTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Stopping ${name}`, success: `${name} stopped`, failure: `stop ${name}` }),
+    { pending: "Stopping task", success: "Task stopped", failure: "stop this task" });
+}
+
+export function completeTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Completing ${name}`, success: `${name} marked completed`, failure: `complete ${name}` }),
+    { pending: "Completing task", success: "Task marked completed", failure: "complete this task" });
+}
+
+export function archiveTitles(task: TaskToastSource, archived: boolean): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => archived
+      ? { pending: `Restoring ${name}`, success: `${name} restored`, failure: `restore ${name}` }
+      : { pending: `Archiving ${name}`, success: `${name} archived`, failure: `archive ${name}` },
+    archived
+      ? { pending: "Restoring task", success: "Task restored", failure: "restore this task" }
+      : { pending: "Archiving task", success: "Task archived", failure: "archive this task" });
+}
+
+export function replyTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Sending reply for ${name}`, success: `Reply sent for ${name}`, failure: `send the reply for ${name}` }),
+    { pending: "Sending reply", success: "Reply sent", failure: "send the reply" });
+}
+
+export function instructionTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Sending instruction for ${name}`, success: `Instruction sent for ${name}`, failure: `send the instruction for ${name}` }),
+    { pending: "Sending instruction", success: "Instruction sent", failure: "send the instruction" });
+}
+
+export function followUpTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Queueing follow-up for ${name}`, success: `Follow-up queued for ${name}`, failure: `queue the follow-up for ${name}` }),
+    { pending: "Queueing follow-up", success: "Follow-up queued", failure: "queue the follow-up" });
+}
+
+export function removeFollowUpTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Removing follow-up for ${name}`, success: `Follow-up removed for ${name}`, failure: `remove the follow-up for ${name}` }),
+    { pending: "Removing follow-up", success: "Follow-up removed", failure: "remove the follow-up" });
+}
+
+export function moveTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({ pending: `Moving ${name}`, success: `${name} moved to another worker`, failure: `move ${name}` }),
+    { pending: "Moving task", success: "Task moved to another worker", failure: "move this task" });
+}
+
 export interface BlockedExplanation {
   headline: string;
   rawReason?: string;
@@ -160,13 +248,24 @@ export function explainBlocked(
   };
 }
 
+/** Gap between the header trigger and its menu, and between the menu and the viewport edge. */
+const HEADER_MENU_MARGIN = 8;
+
+interface HeaderMenuPlacement {
+  top: number;
+  left: number;
+  maxHeight: number;
+}
+
 /** The header's ellipsis menu: cancel, archive, mark completed. */
 export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [confirmingCancel, setConfirmingCancel] = React.useState(false);
   const [handoffOpen, setHandoffOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = React.useState<HeaderMenuPlacement | null>(null);
+  const triggerRef = React.useRef<HTMLDivElement>(null);
+  const panelRef = React.useRef<HTMLDivElement>(null);
   const cancellable = canCancel(task);
   const completable = canComplete(task) && task.state !== "blocked";
   const handoffable = canHandoff(task);
@@ -176,7 +275,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
     if (!menuOpen) return;
     const closeOnPointer = (event: PointerEvent) => {
       const target = event.target as Node | null;
-      if (target && menuRef.current?.contains(target)) return;
+      if (target && (triggerRef.current?.contains(target) || panelRef.current?.contains(target))) return;
       setMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -190,27 +289,72 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
     };
   }, [menuOpen]);
 
+  // The menu portals to the body: the title bar clips its own row to
+  // truncate the stats at narrow widths, and that clipping would clip an
+  // inline menu too.
+  React.useLayoutEffect(() => {
+    if (!menuOpen) {
+      setPlacement(null);
+      return;
+    }
+    const update = () => {
+      const trigger = triggerRef.current;
+      const panel = panelRef.current;
+      if (!trigger || !panel) return;
+      const triggerRect = trigger.getBoundingClientRect();
+      const { width, height } = panel.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const left = Math.max(
+        HEADER_MENU_MARGIN,
+        Math.min(triggerRect.right - width, viewportWidth - width - HEADER_MENU_MARGIN),
+      );
+      const below = triggerRect.bottom + HEADER_MENU_MARGIN;
+      let next: HeaderMenuPlacement;
+      if (below + height + HEADER_MENU_MARGIN <= viewportHeight) {
+        next = { top: below, left, maxHeight: viewportHeight - below - HEADER_MENU_MARGIN };
+      } else {
+        const above = triggerRect.top - height - HEADER_MENU_MARGIN;
+        next =
+          above >= HEADER_MENU_MARGIN
+            ? { top: above, left, maxHeight: Math.max(0, triggerRect.top - HEADER_MENU_MARGIN * 2) }
+            : { top: HEADER_MENU_MARGIN, left, maxHeight: viewportHeight - HEADER_MENU_MARGIN * 2 };
+      }
+      setPlacement((previous) =>
+        previous && previous.top === next.top && previous.left === next.left && previous.maxHeight === next.maxHeight
+          ? previous
+          : next,
+      );
+    };
+    update();
+    window.addEventListener("resize", update);
+    document.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      document.removeEventListener("scroll", update, true);
+    };
+  }, [menuOpen]);
+
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
-    successTitle: string,
+    titles: TaskToastTitles,
   ) => {
     if (busy) return;
     setBusy(true);
-    const lifecycle = toast.pending(pendingTitle);
+    const lifecycle = toast.pending(titles.pending);
     try {
       const result = await action();
       setBusy(false);
       if (result.ok) {
-        lifecycle.success(successTitle);
+        lifecycle.success(titles.success);
         onChanged();
       } else {
-        const failure = actionFailure(result.error, "update this task");
+        const failure = actionFailure(result.error, titles.failure);
         lifecycle.error(failure.title, failure.options);
       }
     } catch (error) {
       setBusy(false);
-      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, "update this task");
+      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
     }
   };
@@ -251,7 +395,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
         disabled: busy,
         onSelect: () => {
           setMenuOpen(false);
-          void run(() => executeArchive(task.id, !archived), archived ? "Restoring task" : "Archiving task", archived ? "Task restored" : "Task archived");
+          void run(() => executeArchive(task.id, !archived), archiveTitles(task, archived));
         },
       },
       ...(completable
@@ -263,7 +407,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
               disabled: busy,
               onSelect: () => {
                 setMenuOpen(false);
-                void run(() => executeComplete(task.id), "Completing task", "Task marked completed");
+                void run(() => executeComplete(task.id), completeTitles(task));
               },
             },
           ]
@@ -273,7 +417,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
 
   return (
     <div className="task-detail-header-actions">
-      <div className="task-action-menu" ref={menuRef}>
+      <div className="task-action-menu" ref={triggerRef}>
         <button
           className="icon-button task-action-menu-trigger"
           type="button"
@@ -284,12 +428,22 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
         >
           <MoreIcon />
         </button>
-        {menuOpen && (
-          <div className="task-action-menu-items">
-            <MenuPanel sections={sections} onClose={() => setMenuOpen(false)} />
-          </div>
-        )}
       </div>
+      {menuOpen && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="task-action-menu-portal"
+            style={
+              placement
+                ? { top: placement.top, left: placement.left, maxHeight: placement.maxHeight }
+                : { visibility: "hidden" }
+            }
+          >
+            <MenuPanel sections={sections} onClose={() => setMenuOpen(false)} />
+          </div>,
+          document.body,
+        )}
       <Modal open={confirmingCancel} onClose={() => setConfirmingCancel(false)} labelledBy="cancel-dialog-title" className="modal-dialog-cancel">
         <h2 id="cancel-dialog-title">Stop this task?</h2>
         <p>The worker stops. You can resume it later.</p>
@@ -302,7 +456,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
             type="button"
             onClick={() => {
               setConfirmingCancel(false);
-              void run(() => executeCancel(task.id), "Stopping task", "Task stopped");
+              void run(() => executeCancel(task.id), stopTitles(task));
             }}
           >
             Stop task
@@ -402,20 +556,21 @@ function HandoffDialog({
     event.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
-    const lifecycle = toast.pending("Moving task");
+    const titles = moveTitles(task);
+    const lifecycle = toast.pending(titles.pending);
     try {
       const result = await executeHandoff(task.id, workerId, modelId);
       setBusy(false);
       if (result.ok) {
-        lifecycle.success("Task moved to another worker");
+        lifecycle.success(titles.success);
         onChanged();
       } else {
-        const failure = actionFailure(result.error, "move this task");
+        const failure = actionFailure(result.error, titles.failure);
         lifecycle.error(failure.title, failure.options);
       }
     } catch (error) {
       setBusy(false);
-      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, "move this task");
+      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
     }
   };
@@ -475,20 +630,19 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
 
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
-    successTitle: string,
+    titles: TaskToastTitles,
   ) => {
     if (busy) return;
     setBusy(true);
-    const lifecycle = toast.pending(pendingTitle);
+    const lifecycle = toast.pending(titles.pending);
     const result = await action();
     setBusy(false);
     if (result.ok) {
-      lifecycle.success(successTitle);
+      lifecycle.success(titles.success);
       onChanged();
       return;
     }
-    const failure = actionFailure(result.error, "update this task");
+    const failure = actionFailure(result.error, titles.failure);
     lifecycle.error(failure.title, failure.options);
   };
 
@@ -501,7 +655,7 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
           className="task-action task-action-primary"
           type="button"
           disabled={busy}
-          onClick={() => void run(() => executeResume(task.id), "Resuming task", "Task resumed")}
+          onClick={() => void run(() => executeResume(task.id), resumeTitles(task))}
         >
           Continue now
         </button>
@@ -509,7 +663,7 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
           className="task-action"
           type="button"
           disabled={busy}
-          onClick={() => void run(() => executeCancel(task.id), "Stopping task", "Task stopped")}
+          onClick={() => void run(() => executeCancel(task.id), stopTitles(task))}
         >
           Stop task
         </button>
@@ -540,60 +694,59 @@ export function TaskControls({
 
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
-    pendingTitle: string,
-    successTitle: string,
+    titles: TaskToastTitles,
   ) => {
     if (busy) return;
     setBusy(true);
-    const lifecycle = toast.pending(pendingTitle);
+    const lifecycle = toast.pending(titles.pending);
     try {
       const result = await action();
       setBusy(false);
       if (result.ok) {
-        lifecycle.success(successTitle);
+        lifecycle.success(titles.success);
         onChanged();
       } else {
-        const failure = actionFailure(result.error, "update this task");
+        const failure = actionFailure(result.error, titles.failure);
         lifecycle.error(failure.title, failure.options);
       }
     } catch (error) {
       setBusy(false);
-      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, "update this task");
+      const failure = actionFailure({ message: error instanceof Error ? error.message : "Unknown error" }, titles.failure);
       lifecycle.error(failure.title, failure.options);
     }
   };
 
   const handleSend = (request: ComposerRequest) => {
     if (request.instruction === undefined) {
-       if (isResume(routing)) void run(() => executeResume(task.id), "Resuming task", "Task resumed");
+       if (isResume(routing)) void run(() => executeResume(task.id), resumeTitles(task));
       return;
     }
     const instruction = request.instruction;
     if (routing.type === "reply") {
-      void run(() => executeReply(task.id, instruction, task.scope), "Sending reply", "Reply sent");
+      void run(() => executeReply(task.id, instruction, task.scope), replyTitles(task));
       return;
     }
     if (
       (routing.type === "steer-and-queue" && request.mode === "steer") ||
       (routing.type === "steer" && request.mode === "steer")
     ) {
-      void run(() => executeSteer(task.id, instruction), "Sending instruction", "Instruction sent");
+      void run(() => executeSteer(task.id, instruction), instructionTitles(task));
       return;
     }
     if ((routing.type === "steer-and-queue" && request.mode === "primary") || routing.type === "queue") {
-      void run(() => executeQueue(task.id, instruction), "Queueing follow-up", "Follow-up queued");
+      void run(() => executeQueue(task.id, instruction), followUpTitles(task));
       return;
     }
     if (routing.type === "resume") {
-      void run(() => executeResume(task.id, { instruction, scope: task.scope }), "Resuming task", "Task resumed");
+      void run(() => executeResume(task.id, { instruction, scope: task.scope }), resumeTitles(task));
       return;
     }
     if (routing.type === "steer" && request.mode === "primary") {
-      void run(() => executeSteer(task.id, instruction), "Sending instruction", "Instruction sent");
+      void run(() => executeSteer(task.id, instruction), instructionTitles(task));
     }
   };
 
-  const removeQueued = (index: number) => void run(() => executeRemoveFollowUp(task.id, index), "Removing follow-up", "Follow-up removed");
+  const removeQueued = (index: number) => void run(() => executeRemoveFollowUp(task.id, index), removeFollowUpTitles(task));
   const explanation = task.state === "blocked" || task.state === "failed"
     ? explainBlocked(task.completion, task.scope)
     : undefined;
@@ -610,21 +763,21 @@ export function TaskControls({
             </details>
           )}
           <div className="blocked-task-actions">
-            <button className="task-action" type="button" disabled={busy} onClick={() => void run(() => executeComplete(task.id), "Completing task", "Task marked completed")}>
+            <button className="task-action" type="button" disabled={busy} onClick={() => void run(() => executeComplete(task.id), completeTitles(task))}>
               Mark as completed
             </button>
             {explanation.suggestedScope && (
               <button
                 className="task-action task-action-primary"
                 type="button"
-                onClick={() => void run(() => executeResume(task.id, { scope: explanation.suggestedScope }), "Resuming task", "Task resumed")}
+                onClick={() => void run(() => executeResume(task.id, { scope: explanation.suggestedScope }), resumeTitles(task))}
               >
                 {explanation.deniedPaths.length > 0
                   ? `Continue with access to ${explanation.deniedPaths.join(", ")}`
                   : "Continue with wider access"}
               </button>
             )}
-            <button className="task-action" type="button" onClick={() => void run(() => executeResume(task.id), "Resuming task", "Task resumed")}>
+            <button className="task-action" type="button" onClick={() => void run(() => executeResume(task.id), resumeTitles(task))}>
               Continue as-is
             </button>
           </div>
