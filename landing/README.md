@@ -1,6 +1,6 @@
 # Oga landing page
 
-Cloudflare Pages serves this directory as a static site. It has no dependencies, build command, or generated output.
+Cloudflare Pages serves this directory as a static site. `docs/changelog.html` is generated from `CHANGELOG.md` at deploy time and is not committed — edit the markdown, never the HTML.
 
 ## Deploy from the command line
 
@@ -18,7 +18,7 @@ Before the first deployment, create the `oga` Pages project and set its producti
 
 - Project name: `oga`
 - Production branch: `main`
-- Build command: leave blank
+- Build command: `node scripts/changelog-to-html.mjs`
 - Build output directory: `landing`
 - Custom domain: `oga.desgn.space`
 
@@ -29,7 +29,7 @@ Before the first deployment, create the `oga` Pages project and set its producti
 3. Choose the Git provider and authorize access to this repository if Cloudflare does not already have it.
 4. Select this repository and choose **Begin setup**.
 5. Enter `oga` as the project name and select `main` as the production branch.
-6. Leave the framework preset unset and the build command blank.
+6. Leave the framework preset unset and enter `node scripts/changelog-to-html.mjs` as the build command, so the changelog page is built from the current `CHANGELOG.md` on every deploy.
 7. Enter `landing` as the build output directory.
 8. Select **Save and Deploy**.
 9. Open the new Pages project, select **Custom domains**, then **Set up a custom domain**.

@@ -32,8 +32,7 @@ if grep -q '^## Unreleased$' CHANGELOG.md; then
     sed -i '' "s/^## Unreleased$/## Unreleased\\
 \\
 ## $NEW_VERSION - $(date +%Y-%m-%d)/" CHANGELOG.md
-    make changelog
 fi
-git add VERSION CHANGELOG.md landing rust/Cargo.toml rust/Cargo.lock rust/apps/oga-desktop/tauri.conf.json
+git add VERSION CHANGELOG.md rust/Cargo.toml rust/Cargo.lock rust/apps/oga-desktop/tauri.conf.json
 git commit -m "chore: release v$NEW_VERSION"
 printf 'Oga version %s -> %s, committed\n' "$CURRENT" "$NEW_VERSION"
