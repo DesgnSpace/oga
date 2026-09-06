@@ -1333,10 +1333,9 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         named_pair("claude", "opus"),
         &catalog,
         &workers,
-        &statuses,
-        None,
-        &[],
-    );
+        &SelectionInputs::new(&settings()).statuses(&statuses),
+    )
+    .expect("named route");
     assert_eq!(audit.rejected.len(), 1);
     assert_eq!(audit.rejected[0].stage, SelectionStage::Availability);
     assert_eq!(audit.rejected[0].reason, "Observed billing failure");
@@ -1353,10 +1352,9 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         named_pair("claude", "opus-9"),
         &catalog,
         &workers,
-        &[],
-        None,
-        &[],
-    );
+        &SelectionInputs::new(&settings()),
+    )
+    .expect("named route");
     assert_eq!(
         audit.rejected.iter().map(|r| r.stage).collect::<Vec<_>>(),
         vec![SelectionStage::Catalog]
@@ -1383,10 +1381,9 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         named_pair("claude", "opus"),
         &fallback,
         &workers,
-        &[],
-        None,
-        &[],
-    );
+        &SelectionInputs::new(&settings()),
+    )
+    .expect("named route");
     assert!(audit.rejected.is_empty());
     assert!(audit.warnings.is_empty());
 
@@ -1403,10 +1400,9 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         named_pair("claude", "opus"),
         &catalog,
         &workers,
-        &[],
-        Some(&narrow),
-        &[],
-    );
+        &SelectionInputs::new(&settings()).policy(&narrow),
+    )
+    .expect("named route");
     assert_eq!(
         audit.rejected.iter().map(|r| r.stage).collect::<Vec<_>>(),
         vec![SelectionStage::Policy]
@@ -1425,10 +1421,9 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         named_pair("claude", "opus"),
         &catalog,
         &workers,
-        &[],
-        None,
-        &spent_claude,
-    );
+        &SelectionInputs::new(&settings()).usage(&spent_claude),
+    )
+    .expect("named route");
     assert_eq!(audit.quota_used_percent, Some(99.0));
     assert_eq!(
         audit.rejected.iter().map(|r| r.stage).collect::<Vec<_>>(),
@@ -1465,10 +1460,9 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         pair,
         &laddered,
         &workers,
-        &[],
-        None,
-        &[],
-    );
+        &SelectionInputs::new(&settings()),
+    )
+    .expect("named route");
     assert!(
         audit
             .warnings
@@ -1500,13 +1494,88 @@ fn the_caller_named_pair_is_advised_never_blocked() {
         pair,
         &laddered,
         &workers,
-        &[],
-        None,
-        &[],
-    );
+        &SelectionInputs::new(&settings()),
+    )
+    .expect("named route");
     assert!(audit.rejected.is_empty());
     assert!(audit.warnings.is_empty());
     assert_eq!(audit.effort.as_deref(), Some("low"));
+}
+
+#[test]
+fn a_switched_off_model_is_refused_even_when_named_explicitly() {
+    let catalog = models();
+    let workers = profiles();
+
+    let refusal = check_named_route(
+        "Implement the feature.",
+        named_pair("claude", "opus"),
+        &catalog,
+        &workers,
+        &SelectionInputs::new(&nothing_on()),
+    )
+    .expect_err("refused");
+    assert!(
+        refusal
+            .to_string()
+            .contains("opus is not turned on for claude"),
+        "{refusal}"
+    );
+    assert!(refusal.to_string().contains("Open Settings"), "{refusal}");
+}
+
+#[test]
+fn a_short_name_resolves_and_switches_on_the_right_model() {
+    let catalog = models();
+    let workers = profiles();
+
+    let audit = check_named_route(
+        "Implement the feature.",
+        named_pair("opencode", "big-pickle"),
+        &catalog,
+        &workers,
+        &SelectionInputs::new(&settings()),
+    )
+    .expect("named route");
+    assert_eq!(audit.resolved_model, "opencode/big-pickle");
+}
+
+#[test]
+fn an_ambiguous_name_is_refused_with_candidates() {
+    let catalog = [
+        info(
+            "opencode/big-pickle",
+            Provider::OpenCode,
+            "opencode",
+            ModelInfoSource::Discovered,
+            None,
+        ),
+        info(
+            "opencode-go/big-pickle",
+            Provider::OpenCode,
+            "opencode",
+            ModelInfoSource::Discovered,
+            None,
+        ),
+    ];
+    let workers = profiles();
+
+    let refusal = check_named_route(
+        "Implement the feature.",
+        named_pair("opencode", "big-pickle"),
+        &catalog,
+        &workers,
+        &SelectionInputs::new(&settings()),
+    )
+    .expect_err("ambiguous");
+    assert!(
+        refusal.to_string().contains("opencode/big-pickle"),
+        "{refusal}"
+    );
+    assert!(
+        refusal.to_string().contains("opencode-go/big-pickle"),
+        "{refusal}"
+    );
 }
 
 fn settings_with(

@@ -13,11 +13,11 @@ use axum::{
 use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_config::{canonical_cwd, global_cwd};
 use oga_domain::{
-    ArchivedFilter, ListOrder, ModelInfo, ModelInfoSource, OnBlockerFailure, Provider, StateFilter,
-    Task, TaskKind, TaskListQuery, TaskMatch, TaskScope, TaskState,
+    ArchivedFilter, ListOrder, ModelInfo, OnBlockerFailure, Provider, StateFilter, Task, TaskKind,
+    TaskListQuery, TaskMatch, TaskScope, TaskState,
 };
 use oga_http::{HttpState, settings::ModelQuery as SettingsModelQuery};
-use oga_routing::claude_models;
+use oga_routing::{ModelNameMatch, ambiguous_message, not_enabled_message, resolve_model_name};
 use oga_service::{
     ArchiveRequest, CancelRequest, CompletionAssertion, DispatchRequest, FollowUpQueue,
     HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest, WorktreeRemoveRequest,
@@ -830,6 +830,56 @@ impl McpServer {
         requested_model: Option<String>,
     ) -> Result<(String, String), McpError> {
         let profiles = self.state.store.repositories().profiles().list()?;
+        let settings = oga_service::authorization::resolved_model_settings(&self.state.store, cwd)
+            .map_err(|error| McpError::Message(error.to_string()))?;
+        // The same catalog Settings itself reads from, so a name resolves the
+        // same way here as it shows there. A profile the settings screen has
+        // never loaded falls back to a short alias list, same as before.
+        let catalog_for = |profile: &oga_domain::Profile| {
+            oga_http::settings::cached_catalog(std::slice::from_ref(profile))
+        };
+        // One resolution rule everywhere: the exact id Settings shows, or its
+        // short trailing name when that names exactly one model this account
+        // offers. Nothing here trusts the caller's string past this point —
+        // whatever it resolves to is what gets checked and dispatched.
+        let resolve = |profile: &oga_domain::Profile, hint: &str| -> Result<String, McpError> {
+            let catalog = catalog_for(profile);
+            let refs: Vec<&ModelInfo> = catalog.iter().collect();
+            match resolve_model_name(&refs, hint) {
+                ModelNameMatch::Ambiguous(candidates) => Err(McpError::Message(ambiguous_message(
+                    &profile.id,
+                    hint,
+                    &candidates
+                        .iter()
+                        .map(|candidate| candidate.id.clone())
+                        .collect::<Vec<_>>(),
+                ))),
+                ModelNameMatch::Resolved(resolved) => {
+                    if oga_config::model_enabled(&settings, &profile.id, &resolved.id) {
+                        Ok(resolved.id.clone())
+                    } else {
+                        let on: Vec<String> = catalog
+                            .iter()
+                            .filter(|candidate| {
+                                oga_config::model_enabled(&settings, &profile.id, &candidate.id)
+                            })
+                            .map(|candidate| candidate.id.clone())
+                            .collect();
+                        Err(McpError::Message(not_enabled_message(
+                            &profile.id,
+                            hint,
+                            &resolved.id,
+                            &on,
+                        )))
+                    }
+                }
+                // Discovery can fall back to a short list that says nothing
+                // about what else the account offers, so an unknown name is
+                // not evidence it does not exist. Pass it through unresolved;
+                // dispatch still refuses it if it is genuinely not turned on.
+                ModelNameMatch::Unknown => Ok(hint.to_owned()),
+            }
+        };
         let profile = if let Some(profile_id) = requested_profile {
             profiles
                 .into_iter()
@@ -840,9 +890,13 @@ impl McpServer {
                 .into_iter()
                 .filter(|profile| {
                     profile.enabled
-                        && catalog_models(profile)
-                            .iter()
-                            .any(|candidate| candidate.id == model)
+                        && matches!(
+                            resolve_model_name(
+                                &catalog_for(profile).iter().collect::<Vec<_>>(),
+                                model
+                            ),
+                            ModelNameMatch::Resolved(_)
+                        )
                 })
                 .collect();
             // Among the accounts offering it, the one where it is switched on:
@@ -850,15 +904,7 @@ impl McpServer {
             // account happened to list it first.
             offering
                 .iter()
-                .find(|profile| {
-                    oga_service::authorization::check_model_enabled(
-                        &self.state.store,
-                        cwd,
-                        &profile.id,
-                        model,
-                    )
-                    .is_ok()
-                })
+                .find(|profile| resolve(profile, model).is_ok())
                 .or_else(|| offering.first())
                 .cloned()
                 .ok_or_else(|| {
@@ -886,7 +932,10 @@ impl McpServer {
                 profile.id
             )));
         }
-        let model = requested_model.unwrap_or(profile.default_model.clone());
+        let model = match requested_model {
+            Some(hint) => resolve(&profile, &hint)?,
+            None => profile.default_model.clone(),
+        };
         if model.trim().is_empty() || model.chars().count() > 200 {
             return Err(McpError::InvalidParams(
                 "model must be between 1 and 200 characters".into(),
@@ -1420,25 +1469,6 @@ fn task_query(args: &Value) -> Result<TaskListQuery, McpError> {
         archived: archived.or(Some(ArchivedFilter::Active)),
         query: optional_string(args, "query"),
     })
-}
-
-fn catalog_models(profile: &oga_domain::Profile) -> Vec<ModelInfo> {
-    if profile.provider == Provider::Claude {
-        return claude_models(profile);
-    }
-    vec![ModelInfo {
-        id: profile.default_model.clone(),
-        label: profile.default_model.clone(),
-        provider: profile.provider,
-        profile_id: profile.id.clone(),
-        source: ModelInfoSource::Configured,
-        cost: None,
-        context_window: None,
-        reasoning: None,
-        efforts: None,
-        default_effort: None,
-        tool_call: None,
-    }]
 }
 
 fn parse_provider(value: &str) -> Result<Provider, McpError> {

@@ -141,20 +141,89 @@ pub enum RouteError {
     UnknownHint(String),
     #[error("{}", oga_config::model_not_enabled_message(profile_id, model))]
     ModelNotEnabled { profile_id: String, model: String },
+    /// A resolved model the caller could reach, but has not turned on. Built
+    /// with [`not_enabled_message`], which names what the caller typed, what
+    /// it resolved to, and what is actually on — the extra context only an
+    /// entry point holding the catalog and settings together can give.
+    #[error("{0}")]
+    ResolvedModelNotEnabled(String),
+    /// The caller's name matches more than one model in this catalog, so
+    /// guessing would silently run the wrong one.
+    #[error("{}", ambiguous_message(profile_id, model, candidates))]
+    AmbiguousModel {
+        profile_id: String,
+        model: String,
+        candidates: Vec<String>,
+    },
     #[error("{0}")]
     NoEligibleModel(NoEligibleModel),
 }
 
 impl RouteError {
     pub const MODEL_NOT_ENABLED: &str = "model_not_enabled";
+    pub const AMBIGUOUS_MODEL: &str = "ambiguous_model";
 
     pub fn code(&self) -> &'static str {
         match self {
             RouteError::NoEligibleModel(_) => NoEligibleModel::CODE,
-            RouteError::ModelNotEnabled { .. } => Self::MODEL_NOT_ENABLED,
+            RouteError::ModelNotEnabled { .. } | RouteError::ResolvedModelNotEnabled(_) => {
+                Self::MODEL_NOT_ENABLED
+            }
+            RouteError::AmbiguousModel { .. } => Self::AMBIGUOUS_MODEL,
             _ => "route_error",
         }
     }
+}
+
+/// What resolving a caller's model name against one worker's catalog found.
+/// The exact id Settings shows always wins; failing that, the short trailing
+/// name Settings displays resolves if it names exactly one model.
+pub enum ModelNameMatch<'a> {
+    Resolved(&'a ModelInfo),
+    Ambiguous(Vec<&'a ModelInfo>),
+    Unknown,
+}
+
+/// The one resolution rule every entry point applies: a caller may name a
+/// model the way Settings shows it, including the short trailing name, but
+/// only when that names exactly one model here.
+pub fn resolve_model_name<'a>(models: &[&'a ModelInfo], hint: &str) -> ModelNameMatch<'a> {
+    match match_hint(models, hint) {
+        matched if matched.is_empty() => ModelNameMatch::Unknown,
+        matched if matched.len() == 1 => ModelNameMatch::Resolved(matched[0]),
+        matched => ModelNameMatch::Ambiguous(matched),
+    }
+}
+
+/// What someone is told when the model they named names more than one entry
+/// in this catalog: every candidate, so they can say exactly which one.
+pub fn ambiguous_message(profile_id: &str, typed: &str, candidates: &[String]) -> String {
+    format!(
+        "{typed} names more than one model for {profile_id}: {}. Say which one, the way \
+         Settings shows it.",
+        candidates.join(", ")
+    )
+}
+
+/// What someone is told when the model they named resolves to one that is
+/// switched off: what they typed, what it resolved to (when that differs),
+/// and what is actually on for this worker, so they do not have to open
+/// Settings just to find that out.
+pub fn not_enabled_message(profile_id: &str, typed: &str, resolved: &str, on: &[String]) -> String {
+    let named = if typed == resolved {
+        resolved.to_owned()
+    } else {
+        format!("{resolved} (you typed \"{typed}\")")
+    };
+    let on_list = if on.is_empty() {
+        "No models are turned on for it.".to_owned()
+    } else {
+        format!("Models turned on for it: {}.", on.join(", "))
+    };
+    format!(
+        "{named} is not turned on for {profile_id}, so this task was not sent anywhere. \
+         {on_list} Open Settings, find {profile_id} under Workers, and switch {resolved} on."
+    )
 }
 
 /// Everything selection reads about the world beyond catalogs and profiles.
@@ -1125,18 +1194,29 @@ pub struct NamedRouteAudit {
     pub quota_used_percent: Option<f64>,
     pub rejected: Vec<SelectionRejection>,
     pub warnings: Vec<String>,
+    /// The id the catalog knows this model by. Equal to the caller's own
+    /// string when nothing resolved it to something else — dispatch must use
+    /// this, never the caller's raw string, so the model that runs is the one
+    /// Settings actually has an opinion about.
+    pub resolved_model: String,
 }
 
-/// Audit a caller-named profile/model pair: advise, never block.
+/// Audit a caller-named profile/model pair. Most findings advise, never
+/// block, since naming a profile and a model is the caller's call — but a
+/// model this worker has not turned on is refused the same as automatic
+/// routing refuses one, because the enabled check is authoritative on every
+/// path a task can be dispatched by.
 pub fn check_named_route(
     prompt: &str,
     pair: NamedPair,
     models: &[ModelInfo],
     profiles: &[Profile],
-    statuses: &[ProfileStatus],
-    policy: Option<&RoutingPolicy>,
-    usage: &[ProfileUsage],
-) -> NamedRouteAudit {
+    extra: &SelectionInputs,
+) -> Result<NamedRouteAudit, RouteError> {
+    let statuses = extra.statuses;
+    let policy = extra.policy;
+    let usage = extra.usage;
+    let settings = extra.settings;
     let NamedPair {
         profile_id,
         model: model_id,
@@ -1169,7 +1249,25 @@ pub fn check_named_route(
         .iter()
         .filter(|m| m.profile_id == profile_id)
         .collect();
-    let chosen = offered.iter().copied().find(|m| m.id == model_id);
+    // One resolution rule everywhere: the exact id, or its short trailing name
+    // when that names exactly one model here. Two or more candidates is a
+    // reason to stop rather than guess which one runs.
+    let chosen = match resolve_model_name(&offered, model_id) {
+        ModelNameMatch::Resolved(model) => Some(model),
+        ModelNameMatch::Ambiguous(candidates) => {
+            return Err(RouteError::AmbiguousModel {
+                profile_id: profile_id.to_owned(),
+                model: model_id.to_owned(),
+                candidates: candidates.into_iter().map(|m| m.id.clone()).collect(),
+            });
+        }
+        ModelNameMatch::Unknown => None,
+    };
+    // Everything past here reasons about the id the catalog actually knows,
+    // not the name the caller happened to type — the two only differ when a
+    // short name resolved to something else, and only the resolved id says
+    // anything true about availability, usage, or whether it is turned on.
+    let resolved_id: &str = chosen.map_or(model_id, |model| model.id.as_str());
     // Discovery that fails falls back to the one model the profile is
     // configured with, and that list is not evidence about anything else the
     // account offers. Only a list that was actually enumerated can say a model
@@ -1189,10 +1287,25 @@ pub fn check_named_route(
              dispatching, or the run may fail at start."
         ));
     }
+    // A model this worker has not turned on is refused here exactly as
+    // automatic routing refuses one — the caller named the pair, but that
+    // never authorised spending on a model nobody switched on.
+    if let Some(model) = chosen
+        && !model_enabled(settings, profile_id, &model.id)
+    {
+        let on: Vec<String> = offered
+            .iter()
+            .filter(|candidate| model_enabled(settings, profile_id, &candidate.id))
+            .map(|candidate| candidate.id.clone())
+            .collect();
+        return Err(RouteError::ResolvedModelNotEnabled(not_enabled_message(
+            profile_id, model_id, &model.id, &on,
+        )));
+    }
 
     let status = statuses
         .iter()
-        .find(|item| item.profile == profile_id && item.model == model_id);
+        .find(|item| item.profile == profile_id && item.model == resolved_id);
     if let Some(status) = status
         && status.state == AvailabilityState::Unavailable
     {
@@ -1213,7 +1326,7 @@ pub fn check_named_route(
     }
 
     let measured = usage.iter().find(|row| row.profile == profile_id);
-    let used = measured.and_then(|row| worst_window_used_percent(row, Some(model_id)));
+    let used = measured.and_then(|row| worst_window_used_percent(row, Some(resolved_id)));
     if let Some(used) = used
         && used >= LOW_HEADROOM_PERCENT
     {
@@ -1225,14 +1338,14 @@ pub fn check_named_route(
             );
         }
         warnings.push(format!(
-            "{profile_id} has {}% left on the window covering {model_id}; the run may stop \
+            "{profile_id} has {}% left on the window covering {resolved_id}; the run may stop \
              part-way through.",
             100.0 - used
         ));
     }
 
     if let (Some(route), Some(provider)) = (policy_route, provider)
-        && !route.model_allowed(provider.as_str(), model_id)
+        && !route.model_allowed(provider.as_str(), resolved_id)
     {
         add(
             SelectionStage::Policy,
@@ -1243,7 +1356,7 @@ pub fn check_named_route(
             None,
         );
         warnings.push(format!(
-            "{} model {model_id} is not one this project allows for {} work; the explicit \
+            "{} model {resolved_id} is not one this project allows for {} work; the explicit \
              choice overrode the project's routing policy ([routes] in .oga.yaml).",
             provider.as_str(),
             demand.task_class.as_str()
@@ -1266,7 +1379,8 @@ pub fn check_named_route(
         && !levels.iter().any(|level| level == wanted)
     {
         warnings.push(format!(
-            "{model_id} accepts {} as reasoning levels, not {wanted}; passing it through as asked.",
+            "{resolved_id} accepts {} as reasoning levels, not {wanted}; passing it through as \
+             asked.",
             levels.join(", ")
         ));
     }
@@ -1274,7 +1388,7 @@ pub fn check_named_route(
         warnings.push(heuristic_note(&demand.reason, difficulty));
     }
 
-    NamedRouteAudit {
+    Ok(NamedRouteAudit {
         task_class: demand.task_class,
         preference: named_preference
             .or(policy_route.and_then(|route| route.preference))
@@ -1291,7 +1405,8 @@ pub fn check_named_route(
         quota_used_percent: used,
         rejected: top_rejections(&rejected),
         warnings,
-    }
+        resolved_model: resolved_id.to_owned(),
+    })
 }
 
 fn reject(
