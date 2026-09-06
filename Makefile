@@ -184,9 +184,10 @@ install: app-bundle
 		fi; \
 	fi
 
-# Local preview only. The page it writes is gitignored; deploys rebuild it.
+# Local preview only, written under dist/ next to deploy output.
 changelog:
-	bun scripts/changelog-to-html.mjs landing/docs/changelog.html
+	mkdir -p $(DIST)
+	bun scripts/changelog-to-html.mjs $(DIST)/changelog.html
 
 deploy-landing:
 	rm -rf $(DIST)/landing
