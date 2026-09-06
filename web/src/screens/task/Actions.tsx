@@ -11,6 +11,7 @@ import type {
   ProfileView,
   Task,
   TaskCompletion,
+  TaskEventView,
   TaskScope,
   TaskState,
 } from "@/bridge/types";
@@ -675,10 +676,12 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
 /** The composer plus the blocked-task explanation, in the footer of the transcript. */
 export function TaskControls({
   task,
+  events,
   onChanged,
   thinkingToggle,
 }: {
   task: Task;
+  events: TaskEventView[];
   onChanged: () => void;
   thinkingToggle?: { active: boolean; onToggle: () => void };
 }) {
@@ -687,6 +690,25 @@ export function TaskControls({
   const queued = task.queuedFollowUpItems ?? [];
   const pinnedQuestionRef = React.useRef<HTMLDivElement>(null);
   const pinnedQuestion = routing.type === "reply" ? routing.question : undefined;
+  // The model's published window, read once per worker and model. Absent when
+  // the catalog names none — the footer then shows no context read at all.
+  const [contextWindow, setContextWindow] = React.useState<number | undefined>(undefined);
+  React.useEffect(() => {
+    let disposed = false;
+    setContextWindow(undefined);
+    void broker
+      .modelSettings(task.worktree?.originCwd ?? task.cwd)
+      .then((result) => {
+        if (disposed || !result.ok) return;
+        const window = result.value.workers
+          .find((worker) => worker.id === task.profileId)
+          ?.models.find((model) => model.id === task.model)?.contextWindow;
+        setContextWindow(window);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [task.worktree?.originCwd, task.cwd, task.profileId, task.model]);
 
   React.useEffect(() => {
     if (pinnedQuestion !== undefined) pinnedQuestionRef.current?.scrollIntoView({ block: "nearest" });
@@ -798,7 +820,7 @@ export function TaskControls({
           thinkingToggle={thinkingToggle}
         />
       )}
-      {routing.type !== "none" && <TaskMetadata task={task} />}
+      {routing.type !== "none" && <TaskMetadata task={task} events={events} contextWindow={contextWindow} />}
     </section>
   );
 }
