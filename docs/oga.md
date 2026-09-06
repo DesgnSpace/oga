@@ -20,6 +20,7 @@ follow it, or operate without the app open.
 | `oga archive` / `oga restore` | Hide or restore task records. |
 | `oga cancel <task-id>...` | Stop a task. |
 | `oga resume <task-id>` | Continue a task, optionally with `-m` or `--start-at`. |
+| `oga handoff <task-id>` | Move a task to another worker or model with `--worker`, `--model`, `--effort`. |
 | `oga complete <task-id>` | Mark a task complete. |
 | `oga cleanup` | Preview removable activity and worktrees. |
 | `oga config [cwd]` | Print resolved profiles, models, routes, and worker rules. |
@@ -78,7 +79,10 @@ there is news, `1` on timeout, and `2` for invalid input.
 
 Use `oga inspect <task-id>` before acting on a settled task. Resume failed,
 cancelled, or blocked work with `oga resume`; use `-m` when the next run needs
-an instruction. Archive hides a record without deleting it. `cleanup` is the
+an instruction. Move a task to a different account or model with
+`oga handoff <task-id> --worker <name>`; it keeps its id, request, and place in
+line, and one still waiting on other work or on a start time keeps waiting.
+Archive hides a record without deleting it. `cleanup` is the
 only command that permanently removes task activity.
 
 Before starting work, search for a task on the same feature, file, or command:
