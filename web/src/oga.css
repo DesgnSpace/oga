@@ -3619,18 +3619,21 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .usage-heatmap-weekdays,
 .usage-heatmap-grid {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
+    grid-template-columns: repeat(7, 12px);
+    grid-auto-rows: 12px;
+    gap: 3px;
 }
 
 .usage-heatmap-weekday {
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: 9px;
+    line-height: 12px;
     text-align: center;
 }
 
 .usage-heatmap-cell {
-    aspect-ratio: 1;
+    width: 12px;
+    height: 12px;
     border-radius: 3px;
 }
 
@@ -3698,25 +3701,8 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     font-size: 11px;
 }
 
-.usage-chart-area {
-    fill: color-mix(in srgb, var(--color-accent) 16%, transparent);
-    stroke: none;
-}
-
-.usage-chart-line {
-    fill: none;
-    stroke: var(--color-accent);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.usage-chart-dot {
+.usage-chart-bar {
     fill: var(--color-accent);
-}
-
-.usage-chart-dot-hit {
-    fill: transparent;
 }
 
 .usage-chart-empty {

@@ -206,7 +206,7 @@ function formatPeakHour(hour: number): string {
   return `${twelve} ${hour < 12 ? "AM" : "PM"}`;
 }
 
-const WEEKDAY_LABELS: ReadonlyArray<string> = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_LABELS: ReadonlyArray<string> = ["S", "M", "T", "W", "T", "F", "S"];
 
 function Heatmap({
   days,
@@ -258,8 +258,8 @@ function Heatmap({
         </button>
       </div>
       <div className="usage-heatmap-weekdays" aria-hidden="true">
-        {WEEKDAY_LABELS.map((weekday) => (
-          <span key={weekday} className="usage-heatmap-weekday">
+        {WEEKDAY_LABELS.map((weekday, index) => (
+          <span key={index} className="usage-heatmap-weekday">
             {weekday}
           </span>
         ))}
@@ -307,8 +307,8 @@ function UsageCharts({ period }: { period: UsagePeriod }) {
   const bars = useMemo(() => topBreakdown(period.breakdown, CHART_BREAKDOWN_LIMIT), [period.breakdown]);
   return (
     <div className="usage-charts">
-      <LineChart label="Cost over time" series={series} value={(point) => point.costUsd} formatValue={(value) => formatCost(value) ?? "$0.00"} />
-      <LineChart label="Tokens over time" series={series} value={(point) => point.tokens} formatValue={formatTokenCount} />
+      <DailyBarChart label="Cost over time" series={series} value={(point) => point.costUsd} formatValue={(value) => formatCost(value) ?? "$0.00"} />
+      <DailyBarChart label="Tokens over time" series={series} value={(point) => point.tokens} formatValue={formatTokenCount} />
       <ModelBarChart bars={bars} />
     </div>
   );
@@ -322,8 +322,11 @@ const CHART_PAD_BOTTOM = 20;
 const CHART_PLOT_WIDTH = CHART_WIDTH - CHART_PAD_LEFT;
 const CHART_PLOT_HEIGHT = CHART_HEIGHT - CHART_PAD_TOP - CHART_PAD_BOTTOM;
 const CHART_BASELINE_Y = CHART_PAD_TOP + CHART_PLOT_HEIGHT;
+const CHART_BAR_MIN_WIDTH = 1;
+const CHART_BAR_MAX_WIDTH = 14;
+const CHART_BAR_RADIUS = 2;
 
-function LineChart({
+function DailyBarChart({
   label,
   series,
   value,
@@ -336,16 +339,17 @@ function LineChart({
 }) {
   const max = Math.max(0, ...series.map(value));
   const isEmpty = max <= 0;
-  const points = series.map((point, index) => ({
-    x: CHART_PAD_LEFT + (series.length <= 1 ? CHART_PLOT_WIDTH / 2 : (index / (series.length - 1)) * CHART_PLOT_WIDTH),
-    y: max <= 0 ? CHART_BASELINE_Y : CHART_PAD_TOP + CHART_PLOT_HEIGHT - (value(point) / max) * CHART_PLOT_HEIGHT,
-    point,
-  }));
-  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const areaPath =
-    points.length > 0
-      ? `${linePath} L${points[points.length - 1].x.toFixed(1)},${CHART_BASELINE_Y} L${points[0].x.toFixed(1)},${CHART_BASELINE_Y} Z`
-      : "";
+  const slot = series.length > 0 ? CHART_PLOT_WIDTH / series.length : CHART_PLOT_WIDTH;
+  const barWidth = Math.min(CHART_BAR_MAX_WIDTH, Math.max(CHART_BAR_MIN_WIDTH, slot * 0.6));
+  const bars = series.map((point, index) => {
+    const height = max <= 0 ? 0 : (value(point) / max) * CHART_PLOT_HEIGHT;
+    return {
+      x: CHART_PAD_LEFT + slot * index + (slot - barWidth) / 2,
+      y: CHART_BASELINE_Y - height,
+      height,
+      point,
+    };
+  });
   return (
     <div className="usage-chart">
       <h3 className="usage-chart-title">{label}</h3>
@@ -365,15 +369,10 @@ function LineChart({
             <text x={CHART_PAD_LEFT - 6} y={CHART_PAD_TOP + 4} className="usage-chart-axis-label" textAnchor="end">
               {formatValue(max)}
             </text>
-            <path d={areaPath} className="usage-chart-area" />
-            <path d={linePath} className="usage-chart-line" />
-            {points.map(({ x, y, point }) => (
-              <g key={point.date}>
-                <circle cx={x} cy={y} r={6} className="usage-chart-dot-hit">
-                  <title>{`${point.date} · ${formatValue(value(point))}`}</title>
-                </circle>
-                <circle cx={x} cy={y} r={2.5} className="usage-chart-dot" />
-              </g>
+            {bars.map(({ x, y, height, point }) => (
+              <rect key={point.date} x={x} y={y} width={barWidth} height={height} rx={Math.min(CHART_BAR_RADIUS, barWidth / 2)} className="usage-chart-bar">
+                <title>{`${point.date} · ${formatValue(value(point))}`}</title>
+              </rect>
             ))}
           </>
         )}
