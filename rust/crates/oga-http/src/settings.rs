@@ -22,7 +22,7 @@ use oga_domain::{
     UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
-use oga_providers::{codex_home, environment_for};
+use oga_providers::{codex_home, environment_for, unset_environment_for};
 use oga_routing::{
     claude_models, claude_models_from_catalog, format_rfc3339_ms, now_ms, parse_antigravity_models,
     parse_codex_models, parse_opencode_models, parse_opencode_v2_models, parse_pi_models,
@@ -962,6 +962,15 @@ async fn models_for_profile(profile: &Profile, refresh: bool) -> Vec<ModelInfo> 
     models
 }
 
+/// Gives a probe the same account the worker would run under: the profile's
+/// own variables, and the removal of the ones the provider has to run without.
+fn apply_profile_environment(command: &mut Command, profile: &Profile) {
+    command.envs(environment_for(profile));
+    for key in unset_environment_for(profile) {
+        command.env_remove(key);
+    }
+}
+
 /// Spawns the provider's own model-listing command in a throwaway directory
 /// and parses its output. A provider that fails, times out, or is not
 /// understood yields no models, so the caller falls back to the profile's
@@ -998,7 +1007,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    command.envs(environment_for(profile));
+    apply_profile_environment(&mut command, profile);
     let output = timeout(PROVIDER_TIMEOUT, command.output())
         .await
         .map_err(|_| ())?
@@ -1508,7 +1517,7 @@ async fn claude_usage_with_program(profile: &Profile, program: &str) -> ProfileU
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    command.envs(environment_for(profile));
+    apply_profile_environment(&mut command, profile);
     let output = match timeout(USAGE_TIMEOUT, command.output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => {

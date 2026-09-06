@@ -134,6 +134,13 @@ fn main() -> io::Result<()> {
             thread::sleep(Duration::from_millis(millis));
             basic();
         }
+        "probe-env" => {
+            eprintln!(
+                "FAKE_PROVIDER_PROBE={}",
+                env::var("FAKE_PROVIDER_PROBE").unwrap_or_else(|_| "<absent>".into())
+            );
+            basic();
+        }
         "child" => child()?,
         other => {
             eprintln!("unknown fake provider mode: {other}");

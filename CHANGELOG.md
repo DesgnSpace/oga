@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
+
 ## 0.0.6 - 2026-09-05
 
 ### Added

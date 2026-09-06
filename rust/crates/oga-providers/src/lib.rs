@@ -1,6 +1,9 @@
 //! Provider argv, transcripts, sessions, and usage/event parsing.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use oga_domain::{Profile, Provider};
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,10 @@ pub struct ProviderCommand {
     pub argv: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Variables the child has to run without, even when the broker exports
+    /// them.
+    #[serde(default)]
+    pub env_remove: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -212,6 +219,7 @@ pub fn command_for_with_options(
     ProviderCommand {
         argv,
         env: environment_for(profile),
+        env_remove: unset_environment_for(profile),
     }
 }
 
@@ -360,6 +368,7 @@ pub fn resume_command_for_with_options(
     Ok(ProviderCommand {
         argv,
         env: environment_for(profile),
+        env_remove: unset_environment_for(profile),
     })
 }
 
@@ -704,14 +713,36 @@ pub fn claude_config_dir(profile: &Profile) -> String {
     };
     account_dir(profile, "CLAUDE_CONFIG_DIR", &default)
 }
+/// The value `CLAUDE_CONFIG_DIR` has to carry for this profile, or `None` when
+/// the profile wants the directory Claude already reads by default. Claude
+/// keys the keychain entry holding the account off whether the variable is set
+/// at all, not off where it points: set to any path, that default one
+/// included, it looks under an entry named for the path and finds nothing. So
+/// the default profile has to reach Claude with the variable absent.
+fn claude_config_override(profile: &Profile) -> Option<String> {
+    let dir = claude_config_dir(profile);
+    (dir != format!("{}/.claude", home())).then_some(dir)
+}
 /// Codex's account directory for this profile.
 pub fn codex_home(profile: &Profile) -> String {
     account_dir(profile, "CODEX_HOME", "/.codex")
 }
+/// Variables a provider process must not merely be given a value for, but must
+/// not see at all. A worker inherits the broker's own environment, so absent
+/// means removed rather than left unset.
+pub fn unset_environment_for(profile: &Profile) -> BTreeSet<String> {
+    match profile.provider {
+        Provider::Claude if claude_config_override(profile).is_none() => {
+            BTreeSet::from(["CLAUDE_CONFIG_DIR".to_owned()])
+        }
+        _ => BTreeSet::new(),
+    }
+}
 /// The environment a provider process receives: the profile's own env with
 /// `$HOME` and `~` expanded before they reach `execve`, plus the provider's
 /// account directory set explicitly, so an inherited broker value cannot join
-/// otherwise separate profiles.
+/// otherwise separate profiles. Pair it with `unset_environment_for`, which
+/// covers the directories this map deliberately names nothing for.
 pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
     let home = home();
     let mut env = profile
@@ -720,9 +751,14 @@ pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
         .map(|(key, value)| (key.clone(), expand_home(value, &home)))
         .collect::<BTreeMap<_, _>>();
     match profile.provider {
-        Provider::Claude => {
-            env.insert("CLAUDE_CONFIG_DIR".into(), claude_config_dir(profile));
-        }
+        Provider::Claude => match claude_config_override(profile) {
+            Some(dir) => {
+                env.insert("CLAUDE_CONFIG_DIR".into(), dir);
+            }
+            None => {
+                env.remove("CLAUDE_CONFIG_DIR");
+            }
+        },
         Provider::Codex => {
             env.insert("CODEX_HOME".into(), codex_home(profile));
         }
@@ -887,14 +923,48 @@ mod tests {
         let mut personal = profile(Provider::Claude);
         personal.id = "claude-me".into();
 
-        assert_eq!(
-            environment_for(&primary)["CLAUDE_CONFIG_DIR"],
-            format!("{home}/.claude")
-        );
+        assert_eq!(claude_config_dir(&primary), format!("{home}/.claude"));
         assert_eq!(
             environment_for(&personal)["CLAUDE_CONFIG_DIR"],
             format!("{home}/.claude-me")
         );
+    }
+
+    /// Claude names the keychain entry holding the account after
+    /// `CLAUDE_CONFIG_DIR` whenever the variable is set, so a profile pointed
+    /// at the directory Claude already defaults to has to see no variable at
+    /// all — otherwise it hunts for an entry no login ever wrote and reports
+    /// itself signed out.
+    #[test]
+    fn the_default_claude_directory_reaches_the_worker_as_no_variable() {
+        let home = home();
+        let mut primary = profile(Provider::Claude);
+        primary.id = "claude".into();
+        let mut spelled_out = profile(Provider::Claude);
+        spelled_out.id = "claude".into();
+        spelled_out
+            .env
+            .insert("CLAUDE_CONFIG_DIR".into(), "$HOME/.claude".into());
+
+        for candidate in [&primary, &spelled_out] {
+            let command = command_for(candidate, "go", "/repo", None, None, None);
+            assert!(!command.env.contains_key("CLAUDE_CONFIG_DIR"));
+            assert!(command.env_remove.contains("CLAUDE_CONFIG_DIR"));
+            assert!(
+                command.argv.contains(&format!("{home}/.claude/skills")),
+                "skills still come from the default directory: {:?}",
+                command.argv
+            );
+        }
+
+        let mut personal = profile(Provider::Claude);
+        personal.id = "claude-me".into();
+        let command = command_for(&personal, "go", "/repo", None, None, None);
+        assert_eq!(
+            command.env["CLAUDE_CONFIG_DIR"],
+            format!("{home}/.claude-me")
+        );
+        assert!(command.env_remove.is_empty());
     }
 
     #[test]
@@ -924,10 +994,9 @@ mod tests {
         let mut claude = profile(Provider::Claude);
         claude.id = "claude".into();
         let command = command_for(&claude, "go", "/repo", None, None, None);
-        assert_eq!(
-            command.env["CLAUDE_CONFIG_DIR"],
-            format!("{}/.claude", home())
-        );
+        assert!(!command.env.contains_key("CLAUDE_CONFIG_DIR"));
+        assert!(command.env_remove.contains("CLAUDE_CONFIG_DIR"));
+        assert_eq!(claude_config_dir(&claude), format!("{}/.claude", home()));
 
         let codex = profile(Provider::Codex);
         assert_eq!(
