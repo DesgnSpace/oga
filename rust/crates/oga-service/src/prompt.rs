@@ -35,7 +35,7 @@ pub struct WorkerAttribution {
 }
 
 impl WorkerAttribution {
-    /// `claude/opus (effort high)`, or `claude/opus` when no effort ran.
+    /// `on claude/opus, high effort`, or `on claude/opus` when no effort ran.
     pub fn summary(&self) -> String {
         match self
             .effort
@@ -43,14 +43,25 @@ impl WorkerAttribution {
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            Some(effort) => format!("{}/{} (effort {effort})", self.provider, self.model),
-            None => format!("{}/{}", self.provider, self.model),
+            Some(effort) => format!("on {}/{}, {effort} effort", self.provider, self.model),
+            None => format!("on {}/{}", self.provider, self.model),
         }
+    }
+
+    /// The footer stamped on pull request bodies the worker opens.
+    pub fn footer(&self) -> String {
+        format!(
+            "Task supervised by Oga ({}) — {ATTRIBUTION_EMAIL}",
+            self.summary()
+        )
     }
 
     /// The git trailer stamped on commits the worker creates.
     pub fn trailer(&self) -> String {
-        format!("Oga: Done with Oga {}", self.summary())
+        format!(
+            "Supervised-by: Oga ({}) — {ATTRIBUTION_EMAIL}",
+            self.summary()
+        )
     }
 }
 
@@ -111,8 +122,7 @@ fn attribution_lines(attribution: &WorkerAttribution) -> Vec<String> {
         ),
         "- Pull requests you open: end the body with a footer on its own lines:".into(),
         "  ---".into(),
-        format!("  Done with Oga {}", attribution.summary()),
-        format!("  {ATTRIBUTION_EMAIL}"),
+        format!("  {}", attribution.footer()),
         "- Use these words exactly as written here. Never stamp the same commit twice, and never add attribution to anything the user wrote themselves.".into(),
     ]
 }
@@ -993,7 +1003,9 @@ mod tests {
             }),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Oga: Done with Oga claude/opus (effort high)"));
+        assert!(
+            prompt.contains("Supervised-by: Oga (on claude/opus, high effort) — oga@desgn.space")
+        );
         assert!(prompt.contains("OGA_BLOCKED"));
     }
 
@@ -1032,8 +1044,13 @@ mod tests {
             ..WorkerPromptInput::default()
         });
         assert!(prompt.contains("## Attribution"));
-        assert!(prompt.contains("Oga: Done with Oga claude/opus (effort high)"));
-        assert!(prompt.contains("Done with Oga claude/opus (effort high)"));
+        assert!(
+            prompt.contains("Supervised-by: Oga (on claude/opus, high effort) — oga@desgn.space")
+        );
+        assert!(
+            prompt
+                .contains("Task supervised by Oga (on claude/opus, high effort) — oga@desgn.space")
+        );
         assert!(prompt.contains(ATTRIBUTION_EMAIL));
         assert!(prompt.contains("Never stamp the same commit twice"));
         assert!(!prompt.contains("without an AI attribution trailer"));
@@ -1050,15 +1067,15 @@ mod tests {
             }),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Oga: Done with Oga claude/opus"));
-        assert!(!prompt.contains("(effort"));
+        assert!(prompt.contains("Supervised-by: Oga (on claude/opus) — oga@desgn.space"));
+        assert!(!prompt.contains("effort)"));
 
         let silent = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
             ..WorkerPromptInput::default()
         });
         assert!(!silent.contains("## Attribution"));
-        assert!(!silent.contains("Done with Oga"));
+        assert!(!silent.contains("supervised by Oga"));
     }
 
     #[test]
