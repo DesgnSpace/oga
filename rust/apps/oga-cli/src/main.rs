@@ -22,7 +22,7 @@ use oga_domain::{
     ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, Difficulty,
     EventKind, HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource,
     ModelQuery, Profile, Provider, Task, TaskEvent, TaskListQuery, TaskState, TaskSummary,
-    TaskTopic, TaskWorktree, VERSION, WorkKind, WorktreeOption,
+    TaskWorktree, VERSION, WorkKind, WorktreeOption,
 };
 use oga_events::{EventSocketOptions, SocketError, event_socket_path, start_event_socket};
 use oga_http::HttpState;
@@ -58,7 +58,7 @@ const HOLD_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the broker checks whether the host was suspended under it.
 const WAKE_WATCH_INTERVAL: Duration = Duration::from_secs(30);
 const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <first> <second> ...              try each destination in order, moving on when one cannot take the work\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nEach destination is worker:model:effort with the model or the effort left out: 'claude' alone means its default model, 'claude:high' means that effort on it.\nKinds are context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor, comma-separated.";
-const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --kind <kind>          Name the subject: ui, backend, database, docs, tests, review, research, refactor.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
+const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --kind <kind>          Name the kind of work: context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
 type CliResult<T> = Result<T, CliError>;
 
 #[derive(Debug, Error)]
@@ -891,7 +891,7 @@ struct DelegateOptions {
     worker: Option<String>,
     model: Option<String>,
     difficulty: Option<Difficulty>,
-    kind: Option<TaskTopic>,
+    kind: Option<WorkKind>,
     worktree: bool,
     cwd: Option<String>,
     json: bool,
@@ -955,15 +955,16 @@ fn parse_difficulty(value: &str) -> CliResult<Difficulty> {
     })
 }
 
-/// Name the subject of the work so a love rule for it applies even when the
-/// task text never says so. Unknown names fail here, not at dispatch.
-fn parse_kind(value: &str) -> CliResult<TaskTopic> {
-    TaskTopic::parse(value).ok_or_else(|| {
+/// Name the kind of work — a class or a subject — so a love rule for it
+/// applies even when the task text never reads that way. Unknown names fail
+/// here, not at dispatch.
+fn parse_kind(value: &str) -> CliResult<WorkKind> {
+    WorkKind::parse(value).ok_or_else(|| {
         CliError::new(format!(
             "there is no kind of work called '{value}'; name one of {}",
-            TaskTopic::ALL
+            WorkKind::ALL
                 .iter()
-                .map(|topic| topic.as_str())
+                .map(|kind| kind.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
@@ -3905,6 +3906,7 @@ fn switch_model_on(root: &mut serde_yaml::Value, profile_id: &str, model: &str) 
 mod tests {
     use super::*;
     use oga_domain::TaskClass;
+    use oga_domain::TaskTopic;
 
     #[test]
     fn parses_watch_duration_and_flags() {
@@ -4295,12 +4297,15 @@ mod tests {
     }
 
     #[test]
-    fn delegate_kind_names_a_subject_or_fails_loudly() {
+    fn delegate_kind_names_a_class_or_a_subject_or_fails_loudly() {
         let (options, _) = parse_delegate_args(&["--kind=review".into(), "look".into()]).unwrap();
-        assert_eq!(options.kind, Some(TaskTopic::Review));
+        assert_eq!(options.kind, Some(WorkKind::Review));
         let (options, _) =
             parse_delegate_args(&["--kind".into(), "frontend".into(), "look".into()]).unwrap();
-        assert_eq!(options.kind, Some(TaskTopic::Ui));
+        assert_eq!(options.kind, Some(WorkKind::Ui));
+        let (options, _) =
+            parse_delegate_args(&["--kind=mechanical".into(), "look".into()]).unwrap();
+        assert_eq!(options.kind, Some(WorkKind::Mechanical));
         assert!(parse_delegate_args(&["--kind=refactoring".into(), "look".into()]).is_err());
     }
 

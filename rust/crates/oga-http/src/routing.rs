@@ -22,23 +22,27 @@ pub(crate) struct PreviewBody {
     pub cwd: String,
     pub prompt: String,
     pub difficulty: Option<Difficulty>,
-    pub kind: Option<oga_domain::TaskTopic>,
+    pub kind: Option<oga_domain::WorkKind>,
 }
 
+/// What a caller wants when a task starts: a prompt to read and any of the
+/// caller's own overrides. Shared by the HTTP dispatch and preview routes and
+/// by MCP's `delegate`, so every entry point that starts a task resolves a
+/// destination the same way.
 #[derive(Debug, Clone)]
-pub(crate) struct RouteInput {
+pub struct RouteInput {
     pub prompt: String,
     pub cwd: String,
     pub profile: Option<String>,
     pub model: Option<String>,
     pub difficulty: Option<Difficulty>,
-    pub topic: Option<oga_domain::TaskTopic>,
+    pub kind: Option<oga_domain::WorkKind>,
     pub effort: Option<String>,
     pub default_profile_shortcut: bool,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RoutePlan {
+pub struct RoutePlan {
     pub profile_id: String,
     pub model: String,
     pub effort: Option<String>,
@@ -61,7 +65,7 @@ pub async fn preview(
             profile: None,
             model: None,
             difficulty: body.difficulty,
-            topic: body.kind,
+            kind: body.kind,
             effort: None,
             default_profile_shortcut: false,
         },
@@ -82,7 +86,7 @@ pub async fn preview(
     Ok(Json(response))
 }
 
-pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError> {
+pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError> {
     let cwd = Path::new(&input.cwd);
     if !cwd.is_absolute() {
         return Err(HttpError::bad_request("cwd must be an absolute path"));
@@ -169,7 +173,7 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
                 && input.profile.is_none()
                 && input.model.is_none()
                 && input.difficulty.is_none()
-                && input.topic.is_none()
+                && input.kind.is_none()
                 && default_profile(&profiles).is_some();
             let profile_id = if default_route {
                 default_profile(&profiles).map(|profile| profile.id.clone())
@@ -184,7 +188,7 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
                 &RoutePreferences {
                     model_hint: input.model.clone(),
                     difficulty,
-                    topic: input.topic,
+                    kind: input.kind,
                     profile_id,
                     ..RoutePreferences::default()
                 },
@@ -379,7 +383,7 @@ mod tests {
                 profile: None,
                 model: Some(MODEL.into()),
                 difficulty: None,
-                topic: None,
+                kind: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -415,7 +419,7 @@ mod tests {
                 profile: None,
                 model: None,
                 difficulty: None,
-                topic: None,
+                kind: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -444,7 +448,7 @@ mod tests {
                 profile: None,
                 model: None,
                 difficulty: None,
-                topic: None,
+                kind: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -457,7 +461,7 @@ mod tests {
 
     #[test]
     fn a_love_rule_for_a_subject_beats_one_for_the_class() {
-        use oga_domain::TaskTopic;
+        use oga_domain::WorkKind;
 
         let (directory, store) = fixture();
         switch(&store, directory.path(), true);
@@ -476,7 +480,7 @@ mod tests {
                 profile: None,
                 model: None,
                 difficulty: None,
-                topic: None,
+                kind: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -499,7 +503,7 @@ mod tests {
                 profile: None,
                 model: None,
                 difficulty: None,
-                topic: Some(TaskTopic::Ui),
+                kind: Some(WorkKind::Ui),
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -507,6 +511,63 @@ mod tests {
         .expect("route");
 
         assert_eq!(route.model, MODEL);
+    }
+
+    #[test]
+    fn a_named_class_kind_reaches_its_loved_model_over_the_prompts_own_read() {
+        use oga_domain::WorkKind;
+
+        let (directory, store) = fixture();
+        switch(&store, directory.path(), true);
+        std::fs::write(
+            directory.path().join(".oga.yaml"),
+            format!("love:\n  - model: profile:{MODEL}\n    when: [mechanical]\n"),
+        )
+        .expect("project config");
+
+        // The prompt itself reads as build work, which no rule claims here,
+        // so it runs on the ordinary path rather than the loved one.
+        let unnamed = plan(
+            &HttpState::new(store.clone()),
+            RouteInput {
+                prompt: "Implement the thing described in the plan.".into(),
+                cwd: directory.path().display().to_string(),
+                profile: None,
+                model: None,
+                difficulty: None,
+                kind: None,
+                effort: None,
+                default_profile_shortcut: false,
+            },
+        )
+        .expect("route");
+        assert!(!unnamed.reason.contains("loved"), "{}", unnamed.reason);
+
+        // Naming the class at dispatch reaches the rule even though the
+        // prompt itself never reads as mechanical work.
+        let route = plan(
+            &HttpState::new(store),
+            RouteInput {
+                prompt: "Implement the thing described in the plan.".into(),
+                cwd: directory.path().display().to_string(),
+                profile: None,
+                model: None,
+                difficulty: None,
+                kind: Some(WorkKind::Mechanical),
+                effort: None,
+                default_profile_shortcut: false,
+            },
+        )
+        .expect("route");
+
+        assert_eq!(route.model, MODEL);
+        assert!(
+            route
+                .reason
+                .contains("loved for mechanical work, the kind you named"),
+            "{}",
+            route.reason
+        );
     }
 
     #[test]

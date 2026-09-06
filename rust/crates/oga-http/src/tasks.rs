@@ -35,9 +35,10 @@ pub(crate) struct DispatchBody {
     pub allow_questions: Option<bool>,
     pub difficulty: Option<oga_domain::Difficulty>,
     pub effort: Option<String>,
-    /// The subject of the work, when the caller names it. Wins over whatever
-    /// the prompt reads like for love-rule matching.
-    pub kind: Option<oga_domain::TaskTopic>,
+    /// The kind of work, when the caller names it, in the same vocabulary
+    /// `oga love --when` accepts. Wins over whatever the prompt reads like
+    /// for love-rule matching.
+    pub kind: Option<oga_domain::WorkKind>,
     pub tldr: Option<String>,
     pub title: Option<String>,
     pub timeout_ms: Option<u64>,
@@ -190,7 +191,7 @@ pub(crate) async fn dispatch_body(
             profile,
             model: body.model,
             difficulty: body.difficulty,
-            topic: body.kind,
+            kind: body.kind,
             effort: body.effort,
             default_profile_shortcut: true,
         },

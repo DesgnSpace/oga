@@ -8,7 +8,7 @@ use oga_config::{
 };
 use oga_domain::{
     Difficulty, FailureCode, ModelCost, ModelInfo, ModelInfoSource, Profile, ProfileFailure,
-    ProfileSuccess, ProfileUsage, Provider, RoutePreference, SelectionStage, TaskClass, TaskTopic,
+    ProfileSuccess, ProfileUsage, Provider, RoutePreference, SelectionStage, TaskClass,
     UsageSource, UsageWindow, UsageWindowKind, WorkKind,
 };
 use oga_routing::{
@@ -2340,7 +2340,7 @@ fn love_rules_prefer_the_subject_over_the_class() {
         &catalog,
         &workers,
         &RoutePreferences {
-            topic: Some(TaskTopic::Ui),
+            kind: Some(WorkKind::Ui),
             ..RoutePreferences::default()
         },
         &SelectionInputs::new(&settings),
@@ -2355,7 +2355,7 @@ fn love_rules_prefer_the_subject_over_the_class() {
         &catalog,
         &workers,
         &RoutePreferences {
-            topic: Some(TaskTopic::Refactor),
+            kind: Some(WorkKind::Refactor),
             ..RoutePreferences::default()
         },
         &SelectionInputs::new(&settings),
@@ -2373,6 +2373,58 @@ fn love_rules_prefer_the_subject_over_the_class() {
     )
     .unwrap();
     assert_eq!(plain.model, "opencode/big-pickle");
+}
+
+// A caller that states the class of work reaches its loved model even when
+// the prompt's own words would have read as a different class, and the
+// reason names the kind as the caller's own word rather than the prompt's.
+#[test]
+fn a_caller_named_class_reaches_its_loved_model_over_the_prompts_own_read() {
+    let catalog = models();
+    let workers = profiles();
+    let settings = love_rules(vec![
+        rule("sonnet", Some("claude"), &[WorkKind::Mechanical], None),
+        rule(
+            "opencode/big-pickle",
+            Some("opencode"),
+            &[WorkKind::Build],
+            None,
+        ),
+        rule("haiku", Some("claude"), &[], None),
+    ]);
+
+    // The prompt itself reads as build work, so the build rule would win.
+    let guessed = choose_model(
+        "Implement the thing described in the plan.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(guessed.model, "opencode/big-pickle");
+
+    // The caller says this is mechanical work instead; that rule wins, and
+    // the reason credits the caller, not the prompt.
+    let named = choose_model(
+        "Implement the thing described in the plan.",
+        &catalog,
+        &workers,
+        &RoutePreferences {
+            kind: Some(WorkKind::Mechanical),
+            ..RoutePreferences::default()
+        },
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(named.model, "sonnet", "{}", named.reason);
+    assert!(
+        named
+            .reason
+            .contains("loved for mechanical work, the kind you named"),
+        "{}",
+        named.reason
+    );
 }
 
 #[test]

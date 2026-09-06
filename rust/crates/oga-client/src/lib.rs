@@ -13,8 +13,8 @@ use std::{collections::BTreeMap, time::Duration};
 use oga_domain::{
     ArchivedFilter, BranchOutcome, ConsumerDelivery, Difficulty, EventKind, EventPointer,
     MemoryEntry, MemoryProject, ProfileFailure, ProfileView, ScopeGrant, SpendTotals, Task,
-    TaskCompletion, TaskEventView, TaskHoldView, TaskScope, TaskState, TaskSummary, TaskTopic,
-    TaskTurn, WorktreeOption,
+    TaskCompletion, TaskEventView, TaskHoldView, TaskScope, TaskState, TaskSummary, TaskTurn,
+    WorkKind, WorktreeOption,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -412,10 +412,11 @@ pub struct DispatchRequest {
     pub difficulty: Option<Difficulty>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
-    /// The subject of the work, when the caller names it. Lets a love rule
-    /// for that subject apply even when the prompt never says so.
+    /// The kind of work, when the caller names it, in the same vocabulary
+    /// `oga love --when` accepts: a class of work or a subject. Lets a love
+    /// rule for it apply even when the prompt never reads that way.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<TaskTopic>,
+    pub kind: Option<WorkKind>,
     pub tldr: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -540,7 +541,7 @@ pub struct RoutingPreviewRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub difficulty: Option<Difficulty>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<TaskTopic>,
+    pub kind: Option<WorkKind>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

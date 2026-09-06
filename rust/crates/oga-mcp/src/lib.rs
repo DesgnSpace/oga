@@ -14,7 +14,7 @@ use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_config::{canonical_cwd, global_cwd};
 use oga_domain::{
     ArchivedFilter, ListOrder, ModelInfo, OnBlockerFailure, Provider, StateFilter, Task, TaskKind,
-    TaskListQuery, TaskMatch, TaskScope, TaskState,
+    TaskListQuery, TaskMatch, TaskScope, TaskState, WorkKind,
 };
 use oga_http::{HttpState, settings::ModelQuery as SettingsModelQuery};
 use oga_routing::{ModelNameMatch, ambiguous_message, not_enabled_message, resolve_model_name};
@@ -230,18 +230,45 @@ impl McpServer {
         validate_length(&tldr, 200, "tldr")?;
         validate_length(&title, 60, "title")?;
         validate_delegate_options(args)?;
-        let (profile_id, model) = self.route(
-            &cwd,
-            optional_string(args, "profile"),
-            optional_string(args, "model"),
-        )?;
+        // Validated above, so parsing cannot fail here.
+        let difficulty = optional_string(args, "difficulty")
+            .map(|value| serde_json::from_value(json!(value)).expect("difficulty validated above"));
+        let kind = optional_string(args, "kind")
+            .map(|value| WorkKind::parse(&value).expect("kind validated above"));
+        let profile_arg = optional_string(args, "profile");
+        let model_arg = optional_string(args, "model");
+        let effort_arg = optional_string(args, "effort");
+        // Automatic routing — the caller named neither account — is the one
+        // path a stated difficulty or kind can actually reach: it is what
+        // reads the prompt, applies a loved rule, and projects an effort.
+        // Naming a profile or a model is the caller's own call, same as ever.
+        let (profile_id, model, route_effort) = if profile_arg.is_none() && model_arg.is_none() {
+            let route = oga_http::routing::plan(
+                &self.state,
+                oga_http::routing::RouteInput {
+                    prompt: prompt.clone(),
+                    cwd: cwd.clone(),
+                    profile: None,
+                    model: None,
+                    difficulty,
+                    kind,
+                    effort: effort_arg.clone(),
+                    default_profile_shortcut: false,
+                },
+            )
+            .map_err(|error| McpError::Message(error.message))?;
+            (route.profile_id, route.model, route.effort)
+        } else {
+            let (profile_id, model) = self.route(&cwd, profile_arg, model_arg)?;
+            (profile_id, model, None)
+        };
         let mut request = DispatchRequest::new(profile_id, prompt, PathBuf::from(&cwd));
         request.model = Some(model);
         request.scope = scope(args.get("scope"))?;
         request.allow_questions = optional_bool(args, "allowQuestions").unwrap_or(true);
         request.timeout = optional_u64(args, "timeoutMs")?.map(Duration::from_millis);
         request.parent_task_id = optional_string(args, "parent");
-        request.effort = optional_string(args, "effort");
+        request.effort = effort_arg.or(route_effort);
         request.tldr = Some(tldr);
         request.title = Some(title);
         request.worktree = args
@@ -1299,6 +1326,18 @@ fn validate_delegate_options(args: &Value) -> Result<(), McpError> {
         return Err(McpError::InvalidParams(
             "difficulty must be mechanical, standard, hard, or critical".into(),
         ));
+    }
+    if let Some(kind) = optional_string(args, "kind")
+        && WorkKind::parse(&kind).is_none()
+    {
+        return Err(McpError::InvalidParams(format!(
+            "there is no kind of work called '{kind}'; name one of {}",
+            WorkKind::ALL
+                .iter()
+                .map(|kind| kind.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
     }
     if let Some(effort) = optional_string(args, "effort")
         && !["minimal", "low", "medium", "high", "xhigh", "max"].contains(&effort.as_str())
