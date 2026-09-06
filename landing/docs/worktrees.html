@@ -81,7 +81,7 @@
         <pre><code>git log oga/&lt;branch-name&gt;
 git merge oga/&lt;branch-name&gt;</code></pre>
         <p>Work on its own branch can also commit, push, and open a pull request for you. When it does, the link comes back with the rest of the report.</p>
-        <p>Commits it creates end with a <code>Supervised-by:</code> trailer naming the provider, model, and effort behind them. Pull requests it opens end with the same stamp. Turn the stamp off for a project with <code>worker: attribution: false</code> in <code>.oga.yaml</code>, or everywhere with the same key in <code>~/.oga.yaml</code>.</p>
+        <p>Commits it creates end with a <code>Co-Authored-By:</code> trailer naming the provider, model, and effort behind them, so git credits the run. Pull requests it opens end with the same stamp. Turn the stamp off for a project with <code>worker: attribution: false</code> in <code>.oga.yaml</code>, or everywhere with the same key in <code>~/.oga.yaml</code>.</p>
 
         <h2 id="archive">Archive the task and branch</h2>
         <p>Archive keeps the branch by default. When the work is finished and you also want to remove that local branch, ask Oga to do it safely:</p>

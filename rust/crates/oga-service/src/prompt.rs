@@ -41,15 +41,16 @@ impl WorkerAttribution {
     /// The footer stamped on pull request bodies the worker opens.
     pub fn footer(&self) -> String {
         format!(
-            "Supervised by Oga ({}) — {ATTRIBUTION_EMAIL}",
+            "Supervised by Oga ({}) — <{ATTRIBUTION_EMAIL}>",
             self.summary()
         )
     }
 
-    /// The git trailer stamped on commits the worker creates.
+    /// The git trailer stamped on commits the worker creates. Shaped so git
+    /// reads it as a co-author.
     pub fn trailer(&self) -> String {
         format!(
-            "Supervised-by: Oga ({}) — {ATTRIBUTION_EMAIL}",
+            "Co-Authored-By: Oga ({}) <{ATTRIBUTION_EMAIL}>",
             self.summary()
         )
     }
@@ -976,10 +977,10 @@ mod tests {
         });
         assert!(prompt.contains("## Attribution"));
         assert!(
-            prompt.contains("Supervised-by: Oga (on claude/opus, high effort) — oga@desgn.space")
+            prompt.contains("Co-Authored-By: Oga (on claude/opus, high effort) <oga@desgn.space>")
         );
         assert!(
-            prompt.contains("Supervised by Oga (on claude/opus, high effort) — oga@desgn.space")
+            prompt.contains("Supervised by Oga (on claude/opus, high effort) — <oga@desgn.space>")
         );
         assert!(prompt.contains(ATTRIBUTION_EMAIL));
         assert!(prompt.contains("Never stamp the same commit twice"));
@@ -998,7 +999,7 @@ mod tests {
             }),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Supervised-by: Oga (on claude/opus) — oga@desgn.space"));
+        assert!(prompt.contains("Co-Authored-By: Oga (on claude/opus) <oga@desgn.space>"));
         assert!(!prompt.contains("effort)"));
 
         let silent = assemble_worker_prompt(&WorkerPromptInput {
