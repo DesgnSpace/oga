@@ -278,7 +278,7 @@ pub async fn get_projects(State(state): State<HttpState>) -> Result<impl IntoRes
         .store
         .with_connection(|connection| {
             let mut statement = connection.prepare(
-                "SELECT cwd FROM (SELECT COALESCE(origin_cwd,cwd) AS cwd,MAX(updated_at) AS seen FROM tasks GROUP BY COALESCE(origin_cwd,cwd) UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM memories GROUP BY cwd UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM context_maps GROUP BY cwd) GROUP BY cwd ORDER BY MAX(seen) DESC,cwd",
+                "SELECT cwd FROM (SELECT COALESCE(origin_cwd,cwd) AS cwd,MAX(updated_at) AS seen FROM tasks GROUP BY COALESCE(origin_cwd,cwd) UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM memories GROUP BY cwd UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM context_index GROUP BY cwd) GROUP BY cwd ORDER BY MAX(seen) DESC,cwd",
             )?;
             Ok(statement
                 .query_map([], |row| row.get::<_, String>(0))?
@@ -501,6 +501,7 @@ pub async fn model_rows(
             only_enabled: query.only_enabled,
             query: query.query.clone(),
         },
+        &profiles,
     );
     if !include_usage || rows.is_empty() {
         return Ok(rows);
@@ -1303,7 +1304,11 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                         "capabilities": capabilities,
                         "inheritedCapabilities": inherited_capabilities,
                         "hasCapabilitiesOverride": project_model.as_ref().is_some_and(|setting| setting.capabilities.is_some()),
-                        "loved": love.names_model(&profile.id, &model.id),
+                        "loved": love.names_model(
+                            &profile.id,
+                            &model.id,
+                            Some(profile.default_model.as_str())
+                        ),
                         "availableGlobally": inherited_enabled,
                     })
                 })
@@ -1911,7 +1916,7 @@ mod catalog_tests {
 
         // Not refreshing must reuse the cached catalog rather than collapsing
         // back to the single configured-model fallback.
-        let models = discover_catalog(&[opencode], false).await;
+        let models = discover_catalog(&[opencode.clone()], false).await;
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"opencode-go/deepseek-v4-flash"));
@@ -1934,6 +1939,7 @@ mod catalog_tests {
                 only_preferred: Some(false),
                 ..Default::default()
             },
+            &[opencode.clone()],
         );
         assert_eq!(all_rows.len(), 2);
         assert!(all_rows.iter().all(|row| !row.enabled));

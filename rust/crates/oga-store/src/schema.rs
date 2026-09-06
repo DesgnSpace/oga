@@ -1,4 +1,5 @@
-//! The version-37 database shape.
+//! The founding database shape and every migration that carries an older
+//! database up to it.
 //!
 //! [`create_fresh_schema`] produces the current database shape.
 
@@ -7,7 +8,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 42;
+pub const LATEST_SCHEMA_VERSION: i64 = 43;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -165,7 +166,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       use_count INTEGER NOT NULL DEFAULT 1
     );
     CREATE INDEX IF NOT EXISTS scope_grants_cwd ON scope_grants(cwd, last_used_at DESC);
-    CREATE TABLE IF NOT EXISTS context_maps (
+    CREATE TABLE IF NOT EXISTS context_index (
       cwd TEXT PRIMARY KEY,
       scheme INTEGER NOT NULL,
       state TEXT NOT NULL CHECK(state IN ('building','ready','partial')),
@@ -234,7 +235,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
     );
-     INSERT INTO schema_migrations(version, name) VALUES (42, 'tree-sitter code index');"#;
+     INSERT INTO schema_migrations(version, name) VALUES (43, 'code index without context maps');"#;
 
 /// One row per indexed file, one per symbol, with the symbol search index
 /// derived from the same rows.
@@ -360,7 +361,6 @@ pub fn migrate_v37_to_v38(conn: &Connection) -> Result<(), StoreError> {
           id INTEGER PRIMARY KEY,
           cwd TEXT NOT NULL,
           hints TEXT NOT NULL,
-          entity_id INTEGER REFERENCES context_entities(id) ON DELETE SET NULL,
           learned_path TEXT NOT NULL,
           learned_symbol TEXT NOT NULL DEFAULT '',
           source_digest TEXT NOT NULL,
@@ -372,9 +372,10 @@ pub fn migrate_v37_to_v38(conn: &Connection) -> Result<(), StoreError> {
           last_confirmed_at TEXT NOT NULL,
           UNIQUE(cwd, hints, learned_path, learned_symbol)
         );
-        INSERT INTO context_learned_routes SELECT * FROM context_learned_routes_old;
+        INSERT INTO context_learned_routes(id,cwd,hints,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
+          SELECT id,cwd,hints,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at
+          FROM context_learned_routes_old;
         DROP TABLE context_learned_routes_old;
-        CREATE INDEX context_learned_routes_cwd_entity ON context_learned_routes(cwd, entity_id);
         CREATE VIRTUAL TABLE context_learned_routes_fts USING fts5(hints, content='context_learned_routes', content_rowid='id', tokenize='porter unicode61 remove_diacritics 2', prefix='2 3 4 5 6 8 10');
         CREATE TRIGGER context_learned_routes_ai AFTER INSERT ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(rowid, hints) VALUES (new.id, new.hints); END;
         CREATE TRIGGER context_learned_routes_ad AFTER DELETE ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(context_learned_routes_fts, rowid, hints) VALUES ('delete', old.id, old.hints); END;
@@ -398,7 +399,6 @@ pub fn migrate_v38_to_v39(conn: &Connection) -> Result<(), StoreError> {
           id INTEGER PRIMARY KEY,
           cwd TEXT NOT NULL,
           aliases TEXT NOT NULL,
-          entity_id INTEGER REFERENCES context_entities(id) ON DELETE SET NULL,
           learned_path TEXT NOT NULL,
           learned_symbol TEXT NOT NULL DEFAULT '',
           source_digest TEXT NOT NULL,
@@ -410,11 +410,10 @@ pub fn migrate_v38_to_v39(conn: &Connection) -> Result<(), StoreError> {
           last_confirmed_at TEXT NOT NULL,
           UNIQUE(cwd, learned_path, learned_symbol)
         );
-        INSERT INTO context_learned_routes(id,cwd,aliases,entity_id,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
-          SELECT MIN(id),cwd,SUBSTR(GROUP_CONCAT(hints, ' '), 1, 160),MAX(entity_id),learned_path,learned_symbol,MAX(source_digest),MAX(task_id),MAX(attempt),MAX(profile_id),MAX(model),MIN(created_at),MAX(last_confirmed_at)
+        INSERT INTO context_learned_routes(id,cwd,aliases,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
+          SELECT MIN(id),cwd,SUBSTR(GROUP_CONCAT(hints, ' '), 1, 160),learned_path,learned_symbol,MAX(source_digest),MAX(task_id),MAX(attempt),MAX(profile_id),MAX(model),MIN(created_at),MAX(last_confirmed_at)
           FROM context_learned_routes_old GROUP BY cwd,learned_path,learned_symbol;
         DROP TABLE context_learned_routes_old;
-        CREATE INDEX context_learned_routes_cwd_entity ON context_learned_routes(cwd, entity_id);
         CREATE INDEX context_learned_routes_cwd_aliases ON context_learned_routes(cwd, aliases);
         CREATE VIRTUAL TABLE context_learned_routes_fts USING fts5(aliases, content='context_learned_routes', content_rowid='id', tokenize='porter unicode61 remove_diacritics 2', prefix='2 3 4 5 6 8 10');
         CREATE TRIGGER context_learned_routes_ai AFTER INSERT ON context_learned_routes BEGIN INSERT INTO context_learned_routes_fts(rowid, aliases) VALUES (new.id, new.aliases); END;
@@ -492,5 +491,20 @@ pub fn migrate_v41_to_v42(conn: &Connection) -> Result<(), StoreError> {
         COMMIT;"#
     );
     conn.execute_batch(&batch)?;
+    Ok(())
+}
+
+/// Take the context map out of the database.
+///
+/// The map's own tables went at v42. What is left is the per-project
+/// bookkeeping row the code index writes, which outlived the map and is
+/// renamed here for what it actually records.
+pub fn migrate_v42_to_v43(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"BEGIN IMMEDIATE;
+        ALTER TABLE context_maps RENAME TO context_index;
+        INSERT INTO schema_migrations(version, name) VALUES (43, 'code index without context maps');
+        COMMIT;"#,
+    )?;
     Ok(())
 }

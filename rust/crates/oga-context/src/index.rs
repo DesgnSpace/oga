@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use oga_domain::{ContextFile, ContextMapRow, Task};
+use oga_domain::Task;
 use oga_store::{Store, StoreError};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::query::{self, CANDIDATE_POOL, DEFAULT_LIMIT, Ranking, Scored, TermWeights};
 use crate::routes::{self, MAX_HINTS_CHARS, RouteMove, RouteRecord};
-use crate::store::{self as index_store, FileUpdate, MAP_SCHEME, SymbolRow};
+use crate::store::{self as index_store, FileUpdate, INDEX_SCHEME, SymbolRow};
 use crate::symbols::extract_symbols;
 use crate::text::{fts_query, name_key, prompt_terms};
 use crate::walk::{self, WalkFile};
@@ -105,24 +105,9 @@ impl ContextTarget {
         }
     }
 
-    fn map_cwd(&self) -> &Path {
+    fn index_cwd(&self) -> &Path {
         self.source_cwd.as_deref().unwrap_or(&self.cwd)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderTier {
-    Full,
-    Skeleton,
-    Index,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct QueryOptions {
-    pub paths: Vec<String>,
-    pub symbols: Vec<String>,
-    pub tier: Option<RenderTier>,
-    pub depth: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,9 +128,6 @@ pub struct QuestionOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextResult {
     pub markdown: String,
-    pub files: Vec<ContextFile>,
-    pub outside_scope: usize,
-    pub gone: usize,
     pub candidates: Vec<QuestionCandidate>,
 }
 
@@ -191,7 +173,7 @@ impl<'a> ContextIndex<'a> {
         let now = timestamp_now();
         index_store::replace_files(self.store, cwd, &updates, &now)?;
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
-        index_store::save_map(self.store, cwd, partial, file_count, symbol_count, &now)?;
+        index_store::save_index(self.store, cwd, partial, file_count, symbol_count, &now)?;
         let (routes_confirmed, routes_dropped, _) = routes::heal(self.store, cwd, &[])?;
         Ok(BuildResult {
             partial,
@@ -206,7 +188,7 @@ impl<'a> ContextIndex<'a> {
     /// writes a layout the stored one predates.
     pub fn ensure(&self, cwd: impl AsRef<Path>) -> Result<(), ContextError> {
         let cwd = cwd.as_ref();
-        if index_store::map_row(self.store, cwd)?.is_none_or(|map| map.scheme != MAP_SCHEME) {
+        if index_store::index_row(self.store, cwd)?.is_none_or(|row| row.scheme != INDEX_SCHEME) {
             self.build(cwd, BuildOptions::default())?;
         }
         Ok(())
@@ -221,7 +203,7 @@ impl<'a> ContextIndex<'a> {
     ) -> Result<ReconcileResult, ContextError> {
         let cwd = cwd.as_ref();
         let known = index_store::file_rows(self.store, cwd)?;
-        if known.is_empty() || index_store::map_row(self.store, cwd)?.is_none() {
+        if known.is_empty() || index_store::index_row(self.store, cwd)?.is_none() {
             let built = self.build(cwd, options)?;
             return Ok(ReconcileResult {
                 partial: built.partial,
@@ -281,7 +263,7 @@ impl<'a> ContextIndex<'a> {
         let (confirmed, dropped, route_moves) = routes::heal(self.store, cwd, &moved)?;
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
         if changed {
-            index_store::save_map(
+            index_store::save_index(
                 self.store,
                 cwd,
                 walk.partial,
@@ -304,76 +286,6 @@ impl<'a> ContextIndex<'a> {
         })
     }
 
-    pub fn list(
-        &self,
-        target: &ContextTarget,
-        options: &QueryOptions,
-    ) -> Result<ContextResult, ContextError> {
-        self.ensure(target.map_cwd())?;
-        let map_cwd = target.map_cwd();
-        let mut files = Vec::new();
-        let mut outside_scope = 0;
-        let mut gone = 0;
-        for file in index_store::files_with_symbols(self.store, map_cwd)? {
-            if !asked_for(&file, options, map_cwd) {
-                continue;
-            }
-            if !scope_covers_path(&target.scope.read, &target.cwd, &file.path) {
-                outside_scope += 1;
-                continue;
-            }
-            if !target.cwd.join(&file.path).is_file() {
-                gone += 1;
-                continue;
-            }
-            files.push(file);
-        }
-        let map = index_store::map_row(self.store, map_cwd)?;
-        let mut lines = vec![map_header(
-            map_cwd,
-            map.as_ref(),
-            files.len(),
-            files.iter().map(|file| file.symbols.len()).sum(),
-        )];
-        if let Some(depth) = options.depth {
-            lines.push(format!("scope depth {depth}"));
-        }
-        if files.is_empty() {
-            lines.push("No files are in this map area. Expand the map area or check the task's readable paths.".into());
-        }
-        for file in &files {
-            let tier = options.tier.unwrap_or_else(|| {
-                if options.paths.iter().any(|path| {
-                    path_prefix(path, &file.path) && (path.ends_with('/') || path == ".")
-                }) {
-                    RenderTier::Skeleton
-                } else {
-                    RenderTier::Full
-                }
-            });
-            lines.push(render_file(file, tier));
-        }
-        if outside_scope > 0 {
-            lines.push(format!(
-                "({outside_scope} path{} omitted: outside this task's read scope)",
-                if outside_scope == 1 { "" } else { "s" }
-            ));
-        }
-        if gone > 0 {
-            lines.push(format!(
-                "({gone} path{} omitted: no longer on disk)",
-                if gone == 1 { "" } else { "s" }
-            ));
-        }
-        Ok(ContextResult {
-            markdown: lines.join("\n"),
-            files,
-            outside_scope,
-            gone,
-            candidates: Vec::new(),
-        })
-    }
-
     pub fn question(
         &self,
         target: &ContextTarget,
@@ -388,13 +300,13 @@ impl<'a> ContextIndex<'a> {
         question: &str,
         options: QuestionOptions,
     ) -> Result<ContextResult, ContextError> {
-        self.ensure(target.map_cwd())?;
-        let map_cwd = target.map_cwd();
+        self.ensure(target.index_cwd())?;
+        let index_cwd = target.index_cwd();
         let terms = prompt_terms(question);
         if terms.is_empty() {
             return Ok(miss(question, &[]));
         }
-        let ranked = self.rank(map_cwd, question, &terms)?;
+        let ranked = self.rank(index_cwd, question, &terms)?;
         let confident = query::is_confident(&ranked, &terms);
         let reachable = self.reachable(target, &ranked, options.limit)?;
         if reachable.kept.is_empty() {
@@ -433,9 +345,6 @@ impl<'a> ContextIndex<'a> {
         }
         Ok(ContextResult {
             markdown: lines.join("\n"),
-            files: Vec::new(),
-            outside_scope: reachable.outside_scope,
-            gone: reachable.gone,
             candidates,
         })
     }
@@ -486,7 +395,7 @@ impl<'a> ContextIndex<'a> {
             });
         }
         let read_cwd = PathBuf::from(&task.cwd);
-        let map_cwd = task.worktree.as_ref().map_or_else(
+        let index_cwd = task.worktree.as_ref().map_or_else(
             || read_cwd.clone(),
             |worktree| PathBuf::from(&worktree.origin_cwd),
         );
@@ -525,7 +434,7 @@ impl<'a> ContextIndex<'a> {
                 model: &task.model,
             })
             .collect::<Vec<_>>();
-        routes::save(self.store, &map_cwd, &records, &timestamp_now())?;
+        routes::save(self.store, &index_cwd, &records, &timestamp_now())?;
         Ok(LearnRoutesResult {
             accepted: prepared.len(),
             rejected,
@@ -560,44 +469,43 @@ impl<'a> ContextIndex<'a> {
         Ok(())
     }
 
-    pub fn files(&self, cwd: impl AsRef<Path>) -> Result<Vec<ContextFile>, ContextError> {
-        Ok(index_store::files_with_symbols(self.store, cwd.as_ref())?)
-    }
-
-    pub fn map(&self, cwd: impl AsRef<Path>) -> Result<Option<ContextMapRow>, ContextError> {
-        Ok(index_store::map_row(self.store, cwd.as_ref())?)
-    }
-
     fn rank(
         &self,
-        map_cwd: &Path,
+        index_cwd: &Path,
         question: &str,
         terms: &[String],
     ) -> Result<Vec<Scored>, ContextError> {
         let mut ranking = Ranking::default();
-        for route in routes::matching(self.store, map_cwd, question, terms)? {
+        for route in routes::matching(self.store, index_cwd, question, terms)? {
             let overlap = routes::overlap(&route, terms);
             if !route.exact && overlap == 0 {
                 continue;
             }
-            let Some(symbol) = self.route_target(map_cwd, &route)? else {
+            let Some(symbol) = self.route_target(index_cwd, &route)? else {
                 routes::forget(self.store, route.id)?;
                 continue;
             };
             ranking.add_route(&route, symbol, overlap);
         }
-        let (_, total) = index_store::counts(self.store, map_cwd)?;
-        let weights = TermWeights::new(&index_store::term_hits(self.store, map_cwd, terms)?, total);
+        let (_, total) = index_store::counts(self.store, index_cwd)?;
+        let weights = TermWeights::new(
+            &index_store::term_hits(self.store, index_cwd, terms)?,
+            total,
+        );
         let question_key = name_key(question);
         let mut keys = vec![question_key.clone()];
         keys.extend(terms.iter().cloned());
         keys.sort();
         keys.dedup();
-        for symbol in index_store::symbols_by_name(self.store, map_cwd, &keys, 32)? {
+        for symbol in index_store::symbols_by_name(self.store, index_cwd, &keys, 32)? {
             ranking.add_symbol(symbol, terms, &question_key, &weights, None);
         }
-        let search =
-            index_store::symbols_by_search(self.store, map_cwd, &fts_query(terms), CANDIDATE_POOL)?;
+        let search = index_store::symbols_by_search(
+            self.store,
+            index_cwd,
+            &fts_query(terms),
+            CANDIDATE_POOL,
+        )?;
         for (symbol, rank) in search {
             ranking.add_symbol(symbol, terms, &question_key, &weights, Some(rank));
         }
@@ -608,18 +516,20 @@ impl<'a> ContextIndex<'a> {
     /// whole file answers with the file itself.
     fn route_target(
         &self,
-        map_cwd: &Path,
+        index_cwd: &Path,
         route: &routes::LearnedRoute,
     ) -> Result<Option<SymbolRow>, ContextError> {
         match &route.symbol {
             Some(name) => Ok(index_store::symbol_at(
                 self.store,
-                map_cwd,
+                index_cwd,
                 &route.path,
                 name,
             )?),
-            None => Ok(index_store::file_exists(self.store, map_cwd, &route.path)?
-                .then(|| file_anchor(&route.path))),
+            None => Ok(
+                index_store::file_exists(self.store, index_cwd, &route.path)?
+                    .then(|| file_anchor(&route.path)),
+            ),
         }
     }
 
@@ -633,13 +543,13 @@ impl<'a> ContextIndex<'a> {
         let Ok(source) = fs::read_to_string(target.cwd.join(&symbol.path)) else {
             // A checkout that has not materialised the file yet still answers
             // from the origin it was cut from.
-            let origin = target.map_cwd().join(&symbol.path);
+            let origin = target.index_cwd().join(&symbol.path);
             return Ok(origin.is_file().then(|| symbol.clone()));
         };
         if target.source_cwd.is_none() || symbol.name.is_empty() {
             return Ok(Some(symbol.clone()));
         }
-        if digest_of(source.as_bytes()) == file_digest(target.map_cwd(), &symbol.path) {
+        if digest_of(source.as_bytes()) == file_digest(target.index_cwd(), &symbol.path) {
             return Ok(Some(symbol.clone()));
         }
         let Some(extracted) = extract_symbols(&symbol.path, &source) else {
@@ -829,43 +739,14 @@ fn miss(question: &str, absent: &[String]) -> ContextResult {
     let detail = if absent.is_empty() {
         String::new()
     } else {
-        format!(" No map match: {}.", absent.join(", "))
+        format!(" Not indexed: {}.", absent.join(", "))
     };
     ContextResult {
         markdown: format!(
-            "No confident match for \"{question}\" in this map.{detail} Search the tree or read likely files directly."
+            "No confident match for \"{question}\" in this project.{detail} Search the tree or read likely files directly."
         ),
-        files: Vec::new(),
-        outside_scope: 0,
-        gone: 0,
         candidates: Vec::new(),
     }
-}
-
-/// Whether the map request covers this file: a path or directory it named, a
-/// symbol it named, or naming nothing at all, which asks for everything.
-fn asked_for(file: &ContextFile, options: &QueryOptions, map_cwd: &Path) -> bool {
-    if options.paths.is_empty() && options.symbols.is_empty() {
-        return true;
-    }
-    let by_path = options.paths.iter().any(|path| {
-        let directory =
-            path.is_empty() || path == "." || path.ends_with('/') || map_cwd.join(path).is_dir();
-        if directory {
-            path_prefix(path, &file.path) && depth_allowed(map_cwd, path, &file.path, options.depth)
-        } else {
-            file.path == *path
-        }
-    });
-    by_path
-        || options.symbols.iter().any(|requested| {
-            let prefix = requested.strip_suffix('*');
-            file.symbols.iter().any(|symbol| {
-                prefix.map_or(symbol.name == *requested, |prefix| {
-                    symbol.name.starts_with(prefix)
-                })
-            })
-        })
 }
 
 /// What survived the scope and existence checks, and how many did not.
@@ -951,70 +832,6 @@ fn source_body(target: &ContextTarget, symbol: &SymbolRow) -> String {
     format!("```text\n{}\n```", body.join("\n"))
 }
 
-fn render_file(file: &ContextFile, tier: RenderTier) -> String {
-    if tier == RenderTier::Index {
-        return file.path.clone();
-    }
-    if tier == RenderTier::Skeleton {
-        let count = file.symbols.len();
-        return entry_line(
-            &file.path,
-            None,
-            (count > 0)
-                .then(|| {
-                    format!(
-                        "{count} symbol{} not listed",
-                        if count == 1 { "" } else { "s" }
-                    )
-                })
-                .into_iter()
-                .collect(),
-            None,
-        );
-    }
-    let symbols = file
-        .symbols
-        .iter()
-        .map(|symbol| {
-            entry_line(
-                &file.path,
-                Some(&symbol.qualified),
-                symbol
-                    .doc
-                    .as_deref()
-                    .and_then(first_sentence)
-                    .into_iter()
-                    .collect(),
-                Some(symbol.line),
-            )
-        })
-        .collect::<Vec<_>>();
-    if symbols.is_empty() {
-        return file.path.clone();
-    }
-    symbols.join("\n")
-}
-
-fn first_sentence(doc: &str) -> Option<String> {
-    let phrase = doc
-        .split_once(". ")
-        .map_or(doc, |(first, _)| first)
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .trim_end_matches('.')
-        .to_owned();
-    if phrase.chars().count() > 60 {
-        let truncated = phrase.chars().take(60).collect::<String>();
-        return Some(match truncated.rsplit_once(' ') {
-            Some((head, _)) => format!("{head}…"),
-            None => truncated,
-        });
-    }
-    (!phrase.is_empty()).then_some(phrase)
-}
-
 fn entry_line(path: &str, symbol: Option<&str>, notes: Vec<String>, line: Option<u64>) -> String {
     let mut entry = path.to_owned();
     if let Some(line) = line {
@@ -1033,28 +850,6 @@ fn entry_line(path: &str, symbol: Option<&str>, notes: Vec<String>, line: Option
         entry.push_str(&notes.join(" · "));
     }
     entry
-}
-
-fn map_header(
-    cwd: &Path,
-    map: Option<&ContextMapRow>,
-    file_count: usize,
-    symbol_count: usize,
-) -> String {
-    format!(
-        "# Context map — {}\nscheme {} · {} files · {} symbols · state {} · generated {}",
-        cwd.display(),
-        MAP_SCHEME,
-        file_count,
-        symbol_count,
-        map.map_or("unknown", |map| match map.state {
-            oga_domain::ContextMapState::Building => "building",
-            oga_domain::ContextMapState::Partial => "partial",
-            oga_domain::ContextMapState::Ready => "ready",
-        }),
-        map.and_then(|map| map.built_at.as_deref())
-            .unwrap_or("unknown"),
-    )
 }
 
 fn line_count(bytes: &[u8]) -> usize {
@@ -1108,24 +903,6 @@ fn scope_covers_path(rules: &[String], cwd: &Path, target: &str) -> bool {
             target == base
         }
     })
-}
-
-fn path_prefix(prefix: &str, path: &str) -> bool {
-    let prefix = prefix.trim().trim_matches('/');
-    prefix.is_empty() || prefix == "." || path == prefix || path.starts_with(&format!("{prefix}/"))
-}
-
-fn depth_allowed(cwd: &Path, scope: &str, path: &str, depth: Option<usize>) -> bool {
-    let Some(depth) = depth else { return true };
-    let base = cwd.join(if scope.is_empty() || scope == "." {
-        ""
-    } else {
-        scope
-    });
-    let Some(relative) = relative_inside(&base, &cwd.join(path)) else {
-        return false;
-    };
-    relative.split('/').count().saturating_sub(1) <= depth
 }
 
 fn digest_of(bytes: &[u8]) -> String {

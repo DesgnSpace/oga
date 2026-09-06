@@ -29,7 +29,7 @@ const DELEGATE_DESCRIPTION: &str = concat!(
 
 const MODELS_DESCRIPTION: &str = concat!(
     "Read a project's capacity before naming a destination: preferred, enabled models, plus every model the project's routing rules name. ",
-    "Answers `{ love, models }` — `love` is the rules that route work naming no model, where a rule's `when` names the kinds of work it takes: classes, or subjects such as ui, backend, database, docs, tests, review, research, refactor. An empty `when` takes every other kind, and a subject match outranks a class match. ",
+    "Answers `{ love, models }` — `love` is the rules that route work naming no model, where a rule's `when` names the kinds of work it takes: classes, or subjects such as ui, backend, database, docs, tests, review, research, refactor. An empty `when` takes every other kind, and a subject match outranks a class match. A rule's `models` is the ordered chain tried first to last when no destination is named. ",
     "Each model row is ready to pass to delegate and carries a usage summary. ",
     "Widen it with `onlyPreferred: false`, or `onlyEnabled: false` to see what is switched off."
 );
@@ -46,9 +46,7 @@ const TASKS_DESCRIPTION: &str = "Find delegated tasks. No arguments lists active
 
 const MEMORY_DESCRIPTION: &str = "Read or update durable project facts shared across Oga callers and delegated workers; delegation ships the cwd's active memories automatically. Store decisions, constraints, and conventions, never secrets or transient task status. Use expectedVersion to prevent concurrent overwrites.";
 
-const MAP_DESCRIPTION: &str = "List where a project's files and top-level symbols are, without searching the tree. Oga re-verifies the map against disk as you ask, so the answer is fresh — but it is an index, not a specification, so open a file before acting on an entry. The `options` selectors compose; globs are not supported; omit `options` or pass `{}` for the whole map. For a plain-language question, use `query`.";
-
-const QUERY_DESCRIPTION: &str = "Ask where something lives before searching the tree — \"email driver\" can answer `src/adapters.ts#emailDriver`. Answers with one anchor when confident, a few candidates when not, or an honest miss telling you to search instead. The index can lag the code, so read the source it names before acting. Use `map` to browse a directory or resolve an exact symbol or path.";
+const QUERY_DESCRIPTION: &str = "Ask where something lives before searching the tree — \"email driver\" can answer `src/adapters.ts#emailDriver`. Answers with one anchor when confident, a few candidates when not, or an honest miss telling you to search instead. The index can lag the code, so read the source it names before acting.";
 
 const REPLY_DESCRIPTION: &str = "Answer the question a task is parked on in needs_input. Answer what is in scope and reversible yourself; escalate product intent, secrets, destructive actions, and requests for new authority. Send the answer alone — the session still holds the brief. Optional scope replaces the task's scope and becomes the cwd's grant.";
 
@@ -565,66 +563,6 @@ pub fn tool_list() -> Value {
                 ),
             ]),
             &["action", "cwd"],
-        ),
-    ));
-
-    tools.push(tool(
-        "map",
-        MAP_DESCRIPTION,
-        object_schema(
-            Map::from_iter([
-                (
-                    "cwd".into(),
-                    described(
-                        json!({ "type": "string", "minLength": 1 }),
-                        "Absolute path of the project whose map is asked for.",
-                    ),
-                ),
-                (
-                    "options".into(),
-                    described(object_schema(
-                        Map::from_iter([
-                            (
-                                "path".into(),
-                                described(
-                                    json!({ "type": "array", "items": { "type": "string" } }),
-                                    "An exact file or directory. A directory limits the map to that subtree. Repeatable.",
-                                ),
-                            ),
-                            (
-                                "symbol".into(),
-                                described(
-                                    json!({ "type": "array", "items": { "type": "string" } }),
-                                    "An exact symbol name, or a prefix ending in `*`. Repeatable.",
-                                ),
-                            ),
-                            (
-                                "q".into(),
-                                described(
-                                    json!({ "type": "string", "minLength": 1 }),
-                                    "Deprecated — use the `query` tool. A plain-language question, answered with a ranked anchor rather than a listing.",
-                                ),
-                            ),
-                            (
-                                "tier".into(),
-                                described(
-                                    json!({ "type": "string", "enum": ["full", "skeleton"] }),
-                                    "full shows symbols; skeleton shows paths and line counts. Directory prefixes default to skeleton.",
-                                ),
-                            ),
-                            (
-                                "depth".into(),
-                                described(
-                                    json!({ "type": "integer", "minimum": 0, "maximum": MAX_SAFE_INTEGER }),
-                                    "Maximum directory levels below each requested directory. Depth 0 keeps files directly inside it.",
-                                ),
-                            ),
-                        ]),
-                        &[],
-                    ), "Optional map selection. Omit it or pass {} for the default map."),
-                ),
-            ]),
-            &["cwd"],
         ),
     ));
 

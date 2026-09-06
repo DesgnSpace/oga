@@ -17,8 +17,8 @@ mod walk;
 
 pub use index::{
     BuildOptions, BuildResult, ContextError, ContextIndex, ContextResult, ContextTarget,
-    LearnRouteProposal, LearnRouteRejection, LearnRoutesResult, QueryOptions, QuestionCandidate,
-    QuestionOptions, ReconcileResult, RenderTier,
+    LearnRouteProposal, LearnRouteRejection, LearnRoutesResult, QuestionCandidate, QuestionOptions,
+    ReconcileResult,
 };
 pub use lang::{LanguageAdapter, adapters};
 pub use routes::RouteMove;

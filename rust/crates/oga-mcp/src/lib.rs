@@ -28,8 +28,8 @@ use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 mod hints;
-mod map;
 mod protocol;
+mod query;
 mod shaping;
 
 pub use protocol::{
@@ -199,7 +199,6 @@ impl McpServer {
             "health" => (self.health(), None),
             "tasks" => (self.tasks(&args)?, None),
             "memory" => self.memory(&args)?,
-            "map" => self.map(&args)?,
             "query" => self.query(&args)?,
             "reply" => self.reply(&args).await?,
             "resume" => self.resume(&args).await?,
@@ -461,29 +460,6 @@ impl McpServer {
         }
     }
 
-    fn map(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
-        let cwd = required_string(args, "cwd")?;
-        let options = args
-            .get("options")
-            .cloned()
-            .map(serde_json::from_value::<map::MapOptions>)
-            .transpose()
-            .map_err(|error| McpError::InvalidParams(format!("options: {error}")))?
-            .unwrap_or_default();
-        if let Some(question) = options.q.as_deref()
-            && !question.trim().is_empty()
-        {
-            return Ok((
-                json!(map::query(&self.state, &cwd, question).map_err(McpError::Message)?),
-                Some(cwd),
-            ));
-        }
-        Ok((
-            json!(map::lookup(&self.state, &cwd, &options).map_err(McpError::Message)?),
-            Some(cwd),
-        ))
-    }
-
     fn query(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
         let requested_cwd = required_string(args, "cwd")?;
         let question = required_string(args, "q")?;
@@ -505,7 +481,7 @@ impl McpServer {
             requested_cwd
         };
         Ok((
-            json!(map::query(&self.state, &cwd, &question).map_err(McpError::Message)?),
+            json!(query::query(&self.state, &cwd, &question).map_err(McpError::Message)?),
             Some(cwd),
         ))
     }

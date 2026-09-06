@@ -5,8 +5,13 @@
 ### Added
 
 - `oga love --when` now routes by subject as well as class: `oga love opencode:muse --when ui` sends UI work there, with `backend`, `database`, `docs`, `tests`, `review`, `research`, and `refactor` alongside the existing kinds. A subject rule wins over a class rule, and `oga delegate --kind <subject>` names the subject when the task text never says so.
+- `oga love` now takes an ordered list of destinations per rule, like `oga love opencode:luna:max claude:opus:low --when ui`. The first destination that can take the work runs it; when it is rate-limited, out of credits, or otherwise unavailable, the next one runs instead, and the task record says which one ran and why it was not the first. Each destination is `worker:model:effort` with the model or the effort left out.
 - Work a delegated worker ships now carries a short stamp naming the provider, model, and effort behind it: a `Supervised-by:` trailer on commits it creates and a footer on pull requests it opens. Turn it off per project with `worker: attribution: false` in `.oga.yaml`, or everywhere with the same key in `~/.oga.yaml`.
 - `oga archive --delete-branch` can now remove a worktree task's local branch safely, while explaining when Git keeps it.
+
+### Removed
+
+- The project map is gone. `oga query` answers the same questions in plain language and points at the exact line, so browsing a generated listing of files and symbols no longer has a place. Anything the old map stored is cleaned up the first time this version runs. A worker prompt you customized to include `{{context_map}}` keeps working: that spot now fills with nothing rather than showing the placeholder.
 
 ### Changed
 

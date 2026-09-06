@@ -61,6 +61,7 @@ fn model_rows_expose_each_model_effort_ladder() {
         &ModelOverrides::default(),
         &settings(std::slice::from_ref(&model)),
         &oga_domain::ModelQuery::default(),
+        &[profile(Provider::Claude)],
     );
     assert_eq!(
         rows[0].efforts.as_deref(),
@@ -350,6 +351,7 @@ fn model_rows_join_catalog_entries_with_settings_and_narrowing() {
         &overrides,
         &settings(&catalog),
         &ModelQuery::default(),
+        &[profile(Provider::Claude)],
     );
     let haiku = rows_all.iter().find(|row| row.model == "haiku").unwrap();
     assert!(haiku.preferred);
@@ -366,6 +368,7 @@ fn model_rows_join_catalog_entries_with_settings_and_narrowing() {
             only_preferred: Some(false),
             ..ModelQuery::default()
         },
+        &[profile(Provider::Claude)],
     );
     assert_eq!(widened.len(), 4);
 
@@ -376,6 +379,7 @@ fn model_rows_join_catalog_entries_with_settings_and_narrowing() {
         &empty,
         &settings(&catalog),
         &ModelQuery::default(),
+        &[profile(Provider::Claude)],
     );
     assert!(rows.iter().all(|row| !row.preferred));
     assert_eq!(rows.len(), 4);
@@ -389,6 +393,7 @@ fn model_rows_join_catalog_entries_with_settings_and_narrowing() {
             query: Some("OPUS".into()),
             ..ModelQuery::default()
         },
+        &[profile(Provider::Claude)],
     );
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].model, "opus");
@@ -408,22 +413,32 @@ fn a_model_any_love_rule_names_survives_the_narrowed_view() {
     let mut settings = settings(&catalog);
     settings.love = LoveRules(vec![
         LoveRule {
-            model: "opus".into(),
-            profile_id: None,
+            destinations: vec![oga_config::LoveDestination {
+                profile_id: None,
+                model: Some("opus".into()),
+                effort: Some("max".into()),
+            }],
             when: vec![oga_domain::WorkKind::Reasoning],
-            effort: Some("max".into()),
             scope: "project".into(),
         },
         LoveRule {
-            model: "sonnet".into(),
-            profile_id: Some("codex-work".into()),
+            destinations: vec![oga_config::LoveDestination {
+                profile_id: Some("codex-work".into()),
+                model: Some("sonnet".into()),
+                effort: None,
+            }],
             when: Vec::new(),
-            effort: None,
             scope: "project".into(),
         },
     ]);
 
-    let rows = select_model_rows(&catalog, &overrides, &settings, &ModelQuery::default());
+    let rows = select_model_rows(
+        &catalog,
+        &overrides,
+        &settings,
+        &ModelQuery::default(),
+        &[profile(Provider::Claude)],
+    );
 
     let loved = rows
         .iter()
@@ -452,6 +467,7 @@ fn a_model_nobody_switched_on_is_reported_unavailable() {
             only_preferred: Some(false),
             ..ModelQuery::default()
         },
+        &[profile(Provider::Claude)],
     );
 
     assert_eq!(rows.len(), catalog.len());
@@ -464,6 +480,7 @@ fn a_model_nobody_switched_on_is_reported_unavailable() {
             &ModelOverrides::default(),
             &nothing_on,
             &ModelQuery::default(),
+            &[profile(Provider::Claude)],
         )
         .is_empty()
     );

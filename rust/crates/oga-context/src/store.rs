@@ -4,15 +4,21 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use oga_domain::{ContextFile, ContextMapRow, ContextMapState, ContextSymbol, SymbolKind};
+use oga_domain::SymbolKind;
 use oga_store::{Store, StoreError};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 use crate::text::{identifier_tokens, name_key};
 
-/// The index layout this binary writes. A stored map built by an older layout
-/// is rebuilt rather than read.
-pub(crate) const MAP_SCHEME: u32 = 7;
+/// The index layout this binary writes. An index built by an older layout is
+/// rebuilt rather than read.
+pub(crate) const INDEX_SCHEME: u32 = 7;
+
+/// What the index knows about its own last build for one project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexRow {
+    pub scheme: u32,
+}
 
 /// One file as the index holds it, before its symbols are loaded.
 #[derive(Debug, Clone, PartialEq)]
@@ -70,42 +76,6 @@ pub fn file_rows(store: &Store, cwd: &Path) -> Result<HashMap<String, FileRow>, 
             .into_iter()
             .map(|file| (file.path.clone(), file))
             .collect())
-    })
-}
-
-/// Every indexed file with its symbols, for the map view.
-pub fn files_with_symbols(store: &Store, cwd: &Path) -> Result<Vec<ContextFile>, StoreError> {
-    let cwd = cwd.display().to_string();
-    store.with_connection(|connection| {
-        let mut statement = connection.prepare(&format!(
-            "SELECT {FILE_COLUMNS},updated_at FROM context_files WHERE cwd=? ORDER BY path"
-        ))?;
-        let files = statement
-            .query_map([&cwd], |row| {
-                Ok((file_from_row(row)?, row.get::<_, String>(7)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut statement = connection.prepare(
-            "SELECT kind,name,qualified,parent,line,end_line,signature,doc,exported FROM context_symbols WHERE file_id=? ORDER BY line,id",
-        )?;
-        let mut result = Vec::with_capacity(files.len());
-        for (file, updated_at) in files {
-            let symbols = statement
-                .query_map([file.id], context_symbol_from_row)?
-                .collect::<Result<Vec<_>, _>>()?;
-            result.push(ContextFile {
-                cwd: cwd.clone(),
-                path: file.path,
-                lang: file.lang,
-                lines: file.lines,
-                size: file.size,
-                mtime_ms: file.mtime_ms as f64,
-                digest: file.digest,
-                symbols,
-                updated_at,
-            });
-        }
-        Ok(result)
     })
 }
 
@@ -408,26 +378,15 @@ pub fn counts(store: &Store, cwd: &Path) -> Result<(usize, usize), StoreError> {
     })
 }
 
-pub fn map_row(store: &Store, cwd: &Path) -> Result<Option<ContextMapRow>, StoreError> {
+pub fn index_row(store: &Store, cwd: &Path) -> Result<Option<IndexRow>, StoreError> {
     store.with_connection(|connection| {
         Ok(connection
             .query_row(
-                "SELECT cwd,scheme,state,built_at,file_count,symbol_count,updated_at \
-                 FROM context_maps WHERE cwd=?",
+                "SELECT scheme FROM context_index WHERE cwd=?",
                 [cwd.display().to_string()],
                 |row| {
-                    Ok(ContextMapRow {
-                        cwd: row.get(0)?,
-                        scheme: row.get::<_, i64>(1)?.max(0) as u32,
-                        state: match row.get::<_, String>(2)?.as_str() {
-                            "building" => ContextMapState::Building,
-                            "partial" => ContextMapState::Partial,
-                            _ => ContextMapState::Ready,
-                        },
-                        built_at: row.get(3)?,
-                        file_count: row.get::<_, i64>(4)?.max(0) as u64,
-                        symbol_count: row.get::<_, i64>(5)?.max(0) as u64,
-                        updated_at: row.get(6)?,
+                    Ok(IndexRow {
+                        scheme: row.get::<_, i64>(0)?.max(0) as u32,
                     })
                 },
             )
@@ -435,7 +394,7 @@ pub fn map_row(store: &Store, cwd: &Path) -> Result<Option<ContextMapRow>, Store
     })
 }
 
-pub fn save_map(
+pub fn save_index(
     store: &Store,
     cwd: &Path,
     partial: bool,
@@ -446,14 +405,14 @@ pub fn save_map(
     let state = if partial { "partial" } else { "ready" };
     store.transaction(|transaction| {
         transaction.execute(
-            "INSERT INTO context_maps(cwd,scheme,state,built_at,file_count,symbol_count,updated_at) \
+            "INSERT INTO context_index(cwd,scheme,state,built_at,file_count,symbol_count,updated_at) \
              VALUES(?,?,?,?,?,?,?) \
              ON CONFLICT(cwd) DO UPDATE SET scheme=excluded.scheme,state=excluded.state,\
              built_at=excluded.built_at,file_count=excluded.file_count,\
              symbol_count=excluded.symbol_count,updated_at=excluded.updated_at",
             params![
                 cwd.display().to_string(),
-                MAP_SCHEME,
+                INDEX_SCHEME,
                 state,
                 now,
                 file_count,
@@ -490,20 +449,6 @@ fn symbol_from_row(row: &Row<'_>) -> rusqlite::Result<SymbolRow> {
         doc: non_empty(row.get(8)?),
         exported: row.get::<_, i64>(9)? != 0,
         digest: row.get(10)?,
-    })
-}
-
-fn context_symbol_from_row(row: &Row<'_>) -> rusqlite::Result<ContextSymbol> {
-    Ok(ContextSymbol {
-        kind: SymbolKind::parse(&row.get::<_, String>(0)?).unwrap_or(SymbolKind::Fn),
-        name: row.get(1)?,
-        qualified: row.get(2)?,
-        parent: non_empty(row.get(3)?),
-        line: row.get::<_, i64>(4)?.max(0) as u64,
-        end_line: row.get::<_, i64>(5)?.max(0) as u64,
-        signature: row.get(6)?,
-        doc: non_empty(row.get(7)?),
-        exported: row.get::<_, i64>(8)? != 0,
     })
 }
 

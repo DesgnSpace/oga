@@ -21,11 +21,10 @@ use url::Url;
 use crate::{
     AgentRemoved, AgentStopped, BrokerState, BrokerSummaryState, CompletionRequest, ConsumerInbox,
     DispatchRequest, EventFrame, EventHead, EventStreamOptions, EventStreamQuery, HandoffRequest,
-    MapInitRequest, MapInitResponse, MapQuery, MapResponse, MemoryList, MemoryWrite,
-    ModelSettingsSnapshot, ModelSettingsUpdate, ProfileCreate, ProfilePatch, ProjectList,
-    PromptConfig, PromptWrite, QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview,
-    RoutingPreviewRequest, StateQuery, SteerRequest, TaskActionResponse, TaskEventPage,
-    TaskEventsQuery, TurnsResponse, UsageResponse,
+    MemoryList, MemoryWrite, ModelSettingsSnapshot, ModelSettingsUpdate, ProfileCreate,
+    ProfilePatch, ProjectList, PromptConfig, PromptWrite, QueryInitRequest, QueryInitResponse,
+    QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview, RoutingPreviewRequest, StateQuery,
+    SteerRequest, TaskActionResponse, TaskEventPage, TaskEventsQuery, TurnsResponse, UsageResponse,
 };
 
 /// Errors returned by the loopback transport or by a broker response.
@@ -714,6 +713,9 @@ impl LoopbackClient {
         let mut url = self.endpoint(&["api", "query"]);
         url.query_pairs_mut().append_pair("cwd", &request.cwd);
         url.query_pairs_mut().append_pair("q", &request.question);
+        if let Some(task) = &request.task {
+            url.query_pairs_mut().append_pair("task", task);
+        }
         if let Some(limit) = request.limit {
             url.query_pairs_mut()
                 .append_pair("limit", &limit.to_string());
@@ -725,38 +727,11 @@ impl LoopbackClient {
         Ok(response.markdown)
     }
 
-    pub async fn map(&self, request: &MapQuery) -> Result<MapResponse, ClientError> {
-        let mut url = self.endpoint(&["api", "map"]);
-        url.query_pairs_mut().append_pair("task", &request.task);
-        for path in &request.paths {
-            url.query_pairs_mut().append_pair("path", path);
-        }
-        for symbol in &request.symbols {
-            url.query_pairs_mut().append_pair("symbol", symbol);
-        }
-        if let Some(depth) = request.depth {
-            url.query_pairs_mut()
-                .append_pair("depth", &depth.to_string());
-        }
-        if let Some(question) = &request.question {
-            url.query_pairs_mut().append_pair("q", question);
-        }
-        if let Some(tier) = request.tier {
-            url.query_pairs_mut().append_pair("tier", tier.as_str());
-        }
-        if let Some(limit) = request.limit {
-            url.query_pairs_mut()
-                .append_pair("limit", &limit.to_string());
-        }
-        if request.code {
-            url.query_pairs_mut().append_pair("code", "true");
-        }
-        self.send_json(Method::GET, url, None, Some("application/json"))
-            .await
-    }
-
-    pub async fn init_map(&self, request: &MapInitRequest) -> Result<MapInitResponse, ClientError> {
-        let mut url = self.endpoint(&["api", "map", "init"]);
+    pub async fn init_query_index(
+        &self,
+        request: &QueryInitRequest,
+    ) -> Result<QueryInitResponse, ClientError> {
+        let mut url = self.endpoint(&["api", "query", "init"]);
         url.query_pairs_mut().append_pair("cwd", &request.cwd);
         if request.force {
             url.query_pairs_mut().append_pair("force", "true");
@@ -1156,7 +1131,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::{CursorFrame, MapTier};
+    use crate::CursorFrame;
 
     #[derive(Clone)]
     struct MockState {
@@ -1321,11 +1296,7 @@ mod tests {
             ("GET", "/api/query") => {
                 json_response(StatusCode::OK, json!({ "markdown": "# Context" }))
             }
-            ("GET", "/api/map") => json_response(
-                StatusCode::OK,
-                json!({ "markdown": "# Map", "files": [], "omitted": { "outsideScope": 2, "gone": 1 } }),
-            ),
-            ("POST", "/api/map/init") => json_response(
+            ("POST", "/api/query/init") => json_response(
                 StatusCode::OK,
                 json!({ "fileCount": 1, "symbolCount": 1, "partial": false, "changed": true, "elapsedMs": 1 }),
             ),
@@ -1644,16 +1615,14 @@ mod tests {
             .query(&QueryRequest::new("/home/test", "where is the task"))
             .await
             .expect("query");
-        let map = client
-            .map(&MapQuery::new("task").path("src").tier(MapTier::Full))
-            .await
-            .expect("map");
-        assert_eq!(map.omitted.outside_scope, 2);
-        assert_eq!(map.omitted.gone, 1);
         client
-            .init_map(&MapInitRequest::new("/home/test"))
+            .query(&QueryRequest::new("/home/test", "where is the task").task("task"))
             .await
-            .expect("map init");
+            .expect("task query");
+        client
+            .init_query_index(&QueryInitRequest::new("/home/test"))
+            .await
+            .expect("query init");
         client
             .create_profile(&ProfileCreate {
                 id: None,

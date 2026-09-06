@@ -400,11 +400,14 @@ pub fn model_capabilities(
 }
 
 /// One `/api/models` row: the catalog entry joined with per-project settings.
+/// Profiles ride along so a rule naming a worker alone still marks that
+/// worker's default model as loved.
 pub fn select_model_rows(
     models: &[ModelInfo],
     overrides: &ModelOverrides,
     settings: &ResolvedModelSettings,
     query: &ModelQuery,
+    profiles: &[Profile],
 ) -> Vec<ModelSettingsRow> {
     let rows: Vec<ModelSettingsRow> = models
         .iter()
@@ -414,13 +417,19 @@ pub fn select_model_rows(
                 .as_ref()
                 .and_then(|o| o.enabled)
                 .unwrap_or_else(|| model_enabled(settings, &model.profile_id, &model.id));
+            let default_model = profiles
+                .iter()
+                .find(|profile| profile.id == model.profile_id)
+                .map(|profile| profile.default_model.as_str());
             ModelSettingsRow {
                 profile: model.profile_id.clone(),
                 model: model.id.clone(),
                 capabilities: model_capabilities(model, override_for_model.as_ref()),
                 enabled,
                 preferred: override_for_model.as_ref().and_then(|o| o.preferred) == Some(true),
-                loved: settings.love.names_model(&model.profile_id, &model.id),
+                loved: settings
+                    .love
+                    .names_model(&model.profile_id, &model.id, default_model),
                 efforts: model.efforts.clone(),
                 default_effort: model.default_effort.clone(),
                 usage: None,
