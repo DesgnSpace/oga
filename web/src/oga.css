@@ -3599,8 +3599,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 }
 
 .usage-heatmap {
-    display: grid;
-    gap: var(--space-2);
+    display: contents;
     width: 100%;
     min-width: 0;
 }
@@ -3608,8 +3607,10 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .usage-heatmap-header {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-end;
     gap: var(--space-2);
+    grid-column: 1;
+    grid-row: 2;
 }
 
 .usage-heatmap-month-label {
@@ -3624,6 +3625,14 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     align-items: start;
     justify-content: center;
     gap: 4px;
+    grid-column: 1;
+    grid-row: 3;
+}
+
+.usage-overview > .usage-period-switch {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
 }
 
 .usage-heatmap-weekdays {
@@ -3703,6 +3712,8 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-width: 0;
     max-width: 38rem;
     margin-inline: auto;
+    grid-column: 1;
+    grid-row: 3;
 }
 
 .usage-chart-title {
