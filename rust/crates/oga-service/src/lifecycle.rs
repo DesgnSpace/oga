@@ -65,6 +65,7 @@ pub struct RunOutcome {
 #[derive(Clone, Default)]
 pub struct ActiveRuns {
     processes: Arc<Mutex<HashMap<String, Arc<RunningProcess>>>>,
+    starting: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 #[derive(Default)]
@@ -87,6 +88,35 @@ impl ActiveRuns {
             .expect("active run map is not poisoned")
             .get(task_id)
             .cloned()
+    }
+
+    pub(crate) fn mark_starting(&self, task_id: &str) {
+        let mut starting = self
+            .starting
+            .lock()
+            .expect("starting run map is not poisoned");
+        *starting.entry(task_id.to_owned()).or_default() += 1;
+    }
+
+    pub(crate) fn clear_starting(&self, task_id: &str) {
+        let mut starting = self
+            .starting
+            .lock()
+            .expect("starting run map is not poisoned");
+        let Some(count) = starting.get_mut(task_id) else {
+            return;
+        };
+        *count -= 1;
+        if *count == 0 {
+            starting.remove(task_id);
+        }
+    }
+
+    pub(crate) fn is_starting(&self, task_id: &str) -> bool {
+        self.starting
+            .lock()
+            .expect("starting run map is not poisoned")
+            .contains_key(task_id)
     }
 
     pub(crate) fn remove(&self, task_id: &str, process: &Arc<RunningProcess>) {

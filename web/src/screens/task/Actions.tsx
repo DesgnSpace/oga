@@ -5,6 +5,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { broker } from "@/bridge/client";
 import type {
+  ArchiveTaskResponse,
   BridgeError,
   CompletionCode,
   ModelSettingsSnapshot,
@@ -28,8 +29,8 @@ import { toast } from "@/state/toast";
 /** Any task-like value with just the state a menu needs to gate on. */
 export type TaskLike = { state: TaskState; archivedAt?: string };
 
-export function executeArchive(taskId: string, archived: boolean) {
-  return broker.archiveTask(taskId, archived);
+export function executeArchive(taskId: string, archived: boolean, deleteBranch = false) {
+  return broker.archiveTask(taskId, archived, deleteBranch);
 }
 
 export function executeCancel(taskId: string) {
@@ -159,6 +160,34 @@ export function archiveTitles(task: TaskToastSource, archived: boolean): TaskToa
       : { pending: "Archiving task", success: "Task archived", failure: "archive this task" });
 }
 
+export function archiveBranchTitles(task: TaskToastSource): TaskToastTitles {
+  return taskToastTitles(task,
+    (name) => ({
+      pending: `Archiving ${name} and deleting its branch`,
+      success: `${name} archived and branch deleted`,
+      failure: `archive ${name} and delete its branch`,
+    }),
+    {
+      pending: "Archiving task and deleting its branch",
+      success: "Task archived and branch deleted",
+      failure: "archive this task and delete its branch",
+    });
+}
+
+export function archiveBranchSuccess(task: TaskToastSource, response: ArchiveTaskResponse | undefined): string {
+  const name = taskToastName(task);
+  const subject = name ? `"${name}"` : "Task";
+  if (!response) return `${subject} archived; branch status unavailable`;
+  if (response.branchOutcome === "deleted") return `${subject} archived and branch deleted`;
+  if (response.branchOutcome === "already_gone") return `${subject} archived; branch was already gone`;
+  if (response.branchOutcome === "kept") {
+    return response.branchReason
+      ? `${subject} archived; branch kept: ${response.branchReason}`
+      : `${subject} archived; branch kept`;
+  }
+  return `${subject} archived`;
+}
+
 export function replyTitles(task: TaskToastSource): TaskToastTitles {
   return taskToastTitles(task,
     (name) => ({ pending: `Sending reply for ${name}`, success: `Reply sent for ${name}`, failure: `send the reply for ${name}` }),
@@ -194,6 +223,74 @@ export interface BlockedExplanation {
   rawReason?: string;
   deniedPaths: string[];
   suggestedScope?: TaskScope;
+}
+
+export interface ArchiveBranchTask extends TaskToastSource {
+  id: string;
+  branch: string;
+  state: TaskState;
+}
+
+export function ArchiveBranchDialog({
+  task,
+  open,
+  onClose,
+  onChanged,
+}: {
+  task: ArchiveBranchTask;
+  open: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const titleId = React.useId();
+  // SAFETY: task.state is the domain state used by the archive action.
+  const stopsBeforeArchive = !(["completed", "failed", "cancelled"] as TaskState[]).includes(task.state);
+
+  const archive = async () => {
+    if (busy) return;
+    setBusy(true);
+    const titles = archiveBranchTitles(task);
+    const lifecycle = toast.pending(titles.pending);
+    try {
+      const result = await executeArchive(task.id, true, true);
+      setBusy(false);
+      if (result.ok) {
+        lifecycle.success(archiveBranchSuccess(task, result.value));
+        onChanged();
+      } else {
+        const failure = actionFailure(result.error, titles.failure);
+        lifecycle.error(failure.title, failure.options);
+      }
+    } catch (error) {
+      setBusy(false);
+      const failure = actionFailure(
+        { message: error instanceof Error ? error.message : "Unknown error" },
+        titles.failure,
+      );
+      lifecycle.error(failure.title, failure.options);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} labelledBy={titleId} className="modal-dialog-cancel">
+      <h2 id={titleId}>Archive task and delete branch?</h2>
+      <p>
+        {stopsBeforeArchive
+          ? "Oga stops and archives this task, then removes its checkout if it is clean and unused. "
+          : "This archives the task and removes its checkout if it is clean and unused. "}
+        Oga deletes <code>{task.branch}</code> only when it has no unmerged commits and no other checkout uses it. Uncommitted work keeps the checkout and branch.
+      </p>
+      <div className="handoff-actions">
+        <button className="settings-button" type="button" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button className="settings-button settings-button-danger" type="button" onClick={() => void archive()} disabled={busy}>
+          Archive and delete
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 function deniedPaths(current: TaskScope | undefined, suggested: TaskScope | undefined): string[] {
@@ -263,6 +360,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
   const [busy, setBusy] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [confirmingCancel, setConfirmingCancel] = React.useState(false);
+  const [confirmingArchiveBranch, setConfirmingArchiveBranch] = React.useState(false);
   const [handoffOpen, setHandoffOpen] = React.useState(false);
   const [placement, setPlacement] = React.useState<HeaderMenuPlacement | null>(null);
   const triggerRef = React.useRef<HTMLDivElement>(null);
@@ -271,6 +369,8 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
   const completable = canComplete(task) && task.state !== "blocked";
   const handoffable = canHandoff(task);
   const archived = task.archivedAt !== undefined;
+  const branch = task.worktree?.branch;
+  const canDeleteBranch = !archived && branch !== undefined;
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -399,6 +499,21 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
           void run(() => executeArchive(task.id, !archived), archiveTitles(task, archived));
         },
       },
+      ...(canDeleteBranch
+        ? [
+            {
+              key: "archive-delete-branch",
+              label: "Archive and delete branch",
+              icon: <ArchiveIcon />,
+              destructive: true,
+              disabled: busy,
+              onSelect: () => {
+                setMenuOpen(false);
+                setConfirmingArchiveBranch(true);
+              },
+            },
+          ]
+        : []),
       ...(completable
         ? [
             {
@@ -464,6 +579,17 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
           </button>
         </div>
       </Modal>
+      {branch && (
+        <ArchiveBranchDialog
+          task={{ ...task, branch }}
+          open={confirmingArchiveBranch}
+          onClose={() => setConfirmingArchiveBranch(false)}
+          onChanged={() => {
+            setConfirmingArchiveBranch(false);
+            onChanged();
+          }}
+        />
+      )}
       <HandoffDialog
         task={task}
         open={handoffOpen}

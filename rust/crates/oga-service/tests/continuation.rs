@@ -1,8 +1,11 @@
-use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap, fs, os::unix::fs::PermissionsExt, path::Path, process::Command,
+    sync::Arc, time::Duration,
+};
 
 use oga_domain::{
-    CompletionCode, HoldArgs, HoldVerb, Profile, Provider, Task, TaskCompletion, TaskHold,
-    TaskKind, TaskScope, TaskState,
+    BranchOutcome, CompletionCode, HoldArgs, HoldVerb, Profile, Provider, Task, TaskCompletion,
+    TaskHold, TaskKind, TaskScope, TaskState, WorktreeRequest,
 };
 use oga_service::{
     ArchiveRequest, CancelRequest, CompletionAssertion, Dispatcher, HandoffRequest, ReplyRequest,
@@ -10,6 +13,7 @@ use oga_service::{
     reply, resume, steer,
 };
 use oga_store::Store;
+use oga_worktree::{branch_exists, create_task_worktree_at};
 use tempfile::TempDir;
 
 fn profile(id: &str, default_model: &str) -> Profile {
@@ -101,6 +105,22 @@ fn service() -> (TempDir, Arc<Store>, Dispatcher) {
     switch_models_on(&store);
     let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
     (directory, store, dispatcher)
+}
+
+fn git(cwd: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+        .args(args)
+        .output()
+        .expect("git is installed");
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// Every model these fixtures run on, switched on. A model is unavailable until
@@ -351,6 +371,332 @@ async fn archive_stops_before_hiding_and_restore_keeps_terminal_state() {
         .expect("restore");
     assert!(restored.task.archived_at.is_none());
     assert_eq!(restored.task.state, TaskState::Cancelled);
+}
+
+#[tokio::test]
+async fn archives_a_clean_worktree_and_deletes_its_branch() {
+    let (directory, store, dispatcher) = service();
+    let repo = directory.path().join("project");
+    fs::create_dir(&repo).expect("repository directory");
+    git(&repo, &["init", "-b", "main"]);
+    fs::write(repo.join("tracked.txt"), "one\n").expect("tracked file");
+    git(&repo, &["add", "tracked.txt"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+    let created = create_task_worktree_at(
+        &directory.path().join("worktrees"),
+        &repo,
+        "archive-worktree",
+        &WorktreeRequest::default(),
+        Some("archive worktree"),
+    )
+    .await
+    .expect("worktree created");
+    let mut fixture = task(
+        "archive-worktree",
+        &created.cwd.to_string_lossy(),
+        TaskState::Completed,
+    );
+    fixture.branch = Some(created.worktree.branch.clone());
+    fixture.worktree = Some(created.worktree.clone());
+    store.repositories().tasks().insert(&fixture).expect("task");
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET origin_cwd=?,worktree_path=?,worktree_branch=? WHERE id=?",
+                rusqlite::params![
+                    &created.worktree.origin_cwd,
+                    &created.worktree.path,
+                    &created.worktree.branch,
+                    &fixture.id,
+                ],
+            )?;
+            Ok(())
+        })
+        .expect("worktree recorded");
+
+    let result = archive(
+        &dispatcher,
+        ArchiveRequest::new("archive-worktree", true).delete_branch(),
+    )
+    .await
+    .expect("archive");
+
+    assert_eq!(result.checkout.as_deref(), Some("removed"));
+    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
+    assert!(result.branch_reason.is_none());
+    assert!(!Path::new(&created.worktree.path).exists());
+    assert!(
+        !branch_exists(&repo, &created.worktree.branch)
+            .await
+            .expect("branch inspected")
+    );
+}
+
+#[tokio::test]
+async fn prunes_a_missing_checkout_before_deleting_its_branch() {
+    let (directory, store, dispatcher) = service();
+    let repo = directory.path().join("project");
+    fs::create_dir(&repo).expect("repository directory");
+    git(&repo, &["init", "-b", "main"]);
+    fs::write(repo.join("tracked.txt"), "one\n").expect("tracked file");
+    git(&repo, &["add", "tracked.txt"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+    let created = create_task_worktree_at(
+        &directory.path().join("worktrees"),
+        &repo,
+        "archive-missing-checkout",
+        &WorktreeRequest::default(),
+        Some("archive missing checkout"),
+    )
+    .await
+    .expect("worktree created");
+    let mut fixture = task(
+        "archive-missing-checkout",
+        &created.cwd.to_string_lossy(),
+        TaskState::Completed,
+    );
+    fixture.branch = Some(created.worktree.branch.clone());
+    fixture.worktree = Some(created.worktree.clone());
+    store.repositories().tasks().insert(&fixture).expect("task");
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET origin_cwd=?,worktree_path=?,worktree_branch=? WHERE id=?",
+                rusqlite::params![
+                    &created.worktree.origin_cwd,
+                    &created.worktree.path,
+                    &created.worktree.branch,
+                    &fixture.id,
+                ],
+            )?;
+            Ok(())
+        })
+        .expect("worktree recorded");
+    fs::remove_dir_all(&created.worktree.path).expect("missing checkout");
+
+    let result = archive(
+        &dispatcher,
+        ArchiveRequest::new("archive-missing-checkout", true).delete_branch(),
+    )
+    .await
+    .expect("archive");
+
+    assert_eq!(result.checkout.as_deref(), Some("nothing to remove"));
+    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
+    assert!(
+        !branch_exists(&repo, &created.worktree.branch)
+            .await
+            .expect("branch inspected")
+    );
+}
+
+#[tokio::test]
+async fn keeps_uncommitted_worktree_and_branch_when_archiving() {
+    let (directory, store, dispatcher) = service();
+    let repo = directory.path().join("project");
+    fs::create_dir(&repo).expect("repository directory");
+    git(&repo, &["init", "-b", "main"]);
+    fs::write(repo.join("tracked.txt"), "one\n").expect("tracked file");
+    git(&repo, &["add", "tracked.txt"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+    let created = create_task_worktree_at(
+        &directory.path().join("worktrees"),
+        &repo,
+        "archive-uncommitted",
+        &WorktreeRequest::default(),
+        Some("archive uncommitted worktree"),
+    )
+    .await
+    .expect("worktree created");
+    fs::write(created.cwd.join("unfinished.txt"), "unfinished\n").expect("unfinished file");
+    let mut fixture = task(
+        "archive-uncommitted",
+        &created.cwd.to_string_lossy(),
+        TaskState::Completed,
+    );
+    fixture.branch = Some(created.worktree.branch.clone());
+    fixture.worktree = Some(created.worktree.clone());
+    store.repositories().tasks().insert(&fixture).expect("task");
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET origin_cwd=?,worktree_path=?,worktree_branch=? WHERE id=?",
+                rusqlite::params![
+                    &created.worktree.origin_cwd,
+                    &created.worktree.path,
+                    &created.worktree.branch,
+                    &fixture.id,
+                ],
+            )?;
+            Ok(())
+        })
+        .expect("worktree recorded");
+
+    let result = archive(
+        &dispatcher,
+        ArchiveRequest::new("archive-uncommitted", true).delete_branch(),
+    )
+    .await
+    .expect("archive");
+
+    assert!(
+        result
+            .checkout
+            .as_deref()
+            .is_some_and(|checkout| checkout.starts_with("kept because it has uncommitted work: "))
+    );
+    assert_eq!(result.branch, Some(BranchOutcome::Kept));
+    assert_eq!(
+        result.branch_reason.as_deref(),
+        Some("checkout was kept, so the branch was kept")
+    );
+    assert!(Path::new(&created.worktree.path).exists());
+    assert!(
+        branch_exists(&repo, &created.worktree.branch)
+            .await
+            .expect("branch inspected")
+    );
+}
+
+#[tokio::test]
+async fn archive_keeps_a_checkout_used_by_a_settled_joined_task() {
+    let (directory, store, dispatcher) = service();
+    let repo = directory.path().join("project");
+    fs::create_dir(&repo).expect("repository directory");
+    git(&repo, &["init", "-b", "main"]);
+    fs::write(repo.join("tracked.txt"), "one\n").expect("tracked file");
+    git(&repo, &["add", "tracked.txt"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+    let created = create_task_worktree_at(
+        &directory.path().join("worktrees"),
+        &repo,
+        "archive-owner",
+        &WorktreeRequest::default(),
+        Some("archive owner"),
+    )
+    .await
+    .expect("worktree created");
+    for (id, state) in [
+        ("archive-owner", TaskState::Completed),
+        ("archive-joined", TaskState::Completed),
+    ] {
+        let mut fixture = task(id, &created.cwd.to_string_lossy(), state);
+        fixture.branch = Some(created.worktree.branch.clone());
+        fixture.worktree = Some(created.worktree.clone());
+        store.repositories().tasks().insert(&fixture).expect("task");
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE tasks SET origin_cwd=?,worktree_path=?,worktree_branch=? WHERE id=?",
+                    rusqlite::params![
+                        &created.worktree.origin_cwd,
+                        &created.worktree.path,
+                        &created.worktree.branch,
+                        id,
+                    ],
+                )?;
+                Ok(())
+            })
+            .expect("worktree recorded");
+    }
+
+    let result = archive(
+        &dispatcher,
+        ArchiveRequest::new("archive-owner", true).delete_branch(),
+    )
+    .await
+    .expect("archive");
+
+    assert_eq!(
+        result.checkout.as_deref(),
+        Some("kept because archive-joined is still using it")
+    );
+    assert_eq!(result.branch, Some(BranchOutcome::Kept));
+    assert!(Path::new(&created.worktree.path).exists());
+    assert!(
+        branch_exists(&repo, &created.worktree.branch)
+            .await
+            .expect("branch inspected")
+    );
+
+    let result = archive(
+        &dispatcher,
+        ArchiveRequest::new("archive-joined", true).delete_branch(),
+    )
+    .await
+    .expect("archive joined task");
+    assert_eq!(result.checkout.as_deref(), Some("removed"));
+    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
+    assert!(!Path::new(&created.worktree.path).exists());
+}
+
+#[tokio::test]
+async fn refuses_branch_deletion_without_a_worktree() {
+    let (directory, store, dispatcher) = service();
+    let cwd = directory.path().to_str().unwrap();
+    seed(&store, "archive-no-worktree", cwd, TaskState::Completed);
+
+    let error = archive(
+        &dispatcher,
+        ArchiveRequest::new("archive-no-worktree", true).delete_branch(),
+    )
+    .await
+    .expect_err("branch deletion requires a worktree");
+    assert_eq!(
+        error.to_string(),
+        "task action refused: deleteBranch only applies to worktree tasks"
+    );
+    assert!(
+        dispatcher
+            .task("archive-no-worktree")
+            .expect("task")
+            .archived_at
+            .is_none()
+    );
 }
 
 #[tokio::test]

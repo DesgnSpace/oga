@@ -37,6 +37,22 @@ describe("broker call serialisation", () => {
     });
   });
 
+  it("carries the branch deletion choice for archive calls", async () => {
+    const invoke = mock().mockResolvedValue(undefined);
+    setTransport(fakeTransport(invoke));
+
+    await broker.archiveTask("task-1", true, true);
+
+    expect(invoke).toHaveBeenCalledWith("broker_call", {
+      call: {
+        call: "archiveTask",
+        taskId: "task-1",
+        archived: true,
+        deleteBranch: true,
+      },
+    });
+  });
+
   it("sends the selected worker and model for a handoff", async () => {
     const invoke = mock().mockResolvedValue(undefined);
     setTransport(fakeTransport(invoke));

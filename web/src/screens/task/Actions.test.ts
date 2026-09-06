@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { canCancel, canComplete, canHandoff, canPause, canResume, explainBlocked } from "./Actions";
-import type { Task, TaskCompletion, TaskScope } from "@/bridge/types";
+import {
+  archiveBranchSuccess,
+  canCancel,
+  canComplete,
+  canHandoff,
+  canPause,
+  canResume,
+  explainBlocked,
+} from "./Actions";
+import type { ArchiveTaskResponse, Task, TaskCompletion, TaskScope } from "@/bridge/types";
 
 function scope(read: string[], write: string[]): TaskScope {
   return { read, write };
@@ -85,5 +93,26 @@ describe("explainBlocked", () => {
   test("no completion at all gets the generic no-record headline", () => {
     const explanation = explainBlocked(undefined, undefined);
     expect(explanation.headline).toBe("This task stopped unexpectedly, and there's no record of why.");
+  });
+});
+
+describe("archiveBranchSuccess", () => {
+  test("does not claim branch deletion when the reply has no branch status", () => {
+    expect(archiveBranchSuccess({ title: "Build the widget" }, undefined)).toBe(
+      '"Build the widget" archived; branch status unavailable',
+    );
+  });
+
+  test("explains why Git kept a branch", () => {
+    const response: ArchiveTaskResponse = {
+      id: "task",
+      state: "completed",
+      branchOutcome: "kept",
+      branchReason: "branch has unmerged commits",
+    };
+
+    expect(archiveBranchSuccess({ title: "Build the widget" }, response)).toBe(
+      '"Build the widget" archived; branch kept: branch has unmerged commits',
+    );
   });
 });

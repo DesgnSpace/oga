@@ -19,9 +19,9 @@ pub enum Move {
     /// steer left the instruction waiting for the current run to finish.
     Queued,
     /// cancel, complete, archive-restore, inspect — read off the state.
-    Settled,
-    /// archive — the task left the active lists.
-    Archived,
+    Settled { branch_gone: bool },
+    /// archive — the task left the active lists; the branch may be unavailable.
+    Archived { branch_gone: bool },
     /// worktree-remove — the checkout is gone; the branch may not be.
     CheckoutRemoved { branch_kept: bool },
 }
@@ -41,16 +41,25 @@ pub fn next(task: &Task, action: Move) -> Vec<Value> {
                 "stops the run and discards what is queued behind it",
             ));
         }
-        Move::Settled => settled(task, &mut hints),
-        Move::Archived => {
-            hints.push(hint(
-                "resume",
-                "unarchives and runs again, keeping the id and history",
-            ));
+        Move::Settled { branch_gone } => settled(task, &mut hints, branch_gone),
+        Move::Archived { branch_gone } => {
+            if !branch_gone {
+                hints.push(hint(
+                    "resume",
+                    "unarchives and runs again, keeping the id and history",
+                ));
+            }
             if let Some(path) = checkout(task) {
                 hints.push(hint(
                     "worktree-remove",
-                    format!("removes the checkout at {path} the archive kept; the branch stays"),
+                    format!(
+                        "removes the checkout at {path}; {}",
+                        if branch_gone {
+                            "the branch is unavailable"
+                        } else {
+                            "the branch stays"
+                        }
+                    ),
                 ));
             }
         }
@@ -122,15 +131,17 @@ fn started(task: &Task, hints: &mut Vec<Value>) {
     ));
 }
 
-fn settled(task: &Task, hints: &mut Vec<Value>) {
+fn settled(task: &Task, hints: &mut Vec<Value>, branch_gone: bool) {
     match task.state {
         TaskState::Completed => {
-            hints.push(hint(
-                "resume",
-                "follows up in the same session; an instruction is required",
-            ));
+            if !branch_gone {
+                hints.push(hint(
+                    "resume",
+                    "follows up in the same session; an instruction is required",
+                ));
+            }
             if let Some(path) = checkout(task) {
-                if let Some(branch) = task.effective_branch() {
+                if !branch_gone && let Some(branch) = task.effective_branch() {
                     hints.push(hint(
                         "shell",
                         format!(
@@ -140,7 +151,14 @@ fn settled(task: &Task, hints: &mut Vec<Value>) {
                 }
                 hints.push(hint(
                     "archive",
-                    format!("removes the checkout at {path}; the branch stays"),
+                    format!(
+                        "removes the checkout at {path}; {}",
+                        if branch_gone {
+                            "the branch is unavailable"
+                        } else {
+                            "the branch stays"
+                        }
+                    ),
                 ));
             }
         }
@@ -150,25 +168,28 @@ fn settled(task: &Task, hints: &mut Vec<Value>) {
                     "handoff",
                     "another model or account picks it up right now",
                 ));
-                hints.push(hint(
-                    "resume",
-                    match resets_at {
-                        Some(instant) => format!(
-                            "startAt: \"rate_limit\" waits until {instant} and runs it for free"
-                        ),
-                        None => {
-                            "startAt: \"rate_limit\" waits until the account has usage again".into()
-                        }
-                    },
-                ));
-            } else {
+                if !branch_gone {
+                    hints.push(hint(
+                        "resume",
+                        match resets_at {
+                            Some(instant) => format!(
+                                "startAt: \"rate_limit\" waits until {instant} and runs it for free"
+                            ),
+                            None => {
+                                "startAt: \"rate_limit\" waits until the account has usage again"
+                                    .into()
+                            }
+                        },
+                    ));
+                }
+            } else if !branch_gone {
                 hints.push(hint(
                     "resume",
                     "picks up where it stopped; add an instruction to change course",
                 ));
                 hints.push(hint("handoff", "same task on another model or profile"));
             }
-            if suggested_scope(task) {
+            if !branch_gone && suggested_scope(task) {
                 hints.push(hint(
                     "resume",
                     "pass the suggestedScope it named to approve the paths it was denied",
@@ -177,7 +198,14 @@ fn settled(task: &Task, hints: &mut Vec<Value>) {
             if let Some(path) = checkout(task) {
                 hints.push(hint(
                     "archive",
-                    format!("removes the checkout at {path}; the branch stays"),
+                    format!(
+                        "removes the checkout at {path}; {}",
+                        if branch_gone {
+                            "the branch is unavailable"
+                        } else {
+                            "the branch stays"
+                        }
+                    ),
                 ));
             }
         }
@@ -260,7 +288,7 @@ mod tests {
             branch: "oga/thing".into(),
             links: None,
         });
-        let hints = next(&cancelled, Move::Settled);
+        let hints = next(&cancelled, Move::Settled { branch_gone: false });
         let tools = hints
             .iter()
             .map(|hint| hint["tool"].as_str().expect("tool"))
@@ -274,8 +302,29 @@ mod tests {
 
     #[test]
     fn a_cancelled_task_without_a_checkout_never_mentions_one() {
-        let hints = next(&task(TaskState::Cancelled), Move::Settled);
+        let hints = next(
+            &task(TaskState::Cancelled),
+            Move::Settled { branch_gone: false },
+        );
         assert!(hints.iter().all(|hint| hint["tool"] != json!("archive")));
+    }
+
+    #[test]
+    fn an_archived_task_with_a_gone_branch_never_offers_resume() {
+        let hints = next(
+            &task(TaskState::Completed),
+            Move::Archived { branch_gone: true },
+        );
+        assert!(hints.iter().all(|hint| hint["tool"] != json!("resume")));
+    }
+
+    #[test]
+    fn a_settled_task_with_a_gone_branch_never_offers_resume() {
+        let hints = next(
+            &task(TaskState::Completed),
+            Move::Settled { branch_gone: true },
+        );
+        assert!(hints.iter().all(|hint| hint["tool"] != json!("resume")));
     }
 
     #[test]
@@ -312,7 +361,7 @@ mod tests {
             asserted_completion: None,
             dependency_blocked: None,
         });
-        let hints = next(&failed, Move::Settled);
+        let hints = next(&failed, Move::Settled { branch_gone: false });
         assert_eq!(hints[0]["tool"], json!("handoff"));
         assert!(
             hints[1]["when"]

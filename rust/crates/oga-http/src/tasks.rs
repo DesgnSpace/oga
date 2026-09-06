@@ -52,6 +52,8 @@ pub(crate) struct DispatchBody {
 #[serde(rename_all = "camelCase")]
 struct ArchiveBody {
     archived: bool,
+    #[serde(default)]
+    delete_branch: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -281,10 +283,11 @@ pub async fn archive(
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let body: ArchiveBody = parse_json(&body)?;
-    let result = state
-        .dispatcher
-        .archive(ArchiveRequest::new(id, body.archived))
-        .await?;
+    let mut request = ArchiveRequest::new(id, body.archived);
+    if body.delete_branch {
+        request = request.delete_branch();
+    }
+    let result = state.dispatcher.archive(request).await?;
     let mut response = response_view(&state, &result.task, false)?;
     if let Some(object) = response.as_object_mut() {
         if result.stopped {
@@ -292,6 +295,12 @@ pub async fn archive(
         }
         if let Some(checkout) = result.checkout {
             object.insert("checkout".into(), json!(checkout));
+        }
+        if let Some(branch) = result.branch {
+            object.insert("branchOutcome".into(), json!(branch));
+        }
+        if let Some(reason) = result.branch_reason {
+            object.insert("branchReason".into(), json!(reason));
         }
     }
     Ok(Json(response))

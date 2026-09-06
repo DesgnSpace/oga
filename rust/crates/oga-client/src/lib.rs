@@ -11,10 +11,10 @@ mod loopback;
 use std::{collections::BTreeMap, time::Duration};
 
 use oga_domain::{
-    ArchivedFilter, ConsumerDelivery, Difficulty, EventKind, EventPointer, MemoryEntry,
-    MemoryProject, ProfileFailure, ProfileView, ScopeGrant, SpendTotals, Task, TaskCompletion,
-    TaskEventView, TaskHoldView, TaskScope, TaskState, TaskSummary, TaskTopic, TaskTurn,
-    WorktreeOption,
+    ArchivedFilter, BranchOutcome, ConsumerDelivery, Difficulty, EventKind, EventPointer,
+    MemoryEntry, MemoryProject, ProfileFailure, ProfileView, ScopeGrant, SpendTotals, Task,
+    TaskCompletion, TaskEventView, TaskHoldView, TaskScope, TaskState, TaskSummary, TaskTopic,
+    TaskTurn, WorktreeOption,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -252,6 +252,10 @@ pub struct TaskActionResponse {
     pub stopped: Option<bool>,
     #[serde(default)]
     pub checkout: Option<String>,
+    #[serde(default)]
+    pub branch_outcome: Option<BranchOutcome>,
+    #[serde(default)]
+    pub branch_reason: Option<String>,
     #[serde(default)]
     pub unarchived: Option<bool>,
     #[serde(default)]

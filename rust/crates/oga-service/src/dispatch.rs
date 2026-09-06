@@ -22,7 +22,7 @@ use rusqlite::params;
 use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
-use tokio::time::sleep;
+use tokio::{sync::Mutex, time::sleep};
 use uuid::Uuid;
 
 use crate::{
@@ -197,6 +197,7 @@ pub struct DispatchPlan {
     pub hold: Option<oga_domain::TaskHold>,
     pub launch: bool,
     pub worktree_created: bool,
+    pub joined_task_id: Option<String>,
 }
 
 /// Result returned after the row is persisted. The worker itself is detached.
@@ -212,6 +213,7 @@ pub struct Dispatcher {
     store: Arc<Store>,
     runner: ProviderRunner,
     active: ActiveRuns,
+    worktree_operations: Arc<Mutex<()>>,
 }
 
 pub type TaskService = Dispatcher;
@@ -222,11 +224,16 @@ impl Dispatcher {
             store,
             runner,
             active: ActiveRuns::default(),
+            worktree_operations: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    pub(crate) fn worktree_operations(&self) -> &Mutex<()> {
+        &self.worktree_operations
     }
 
     pub(crate) fn active_runs(&self) -> ActiveRuns {
@@ -375,7 +382,7 @@ impl Dispatcher {
         if let Some(start_at) = request.start_at.as_deref() {
             dependency_plan = schedule_plan(dependency_plan, &task_id, start_at)?;
         }
-        let (task_cwd, worktree, worktree_created, branch) = self
+        let (task_cwd, worktree, worktree_created, branch, joined_task_id) = self
             .resolve_worktree(
                 &workspace,
                 &task_id,
@@ -482,6 +489,7 @@ impl Dispatcher {
             hold,
             launch: state == TaskState::Queued,
             worktree_created,
+            joined_task_id,
         })
     }
 
@@ -489,6 +497,11 @@ impl Dispatcher {
         &self,
         request: DispatchRequest,
     ) -> Result<DispatchResult, DispatchError> {
+        let worktree_guard = if request.worktree.is_some() {
+            Some(self.worktree_operations.lock().await)
+        } else {
+            None
+        };
         let plan = self.plan(request).await?;
         let task_id = plan.task.id.clone();
         let launched = plan.launch;
@@ -504,6 +517,7 @@ impl Dispatcher {
         if launched {
             self.launch(plan);
         }
+        drop(worktree_guard);
         let task = lifecycle::load_task(&self.store, &task_id)?.ok_or_else(|| {
             DispatchError::Refusal(format!("task disappeared after dispatch: {task_id}"))
         })?;
@@ -544,8 +558,9 @@ impl Dispatcher {
         let dispatcher = self.clone();
         let task_id = task.id.clone();
         let task_updated_at = task.updated_at.clone();
+        self.active.mark_starting(&task_id);
         tokio::spawn(async move {
-            match lifecycle::run_task_and_release_with_active(
+            let result = lifecycle::run_task_and_release_with_active(
                 dispatcher.store.clone(),
                 dispatcher.runner.clone(),
                 task,
@@ -556,8 +571,9 @@ impl Dispatcher {
                     active: dispatcher.active.clone(),
                 },
             )
-            .await
-            {
+            .await;
+            dispatcher.active.clear_starting(&task_id);
+            match result {
                 Ok(outcome) => {
                     if !dispatcher.park_unattended_failure(&outcome.task).await {
                         dispatcher.drain_follow_ups(&outcome.task);
@@ -1035,13 +1051,23 @@ impl Dispatcher {
         task_id: &str,
         option: Option<&WorktreeOption>,
         title: Option<&str>,
-    ) -> Result<(PathBuf, Option<TaskWorktree>, bool, Option<String>), DispatchError> {
+    ) -> Result<
+        (
+            PathBuf,
+            Option<TaskWorktree>,
+            bool,
+            Option<String>,
+            Option<String>,
+        ),
+        DispatchError,
+    > {
         let Some(request) = worktree_request(option) else {
             return Ok((
                 workspace.to_path_buf(),
                 None,
                 false,
                 current_branch(workspace).await?,
+                None,
             ));
         };
         if let Some(join_id) = request.join.as_deref() {
@@ -1052,6 +1078,11 @@ impl Dispatcher {
             }
             let joined = lifecycle::load_task(&self.store, join_id)?
                 .ok_or_else(|| DispatchError::Refusal(format!("unknown task: {join_id}")))?;
+            if joined.archived_at.is_some() {
+                return Err(DispatchError::Refusal(format!(
+                    "worktree.join cannot use archived task: {join_id}"
+                )));
+            }
             let worktree = joined_worktree_of(&joined)?;
             if project_cwd(&joined) != workspace {
                 return Err(DispatchError::Refusal(format!(
@@ -1064,11 +1095,18 @@ impl Dispatcher {
                 Some(worktree.clone()),
                 false,
                 Some(worktree.branch),
+                Some(join_id.to_owned()),
             ));
         }
         let created = create_task_worktree(workspace, task_id, &request, title).await?;
         let branch = created.worktree.branch.clone();
-        Ok((created.cwd, Some(created.worktree), true, Some(branch)))
+        Ok((
+            created.cwd,
+            Some(created.worktree),
+            true,
+            Some(branch),
+            None,
+        ))
     }
 
     fn plan_dependencies(
@@ -1334,6 +1372,18 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
         .map(encode)
         .transpose()?;
     store.transaction(|tx| {
+        if let Some(joined_task_id) = &plan.joined_task_id {
+            let archived_at = tx.query_row(
+                "SELECT archived_at FROM tasks WHERE id=?",
+                [joined_task_id],
+                |row| row.get::<_, Option<String>>(0),
+            )?;
+            if archived_at.is_some() {
+                return Err(StoreError::Refusal(format!(
+                    "worktree.join cannot use archived task: {joined_task_id}"
+                )));
+            }
+        }
         tx.execute(
             "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![

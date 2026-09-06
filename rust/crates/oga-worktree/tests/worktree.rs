@@ -7,10 +7,11 @@ use oga_domain::{
     WorktreeRequest,
 };
 use oga_worktree::{
-    WorktreeError, WorktreeJoinCode, active_checkout_tasks, branch_exists, create_task_worktree_at,
-    joined_worktree_of, recreate_task_worktree, remove_task_branch, remove_task_worktree,
-    require_worktree_paths, unsettled_checkout_writers, validate_join_request,
-    worktree_has_uncommitted_work, worktree_request,
+    WorktreeError, WorktreeJoinCode, active_checkout_tasks, branch_exists, branch_recreatable,
+    create_task_worktree_at, joined_worktree_of, recreate_task_worktree, remove_task_branch,
+    remove_task_branch_safely, remove_task_worktree, require_worktree_paths,
+    unsettled_checkout_writers, validate_join_request, worktree_has_uncommitted_work,
+    worktree_request,
 };
 use tempfile::TempDir;
 
@@ -94,6 +95,14 @@ async fn seeds_the_checkout_and_ignores_the_seeded_path_as_work() {
             .await
             .unwrap()
     );
+
+    fs::write(created.cwd.join(".env.local"), "secret\n").expect("ignored file");
+    assert!(
+        worktree_has_uncommitted_work(&created.worktree)
+            .await
+            .unwrap()
+    );
+    fs::remove_file(created.cwd.join(".env.local")).expect("ignored file removal");
 
     fs::write(created.cwd.join("scratch.txt"), "unfinished\n").expect("scratch file");
     assert!(
@@ -329,6 +338,96 @@ async fn starts_from_a_commit_and_recreates_the_removed_checkout() {
 }
 
 #[tokio::test]
+async fn refuses_to_delete_a_branch_with_unmerged_commits() {
+    let (temp, repo) = repository();
+    let created = create_task_worktree_at(
+        &temp.path().join("worktrees"),
+        &repo,
+        "unmerged-task",
+        &WorktreeRequest::default(),
+        Some("unmerged work"),
+    )
+    .await
+    .expect("worktree created");
+    fs::write(created.cwd.join("unfinished.txt"), "unfinished\n").expect("unfinished file");
+    git(&created.cwd, &["add", "unfinished.txt"]);
+    git(
+        &created.cwd,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "unfinished work",
+        ],
+    );
+    remove_task_worktree(&created.worktree)
+        .await
+        .expect("checkout removed");
+
+    let removal = remove_task_branch_safely(&created.worktree)
+        .await
+        .expect("branch inspected");
+    assert_eq!(removal.outcome, BranchOutcome::Kept);
+    assert_eq!(
+        removal.reason.as_deref(),
+        Some("branch has unmerged commits")
+    );
+    assert!(
+        branch_exists(&repo, &created.worktree.branch)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn refuses_to_delete_a_branch_checked_out_elsewhere() {
+    let (temp, repo) = repository();
+    let created = create_task_worktree_at(
+        &temp.path().join("worktrees"),
+        &repo,
+        "checked-out-task",
+        &WorktreeRequest::default(),
+        Some("checked out elsewhere"),
+    )
+    .await
+    .expect("worktree created");
+    remove_task_worktree(&created.worktree)
+        .await
+        .expect("checkout removed");
+    let elsewhere = temp.path().join("elsewhere");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            elsewhere.to_str().expect("elsewhere path"),
+            &created.worktree.branch,
+        ],
+    );
+
+    assert!(!branch_recreatable(&created.worktree).await.unwrap());
+
+    let removal = remove_task_branch_safely(&created.worktree)
+        .await
+        .expect("branch inspected");
+    assert_eq!(removal.outcome, BranchOutcome::Kept);
+    assert!(
+        removal
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("branch is checked out at"))
+    );
+    assert!(
+        branch_exists(&repo, &created.worktree.branch)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn refuses_bad_links_before_creating_a_checkout() {
     let (temp, repo) = repository();
     fs::create_dir(repo.join("node_modules")).expect("untracked directory");
@@ -372,8 +471,24 @@ async fn recreating_a_missing_branch_is_refused() {
         remove_task_branch(&created.worktree).await.unwrap(),
         BranchOutcome::Deleted
     );
+    assert!(!branch_recreatable(&created.worktree).await.unwrap());
     let error = recreate_task_worktree(&created.worktree).await.unwrap_err();
     assert!(error.to_string().contains("no longer exists"));
+}
+
+#[tokio::test]
+async fn branch_removal_reports_repository_inspection_failure() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let worktree = oga_domain::TaskWorktree {
+        origin_cwd: temp.path().join("missing").display().to_string(),
+        path: temp.path().join("checkout").display().to_string(),
+        branch: "oga/missing".into(),
+        links: None,
+    };
+    let error = remove_task_branch_safely(&worktree)
+        .await
+        .expect_err("repository inspection should fail");
+    assert!(error.to_string().contains("could not inspect repository"));
 }
 
 #[test]

@@ -371,10 +371,23 @@ impl LoopbackClient {
         task_id: &str,
         archived: bool,
     ) -> Result<TaskActionResponse, ClientError> {
+        self.archive_task_with_branch_deletion(task_id, archived, false)
+            .await
+    }
+
+    pub async fn archive_task_with_branch_deletion(
+        &self,
+        task_id: &str,
+        archived: bool,
+        delete_branch: bool,
+    ) -> Result<TaskActionResponse, ClientError> {
         self.send_json(
             Method::PATCH,
             self.endpoint(&["api", "tasks", task_id]),
-            Some(serde_json::json!({ "archived": archived })),
+            Some(serde_json::json!({
+                "archived": archived,
+                "deleteBranch": delete_branch,
+            })),
             None,
         )
         .await

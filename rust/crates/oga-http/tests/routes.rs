@@ -785,6 +785,22 @@ async fn task_routes() {
     assert_eq!(preview["profileId"], "profile");
     assert_eq!(preview["model"], "fake");
 
+    let (status, invalid_branch_delete) = json_response(
+        request(
+            &fixture.router,
+            Method::PATCH,
+            "/api/tasks/task",
+            Body::from(json!({ "archived": true, "deleteBranch": true }).to_string()),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        invalid_branch_delete["error"],
+        "Error: deleteBranch only applies to worktree tasks"
+    );
+
     let (status, archived) = json_response(
         request(
             &fixture.router,

@@ -102,7 +102,8 @@ export const broker = {
 
   deleteProfile: (profileId: string) => call({ call: "deleteProfile", profileId }),
 
-  archiveTask: (taskId: string, archived: boolean) => call({ call: "archiveTask", taskId, archived }),
+  archiveTask: (taskId: string, archived: boolean, deleteBranch = false) =>
+    call<"archiveTask">({ call: "archiveTask", taskId, archived, deleteBranch }),
 
   cancelTask: (taskId: string) => call({ call: "cancelTask", taskId }),
 
