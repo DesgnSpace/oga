@@ -2964,7 +2964,10 @@ fn worker_config_json(
     let own = layers.project.as_ref();
     let mut worker = Map::new();
     if let Some((prompt, layer)) = read_worker_prompt(own)?.zip(own) {
-        worker.insert("workerPrompt".into(), json!(prompt));
+        worker.insert(
+            "workerPrompt".into(),
+            json!(oga_config::ensure_brief_slot(&prompt)),
+        );
         worker.insert("source".into(), json!(layer.path));
         return Ok(Value::Object(worker));
     }
@@ -2974,7 +2977,10 @@ fn worker_config_json(
         .or(read_worker_prompt(layers.user.as_ref())?)
         .or_else(|| saved.everywhere.clone())
         .unwrap_or_else(|| DEFAULT_WORKER_PROMPT.to_owned());
-    worker.insert("workerPrompt".into(), json!(prompt));
+    worker.insert(
+        "workerPrompt".into(),
+        json!(oga_config::ensure_brief_slot(&prompt)),
+    );
     Ok(Value::Object(worker))
 }
 
@@ -3992,7 +3998,7 @@ mod tests {
         };
         let worker = worker_config_json(&layers, &saved("saved rules")).unwrap();
 
-        assert_eq!(worker["workerPrompt"], "project rules");
+        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nproject rules");
         assert_eq!(worker["source"], "/work/.oga.yaml");
     }
 
@@ -4010,7 +4016,7 @@ mod tests {
         };
         let worker = worker_config_json(&layers, &saved("saved rules")).unwrap();
 
-        assert_eq!(worker["workerPrompt"], "saved rules");
+        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nsaved rules");
         assert!(worker.get("source").is_none());
     }
 
@@ -4025,7 +4031,7 @@ mod tests {
         };
         let worker = worker_config_json(&layers, &SavedWorkerPrompts::default()).unwrap();
 
-        assert_eq!(worker["workerPrompt"], "user rules");
+        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nuser rules");
     }
 
     #[test]

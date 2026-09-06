@@ -27,7 +27,23 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
+/// The worker prompt a fresh settings file starts from, editable in Settings
+/// or overridden per project from `.oga.yaml`. It is a default, not a frame:
+/// plain text that is sent as written once `{{brief}}`, `{{scope}}`,
+/// `{{context_map}}`, `{{memories}}`, `{{attribution}}`, and `{{reporting}}`
+/// are filled in per task, with the run itself as `{{task_id}}`,
+/// `{{provider}}`, `{{model}}`, `{{effort}}`. A user who deletes everything
+/// and writes one sentence gets one sentence sent. Code adds nothing except
+/// the task slot itself, first, when it is missing.
 pub const DEFAULT_WORKER_PROMPT: &str = concat!(
+    "Worker mode: you are executing an assigned Oga task.\n",
+    "Continue the assigned brief directly. Do not use Oga to delegate, resume, or manage another task, and do not create a child task for the same work.\n",
+    "\n",
+    "{{brief}}\n",
+    "\n",
+    "{{scope}}\n",
+    "\n",
+    "## Worker rules\n",
     "1. Blocked means stop. A command that will not run, a missing credential, an account or signup, a permission denial, a path outside your scope, a decision this brief does not answer — stop and report it, naming the blocker and the one decision you need.\n",
     "2. Do not work around a blocker. No retry loops, no second tool for the same job, no creating accounts, no linking or authenticating anything, no faking or stubbing the result. Stop, finish what does not depend on it, then report the exact command or path and say whether you need the caller to decide or to run it and return the output.\n",
     "3. Partial work is a valid result. Finish what is unblocked, then report what you stopped on.\n",
@@ -35,7 +51,20 @@ pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "5. Open your final report with `## TL;DR` — 1-3 plain-language sentences stating what was done or found and the outcome. Detail follows after; this applies to your final answer, not to intermediate messages.\n",
     "6. Write that TL;DR as bullets — one idea per line, never a paragraph — and make it stand alone: no bullet may need the detail below it to make sense.\n",
     "7. Keep it to roughly ten lines or fewer: the verdict; what the work did or decided, one meaningful line per decision; checks run and their results, quoting failures exactly; and what is left, broken, or uncertain, or \"nothing\".\n",
-    "8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks."
+    "8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks.\n",
+    "9. Clear local, reversible obstacles yourself — a stray generated file blocking a checkout, a stale lockfile, a missing directory, a tool needing a flag — decide, apply the fix, retry, and note it in the report. Stop only when the obstacle needs the caller: a credential, a scope or product decision, or an action that is irreversible or outside scope. A blocker is a decision you cannot make, not a step that failed once.\n",
+    "10. If a clearly separate continuation is needed, state why it is separate and emit a compact caller-facing pointer with the child task ID and title, so the caller can start `oga watch <childTaskId>` and inspect after settlement. Do not include prompt or output in the pointer.\n",
+    "11. Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.\n",
+    "12. Run the relevant checks before reporting completion, and say what you ran. Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.\n",
+    "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`. After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists.\n",
+    "\n",
+    "{{context_map}}\n",
+    "\n",
+    "{{memories}}\n",
+    "\n",
+    "{{attribution}}\n",
+    "\n",
+    "{{reporting}}"
 );
 
 fn yaml_key(value: &serde_yaml::Value) -> Option<&str> {
@@ -1007,9 +1036,16 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
     Ok(Some(rules))
 }
 
-/// The worker rules one `.oga.yaml` writes for its own scope. `prompt` is the
-/// whole table: whatever it holds ships verbatim under `## Worker rules`, read
-/// again on every dispatch. Any other key is a rule the writer expects Oga to
+/// The worker prompt one `.oga.yaml` writes for its own scope: plain text
+/// that is sent as written, with `{{brief}}` marking where the task lands,
+/// alongside `{{scope}}`, `{{context_map}}`, `{{memories}}`,
+/// `{{attribution}}`, `{{reporting}}`, and the run itself as `{{task_id}}`,
+/// `{{provider}}`, `{{model}}`, `{{effort}}`. A value without `{{brief}}`
+/// keeps working: resolution gives it the slot first through
+/// [`ensure_brief_slot`], leaving its words and order untouched.
+/// `attribution` is the only other key: `false` turns off the supervision
+/// line workers stamp on commits and pull requests, `true` (or leaving it
+/// out) leaves it on. Any other key is a rule the writer expects Oga to
 /// honour and Oga would silently drop, so it fails the read instead.
 pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>, ConfigError> {
     let Some(layer) = layer else {
@@ -1023,7 +1059,7 @@ pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
         .ok_or_else(|| invalid(&layer.path, "worker", WORKER_SHAPE))?;
     if let Some(key) = table.keys().find_map(|key| {
         let key = yaml_key(key)?;
-        (key != "prompt").then_some(key)
+        (key != "prompt" && key != "attribution").then_some(key)
     }) {
         return Err(invalid(
             &layer.path,
@@ -1048,7 +1084,49 @@ pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
         .transpose()
 }
 
-const WORKER_SHAPE: &str = "worker takes one key, prompt, holding the rules text";
+const WORKER_SHAPE: &str =
+    "worker takes prompt, holding the rules text, and an optional attribution flag";
+
+/// The single structural guarantee: the task slot. A template holding
+/// `{{brief}}` is sent as written, nothing added. Anything older — plain
+/// rules from before templates existed — gets the slot first, where the task
+/// always landed, so existing prompts keep working with their words and
+/// order untouched.
+pub fn ensure_brief_slot(raw: &str) -> String {
+    if raw.contains("{{brief}}") {
+        raw.to_owned()
+    } else {
+        format!("{{{{brief}}}}\n\n{raw}")
+    }
+}
+
+/// Whether this scope stamps worker output with the Done-with-Oga line.
+/// `None` means the file says nothing and the next scope up decides.
+pub fn read_worker_attribution(layer: Option<&ConfigLayer>) -> Result<Option<bool>, ConfigError> {
+    let Some(layer) = layer else {
+        return Ok(None);
+    };
+    let Some(worker) = layer.root.get("worker") else {
+        return Ok(None);
+    };
+    let table = worker
+        .as_mapping()
+        .ok_or_else(|| invalid(&layer.path, "worker", WORKER_SHAPE))?;
+    table
+        .get("attribution")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| invalid(&layer.path, "worker.attribution", "must be true or false"))
+        })
+        .transpose()
+}
+
+/// Attribution is on unless somebody turns it off. The project file wins over
+/// the all-projects file; either `false` silences the stamp.
+pub fn resolve_worker_attribution(project: Option<bool>, user: Option<bool>) -> bool {
+    project.or(user).unwrap_or(true)
+}
 
 fn parse_model_override(
     value: &serde_yaml::Value,
@@ -1701,8 +1779,49 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "invalid config /work/.oga.yaml at worker.tldr_sentences: unknown key; worker takes one key, prompt, holding the rules text"
+            "invalid config /work/.oga.yaml at worker.tldr_sentences: unknown key; worker takes prompt, holding the rules text, and an optional attribution flag"
         );
+    }
+
+    #[test]
+    fn worker_attribution_defaults_on_and_resolves_project_first() {
+        assert!(read_worker_attribution(None).unwrap().is_none());
+        let on = layer("/work/.oga.yaml", "worker:\n  attribution: true\n");
+        let off = layer("/work/.oga.yaml", "worker:\n  attribution: false\n");
+        let prompt_only = layer("/work/.oga.yaml", "worker:\n  prompt: rules\n");
+        assert_eq!(read_worker_attribution(Some(&on)).unwrap(), Some(true));
+        assert_eq!(read_worker_attribution(Some(&off)).unwrap(), Some(false));
+        assert_eq!(read_worker_attribution(Some(&prompt_only)).unwrap(), None);
+        let bad = layer("/work/.oga.yaml", "worker:\n  attribution: sometimes\n");
+        assert!(read_worker_attribution(Some(&bad)).is_err());
+        assert!(resolve_worker_attribution(None, None));
+        assert!(!resolve_worker_attribution(Some(false), Some(true)));
+        assert!(!resolve_worker_attribution(None, Some(false)));
+        assert!(resolve_worker_attribution(Some(true), Some(false)));
+    }
+
+    #[test]
+    fn brief_slot_is_added_first_only_when_missing() {
+        assert_eq!(
+            ensure_brief_slot("{{brief}}\n\nBe terse."),
+            "{{brief}}\n\nBe terse."
+        );
+        assert_eq!(ensure_brief_slot("Be terse."), "{{brief}}\n\nBe terse.");
+        assert_eq!(ensure_brief_slot(""), "{{brief}}\n\n");
+    }
+
+    #[test]
+    fn editable_default_is_a_template_carrying_the_house_style() {
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{brief}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{scope}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{memories}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{attribution}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("{{reporting}}"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("Clear local, reversible obstacles yourself"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("oga query"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("oga relearn"));
+        assert!(DEFAULT_WORKER_PROMPT.contains("Do not use Oga to delegate")); // default text, deletable
     }
 
     #[test]
