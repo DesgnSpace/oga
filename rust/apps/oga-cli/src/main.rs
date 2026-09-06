@@ -3350,9 +3350,26 @@ fn work_label(when: &[WorkKind]) -> String {
     label
 }
 
+/// Rules in the order they win a task, so the table reads the way routing
+/// decides: subject rules, then class rules, then the one that takes the rest.
+fn by_precedence(rules: &oga_config::LoveRules) -> Vec<&oga_config::LoveRule> {
+    let tier = |rule: &oga_config::LoveRule| {
+        if rule.when.is_empty() {
+            2
+        } else if rule.when.iter().any(|kind| kind.as_topic().is_some()) {
+            0
+        } else {
+            1
+        }
+    };
+    let mut ordered = rules.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|rule| tier(rule));
+    ordered
+}
+
 fn love_table(rules: &oga_config::LoveRules) -> Vec<String> {
-    let rows = rules
-        .iter()
+    let rows = by_precedence(rules)
+        .into_iter()
         .map(|rule| {
             (
                 work_label(&rule.when),
@@ -3879,6 +3896,17 @@ mod tests {
             "muse"
         );
         assert!(source.contains("ui"));
+    }
+
+    #[test]
+    fn the_love_table_reads_in_the_order_rules_win() {
+        let source =
+            "love:\n  - model: a\n    when: [build]\n  - model: b\n  - model: c\n    when: [ui]\n";
+        let ordered = by_precedence(&read_rules(source))
+            .into_iter()
+            .map(|rule| rule.model.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ordered, ["c", "a", "b"]);
     }
 
     #[test]
