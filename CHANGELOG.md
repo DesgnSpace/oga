@@ -30,6 +30,7 @@
 
 ### Fixed
 
+- Grouped running steps now animate the group summary instead of every step row.
 - Removed the divider below the task search field so the sidebar reads as one column.
 - Usage summary tiles and activity views now use the full width of the Usage window.
 - Made the Usage window's summary tiles compact and sized the window to its content.
