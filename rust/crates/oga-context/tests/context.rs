@@ -301,6 +301,317 @@ fn extracts_markdown_headings_with_their_level_and_section() {
 }
 
 #[test]
+fn extracts_python_functions_classes_constants_and_fields() {
+    let source = [
+        "MAX_RETRIES = 3",
+        "_private = 1",
+        "attempts = 0",
+        "",
+        "@dataclass",
+        "class Route:",
+        "    \"\"\"A learned route.\"\"\"",
+        "",
+        "    hint: str",
+        "    weight: int = 1",
+        "",
+        "    def heal(self, source):",
+        "        \"\"\"Follow the target.\"\"\"",
+        "        return True",
+        "",
+        "    def _internal(self):",
+        "        return None",
+        "",
+        "def extract(path):",
+        "    local = 1",
+        "    return local",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("tools/route.py", &source).expect("python parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.exported))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "MAX_RETRIES", true),
+            (SymbolKind::Class, "Route", true),
+            (SymbolKind::Field, "Route.hint", true),
+            (SymbolKind::Field, "Route.weight", true),
+            (SymbolKind::Method, "Route.heal", true),
+            (SymbolKind::Method, "Route._internal", false),
+            (SymbolKind::Fn, "extract", true),
+        ]
+    );
+    assert_eq!(
+        extracted.symbols[1].doc.as_deref(),
+        Some("A learned route.")
+    );
+    assert_eq!(
+        extracted.symbols[4].doc.as_deref(),
+        Some("Follow the target.")
+    );
+}
+
+#[test]
+fn extracts_go_declarations_and_keeps_the_receiver_in_the_method_name() {
+    let source = [
+        "package broker",
+        "",
+        "// MaxRetries caps the retry loop.",
+        "const MaxRetries = 3",
+        "",
+        "var Timeout = 5",
+        "",
+        "type Kind = string",
+        "",
+        "type Handler func(int)",
+        "",
+        "type Route struct {",
+        "\tHint   string",
+        "\tweight int",
+        "}",
+        "",
+        "type Adapter interface {",
+        "\tName() string",
+        "}",
+        "",
+        "func (r *Route) Heal(source string) bool { return true }",
+        "",
+        "func Extract(path string) int { return 1 }",
+        "",
+        "func private() {}",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("broker/route.go", &source).expect("go parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.exported))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "MaxRetries", true),
+            (SymbolKind::Static, "Timeout", true),
+            (SymbolKind::Type, "Kind", true),
+            (SymbolKind::Type, "Handler", true),
+            (SymbolKind::Struct, "Route", true),
+            (SymbolKind::Field, "Route.Hint", true),
+            (SymbolKind::Field, "Route.weight", false),
+            (SymbolKind::Trait, "Adapter", true),
+            (SymbolKind::Method, "Adapter.Name", true),
+            (SymbolKind::Method, "Route.Heal", true),
+            (SymbolKind::Fn, "Extract", true),
+            (SymbolKind::Fn, "private", false),
+        ]
+    );
+    assert_eq!(
+        extracted.symbols[0].doc.as_deref(),
+        Some("MaxRetries caps the retry loop.")
+    );
+    assert_eq!(extracted.symbols[9].parent.as_deref(), Some("Route"));
+}
+
+#[test]
+fn extracts_php_namespaces_types_and_members() {
+    let source = [
+        "<?php",
+        "",
+        "namespace App\\Broker;",
+        "",
+        "interface Adapter",
+        "{",
+        "    public function name(): string;",
+        "}",
+        "",
+        "trait Healing",
+        "{",
+        "    public function heal(): bool { return true; }",
+        "}",
+        "",
+        "enum Kind: string",
+        "{",
+        "    case Queued = 'queued';",
+        "}",
+        "",
+        "/** A learned route. */",
+        "class Route implements Adapter",
+        "{",
+        "    public const MAX_HINTS = 12;",
+        "",
+        "    public string $hint = '';",
+        "    private int $weight = 1;",
+        "",
+        "    public function name(): string { return $this->hint; }",
+        "",
+        "    private function secret(): void {}",
+        "}",
+        "",
+        "function extract_symbols(string $path): int { return 1; }",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("app/Broker/Route.php", &source).expect("php parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.exported))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Module, "App\\Broker", true),
+            (SymbolKind::Trait, "Adapter", true),
+            (SymbolKind::Method, "Adapter::name", true),
+            (SymbolKind::Trait, "Healing", true),
+            (SymbolKind::Method, "Healing::heal", true),
+            (SymbolKind::Enum, "Kind", true),
+            (SymbolKind::Variant, "Kind::Queued", true),
+            (SymbolKind::Class, "Route", true),
+            (SymbolKind::Const, "Route::MAX_HINTS", true),
+            (SymbolKind::Field, "Route::hint", true),
+            (SymbolKind::Field, "Route::weight", false),
+            (SymbolKind::Method, "Route::name", true),
+            (SymbolKind::Method, "Route::secret", false),
+            (SymbolKind::Fn, "extract_symbols", true),
+        ]
+    );
+    assert_eq!(
+        extracted.symbols[7].doc.as_deref(),
+        Some("A learned route.")
+    );
+}
+
+#[test]
+fn extracts_json_keys_with_their_dotted_path_and_short_values() {
+    let source = [
+        "{",
+        "  \"productName\": \"Oga\",",
+        "  \"updater\": {",
+        "    \"endpoints\": [",
+        "      { \"url\": \"https://oga.dev/appcast.xml\" }",
+        "    ]",
+        "  }",
+        "}",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("tauri.conf.json", &source).expect("json parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "productName", 2),
+            (SymbolKind::Module, "updater", 3),
+            (SymbolKind::Module, "updater.endpoints", 4),
+            (SymbolKind::Module, "updater.endpoints[0]", 5),
+            (SymbolKind::Field, "updater.endpoints[0].url", 5),
+        ]
+    );
+    assert_eq!(
+        extracted.symbols[4].signature,
+        "\"url\": \"https://oga.dev/appcast.xml\""
+    );
+}
+
+#[test]
+fn extracts_toml_tables_and_keys() {
+    let source = [
+        "title = \"oga\"",
+        "",
+        "# The version every crate shares.",
+        "[workspace.package]",
+        "version = \"0.0.6\"",
+        "",
+        "[[bin]]",
+        "name = \"oga\"",
+        "",
+        "[[bin]]",
+        "name = \"ogad\"",
+    ]
+    .join("\n");
+    let extracted = extract_symbols("Cargo.toml", &source).expect("toml parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "title", 1),
+            (SymbolKind::Module, "workspace.package", 4),
+            (SymbolKind::Field, "workspace.package.version", 5),
+            (SymbolKind::Module, "bin[0]", 7),
+            (SymbolKind::Field, "bin[0].name", 8),
+            (SymbolKind::Module, "bin[1]", 10),
+            (SymbolKind::Field, "bin[1].name", 11),
+        ]
+    );
+    assert_eq!(
+        extracted.symbols[1].doc.as_deref(),
+        Some("The version every crate shares.")
+    );
+}
+
+#[test]
+fn extracts_yaml_keys_through_sequences() {
+    let source = [
+        "name: build",
+        "on:",
+        "  push:",
+        "    branches: [main]",
+        "jobs:",
+        "  test:",
+        "    steps:",
+        "      - uses: actions/checkout@v4",
+        "        name: Check out",
+    ]
+    .join("\n");
+    let extracted = extract_symbols(".github/workflows/ci.yml", &source).expect("yaml parses");
+    let found = extracted
+        .symbols
+        .iter()
+        .map(|symbol| (symbol.kind, symbol.qualified.as_str(), symbol.line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        vec![
+            (SymbolKind::Const, "name", 1),
+            (SymbolKind::Module, "on", 2),
+            (SymbolKind::Module, "on.push", 3),
+            (SymbolKind::Module, "on.push.branches", 4),
+            (SymbolKind::Module, "jobs", 5),
+            (SymbolKind::Module, "jobs.test", 6),
+            (SymbolKind::Module, "jobs.test.steps", 7),
+            (SymbolKind::Module, "jobs.test.steps[0]", 8),
+            (SymbolKind::Field, "jobs.test.steps[0].uses", 8),
+            (SymbolKind::Field, "jobs.test.steps[0].name", 9),
+        ]
+    );
+    assert_eq!(extracted.symbols[8].signature, "uses: actions/checkout@v4");
+}
+
+#[test]
+fn refuses_lockfiles_whatever_their_format() {
+    for path in [
+        "package-lock.json",
+        "bun.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "composer.lock",
+        "Package.resolved",
+        "web/uv.lock",
+    ] {
+        assert!(extract_symbols(path, "{}").is_none(), "{path} was indexed");
+    }
+}
+
+#[test]
 fn builds_symbols_and_answers_an_exact_name() {
     let fixture = Fixture::new();
     fixture.write_auth(

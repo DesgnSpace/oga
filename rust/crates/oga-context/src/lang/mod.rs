@@ -3,15 +3,24 @@
 //! engine cannot answer for itself: what counts as public, what a doc comment
 //! looks like, and which files are not worth indexing.
 
+mod config;
+mod go;
+mod json;
 mod markdown;
+mod php;
+mod python;
 mod rust;
 mod swift;
+mod toml;
 mod typescript;
+mod yaml;
 
 use std::sync::{Mutex, OnceLock};
 
 use oga_domain::SymbolKind;
 use tree_sitter::{Language, Node, Query};
+
+use crate::symbols::ExtractedSymbol;
 
 /// How a language joins a symbol to the symbol that encloses it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +82,16 @@ pub trait LanguageAdapter: Send + Sync {
         let _ = (node, source);
         false
     }
+
+    /// Correct a symbol the engine built, where the language knows something
+    /// the tree shape does not: a Go receiver that belongs in the qualified
+    /// name, a config array element known by its position, a Python docstring
+    /// that lives inside the body instead of above it. Runs before anything
+    /// nested inside the symbol is qualified, so a rewritten `qualified`
+    /// carries down.
+    fn refine(&self, symbol: &mut ExtractedSymbol, node: Node<'_>, source: &str) {
+        let _ = (symbol, node, source);
+    }
 }
 
 /// Every adapter, in registration order. Adding a language means adding one
@@ -85,7 +104,13 @@ pub fn adapters() -> &'static [&'static dyn LanguageAdapter] {
                 &rust::Rust as &'static dyn LanguageAdapter,
                 &typescript::TypeScript,
                 &swift::Swift,
+                &python::Python,
+                &go::Go,
+                &php::Php,
                 &markdown::Markdown,
+                &json::Json,
+                &toml::Toml,
+                &yaml::Yaml,
             ]
         })
         .as_slice()
@@ -145,6 +170,7 @@ pub fn is_support_path(path: &str) -> bool {
             "node_modules",
             "vendor",
             "vendored",
+            "gen",
             "generated",
             "__generated__",
             "__snapshots__",

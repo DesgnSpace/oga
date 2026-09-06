@@ -6,7 +6,8 @@
 
 - Cleaned up the task activity timeline for Claude runs: shell commands now show a short summary instead of the full command line, and consecutive commands fold into one row with a count.
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
-- Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
+- Answers cite Rust, TypeScript, TSX, JavaScript, Swift, Python, Go, PHP, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
+- Asking about a setting lands on the exact line in a JSON, TOML, or YAML file, named by its full path through the file, so "sparkle feed url" points at the key that holds it.
 - `oga handoff <task-id> --worker <name>` moves a task to another worker or model from the terminal, keeping its id, request, and place in line.
 - Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
 - The task footer now shows how full the worker's context is, and how far it has grown since the run started.
