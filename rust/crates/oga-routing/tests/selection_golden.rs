@@ -3,7 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use oga_config::{DirectoryModelSettings, LoveRule, LoveRules, ResolvedModelSettings};
+use oga_config::{
+    DirectoryModelSettings, LoveDestination, LoveRule, LoveRules, ResolvedModelSettings,
+};
 use oga_domain::{
     Difficulty, FailureCode, ModelCost, ModelInfo, ModelInfoSource, Profile, ProfileFailure,
     ProfileSuccess, ProfileUsage, Provider, RoutePreference, SelectionStage, TaskClass, TaskTopic,
@@ -1673,10 +1675,27 @@ fn rule(
     effort: Option<&str>,
 ) -> LoveRule {
     LoveRule {
-        model: model_name.into(),
-        profile_id: profile_id.map(String::from),
+        destinations: vec![LoveDestination {
+            profile_id: profile_id.map(String::from),
+            model: Some(model_name.into()),
+            effort: effort.map(String::from),
+        }],
         when: when.to_vec(),
-        effort: effort.map(String::from),
+        scope: "project".into(),
+    }
+}
+
+fn chain(rules: Vec<(&str, Option<&str>, Option<&str>)>, when: &[WorkKind]) -> LoveRule {
+    LoveRule {
+        destinations: rules
+            .into_iter()
+            .map(|(model_name, profile_id, effort)| LoveDestination {
+                profile_id: profile_id.map(String::from),
+                model: Some(model_name.into()),
+                effort: effort.map(String::from),
+            })
+            .collect(),
+        when: when.to_vec(),
         scope: "project".into(),
     }
 }
@@ -2029,6 +2048,192 @@ fn love_rules_route_each_kind_of_work_to_its_own_model() {
         warning.contains("opencode/opencode/big-pickle is loved here for context work")
             && warning.contains("the account is out of credits")
     }));
+}
+
+// A rule holds an ordered chain of destinations: the first one that can take
+// the work runs it, each with its own effort, and the record says which one
+// that was.
+#[test]
+fn a_love_chain_falls_to_the_next_destination_that_can_take_the_work() {
+    let catalog = models()
+        .into_iter()
+        .map(|mut model| {
+            if model.id == "opencode/big-pickle" || model.id == "opus" {
+                model.efforts = Some(
+                    ["low", "medium", "high", "xhigh", "max"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                );
+            }
+            model
+        })
+        .collect::<Vec<_>>();
+    let workers = profiles();
+    let reading = "Read these files and understand how auth works.";
+    let settings = love_rules(vec![chain(
+        vec![
+            ("opencode/big-pickle", Some("opencode"), Some("max")),
+            ("opus", Some("claude"), Some("low")),
+        ],
+        &[WorkKind::Context],
+    )]);
+
+    // Both up: the first runs, priced by its own effort, with nothing to say.
+    let route = choose_model(
+        reading,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(route.model, "opencode/big-pickle");
+    assert_eq!(route.effort.as_deref(), Some("max"));
+    assert!(
+        route
+            .reason
+            .contains("loved for context work at max effort"),
+        "{}",
+        route.reason
+    );
+    assert!(
+        !route.warnings.iter().any(|w| w.contains("loved before")),
+        "{:?}",
+        route.warnings
+    );
+
+    // The first out of credits: the second runs, and the move is visible.
+    let statuses = [unavailable(
+        "opencode",
+        Provider::OpenCode,
+        "opencode/big-pickle",
+        "the account is out of credits",
+        None,
+    )];
+    let route = choose_model(
+        reading,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings).statuses(&statuses),
+    )
+    .unwrap();
+    assert_eq!(route.profile_id, "claude");
+    assert_eq!(route.model, "opus");
+    assert_eq!(route.effort.as_deref(), Some("low"));
+    assert!(
+        route
+            .reason
+            .contains("second loved choice for context work at low effort"),
+        "{}",
+        route.reason
+    );
+    assert!(
+        route.warnings.iter().any(|w| {
+            w.contains("opencode/opencode/big-pickle is loved before claude/opus")
+                && w.contains("the account is out of credits")
+        }),
+        "{:?}",
+        route.warnings
+    );
+
+    // A spent usage window moves the work the same way.
+    let spent_week = [usage_row(
+        "opencode",
+        Provider::OpenCode,
+        UsageSource::None,
+        vec![UsageWindow {
+            label: "Current week".into(),
+            kind: UsageWindowKind::Week,
+            used_percent: 99.0,
+            window_minutes: None,
+            resets_at: None,
+            resets_text: None,
+            model: None,
+        }],
+    )];
+    let route = choose_model(
+        reading,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings).usage(&spent_week),
+    )
+    .unwrap();
+    assert_eq!(route.model, "opus");
+    assert!(
+        route
+            .reason
+            .contains("second loved choice for context work"),
+        "{}",
+        route.reason
+    );
+
+    // Neither can: the usual choice runs, and the warning names the chain.
+    let both_down = [
+        unavailable(
+            "opencode",
+            Provider::OpenCode,
+            "opencode/big-pickle",
+            "the account is out of credits",
+            None,
+        ),
+        unavailable(
+            "claude",
+            Provider::Claude,
+            "opus",
+            "Observed rate limit",
+            None,
+        ),
+    ];
+    let route = choose_model(
+        reading,
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings).statuses(&both_down),
+    )
+    .unwrap();
+    assert_ne!(route.model, "opencode/big-pickle");
+    assert_ne!(route.model, "opus");
+    assert!(
+        route.warnings.iter().any(|w| {
+            w.contains("opencode/opencode/big-pickle → claude/opus are loved here for context work")
+                && w.contains("none could take this task")
+                && w.contains("the account is out of credits")
+                && w.contains("Observed rate limit")
+        }),
+        "{:?}",
+        route.warnings
+    );
+}
+
+// A destination may name a worker alone, standing for its default model.
+#[test]
+fn a_love_chain_may_leave_the_model_to_the_worker() {
+    let catalog = models();
+    let workers = profiles();
+    let settings = love_rules(vec![LoveRule {
+        destinations: vec![LoveDestination {
+            profile_id: Some("opencode".into()),
+            model: None,
+            effort: None,
+        }],
+        when: vec![],
+        scope: "project".into(),
+    }]);
+
+    let route = choose_model(
+        "Implement the fix.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(route.profile_id, "opencode");
+    assert_eq!(route.model, "opencode/big-pickle");
 }
 
 // A subject rule outranks a class rule for the same task; the caller's named

@@ -507,14 +507,29 @@ export type WorkKind =
   | "refactor";
 
 /**
+ * One place work can go: a worker, a model on it, and the thinking level.
+ * A missing model means the worker's default; a missing effort means the
+ * kind of work prices it.
+ */
+export interface LoveDestination {
+  profileId?: string;
+  model?: string;
+  effort?: string;
+}
+
+/**
  * One standing rule for work that names no model. `when` lists the kinds of
  * work the rule takes; an empty list takes every kind no other rule claims.
+ * `models` is the ordered chain that is tried first to last; the flat
+ * `model`/`profileId`/`effort` describe its first destination.
  */
 export interface LoveRule {
   model: string;
   profileId?: string;
   when: WorkKind[];
   effort?: string;
+  /** Absent on payloads from before the chain; read the flat fields then. */
+  models?: LoveDestination[];
   scope: string;
 }
 
