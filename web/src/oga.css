@@ -3459,7 +3459,9 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 }
 
 .modal-dialog-usage {
-    width: min(92vw, 72rem);
+    width: fit-content;
+    min-width: min(92vw, 42rem);
+    max-width: min(92vw, 72rem);
     max-height: min(88dvh, 48rem);
 }
 
@@ -3568,7 +3570,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .usage-cards {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(7rem, max-content));
     gap: var(--space-2);
     margin: 0;
 }
@@ -3578,15 +3580,16 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     gap: var(--space-1);
     align-content: start;
     margin: 0;
-    padding: var(--space-3);
+    padding: var(--space-2) var(--space-3);
     background: var(--color-sidebar);
     border-radius: var(--radius);
     min-width: 0;
+    max-width: 12rem;
 }
 
 .usage-card dt {
     color: var(--color-text-muted);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
 }
 
 .usage-card dd {
@@ -3616,22 +3619,37 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     font-weight: 500;
 }
 
-.usage-heatmap-weekdays,
-.usage-heatmap-grid {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+.usage-heatmap-body {
+    display: flex;
+    align-items: start;
     gap: 4px;
+}
+
+.usage-heatmap-weekdays {
+    display: grid;
+    grid-template-rows: repeat(7, 10px);
+    gap: 3px;
 }
 
 .usage-heatmap-weekday {
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    text-align: center;
+    font-size: 9px;
+    line-height: 10px;
+    white-space: nowrap;
+}
+
+.usage-heatmap-grid {
+    display: grid;
+    grid-template-rows: repeat(7, 10px);
+    grid-auto-flow: column;
+    gap: 3px;
+    justify-content: start;
 }
 
 .usage-heatmap-cell {
-    aspect-ratio: 1;
-    border-radius: 3px;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
 }
 
 .usage-heatmap-cell[data-in-month="false"] {
@@ -3698,25 +3716,8 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     font-size: 11px;
 }
 
-.usage-chart-area {
-    fill: color-mix(in srgb, var(--color-accent) 16%, transparent);
-    stroke: none;
-}
-
-.usage-chart-line {
-    fill: none;
-    stroke: var(--color-accent);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.usage-chart-dot {
+.usage-chart-bar {
     fill: var(--color-accent);
-}
-
-.usage-chart-dot-hit {
-    fill: transparent;
 }
 
 .usage-chart-empty {
@@ -3841,7 +3842,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 @media (max-width: 700px) {
     .usage-page { padding: var(--space-4); }
-    .usage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .usage-cards { grid-template-columns: repeat(2, minmax(7rem, max-content)); }
 }
 
 .modal-dialog-settings .modal-body {
