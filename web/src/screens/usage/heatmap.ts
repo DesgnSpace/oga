@@ -3,17 +3,34 @@ import type { UsageDay } from "@/bridge/types";
 export interface HeatmapCell {
   date: string;
   day: UsageDay | undefined;
-  inPeriod: boolean;
+  inMonth: boolean;
 }
 
-export interface HeatmapCalendar {
-  /** One column per week, seven cells Sunday–Saturday. */
+export interface HeatmapMonth {
+  year: number;
+  month: number; // 1-12
+  /** One row per week, seven cells Sunday–Saturday. */
   weeks: HeatmapCell[][];
-  /** Short month name at the column where a month starts. */
-  monthLabels: Array<string | undefined>;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export interface MonthKey {
+  year: number;
+  month: number; // 1-12
+}
+
+export interface MonthRange {
+  min: MonthKey;
+  max: MonthKey;
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+export function monthLabel(month: MonthKey): string {
+  return `${MONTH_NAMES[month.month - 1]} ${month.year}`;
+}
 
 /** Local today as `YYYY-MM-DD`. */
 export function localToday(): string {
@@ -42,56 +59,76 @@ function toKey(date: Date): string {
   return formatDate(date.getFullYear(), date.getMonth() + 1, date.getDate());
 }
 
+function monthOf(date: Date): MonthKey {
+  return { year: date.getFullYear(), month: date.getMonth() + 1 };
+}
+
+export function addMonths(month: MonthKey, delta: number): MonthKey {
+  const total = month.year * 12 + (month.month - 1) + delta;
+  return { year: Math.floor(total / 12), month: (((total % 12) + 12) % 12) + 1 };
+}
+
+export function compareMonths(a: MonthKey, b: MonthKey): number {
+  return (a.year * 12 + a.month) - (b.year * 12 + b.month);
+}
+
 /**
- * Full-calendar grid for the heatmap. Spans `start`–`end` (falling back to
- * the active days, then today), stretched to at least seven days ending
- * today, padded out to whole Sunday–Saturday weeks. Date math steps whole
- * calendar days so DST changes cannot shift the grid.
+ * Months a person can navigate to: from the earliest activity (or `start`)
+ * through today (or `end`, whichever is later), so paging can never reach
+ * an always-empty future month.
  */
-export function buildHeatmapCalendar(
+export function heatmapMonthBounds(
   days: UsageDay[],
   opts?: { start?: string; end?: string; today?: string },
-): HeatmapCalendar {
+): MonthRange {
   const today = opts?.today ?? localToday();
   const sorted = [...new Set(days.map((day) => day.date))]
     .filter((date) => parseLocal(date) !== undefined)
     .sort();
   const rawStart = opts?.start ?? sorted[0] ?? today;
   const rawEnd = opts?.end ?? sorted[sorted.length - 1] ?? today;
-  // Short periods still reach today so the grid never collapses.
   const endKey = rawEnd >= today ? rawEnd : today;
   const startKey = rawStart <= endKey ? rawStart : endKey;
 
   const endDate = parseLocal(endKey) ?? parseLocal(today);
-  if (endDate === undefined) return { weeks: [], monthLabels: [] };
-  const parsedStart = parseLocal(startKey);
-  let startDate = parsedStart ?? new Date(endDate);
-  const minStart = new Date(endDate);
-  minStart.setDate(minStart.getDate() - 6);
-  if (startDate > minStart) startDate = minStart;
+  const startDate = parseLocal(startKey) ?? endDate;
+  if (endDate === undefined || startDate === undefined) {
+    const fallback = monthOf(new Date());
+    return { min: fallback, max: fallback };
+  }
+  return { min: monthOf(startDate), max: monthOf(endDate) };
+}
 
-  // Pad to whole weeks, Sunday first.
-  const gridStart = new Date(startDate);
+export function clampMonth(month: MonthKey, bounds: MonthRange): MonthKey {
+  if (compareMonths(month, bounds.min) < 0) return bounds.min;
+  if (compareMonths(month, bounds.max) > 0) return bounds.max;
+  return month;
+}
+
+/**
+ * Full calendar grid for one month: every day of the month plus the
+ * leading/trailing days needed to pad out to whole Sunday–Saturday weeks.
+ */
+export function buildHeatmapMonth(days: UsageDay[], month: MonthKey): HeatmapMonth {
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  const firstOfMonth = new Date(month.year, month.month - 1, 1);
+  const lastOfMonth = new Date(month.year, month.month, 0);
+
+  const gridStart = new Date(firstOfMonth);
   gridStart.setDate(gridStart.getDate() - gridStart.getDay());
-  const gridEnd = new Date(endDate);
+  const gridEnd = new Date(lastOfMonth);
   gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
 
-  const byDate = new Map(days.map((day) => [day.date, day]));
   const weeks: HeatmapCell[][] = [];
   const cursor = new Date(gridStart);
   while (cursor <= gridEnd) {
     const week: HeatmapCell[] = [];
     for (let i = 0; i < 7; i += 1) {
       const key = toKey(cursor);
-      week.push({ date: key, day: byDate.get(key), inPeriod: key >= rawStart && key <= rawEnd });
+      week.push({ date: key, day: byDate.get(key), inMonth: cursor.getMonth() === month.month - 1 });
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push(week);
   }
-
-  const monthLabels = weeks.map((week) => {
-    const first = week.find((cell) => cell.date.slice(8) === "01");
-    return first === undefined ? undefined : MONTHS[Number(first.date.slice(5, 7)) - 1];
-  });
-  return { weeks, monthLabels };
+  return { year: month.year, month: month.month, weeks };
 }

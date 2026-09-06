@@ -38,6 +38,7 @@
 - Named the task or worker in toast notifications, so you can tell which one is archiving, stopping, or updating.
 - Kept the app responsive while several workers look up code in a project at once.
 - Fixed the Usage window leaving a large empty gap below your spending data.
+- The activity heatmap in Usage now shows one full month at a time, named and aligned to weekdays, with buttons to step to the month before or after. A month with no activity still draws its full grid instead of collapsing.
 - Took a task out of the task list the moment you archive it, and put it back the moment you restore it, instead of waiting for a reload.
 - Sorted "Newest first" by when you started a task, instead of repeating "Recently updated".
 - A shell command in the activity view no longer carries a green "Succeeded" line, which also appeared while the command was still running. Only a command that failed says so.
