@@ -190,15 +190,16 @@ fn answers_a_question_about_a_swift_extension() {
     assert_eq!(top.symbol.as_deref(), Some("refreshFromBroker"));
 
     let extension = index
-        .files(project.path())
-        .expect("swift fixture files read")
-        .remove(0)
-        .symbols
-        .into_iter()
-        .find(|symbol| symbol.kind == oga_domain::SymbolKind::Impl)
+        .question_with_options(
+            &target,
+            "pull the newest tasks in",
+            QuestionOptions::default(),
+        )
         .expect("the extension is indexed");
-    assert_eq!(extension.name, "TaskList");
-    assert_eq!(extension.doc.as_deref(), Some("Pull the newest tasks in."));
+    assert_eq!(
+        extension.candidates.first().map(|hit| hit.path.as_str()),
+        Some("Refresh.swift")
+    );
 }
 
 /// An unchanged project re-reads nothing. This is the ceiling `oga relearn`

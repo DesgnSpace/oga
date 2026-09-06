@@ -182,7 +182,7 @@ Every tool is available over MCP (`http://127.0.0.1:7331/mcp`) and the REST API.
 | `complete` | Assert completion when work demonstrably landed but the worker never attested it. |
 | `archive` | Soft-hide old tasks without deleting history. |
 | `memory` | Durable project facts shared across callers and workers. |
-| `map` / `query` | Inspect or search the project context map. |
+| `query` | Ask in plain language where something lives in the project. |
 | `health` | Broker and MCP contract versions. |
 
 ## Architecture

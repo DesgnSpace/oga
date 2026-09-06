@@ -1,21 +1,16 @@
-//! Context-map and plain-language query routes.
+//! Plain-language code lookup, answered from the project's own index.
 //!
-//! Every lookup reconciles the map against disk first, so files that changed,
+//! Every lookup reconciles the index against disk first, so files that changed,
 //! moved, or vanished since the last call are re-read before answering.
 
 use std::{path::Path, process::Command, time::Instant};
 
 use axum::{
     Json,
-    body::Body,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::IntoResponse,
 };
-use oga_context::{
-    BuildOptions, ContextError, ContextIndex, ContextResult, ContextTarget, QueryOptions,
-    RenderTier,
-};
+use oga_context::{BuildOptions, ContextError, ContextIndex, ContextTarget};
 use oga_domain::{TaskKind, TaskScope};
 use oga_store::Store;
 use rusqlite::OptionalExtension;
@@ -30,21 +25,8 @@ use crate::{
 #[derive(Debug, Deserialize, Default)]
 pub struct QueryParams {
     pub cwd: Option<String>,
-    pub q: Option<String>,
-    pub limit: Option<u64>,
-    pub code: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct MapParams {
     pub task: Option<String>,
-    #[serde(default)]
-    pub path: Vec<String>,
-    #[serde(default)]
-    pub symbol: Vec<String>,
-    pub depth: Option<u64>,
     pub q: Option<String>,
-    pub tier: Option<String>,
     pub limit: Option<u64>,
     pub code: Option<bool>,
 }
@@ -55,11 +37,15 @@ pub struct InitParams {
     pub force: Option<bool>,
 }
 
+/// Answer a question about a project's code.
+///
+/// A `task` names the checkout the answer must stay inside: the ranking runs
+/// against the origin project's index, but only what that task may read comes
+/// back.
 pub async fn get_query(
     State(state): State<HttpState>,
     Query(query): Query<QueryParams>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let cwd = require_directory(query.cwd.as_deref())?;
     let question = query
         .q
         .as_deref()
@@ -67,6 +53,28 @@ pub async fn get_query(
         .filter(|question| !question.is_empty())
         .ok_or_else(|| HttpError::bad_request("usage: oga query \"<question>\""))?
         .to_owned();
+    let target = match query.task.as_deref() {
+        Some(task_id) => {
+            let task = state::load_task(&state.store, task_id)?
+                .filter(|task| {
+                    task.kind != Some(TaskKind::Orchestrator) && task.archived_at.is_none()
+                })
+                .ok_or_else(|| HttpError::not_found("unknown task"))?;
+            task.worktree.as_ref().map_or_else(
+                || ContextTarget::new(&task.cwd, task.scope.clone()),
+                |worktree| {
+                    ContextTarget::worktree(&task.cwd, &worktree.origin_cwd, task.scope.clone())
+                },
+            )
+        }
+        None => {
+            let cwd = require_directory(query.cwd.as_deref())?;
+            match origin_of_worktree(&state.store, &cwd)? {
+                Some(origin) => ContextTarget::worktree(&cwd, &origin, everything()),
+                None => ContextTarget::new(&cwd, everything()),
+            }
+        }
+    };
     let store = state.store.clone();
     let options = oga_context::QuestionOptions {
         limit: query.limit.map(|limit| limit as usize),
@@ -74,16 +82,13 @@ pub async fn get_query(
     };
     let result = run_blocking(move || {
         let index = ContextIndex::new(&store);
-        let target = match origin_of_worktree(&store, &cwd)? {
-            Some(origin) => {
-                refresh(&index, &origin)?;
-                ContextTarget::worktree(&cwd, &origin, everything())
-            }
-            None => {
-                refresh(&index, &cwd)?;
-                ContextTarget::new(&cwd, everything())
-            }
-        };
+        let index_cwd = target
+            .source_cwd
+            .as_deref()
+            .unwrap_or(&target.cwd)
+            .display()
+            .to_string();
+        refresh(&index, &index_cwd)?;
         Ok(index.question_with_options(&target, &question, options)?)
     })
     .await?;
@@ -93,72 +98,7 @@ pub async fn get_query(
     })))
 }
 
-pub async fn get_map(
-    State(state): State<HttpState>,
-    Query(query): Query<MapParams>,
-    headers: HeaderMap,
-) -> Result<Response, HttpError> {
-    let task_id = query
-        .task
-        .as_deref()
-        .ok_or_else(|| HttpError::bad_request("task is required"))?;
-    let task = state::load_task(&state.store, task_id)?
-        .filter(|task| task.kind != Some(TaskKind::Orchestrator) && task.archived_at.is_none())
-        .ok_or_else(|| HttpError::not_found("unknown task"))?;
-    let question = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
-    if query.path.is_empty()
-        && query.symbol.is_empty()
-        && query.depth.is_none()
-        && question.is_none()
-    {
-        return Err(HttpError::bad_request("path, symbol, or q is required"));
-    }
-    let target = task.worktree.as_ref().map_or_else(
-        || ContextTarget::new(&task.cwd, task.scope.clone()),
-        |worktree| ContextTarget::worktree(&task.cwd, &worktree.origin_cwd, task.scope.clone()),
-    );
-    let question = question.map(str::to_owned);
-    let list_options = QueryOptions {
-        paths: query.path.clone(),
-        symbols: query.symbol.clone(),
-        tier: query.tier.as_deref().map(parse_tier).transpose()?,
-        depth: query.depth.map(|depth| depth as usize),
-    };
-    let question_options = oga_context::QuestionOptions {
-        limit: query.limit.map(|limit| limit as usize),
-        code: query.code.unwrap_or(false),
-    };
-    let store = state.store.clone();
-    let result = run_blocking(move || {
-        let index = ContextIndex::new(&store);
-        let map_cwd = target
-            .source_cwd
-            .as_deref()
-            .unwrap_or(&target.cwd)
-            .display()
-            .to_string();
-        refresh(&index, &map_cwd)?;
-        Ok(match question {
-            Some(question) => index.question_with_options(&target, &question, question_options)?,
-            None => index.list(&target, &list_options)?,
-        })
-    })
-    .await?;
-    if headers
-        .get(header::ACCEPT)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.contains("application/json"))
-    {
-        return Ok(Json(map_json(&result)).into_response());
-    }
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .body(Body::from(result.markdown))
-        .expect("valid text response"))
-}
-
-pub async fn init_map(
+pub async fn init_index(
     State(state): State<HttpState>,
     Query(query): Query<InitParams>,
 ) -> Result<impl IntoResponse, HttpError> {
@@ -225,7 +165,7 @@ fn origin_of_worktree(store: &Store, cwd: &str) -> Result<Option<String>, HttpEr
         .map_err(HttpError::from)
 }
 
-/// Bring the map for `cwd` up to date with disk before answering from it.
+/// Bring the index for `cwd` up to date with disk before answering from it.
 fn refresh(index: &ContextIndex<'_>, cwd: &str) -> Result<(), HttpError> {
     let reconciled = index.reconcile(cwd, BuildOptions::default())?;
     if reconciled.file_count == 0 {
@@ -241,29 +181,6 @@ fn everything() -> TaskScope {
         read: vec!["**".into()],
         write: Vec::new(),
     }
-}
-
-fn parse_tier(tier: &str) -> Result<RenderTier, HttpError> {
-    match tier {
-        "full" => Ok(RenderTier::Full),
-        "skeleton" => Ok(RenderTier::Skeleton),
-        "index" => Ok(RenderTier::Index),
-        other => Err(HttpError::bad_request(format!(
-            "tier must be full, skeleton, or index; got {other}"
-        ))),
-    }
-}
-
-fn map_json(result: &ContextResult) -> serde_json::Value {
-    json!({
-        "markdown": result.markdown,
-        "files": result.files,
-        "candidates": result.candidates,
-        "omitted": {
-            "outsideScope": result.outside_scope,
-            "gone": result.gone,
-        },
-    })
 }
 
 fn require_directory(cwd: Option<&str>) -> Result<String, HttpError> {

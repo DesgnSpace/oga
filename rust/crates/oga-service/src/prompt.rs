@@ -151,7 +151,6 @@ pub struct WorkerPromptInput {
     pub scope: Option<TaskScope>,
     /// The template, resolved upstream with the brief slot ensured.
     pub worker_prompt: String,
-    pub context_map: Option<String>,
     pub memories: Vec<MemoryEntry>,
     /// `None` silences the stamp: the project turned attribution off.
     pub attribution: Option<WorkerAttribution>,
@@ -167,7 +166,6 @@ impl Default for WorkerPromptInput {
             allow_questions: false,
             scope: None,
             worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
-            context_map: None,
             memories: Vec::new(),
             attribution: None,
             identity: PromptIdentity::default(),
@@ -225,19 +223,16 @@ fn render_template(template: &str, values: &[(&str, String)]) -> String {
     out
 }
 
-/// Every value a template may name. `{{memories}}`, `{{context_map}}`, and
-/// `{{attribution}}` expand to a whole section or nothing: a placeholder
-/// language with no conditionals cannot skip a heading, so the section goes
-/// down with the placeholder.
+/// Every value a template may name. `{{memories}}` and `{{attribution}}`
+/// expand to a whole section or nothing: a placeholder language with no
+/// conditionals cannot skip a heading, so the section goes down with the
+/// placeholder.
+///
+/// `{{context_map}}` is retired and expands to nothing. Unknown names survive
+/// as visible text so a typo is caught, which is the wrong answer for a name
+/// Oga itself withdrew: a prompt saved while it existed would print the token.
 fn template_values(input: &WorkerPromptInput) -> Vec<(&str, String)> {
     let scope = input.scope.as_ref().map(scope_line).unwrap_or_default();
-    let context_map = input
-        .context_map
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_owned();
     let memories = if input.memories.is_empty() {
         String::new()
     } else {
@@ -261,7 +256,7 @@ fn template_values(input: &WorkerPromptInput) -> Vec<(&str, String)> {
         ("provider", input.identity.provider.clone()),
         ("model", input.identity.model.clone()),
         ("effort", input.identity.effort.clone().unwrap_or_default()),
-        ("context_map", context_map),
+        ("context_map", String::new()),
         ("memories", memories),
         ("attribution", attribution),
         ("reporting", reporting.join("\n")),
@@ -301,7 +296,7 @@ pub fn scope_line(scope: &TaskScope) -> String {
     all.sort();
     all.dedup();
     format!(
-        "Scope for this task, which also shapes its context map — read: {}; write: {}. That is what the caller approved, not a reading list; what to open is your call.",
+        "Scope for this task — read: {}; write: {}. That is what the caller approved, not a reading list; what to open is your call.",
         describe_rules(&all),
         describe_rules(&scope.write),
     )
@@ -906,7 +901,6 @@ mod tests {
             }),
             worker_prompt:
                 "{{reporting}}\n\n{{brief}}\n\n{{scope}}\n\n{{memories}}\n\n{{attribution}}".into(),
-            context_map: None,
             memories: vec![MemoryEntry {
                 cwd: "/work".into(),
                 key: "a".into(),

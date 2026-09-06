@@ -207,8 +207,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/api/usage", get(usage::get_usage))
         .route("/api/provider-usage", get(settings::get_usage))
         .route("/api/query", get(context::get_query))
-        .route("/api/map", get(context::get_map))
-        .route("/api/map/init", axum::routing::post(context::init_map))
+        .route("/api/query/init", axum::routing::post(context::init_index))
         .layer(middleware::from_fn(json_content_type))
         .with_state(state)
 }

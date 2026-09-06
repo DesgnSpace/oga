@@ -54,28 +54,6 @@ impl From<RunnerError> for LifecycleError {
     }
 }
 
-/// A map fold is deliberately a hook: the context crate owns map storage and
-/// can attach its implementation without making the lifecycle depend on it.
-pub trait MapFoldHook: Send + Sync {
-    fn fold(&self, task: &Task, write_targets: &[String]);
-}
-
-impl<F> MapFoldHook for F
-where
-    F: Fn(&Task, &[String]) + Send + Sync,
-{
-    fn fold(&self, task: &Task, write_targets: &[String]) {
-        self(task, write_targets);
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct NoopMapFoldHook;
-
-impl MapFoldHook for NoopMapFoldHook {
-    fn fold(&self, _task: &Task, _write_targets: &[String]) {}
-}
-
 /// The settled task and the interpretation that produced it.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
@@ -260,7 +238,7 @@ fn decode_json<T: DeserializeOwned>(value: &str, column: usize) -> rusqlite::Res
     })
 }
 
-/// Run a queued task with the default prompt context and no map fold.
+/// Run a queued task with the default prompt context.
 pub async fn run_task(
     store: Arc<Store>,
     runner: ProviderRunner,
@@ -281,15 +259,7 @@ pub async fn run_task(
         ),
         ..WorkerPromptInput::default()
     };
-    run_task_and_release(
-        store,
-        runner,
-        task,
-        profile,
-        prompt,
-        Arc::new(NoopMapFoldHook),
-    )
-    .await
+    run_task_and_release(store, runner, task, profile, prompt).await
 }
 
 /// Run one task and then drain any dependency tasks it releases.
@@ -299,18 +269,9 @@ pub async fn run_task_and_release(
     task: Task,
     profile: Profile,
     prompt: WorkerPromptInput,
-    map_fold: Arc<dyn MapFoldHook>,
 ) -> Result<RunOutcome, LifecycleError> {
-    run_task_and_release_with_active(
-        store,
-        runner,
-        task,
-        profile,
-        prompt,
-        map_fold,
-        RunOptions::default(),
-    )
-    .await
+    run_task_and_release_with_active(store, runner, task, profile, prompt, RunOptions::default())
+        .await
 }
 
 /// Run one task, then drain the dependents its ending releases. The session id
@@ -322,7 +283,6 @@ pub(crate) async fn run_task_and_release_with_active(
     task: Task,
     profile: Profile,
     prompt: WorkerPromptInput,
-    map_fold: Arc<dyn MapFoldHook>,
     options: RunOptions,
 ) -> Result<RunOutcome, LifecycleError> {
     let RunOptions {
@@ -338,7 +298,6 @@ pub(crate) async fn run_task_and_release_with_active(
             task,
             profile,
             prompt,
-            map_fold.clone(),
             RunOptions {
                 session_id: session_id.take(),
                 active: active.clone(),
@@ -378,24 +337,15 @@ pub(crate) async fn run_task_and_release_with_active(
 }
 
 /// Claim, execute, persist, and release a task's provider run.
-pub async fn run_task_with_hook(
+pub async fn run_task_with_prompt(
     store: Arc<Store>,
     runner: ProviderRunner,
     task: Task,
     profile: Profile,
     prompt: WorkerPromptInput,
-    map_fold: Arc<dyn MapFoldHook>,
 ) -> Result<RunOutcome, LifecycleError> {
-    run_task_with_session_and_active(
-        store,
-        runner,
-        task,
-        profile,
-        prompt,
-        map_fold,
-        RunOptions::default(),
-    )
-    .await
+    run_task_with_session_and_active(store, runner, task, profile, prompt, RunOptions::default())
+        .await
 }
 
 pub(crate) async fn run_task_with_session_and_active(
@@ -404,7 +354,6 @@ pub(crate) async fn run_task_with_session_and_active(
     mut task: Task,
     profile: Profile,
     prompt: WorkerPromptInput,
-    map_fold: Arc<dyn MapFoldHook>,
     options: RunOptions,
 ) -> Result<RunOutcome, LifecycleError> {
     authorization::check_model_enabled(
@@ -452,7 +401,6 @@ pub(crate) async fn run_task_with_session_and_active(
     let mut session_id = options.session_id.clone();
     let mut retries = 0;
     let mut accumulated_usage = Usage::default();
-    let mut accumulated_write_targets = Vec::new();
     loop {
         let command = if retries == 0 {
             initial_command.clone()
@@ -478,7 +426,6 @@ pub(crate) async fn run_task_with_session_and_active(
                 let worker = failed_worker(&error);
                 let settled = settle_task(&store, &task, turn_id, None, None, &worker, None)?;
                 record_profile_outcome(&store, &task, &worker)?;
-                map_fold.fold(&settled, &accumulated_write_targets);
                 return Ok(RunOutcome {
                     task: settled,
                     worker,
@@ -556,7 +503,6 @@ pub(crate) async fn run_task_with_session_and_active(
                 let worker = failed_worker(&error);
                 let settled = settle_task(&store, &task, turn_id, None, None, &worker, None)?;
                 record_profile_outcome(&store, &task, &worker)?;
-                map_fold.fold(&settled, &accumulated_write_targets);
                 return Ok(RunOutcome {
                     task: settled,
                     worker,
@@ -581,7 +527,6 @@ pub(crate) async fn run_task_with_session_and_active(
                 &live_events,
             )?;
             add_usage(&mut accumulated_usage, &run.usage);
-            extend_unique(&mut accumulated_write_targets, &run.write_targets);
             session_id = retry_session;
             retries += 1;
             continue;
@@ -601,8 +546,6 @@ pub(crate) async fn run_task_with_session_and_active(
             Some(&live_events),
         )?;
         record_profile_outcome(&store, &task, &worker)?;
-        extend_unique(&mut accumulated_write_targets, &run.write_targets);
-        map_fold.fold(&settled, &accumulated_write_targets);
         return Ok(RunOutcome {
             task: settled,
             worker,
@@ -1187,14 +1130,6 @@ async fn apply_estimated_cost(usage: &mut Usage, provider: Provider, model: &str
 fn add_optional(target: &mut Option<f64>, value: Option<f64>) {
     if let Some(value) = value {
         *target = Some(target.unwrap_or_default() + value);
-    }
-}
-
-fn extend_unique(target: &mut Vec<String>, values: &[String]) {
-    for value in values {
-        if !target.iter().any(|existing| existing == value) {
-            target.push(value.clone());
-        }
     }
 }
 
@@ -1810,13 +1745,12 @@ mod tests {
         };
         store.repositories().tasks().insert(&task).expect("task");
 
-        let error = run_task_with_hook(
+        let error = run_task_with_prompt(
             store,
             oga_runner::ProviderRunner::default(),
             task,
             profile,
             WorkerPromptInput::default(),
-            Arc::new(NoopMapFoldHook),
         )
         .await
         .expect_err("run refused");

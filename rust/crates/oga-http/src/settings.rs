@@ -278,7 +278,7 @@ pub async fn get_projects(State(state): State<HttpState>) -> Result<impl IntoRes
         .store
         .with_connection(|connection| {
             let mut statement = connection.prepare(
-                "SELECT cwd FROM (SELECT COALESCE(origin_cwd,cwd) AS cwd,MAX(updated_at) AS seen FROM tasks GROUP BY COALESCE(origin_cwd,cwd) UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM memories GROUP BY cwd UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM context_maps GROUP BY cwd) GROUP BY cwd ORDER BY MAX(seen) DESC,cwd",
+                "SELECT cwd FROM (SELECT COALESCE(origin_cwd,cwd) AS cwd,MAX(updated_at) AS seen FROM tasks GROUP BY COALESCE(origin_cwd,cwd) UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM memories GROUP BY cwd UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM context_index GROUP BY cwd) GROUP BY cwd ORDER BY MAX(seen) DESC,cwd",
             )?;
             Ok(statement
                 .query_map([], |row| row.get::<_, String>(0))?
