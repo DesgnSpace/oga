@@ -206,7 +206,7 @@ function formatPeakHour(hour: number): string {
   return `${twelve} ${hour < 12 ? "AM" : "PM"}`;
 }
 
-const WEEKDAY_LABELS: ReadonlyArray<string> = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAY_LABELS: ReadonlyArray<string> = ["", "Mon", "", "Wed", "", "Fri", ""];
 
 function Heatmap({
   days,
@@ -257,25 +257,27 @@ function Heatmap({
           <ForwardArrowIcon />
         </button>
       </div>
-      <div className="usage-heatmap-weekdays" aria-hidden="true">
-        {WEEKDAY_LABELS.map((weekday, index) => (
-          <span key={index} className="usage-heatmap-weekday">
-            {weekday}
-          </span>
-        ))}
-      </div>
-      <div className="usage-heatmap-grid" role="img" aria-label={`Daily activity for ${label}`}>
-        {calendar.weeks.flatMap((week) =>
-          week.map((cell) => (
-            <span
-              className="usage-heatmap-cell"
-              key={cell.date}
-              data-in-month={cell.inMonth}
-              data-level={cell.day !== undefined && cell.inMonth ? intensityLevel(cell.day.costUsd, max) : 0}
-              title={heatmapTooltip(cell)}
-            />
-          )),
-        )}
+      <div className="usage-heatmap-body">
+        <div className="usage-heatmap-weekdays" aria-hidden="true">
+          {WEEKDAY_LABELS.map((weekday, index) => (
+            <span key={index} className="usage-heatmap-weekday">
+              {weekday}
+            </span>
+          ))}
+        </div>
+        <div className="usage-heatmap-grid" role="img" aria-label={`Daily activity for ${label}`}>
+          {calendar.weeks.flatMap((week) =>
+            week.map((cell) => (
+              <span
+                className="usage-heatmap-cell"
+                key={cell.date}
+                data-in-month={cell.inMonth}
+                data-level={cell.day !== undefined && cell.inMonth ? intensityLevel(cell.day.costUsd, max) : 0}
+                title={heatmapTooltip(cell)}
+              />
+            )),
+          )}
+        </div>
       </div>
       {!hasActivity && <p className="usage-heatmap-empty">No activity in {label}.</p>}
     </div>
