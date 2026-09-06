@@ -62,9 +62,13 @@ pub struct RoutePreferences {
     pub preference: Option<RoutePreference>,
     pub model_hint: Option<String>,
     pub difficulty: Option<Difficulty>,
-    /// The subject of the work, named by the caller. Wins over whatever the
-    /// prompt reads like; absent means the prompt's own signals decide.
-    pub topic: Option<TaskTopic>,
+    /// The kind of work, named by the caller in the same vocabulary `oga
+    /// love --when` accepts: a class of work or a subject. Wins over
+    /// whichever half of it the prompt reads like for love-rule and
+    /// warning-text purposes; absent means the prompt's own signals decide.
+    /// Never overrides the difficulty floor or [routes] policy, which stay
+    /// keyed to the prompt's own read.
+    pub kind: Option<WorkKind>,
     /// Restrict routing to one profile the caller already named, leaving only
     /// the model to choose. Within a named profile the policy allow order
     /// wins, since the caller picked the account and wants its best model for
@@ -273,7 +277,19 @@ pub fn choose_model(
 ) -> Result<ModelRoute, RouteError> {
     let demand = classify_task(prompt);
     let difficulty = options.difficulty.unwrap_or(demand.difficulty);
-    let topic = options.topic.or(demand.topic);
+    // A stated kind is the caller's own answer to "what is this", so it wins
+    // over the prompt's guess for whichever half of the pair it names — a
+    // class replaces the guessed class, a subject replaces the guessed
+    // subject, never both. It only ever feeds love-rule matching and the text
+    // explaining it below; the difficulty floor and [routes] policy stay
+    // keyed to the prompt's own read, since those exist to catch a caller
+    // under-stating the work, not to be told what to think by it.
+    let kind_from_caller = options.kind.is_some();
+    let love_class = options
+        .kind
+        .and_then(WorkKind::as_class)
+        .unwrap_or(demand.task_class);
+    let topic = options.kind.and_then(WorkKind::as_topic).or(demand.topic);
     let policy_route = extra
         .policy
         .and_then(|policy| policy.route_for_task(demand.task_class));
@@ -485,7 +501,7 @@ pub fn choose_model(
     // says so on the way past. It gives way the moment no destination can
     // take the work: the point of loving a model is to stop choosing, not to
     // buy a way for a dispatch to fail.
-    if let Some(loved) = extra.settings.love.for_task(demand.task_class, topic)
+    if let Some(loved) = extra.settings.love.for_task(love_class, topic)
         && options.model_hint.is_none()
         && options.profile_id.is_none()
     {
@@ -552,7 +568,9 @@ pub fn choose_model(
                 floor,
                 heuristic_agreed,
                 options,
+                love_class,
                 topic,
+                kind_from_caller,
                 index,
                 skipped,
             };
@@ -564,12 +582,13 @@ pub fn choose_model(
                 &rejected,
             ));
         }
-        let matched = loved.matching_kind(demand.task_class, topic);
+        let matched = loved.matching_kind(love_class, topic);
         warnings.push(loved_miss_warning(
             loved,
             matched,
             &skipped,
             demand.task_class,
+            kind_from_caller,
         ));
     }
 
@@ -936,7 +955,13 @@ struct LovedContext<'a> {
     floor: u8,
     heuristic_agreed: bool,
     options: &'a RoutePreferences,
+    /// The class fed to love matching: the caller's stated kind when it names
+    /// one, else the prompt's own guess.
+    love_class: TaskClass,
     topic: Option<TaskTopic>,
+    /// Whether `love_class`/`topic` came from a caller-stated kind rather
+    /// than the prompt, so the reason text can say which.
+    kind_from_caller: bool,
     /// Which destination in the rule's chain ran, and the earlier ones it
     /// passed on the way there.
     index: usize,
@@ -960,7 +985,9 @@ fn finish_loved_route<'a>(
         floor,
         heuristic_agreed,
         options,
+        love_class,
         topic,
+        kind_from_caller,
         index,
         skipped,
     } = ctx;
@@ -1025,9 +1052,10 @@ fn finish_loved_route<'a>(
             demand.reason,
             love_route_reason(
                 loved,
-                loved.matching_kind(demand.task_class, topic),
+                loved.matching_kind(love_class, topic),
                 rule_effort.as_deref(),
                 index,
+                kind_from_caller,
             )
         ),
         candidates: vec![ModelCandidate {
@@ -1052,9 +1080,17 @@ fn love_route_reason(
     matched: Option<WorkKind>,
     effort: Option<&str>,
     index: usize,
+    kind_from_caller: bool,
 ) -> String {
     let effort = effort.map_or_else(String::new, |effort| format!(" at {effort} effort"));
     let chosen = &loved.destinations[index];
+    let work = |kind: WorkKind| -> String {
+        if kind_from_caller {
+            format!("{} work, the kind you named", kind.as_str())
+        } else {
+            format!("{} work", kind.as_str())
+        }
+    };
     if index == 0 {
         return match matched {
             None => format!(
@@ -1066,9 +1102,9 @@ fn love_route_reason(
                 }
             ),
             Some(kind) => format!(
-                "sent to {}, loved for {} work{effort}",
+                "sent to {}, loved for {}{effort}",
                 loved.label(),
-                kind.as_str()
+                work(kind)
             ),
         };
     }
@@ -1084,9 +1120,9 @@ fn love_route_reason(
             }
         ),
         Some(kind) => format!(
-            "sent to {}, {place} loved choice for {} work{effort}",
+            "sent to {}, {place} loved choice for {}{effort}",
             chosen.label(),
-            kind.as_str()
+            work(kind)
         ),
     }
 }
@@ -1110,20 +1146,21 @@ fn loved_miss_warning(
     matched: Option<WorkKind>,
     skipped: &[(String, String)],
     task_class: TaskClass,
+    kind_from_caller: bool,
 ) -> String {
     let usual = format!(
         "this went to the usual choice for {} work instead",
         matched.map_or(task_class.as_str(), WorkKind::as_str)
     );
+    let suffix = love_kind_suffix(matched, kind_from_caller);
     if skipped.len() <= 1 {
         let reason = skipped
             .first()
             .map(|(_, reason)| reason.as_str())
             .unwrap_or("no connected account offers it");
         return format!(
-            "{} is loved here{} but could not take this task: {reason}; {usual}",
+            "{} is loved here{suffix} but could not take this task: {reason}; {usual}",
             loved.label(),
-            love_kind_suffix(matched),
         );
     }
     let details = skipped
@@ -1132,17 +1169,20 @@ fn loved_miss_warning(
         .collect::<Vec<_>>()
         .join("; ");
     format!(
-        "{} are loved here{} but none could take this task: {details}; {usual}",
+        "{} are loved here{suffix} but none could take this task: {details}; {usual}",
         loved.chain_label(),
-        love_kind_suffix(matched),
     )
 }
 
 /// How a warning names the rule that was skipped: the kind of work it claims,
-/// or nothing when it takes everything else.
-fn love_kind_suffix(matched: Option<WorkKind>) -> String {
+/// noting when the caller named it themselves, or nothing when it takes
+/// everything else.
+fn love_kind_suffix(matched: Option<WorkKind>, kind_from_caller: bool) -> String {
     match matched {
         None => String::new(),
+        Some(kind) if kind_from_caller => {
+            format!(" for {} work, the kind you named", kind.as_str())
+        }
         Some(kind) => format!(" for {} work", kind.as_str()),
     }
 }

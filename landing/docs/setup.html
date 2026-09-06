@@ -73,13 +73,31 @@
 
         <h2 id="default-model">Choose who gets work that names nobody</h2>
         <p>Settings controls which workers and models can receive work. A model has to be turned on before Oga can select it.</p>
+        <p><code>oga love</code> pins the worker and model that runs work nobody named an account for. Set it once, and every piece of work that leaves worker and model blank lands there instead of wherever Oga would otherwise guess.</p>
+
+        <h3>Pin a default</h3>
         <p>Mark one account and model as <strong>loved</strong> to make it the default for work that names nothing. From the terminal:</p>
         <pre><code>oga love claude:opus</code></pre>
-        <p>Send one kind of work somewhere else with <code>--when</code>:</p>
+        <p>Give it a reasoning effort too, as a third part of the name:</p>
+        <pre><code>oga love claude:opus:high</code></pre>
+        <p>Name more than one destination and Oga tries them in order, moving on the moment one can't take the work — out of quota, unreachable, or not offering that model:</p>
+        <pre><code>oga love opencode:muse claude:opus</code></pre>
+
+        <h3>Pin a kind of work</h3>
+        <p>Send one kind of work somewhere else with <code>--when</code>, leaving everything else on the default:</p>
         <pre><code>oga love opencode:muse --when ui
 oga love codex:beast --when backend,database</code></pre>
-        <p>You can name a subject — <code>ui</code>, <code>backend</code>, <code>database</code>, <code>docs</code>, <code>tests</code>, <code>review</code>, <code>research</code>, <code>refactor</code> — or how demanding the work is: <code>context</code>, <code>mechanical</code>, <code>build</code>, <code>reasoning</code>, <code>general</code>. Oga reads the subject off the task itself. When a task fits two rules, the one naming its subject takes it.</p>
-        <p>Run <code>oga love</code> on its own to see what this project does today, listed in the order the rules take work. <code>oga love --clear</code> goes back to choosing per piece of work, and <code>--global</code> applies your choice to every project instead of this one.</p>
+        <p>A kind is a subject — <code>ui</code>, <code>backend</code>, <code>database</code>, <code>docs</code>, <code>tests</code>, <code>review</code>, <code>research</code>, <code>refactor</code> — or how demanding the work is: <code>context</code>, <code>mechanical</code>, <code>build</code>, <code>reasoning</code>, <code>general</code>. Oga reads the kind off the task itself by default. A coding agent that already knows it's handing off a UI change, say, can name the kind directly instead — with <code>--kind</code> from the terminal, or its own <code>kind</code> option — rather than leave Oga to guess from the wording. When a task fits two rules, the one naming its subject wins over one naming only how demanding the work is.</p>
+
+        <h3>See what's set, and clear it</h3>
+        <p>Run <code>oga love</code> on its own to see what this project sends where today, listed in the order the rules take work:</p>
+        <pre><code>oga love</code></pre>
+        <p><code>oga love --clear</code> drops every rule and goes back to choosing per piece of work. Add <code>--when</code> to drop only the rule for those kinds:</p>
+        <pre><code>oga love --clear --when ui</code></pre>
+
+        <h3>Project or every project</h3>
+        <p>Every command above applies to the project you're standing in. Add <code>--global</code> to set it for every project instead. That's the fallback: a project's own rules, once it has any, replace the global list whole rather than add to it.</p>
+        <pre><code>oga love claude:opus --global</code></pre>
 
         <div class="docs-callout">
           <p><code>oga config</code> prints what a folder actually resolves to — accounts, models, and which file each setting came from.</p>
