@@ -51,7 +51,7 @@ impl WorkerAttribution {
     /// The footer stamped on pull request bodies the worker opens.
     pub fn footer(&self) -> String {
         format!(
-            "Task supervised by Oga ({}) — {ATTRIBUTION_EMAIL}",
+            "Supervised by Oga ({}) — {ATTRIBUTION_EMAIL}",
             self.summary()
         )
     }
@@ -1048,8 +1048,7 @@ mod tests {
             prompt.contains("Supervised-by: Oga (on claude/opus, high effort) — oga@desgn.space")
         );
         assert!(
-            prompt
-                .contains("Task supervised by Oga (on claude/opus, high effort) — oga@desgn.space")
+            prompt.contains("Supervised by Oga (on claude/opus, high effort) — oga@desgn.space")
         );
         assert!(prompt.contains(ATTRIBUTION_EMAIL));
         assert!(prompt.contains("Never stamp the same commit twice"));
@@ -1075,7 +1074,7 @@ mod tests {
             ..WorkerPromptInput::default()
         });
         assert!(!silent.contains("## Attribution"));
-        assert!(!silent.contains("supervised by Oga"));
+        assert!(!silent.contains("upervised by Oga"));
     }
 
     #[test]
