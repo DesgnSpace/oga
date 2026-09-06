@@ -29,6 +29,7 @@
 
 ### Fixed
 
+- Usage summary tiles and activity views now use the full width of the Usage window.
 - Made the Usage window's summary tiles compact and sized the window to its content.
 - Naming a model by its short name (like `luna` for `openai/gpt-5.6-luna`) now resolves the same way everywhere a task can be sent, so a model you switched on is no longer refused as off, and one you switched off can no longer run. A short name that could mean more than one model is refused, listing the models it could mean, instead of guessing.
 - Fixed the app going unresponsive for everything — the task list, dispatching, even the health check — for stretches while you had a large archive of tasks and several workers running at once.

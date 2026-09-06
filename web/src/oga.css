@@ -3570,7 +3570,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .usage-cards {
     display: grid;
-    grid-template-columns: repeat(4, minmax(7rem, max-content));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--space-2);
     margin: 0;
 }
@@ -3584,7 +3584,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     background: var(--color-sidebar);
     border-radius: var(--radius);
     min-width: 0;
-    max-width: 12rem;
 }
 
 .usage-card dt {
@@ -3608,13 +3607,13 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .usage-heatmap-header {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: var(--space-2);
 }
 
 .usage-heatmap-month-label {
     min-width: 9em;
-    text-align: center;
+    text-align: left;
     font-size: var(--text-base);
     font-weight: 500;
 }
@@ -3842,7 +3841,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 @media (max-width: 700px) {
     .usage-page { padding: var(--space-4); }
-    .usage-cards { grid-template-columns: repeat(2, minmax(7rem, max-content)); }
+    .usage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .modal-dialog-settings .modal-body {
