@@ -82,7 +82,7 @@ pub async fn get_task(
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
     let store = state.store.clone();
-    let task = run_blocking(move || {
+    let task = run_read(move || {
         load_task(&store, &id)?
             .filter(|task| task.kind != Some(TaskKind::Orchestrator))
             .ok_or_else(|| HttpError::not_found("unknown task"))
@@ -122,7 +122,7 @@ pub async fn get_task_events(
     Query(query): Query<EventQuery>,
 ) -> Result<Json<Value>, HttpError> {
     let store = state.store.clone();
-    let task = run_blocking(move || {
+    let task = run_read(move || {
         load_task(&store, &id)?
             .filter(|task| task.kind != Some(TaskKind::Orchestrator))
             .ok_or_else(|| HttpError::not_found("unknown task"))
@@ -174,33 +174,30 @@ pub(crate) fn load_orchestrator(store: &Store, id: &str) -> Result<Task, HttpErr
         .ok_or_else(|| HttpError::not_found("unknown orchestrator"))
 }
 
-/// A single connection guards every read and write, so a slow decode of a
-/// large page must run off the executor, and a bound on its wait, or one
-/// heavy task's history can stall every other request behind it forever.
+/// A slow decode of a large page runs off the executor with a bound on its
+/// wait, or one heavy task's history can stall the caller behind it forever.
 const DB_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
-async fn run_blocking<T, F>(work: F) -> Result<T, HttpError>
+async fn run_read<T, F>(work: F) -> Result<T, HttpError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, HttpError> + Send + 'static,
 {
-    run_blocking_with_timeout(DB_READ_TIMEOUT, work).await
+    run_read_with_timeout(DB_READ_TIMEOUT, work).await
 }
 
-async fn run_blocking_with_timeout<T, F>(timeout: Duration, work: F) -> Result<T, HttpError>
+async fn run_read_with_timeout<T, F>(timeout: Duration, work: F) -> Result<T, HttpError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, HttpError> + Send + 'static,
 {
-    match tokio::time::timeout(timeout, tokio::task::spawn_blocking(work)).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(join_error)) => Err(HttpError::internal(format!(
-            "the broker's read task failed: {join_error}"
-        ))),
-        Err(_) => Err(HttpError::timeout(
-            "the broker did not answer in time; try again",
-        )),
-    }
+    tokio::time::timeout(timeout, crate::router::run_blocking(work))
+        .await
+        .unwrap_or_else(|_| {
+            Err(HttpError::timeout(
+                "the broker did not answer in time; try again",
+            ))
+        })
 }
 
 async fn event_response(
@@ -210,7 +207,7 @@ async fn event_response(
 ) -> Result<Json<Value>, HttpError> {
     let store = state.store.clone();
     let profile_id = task.profile_id.clone();
-    let provider = run_blocking(move || {
+    let provider = run_read(move || {
         store
             .repositories()
             .profiles()
@@ -239,7 +236,7 @@ async fn event_response(
     let store = state.store.clone();
     let task_id = task.id.clone();
     let read_query = query.clone();
-    let (views, tail_page) = run_blocking(move || {
+    let (views, tail_page) = run_read(move || {
         let query = read_query;
         let events = read_events(&store, &task_id, &query)?;
         let views = mark_repeated_retries(
@@ -772,12 +769,12 @@ mod tests {
 
     use axum::http::StatusCode;
 
-    use super::run_blocking_with_timeout;
+    use super::run_read_with_timeout;
 
     #[tokio::test]
     async fn a_stuck_read_times_out_instead_of_hanging_forever() {
         let result: Result<(), super::HttpError> =
-            run_blocking_with_timeout(Duration::from_millis(20), || {
+            run_read_with_timeout(Duration::from_millis(20), || {
                 std::thread::sleep(Duration::from_millis(200));
                 Ok(())
             })
@@ -789,7 +786,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_fast_read_still_resolves_normally() {
-        let result = run_blocking_with_timeout(Duration::from_secs(5), || Ok(42)).await;
+        let result = run_read_with_timeout(Duration::from_secs(5), || Ok(42)).await;
 
         assert_eq!(result.expect("a fast read must succeed"), 42);
     }

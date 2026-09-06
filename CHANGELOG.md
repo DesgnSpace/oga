@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
+- Kept the app responsive while several workers look up code in a project at once.
 
 ## 0.0.6 - 2026-09-05
 
