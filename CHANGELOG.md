@@ -8,6 +8,7 @@
 - `oga love` now takes an ordered list of destinations per rule, like `oga love opencode:luna:max claude:opus:low --when ui`. The first destination that can take the work runs it; when it is rate-limited, out of credits, or otherwise unavailable, the next one runs instead, and the task record says which one ran and why it was not the first. Each destination is `worker:model:effort` with the model or the effort left out.
 - Work a delegated worker ships now carries a short stamp naming the provider, model, and effort behind it: a `Co-Authored-By:` trailer on commits it creates, so git credits the run, and a footer on pull requests it opens. Turn it off per project with `worker: attribution: false` in `.oga.yaml`, or everywhere with the same key in `~/.oga.yaml`.
 - `oga archive --delete-branch` can now remove a worktree task's local branch safely, while explaining when Git keeps it.
+- The Usage window can now switch its activity view between the month grid and charts: cost and tokens over the selected range, plus a cost-by-model breakdown. The grid stays the default.
 
 ### Removed
 

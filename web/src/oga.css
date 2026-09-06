@@ -3665,6 +3665,109 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     font-size: var(--text-sm);
 }
 
+.usage-charts {
+    display: grid;
+    gap: var(--space-4);
+}
+
+.usage-chart-title {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-base);
+    font-weight: 500;
+}
+
+.usage-chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.usage-chart-axis {
+    stroke: var(--color-border);
+    stroke-width: 1;
+}
+
+.usage-chart-gridline {
+    stroke: var(--color-border);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+}
+
+.usage-chart-axis-label {
+    fill: var(--color-text-muted);
+    font-size: 11px;
+}
+
+.usage-chart-area {
+    fill: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    stroke: none;
+}
+
+.usage-chart-line {
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.usage-chart-dot {
+    fill: var(--color-accent);
+}
+
+.usage-chart-dot-hit {
+    fill: transparent;
+}
+
+.usage-chart-empty {
+    margin: var(--space-2) 0 0;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+}
+
+.usage-bar-chart {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.usage-bar-row {
+    display: grid;
+    grid-template-columns: 8em 1fr auto;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+}
+
+.usage-bar-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.usage-bar-track {
+    background: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
+    border-radius: var(--radius);
+    height: 8px;
+}
+
+.usage-bar-fill {
+    display: block;
+    height: 100%;
+    background: var(--color-accent);
+    border-radius: var(--radius);
+}
+
+.usage-bar-value {
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
 .usage-models {
     display: grid;
     gap: var(--space-3);
