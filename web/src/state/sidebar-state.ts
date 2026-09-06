@@ -138,11 +138,12 @@ export function beginRefresh(state: SidebarState): [SidebarState, StateQuery] {
 }
 
 export function applySummary(state: SidebarState, summary: BrokerSummaryState): SidebarState {
+  const tasksHasMore = summary.tasksHasMore ?? false;
   return {
     ...state,
     profiles: summary.profiles,
-    tasks: mergeTasks(state.tasks, summary.tasks),
-    tasksHasMore: summary.tasksHasMore ?? false,
+    tasks: mergeTasks(state.tasks, summary.tasks, tasksHasMore),
+    tasksHasMore,
     loadState: "ready",
     connection: "connected",
     error: undefined,
@@ -151,13 +152,19 @@ export function applySummary(state: SidebarState, summary: BrokerSummaryState): 
   };
 }
 
-/** A settled task stops earning updates, so a reread's recency-bounded page
- * can leave it out even though it is still active. Keep it on screen,
- * appended after whatever the fresh page did return. */
-function mergeTasks(existing: TaskSummary[], fresh: TaskSummary[]): TaskSummary[] {
-  const freshIds = new Set(fresh.map((task) => task.id));
-  const stillMissing = existing.filter((task) => !freshIds.has(task.id));
-  return [...fresh, ...stillMissing];
+/** A page holds the most recently updated tasks the filter admits. A settled
+ * task stops earning updates, so a full page can drift past one that still
+ * belongs on the list; keep those, appended after what the page did return.
+ * A task the page had room for and left out no longer matches the filter, so
+ * it goes. */
+function mergeTasks(existing: TaskSummary[], page: TaskSummary[], truncated: boolean): TaskSummary[] {
+  const tail = page[page.length - 1]?.updatedAt;
+  if (!truncated || tail === undefined) return page;
+  const onPage = new Set(page.map((task) => task.id));
+  const pastTheTail = existing.filter(
+    (task) => !onPage.has(task.id) && !timestampAtLeast(task.updatedAt, tail),
+  );
+  return [...page, ...pastTheTail];
 }
 
 export function applyRefreshError(state: SidebarState, message: string): SidebarState {
@@ -324,15 +331,43 @@ function applyPointer(state: SidebarState, pointer: EventPointer): [SidebarState
   if (!timestampAtLeast(pointer.at, task.updatedAt)) {
     return [{ ...state, eventCursor }, "none"];
   }
-  const updatedTask: TaskSummary = {
+  const archived = archiveChange(pointer.type);
+  const tasks = state.tasks.slice();
+  if (archived !== undefined && !filterAdmits(state.archiveFilter, archived)) {
+    tasks.splice(index, 1);
+    return [{ ...state, eventCursor, tasks }, "none"];
+  }
+
+  let archivedAt = task.archivedAt;
+  if (archived === true) archivedAt = pointer.at;
+  if (archived === false) archivedAt = undefined;
+  tasks[index] = {
     ...task,
     state: pointer.state,
     title: pointer.title.trim() !== "" ? pointer.title : task.title,
     updatedAt: pointer.at,
+    archivedAt,
   };
-  const tasks = state.tasks.slice();
-  tasks[index] = updatedTask;
   return [{ ...state, eventCursor, tasks }, "none"];
+}
+
+/** The task's new archive standing, or `undefined` when the event left it
+ * where it was. */
+function archiveChange(eventType: string): boolean | undefined {
+  if (eventType === "archived") return true;
+  if (eventType === "unarchived") return false;
+  return undefined;
+}
+
+function filterAdmits(filter: TaskArchiveFilter, archived: boolean): boolean {
+  switch (filter) {
+    case "active":
+      return !archived;
+    case "only":
+      return archived;
+    case "include":
+      return true;
+  }
 }
 
 function timestampAtLeast(left: string, right: string): boolean {

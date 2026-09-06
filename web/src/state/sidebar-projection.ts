@@ -388,8 +388,9 @@ function statusGroups(tasks: TaskSummary[]): TaskGroup[] {
 function sorted(tasks: TaskSummary[], sort: TaskSort): TaskSummary[] {
   switch (sort) {
     case "recent":
+      return tasks.slice().sort((left, right) => compareTimes(right.createdAt, left.createdAt));
     case "updated":
-      return tasks.slice().sort((left, right) => compareUpdated(right, left));
+      return tasks.slice().sort((left, right) => compareTimes(right.updatedAt, left.updatedAt));
     case "priority":
       return tasks.slice().sort((left, right) => priorityRank(left.state) - priorityRank(right.state));
   }
@@ -430,9 +431,10 @@ function priorityRank(state: TaskState): number {
   }
 }
 
-function compareUpdated(left: TaskSummary, right: TaskSummary): number {
-  const leftMs = Date.parse(left.updatedAt);
-  const rightMs = Date.parse(right.updatedAt);
+/** Unreadable timestamps sort as the oldest, so a bad row cannot claim the top. */
+function compareTimes(left: string, right: string): number {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
   const leftValid = !Number.isNaN(leftMs);
   const rightValid = !Number.isNaN(rightMs);
   if (leftValid && rightValid) return leftMs - rightMs;
