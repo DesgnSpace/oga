@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+- `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
+- Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
+- Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
+
 ### Fixed
 
+- `oga relearn --force` reads the project again from scratch instead of failing.
 - Fixed the task header's options menu opening clipped inside the header strip.
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
 - Named the task or worker in toast notifications, so you can tell which one is archiving, stopping, or updating.

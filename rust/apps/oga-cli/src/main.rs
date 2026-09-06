@@ -560,13 +560,27 @@ async fn run_relearn(args: &[String]) -> CliResult<i32> {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage: oga relearn | oga relearn \"<hint words|alias>\" <path>[#<symbol>] | oga relearn '<json>'"
+            "Usage: oga relearn [--force] | oga relearn \"<hint words|alias>\" <path>[#<symbol>] | oga relearn '<json>'"
         );
         return Ok(0);
     }
     let cwd = canonical_cwd(".");
     let store = Store::open_writable(database_path())?;
     let index = ContextIndex::new(&store);
+    if args.iter().any(|arg| arg == "--force") {
+        let result = index.build(&cwd, Default::default())?;
+        println!(
+            "Indexed {} files, {} symbols.{}",
+            result.file_count,
+            result.symbol_count,
+            if result.partial {
+                " This project is too large to read in one pass, so some files are missing."
+            } else {
+                ""
+            }
+        );
+        return Ok(0);
+    }
     if args.is_empty() {
         let result = index.reconcile(&cwd, Default::default())?;
         println!(
@@ -673,15 +687,16 @@ Usage: oga <command> [options]
   tail                 Watch everything the broker records, one line per event.
                        For checking on the service itself; to follow a single
                        task, use watch.
-  query "<question>"   Find files and symbols for a plain-language question.
-                       Use --limit N to set results; --code prints source bodies.
+  query "<question>"   Ask in plain words and get the file, line, and name that
+                       answer it. --limit N sets how many; --code prints the code.
   love [worker:model[:effort]]  Send work that names no model to one model. Add
                        --when context,mechanical to send only those kinds of
                        work there. Run it bare to see this project's rules,
                        --clear to go back to choosing per task, --global for
                        every project.
-  relearn              Refresh the map, or save source routes. Add --force to
-                       rebuild it from scratch.
+  relearn              Pick up what changed on disk so query stays current, or
+                       teach it where something lives. Add --force to read the
+                       project again from scratch.
   inflight             List the tasks still running, so you know what stopping
                         the service would interrupt.
   delegate "<task>"    Hand a task to a worker and print its id. Pass - to read

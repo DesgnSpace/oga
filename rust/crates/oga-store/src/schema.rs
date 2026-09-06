@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 41;
+pub const LATEST_SCHEMA_VERSION: i64 = 42;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -25,7 +25,7 @@ pub fn create_fresh_schema(conn: &Connection) -> Result<(), StoreError> {
 }
 
 fn create_fresh_schema_inner(conn: &Connection) -> Result<(), StoreError> {
-    let schema = [BASE_SCHEMA, CONTEXT_ENTITIES, ROUTE_HINTS_TABLE].concat();
+    let schema = [BASE_SCHEMA, CONTEXT_INDEX, ROUTE_HINTS_TABLE].concat();
     exec(conn, &schema)
 }
 
@@ -171,14 +171,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       built_at TEXT,
       file_count INTEGER NOT NULL DEFAULT 0,
       symbol_count INTEGER NOT NULL DEFAULT 0,
-      pending_prose INTEGER NOT NULL DEFAULT 0,
-       updated_at TEXT NOT NULL,
-       search_state TEXT,
-       search_indexed_at TEXT,
-       search_indexed_map_updated_at TEXT,
-       search_indexed_file_count INTEGER NOT NULL DEFAULT 0,
-       search_indexed_symbol_count INTEGER NOT NULL DEFAULT 0,
-       search_last_error TEXT
+      updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS task_holds (
       task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
@@ -240,117 +233,85 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
     );
-     INSERT INTO schema_migrations(version, name) VALUES (41, 'task attachments');"#;
+     INSERT INTO schema_migrations(version, name) VALUES (42, 'tree-sitter code index');"#;
 
-/// One row per file or symbol, with its derived search text written in the same statement.
-const CONTEXT_ENTITIES: &str = r#"      CREATE TABLE context_entities (
+/// One row per indexed file, one per symbol, with the symbol search index
+/// derived from the same rows.
+const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cwd TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK(kind IN ('file','fn','class','type','const','struct','enum','ext','view')),
-        parent_id INTEGER REFERENCES context_entities(id) ON DELETE CASCADE,
         path TEXT NOT NULL,
-        line INTEGER NOT NULL DEFAULT 1,
-        end_line INTEGER NOT NULL DEFAULT 1,
-        name TEXT NOT NULL,
-        -- File rows: whole-file content hash. Symbol rows: hash of the symbol's
-        -- own declaration text (line..end_line) — the signal move-detection
-        -- matches on, independent of which file currently holds the symbol.
+        lang TEXT NOT NULL,
+        -- Whole-file content hash. A file whose hash still matches is never
+        -- re-parsed, which is what makes an unchanged relearn cheap.
         digest TEXT NOT NULL,
-        purpose TEXT,
-        confirmed INTEGER CHECK(confirmed IS NULL OR confirmed IN (0,1)),
-        params TEXT,
-        returns TEXT,
-        exported INTEGER CHECK(exported IS NULL OR exported IN (0,1)),
-        comments_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(comments_json)),
-        lang TEXT,
-        status TEXT CHECK(status IS NULL OR status IN ('mapped','unparsed')),
-        lines INTEGER,
-        size INTEGER,
-        mtime_ms INTEGER,
-        touch_count INTEGER NOT NULL DEFAULT 0,
-        touched_at TEXT,
-        mapped_at TEXT,
-        header_comment TEXT NOT NULL DEFAULT '',
-        refs_json TEXT NOT NULL DEFAULT '{"imports":[],"calls":[]}' CHECK(json_valid(refs_json)),
-        importance REAL NOT NULL DEFAULT 0,
-        path_text TEXT NOT NULL,
-        comments TEXT NOT NULL DEFAULT '',
-        signature TEXT NOT NULL DEFAULT '',
-        refs TEXT NOT NULL DEFAULT '',
-        identifier_tokens TEXT NOT NULL DEFAULT '',
-        symbol_kind TEXT NOT NULL,
-        created_at TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        mtime_ms INTEGER NOT NULL,
+        lines INTEGER NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE UNIQUE INDEX context_entities_file_identity ON context_entities(cwd, path) WHERE kind = 'file';
-      CREATE INDEX context_entities_cwd_path ON context_entities(cwd, path);
-      CREATE INDEX context_entities_parent ON context_entities(parent_id);
-      CREATE INDEX context_entities_touched ON context_entities(cwd, touched_at DESC) WHERE kind = 'file';
-      -- A file's own position update (an application UPDATE, on a confirmed
-      -- move) carries its symbols' denormalized path along for free, so every
-      -- existing (cwd, path) query pattern keeps working without a join.
-      CREATE TRIGGER context_entities_cascade_path
-      AFTER UPDATE OF path ON context_entities
-      WHEN NEW.kind = 'file' AND NEW.path != OLD.path
-      BEGIN
-        UPDATE context_entities SET path = NEW.path, path_text = NEW.path WHERE parent_id = NEW.id;
-      END;
-      CREATE VIRTUAL TABLE context_entities_fts USING fts5(
-        name,
-        path_text,
-        comments,
-        purpose,
-        signature,
-        refs,
-        identifier_tokens,
-        symbol_kind,
-        content='context_entities',
-        content_rowid='id',
-        tokenize='porter unicode61 remove_diacritics 2',
-        prefix='2 3 4 5 6 8 10'
+      CREATE UNIQUE INDEX context_files_identity ON context_files(cwd, path);
+      CREATE INDEX context_files_digest ON context_files(cwd, digest);
+      CREATE TABLE context_symbols (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INTEGER NOT NULL REFERENCES context_files(id) ON DELETE CASCADE,
+        cwd TEXT NOT NULL,
+        path TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        -- The name folded to one lookup key, so an exact-name question is an
+        -- index seek rather than a scan.
+        name_key TEXT NOT NULL,
+        qualified TEXT NOT NULL,
+        parent TEXT NOT NULL DEFAULT '',
+        line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        signature TEXT NOT NULL DEFAULT '',
+        doc TEXT NOT NULL DEFAULT '',
+        exported INTEGER NOT NULL DEFAULT 0 CHECK(exported IN (0,1)),
+        -- Hash of the declaration text with the name masked out, so a route
+        -- can follow the symbol through a rename or a move to another file.
+        digest TEXT NOT NULL,
+        tokens TEXT NOT NULL DEFAULT ''
       );
-      CREATE TRIGGER context_entities_ai
-      AFTER INSERT ON context_entities BEGIN
-        INSERT INTO context_entities_fts(
-          rowid, name, path_text, comments, purpose, signature, refs, identifier_tokens, symbol_kind
-        ) VALUES (
-          new.id, new.name, new.path_text, new.comments, COALESCE(new.purpose, ''), new.signature, new.refs,
-          new.identifier_tokens, new.symbol_kind
-        );
+      CREATE INDEX context_symbols_file ON context_symbols(file_id);
+      CREATE INDEX context_symbols_name ON context_symbols(cwd, name_key);
+      CREATE INDEX context_symbols_digest ON context_symbols(cwd, digest);
+      CREATE INDEX context_symbols_path ON context_symbols(cwd, path, line);
+      CREATE VIRTUAL TABLE context_symbols_fts USING fts5(
+        name,
+        qualified,
+        tokens,
+        signature,
+        doc,
+        path,
+        content='context_symbols',
+        content_rowid='id',
+        tokenize='porter unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER context_symbols_ai
+      AFTER INSERT ON context_symbols BEGIN
+        INSERT INTO context_symbols_fts(rowid, name, qualified, tokens, signature, doc, path)
+        VALUES (new.id, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
       END;
-      CREATE TRIGGER context_entities_ad
-      AFTER DELETE ON context_entities BEGIN
-        INSERT INTO context_entities_fts(
-          context_entities_fts, rowid, name, path_text, comments, purpose, signature, refs,
-          identifier_tokens, symbol_kind
-        ) VALUES (
-          'delete', old.id, old.name, old.path_text, old.comments, COALESCE(old.purpose, ''), old.signature,
-          old.refs, old.identifier_tokens, old.symbol_kind
-        );
+      CREATE TRIGGER context_symbols_ad
+      AFTER DELETE ON context_symbols BEGIN
+        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, name, qualified, tokens, signature, doc, path)
+        VALUES ('delete', old.id, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
       END;
-      CREATE TRIGGER context_entities_au
-      AFTER UPDATE ON context_entities BEGIN
-        INSERT INTO context_entities_fts(
-          context_entities_fts, rowid, name, path_text, comments, purpose, signature, refs,
-          identifier_tokens, symbol_kind
-        ) VALUES (
-          'delete', old.id, old.name, old.path_text, old.comments, COALESCE(old.purpose, ''), old.signature,
-          old.refs, old.identifier_tokens, old.symbol_kind
-        );
-        INSERT INTO context_entities_fts(
-          rowid, name, path_text, comments, purpose, signature, refs, identifier_tokens, symbol_kind
-        ) VALUES (
-          new.id, new.name, new.path_text, new.comments, COALESCE(new.purpose, ''), new.signature, new.refs,
-          new.identifier_tokens, new.symbol_kind
-        );
+      CREATE TRIGGER context_symbols_au
+      AFTER UPDATE ON context_symbols BEGIN
+        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, name, qualified, tokens, signature, doc, path)
+        VALUES ('delete', old.id, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
+        INSERT INTO context_symbols_fts(rowid, name, qualified, tokens, signature, doc, path)
+        VALUES (new.id, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
       END;"#;
 
-/// Learned routes keep one bounded alias set for each source entity.
+/// Learned routes keep one bounded alias set for each place a worker found.
 const ROUTE_HINTS_TABLE: &str = r#"      CREATE TABLE context_learned_routes (
         id INTEGER PRIMARY KEY,
         cwd TEXT NOT NULL,
         aliases TEXT NOT NULL,
-        entity_id INTEGER REFERENCES context_entities(id) ON DELETE SET NULL,
         learned_path TEXT NOT NULL,
         learned_symbol TEXT NOT NULL DEFAULT '',
         source_digest TEXT NOT NULL,
@@ -362,7 +323,6 @@ const ROUTE_HINTS_TABLE: &str = r#"      CREATE TABLE context_learned_routes (
         last_confirmed_at TEXT NOT NULL,
         UNIQUE(cwd, learned_path, learned_symbol)
        );
-       CREATE INDEX context_learned_routes_cwd_entity ON context_learned_routes(cwd, entity_id);
        CREATE INDEX context_learned_routes_cwd_aliases ON context_learned_routes(cwd, aliases);
        CREATE VIRTUAL TABLE context_learned_routes_fts USING fts5(
          aliases,
@@ -485,5 +445,51 @@ pub fn migrate_v40_to_v41(conn: &Connection) -> Result<(), StoreError> {
         INSERT INTO schema_migrations(version, name) VALUES (41, 'task attachments');
         COMMIT;"#,
     )?;
+    Ok(())
+}
+
+/// Replace the line-scanned entity table with the parsed file and symbol
+/// tables. Saved routes survive as text; the next relearn re-resolves each one
+/// against the rebuilt index and refreshes its digest.
+pub fn migrate_v41_to_v42(conn: &Connection) -> Result<(), StoreError> {
+    // Routes are carried out to a constraint-free table first. They reference
+    // the entity rows, and a parent table cannot be dropped while a child
+    // still points at it.
+    let batch = format!(
+        r#"BEGIN IMMEDIATE;
+        DROP TRIGGER IF EXISTS context_learned_routes_ai;
+        DROP TRIGGER IF EXISTS context_learned_routes_ad;
+        DROP TRIGGER IF EXISTS context_learned_routes_au;
+        DROP TABLE IF EXISTS context_learned_routes_fts;
+        CREATE TABLE context_learned_routes_carry AS
+          SELECT cwd,aliases,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at
+          FROM context_learned_routes;
+        DROP TABLE context_learned_routes;
+        DROP TRIGGER IF EXISTS context_entities_ai;
+        DROP TRIGGER IF EXISTS context_entities_ad;
+        DROP TRIGGER IF EXISTS context_entities_au;
+        DROP TRIGGER IF EXISTS context_entities_cascade_path;
+        DROP TABLE IF EXISTS context_entities_fts;
+        DROP TABLE IF EXISTS context_entities;
+        DROP TABLE IF EXISTS context_maps;
+        CREATE TABLE context_maps (
+          cwd TEXT PRIMARY KEY,
+          scheme INTEGER NOT NULL,
+          state TEXT NOT NULL CHECK(state IN ('building','ready','partial')),
+          built_at TEXT,
+          file_count INTEGER NOT NULL DEFAULT 0,
+          symbol_count INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        );
+        {CONTEXT_INDEX}
+        {ROUTE_HINTS_TABLE}
+        INSERT INTO context_learned_routes(cwd,aliases,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
+          SELECT cwd,aliases,learned_path,learned_symbol,source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at
+          FROM context_learned_routes_carry;
+        DROP TABLE context_learned_routes_carry;
+        INSERT INTO schema_migrations(version, name) VALUES (42, 'tree-sitter code index');
+        COMMIT;"#
+    );
+    conn.execute_batch(&batch)?;
     Ok(())
 }

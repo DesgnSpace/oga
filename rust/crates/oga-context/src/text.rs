@@ -93,6 +93,24 @@ pub fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The one key an exact-name lookup compares against, so `extractSymbols`,
+/// `extract_symbols`, and the question "extract symbols" all fold together.
+/// Order and filler words are dropped; a name made only of filler keeps it.
+pub fn name_key(text: &str) -> String {
+    let all = words(text);
+    let mut parts = all
+        .iter()
+        .filter(|word| !FTS_STOP_WORDS.contains(&word.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts = all;
+    }
+    parts.sort();
+    parts.dedup();
+    parts.join(" ")
+}
+
 pub fn identifier_words(name: &str) -> Vec<String> {
     let mut values = vec![normalize_word(&name.to_ascii_lowercase())];
     values.extend(words(name));

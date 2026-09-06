@@ -1,0 +1,232 @@
+//! Turning a plain-language question into one anchor.
+//!
+//! Signals are tried in the order a reader would trust them: a hint someone
+//! taught the project, then a symbol whose name is what was asked, then a
+//! symbol whose name shares the question's words, then the search index over
+//! doc comments and signatures, then the path.
+
+use std::collections::{HashMap, HashSet};
+
+use oga_domain::SymbolKind;
+
+use crate::routes::LearnedRoute;
+use crate::store::SymbolRow;
+use crate::text::{identifier_words, name_key, words};
+
+/// Beyond this many candidates the ranking has already decided; the rest are
+/// noise carried by one shared word.
+pub const CANDIDATE_POOL: usize = 200;
+pub const DEFAULT_LIMIT: usize = 3;
+
+const ROUTE_EXACT: f64 = 1_000_000.0;
+const ROUTE_HINTED: f64 = 500_000.0;
+const NAME_EXACT: f64 = 40_000.0;
+const NAME_COVERED: f64 = 6_000.0;
+const NAME_TERM: f64 = 3_000.0;
+const PARENT_TERM: f64 = 800.0;
+const DOC_TERM: f64 = 400.0;
+const PATH_TERM: f64 = 250.0;
+const EXPORTED: f64 = 300.0;
+const SEARCH_WEIGHT: f64 = 20.0;
+const SEARCH_CEILING: f64 = 30.0;
+
+#[derive(Debug, Clone)]
+pub struct Scored {
+    pub symbol: SymbolRow,
+    pub score: f64,
+    pub matched: Vec<String>,
+    /// A hint or an exact name settles the answer on its own.
+    pub decisive: bool,
+}
+
+/// How much each of the question's words is worth. A word that reaches most
+/// of the project barely narrows anything; a word that reaches three symbols
+/// almost picks the answer by itself.
+#[derive(Debug, Default)]
+pub struct TermWeights {
+    weights: HashMap<String, f64>,
+}
+
+impl TermWeights {
+    pub fn new(hits: &HashMap<String, u64>, total: usize) -> Self {
+        let total = total.max(1) as f64;
+        Self {
+            weights: hits
+                .iter()
+                .map(|(term, hits)| {
+                    let rarity = (total / (1.0 + *hits as f64)).ln();
+                    (term.clone(), rarity.clamp(0.5, 6.0))
+                })
+                .collect(),
+        }
+    }
+
+    fn of(&self, term: &str) -> f64 {
+        self.weights.get(term).copied().unwrap_or(1.0)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Ranking {
+    scored: HashMap<String, Scored>,
+}
+
+impl Ranking {
+    pub fn add_route(&mut self, route: &LearnedRoute, symbol: SymbolRow, overlap: usize) {
+        let score = if route.exact {
+            ROUTE_EXACT
+        } else {
+            ROUTE_HINTED + overlap as f64 * 1_000.0
+        };
+        self.insert(Scored {
+            matched: route
+                .aliases
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect(),
+            symbol,
+            score,
+            decisive: true,
+        });
+    }
+
+    pub fn add_symbol(
+        &mut self,
+        symbol: SymbolRow,
+        terms: &[String],
+        question_key: &str,
+        weights: &TermWeights,
+        search_rank: Option<f64>,
+    ) {
+        let name_tokens = identifier_words(&symbol.name)
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let parent_tokens = symbol
+            .parent
+            .as_deref()
+            .map(words)
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let path_tokens = words(&symbol.path);
+        let prose_tokens = words(&format!(
+            "{} {}",
+            symbol.doc.as_deref().unwrap_or_default(),
+            symbol.signature
+        ));
+        let mut matched = Vec::new();
+        let mut score = 0.0;
+        for term in terms {
+            let mut best = 0.0_f64;
+            if name_tokens.contains(term) {
+                best = best.max(NAME_TERM);
+            }
+            if parent_tokens.contains(term) {
+                best = best.max(PARENT_TERM);
+            }
+            if prose_tokens.contains(term) {
+                best = best.max(DOC_TERM);
+            }
+            if path_tokens.contains(term) {
+                best = best.max(PATH_TERM);
+            }
+            if best > 0.0 {
+                matched.push(term.clone());
+                score += best * weights.of(term);
+            }
+        }
+        if matched.is_empty() {
+            return;
+        }
+        let key = name_key(&symbol.name);
+        let exact = !key.is_empty() && key == question_key;
+        if exact {
+            score += NAME_EXACT;
+        }
+        if key
+            .split_whitespace()
+            .all(|token| terms.iter().any(|term| term == token))
+        {
+            score += NAME_COVERED;
+        }
+        if symbol.exported {
+            score += EXPORTED;
+        }
+        score += search_rank.unwrap_or_default().clamp(0.0, SEARCH_CEILING) * SEARCH_WEIGHT;
+        self.insert(Scored {
+            score: score * support_weight(&symbol.path) * kind_weight(symbol.kind),
+            symbol,
+            matched,
+            decisive: exact,
+        });
+    }
+
+    fn insert(&mut self, candidate: Scored) {
+        let anchor = format!("{}#{}", candidate.symbol.path, candidate.symbol.name);
+        match self.scored.get(&anchor) {
+            Some(existing) if existing.score >= candidate.score => {}
+            _ => {
+                self.scored.insert(anchor, candidate);
+            }
+        }
+    }
+
+    /// Best first, ties broken by path so the same question keeps answering
+    /// the same way.
+    pub fn ranked(self) -> Vec<Scored> {
+        let mut ranked = self.scored.into_values().collect::<Vec<_>>();
+        ranked.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.symbol.path.cmp(&right.symbol.path))
+                .then_with(|| left.symbol.line.cmp(&right.symbol.line))
+        });
+        ranked.truncate(CANDIDATE_POOL);
+        ranked
+    }
+}
+
+/// Whether the top answer is worth returning on its own. A taught hint or an
+/// exact name is; otherwise the question has to have landed whole, and the
+/// runner-up has to be well behind.
+pub fn is_confident(ranked: &[Scored], terms: &[String]) -> bool {
+    let Some(top) = ranked.first() else {
+        return false;
+    };
+    if top.decisive {
+        return true;
+    }
+    let complete = terms
+        .iter()
+        .all(|term| top.matched.iter().any(|hit| hit == term));
+    complete
+        && ranked
+            .get(1)
+            .is_none_or(|next| top.score >= next.score * 1.8)
+}
+
+/// A field or a variant answers a question about the type that holds it, not
+/// the other way round.
+fn kind_weight(kind: SymbolKind) -> f64 {
+    match kind {
+        SymbolKind::Field | SymbolKind::Variant => 0.75,
+        SymbolKind::Impl => 0.9,
+        _ => 1.0,
+    }
+}
+
+/// Fixtures, snapshots, and test doubles exist to hold code still, not to be
+/// found. They stay reachable, just behind the real thing.
+fn support_weight(path: &str) -> f64 {
+    let lower = path.to_ascii_lowercase();
+    let support = lower.split('/').any(|part| {
+        [
+            "test", "tests", "fixture", "fixtures", "mock", "mocks", "examples",
+        ]
+        .contains(&part)
+    }) || lower.contains(".test.")
+        || lower.contains(".spec.");
+    if support { 0.4 } else { 1.0 }
+}
