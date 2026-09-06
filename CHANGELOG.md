@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.7 - 2026-09-06
+
 ### Added
 
 - Release manifests now include the release notes shown in the update prompt.
