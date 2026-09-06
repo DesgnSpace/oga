@@ -126,6 +126,13 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
 
     match (&input.profile, &input.model) {
         (Some(profile_id), Some(model)) => {
+            // Availability and usage stay unread here, same as before: a
+            // caller naming both profile and model gets no quota or
+            // availability advice, only whether the pair itself is reachable.
+            let named_extra = match policy.as_ref() {
+                Some(policy) => SelectionInputs::new(&settings).policy(policy),
+                None => SelectionInputs::new(&settings),
+            };
             let audit = check_named_route(
                 &input.prompt,
                 NamedPair {
@@ -137,13 +144,12 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
                 },
                 &models,
                 &profiles,
-                &[],
-                policy.as_ref(),
-                &[],
-            );
+                &named_extra,
+            )
+            .map_err(|error| HttpError::bad_request(error.to_string()))?;
             Ok(RoutePlan {
                 profile_id: profile_id.clone(),
-                model: model.clone(),
+                model: audit.resolved_model.clone(),
                 effort: input.effort.clone().or(audit.effort.clone()),
                 decision: decision_from_audit(
                     &audit,
@@ -155,7 +161,7 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
                     input.effort.is_some(),
                 ),
                 warnings: audit.warnings,
-                reason: format!("caller chose {profile_id}/{model}"),
+                reason: format!("caller chose {profile_id}/{}", audit.resolved_model),
             })
         }
         _ => {

@@ -18,7 +18,7 @@ pub(crate) fn settings_cwd(task: &Task) -> String {
         .map_or_else(|| task.cwd.clone(), |worktree| worktree.origin_cwd.clone())
 }
 
-pub(crate) fn resolved_model_settings(
+pub fn resolved_model_settings(
     store: &Store,
     cwd: &str,
 ) -> Result<ResolvedModelSettings, StoreError> {
