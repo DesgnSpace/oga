@@ -1579,6 +1579,7 @@ mod tests {
                 cwd: "/home/test".into(),
                 prompt: "inspect".into(),
                 difficulty: None,
+                kind: None,
             })
             .await
             .expect("routing");

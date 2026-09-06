@@ -491,7 +491,20 @@ export interface WorkerSettings {
   models: ModelSettingsModel[];
 }
 
-export type WorkKind = "mechanical" | "context" | "build" | "reasoning" | "general";
+export type WorkKind =
+  | "mechanical"
+  | "context"
+  | "build"
+  | "reasoning"
+  | "general"
+  | "ui"
+  | "backend"
+  | "database"
+  | "docs"
+  | "tests"
+  | "review"
+  | "research"
+  | "refactor";
 
 /**
  * One standing rule for work that names no model. `when` lists the kinds of

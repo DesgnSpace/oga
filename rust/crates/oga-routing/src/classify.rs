@@ -3,13 +3,16 @@
 
 use std::sync::LazyLock;
 
-use oga_domain::{Difficulty, TaskClass};
+use oga_domain::{Difficulty, TaskClass, TaskTopic};
 use regex::Regex;
 
 /// What the prompt heuristic made of the work.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskDemand {
     pub task_class: TaskClass,
+    /// What the work is about, when the prompt says. `None` means no subject
+    /// signal won, never a guess: topic rules simply do not match such a task.
+    pub topic: Option<TaskTopic>,
     pub difficulty: Difficulty,
     pub reason: String,
 }
@@ -132,6 +135,61 @@ fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("static routing pattern")
 }
 
+/// What each subject reads like. Unlike classes, a topic is all-or-nothing: a
+/// prompt either names the subject or it does not, so every signal counts
+/// once and the heaviest topic wins. Ties resolve in topic order below, and a
+/// prompt matching nothing has no topic at all.
+static TOPIC_SIGNALS: LazyLock<Vec<(TaskTopic, Regex)>> = LazyLock::new(|| {
+    vec![
+        (TaskTopic::Ui, regex(r"\bui\b")),
+        (TaskTopic::Ui, regex(r"\bfrontend\b")),
+        (TaskTopic::Ui, regex(r"\buser interface\b")),
+        (TaskTopic::Ui, regex(r"\bcss\b")),
+        (TaskTopic::Ui, regex(r"\bcomponent\b")),
+        (TaskTopic::Ui, regex(r"\blayout\b")),
+        (TaskTopic::Backend, regex(r"\bbackend\b")),
+        (TaskTopic::Backend, regex(r"\brust\b")),
+        (TaskTopic::Backend, regex(r"\bserver\b")),
+        (TaskTopic::Backend, regex(r"\bapi\b")),
+        (TaskTopic::Backend, regex(r"\bendpoint\b")),
+        (TaskTopic::Database, regex(r"\bdatabase\b")),
+        (TaskTopic::Database, regex(r"\bpostgres\b")),
+        (TaskTopic::Database, regex(r"\bmysql\b")),
+        (TaskTopic::Database, regex(r"\bsqlite\b")),
+        (TaskTopic::Database, regex(r"\bsql\b")),
+        (TaskTopic::Database, regex(r"\bschema\b")),
+        (TaskTopic::Docs, regex(r"\bdocs\b")),
+        (TaskTopic::Docs, regex(r"\bdocumentation\b")),
+        (TaskTopic::Docs, regex(r"\breadme\b")),
+        (TaskTopic::Docs, regex(r"\bchangelog\b")),
+        (TaskTopic::Tests, regex(r"\btests?\b")),
+        (TaskTopic::Tests, regex(r"\bcoverage\b")),
+        (TaskTopic::Review, regex(r"\breview\b")),
+        (TaskTopic::Review, regex(r"\bcode review\b")),
+        (TaskTopic::Review, regex(r"\bpull request\b")),
+        (TaskTopic::Research, regex(r"\bresearch\b")),
+        (TaskTopic::Research, regex(r"\bcomparison\b")),
+        (TaskTopic::Research, regex(r"\bevaluat(?:e|ion)\b")),
+        (TaskTopic::Refactor, regex(r"\brefactor\b")),
+        (TaskTopic::Refactor, regex(r"\bclean ?up\b")),
+        (TaskTopic::Refactor, regex(r"\brestructur\w*\b")),
+        (TaskTopic::Refactor, regex(r"\btech debt\b")),
+    ]
+});
+
+/// The order ties resolve in: the subject named first wins, so the outcome is
+/// the same every time whatever the prompt's word order.
+const TOPIC_ORDER: [TaskTopic; 8] = [
+    TaskTopic::Ui,
+    TaskTopic::Backend,
+    TaskTopic::Database,
+    TaskTopic::Docs,
+    TaskTopic::Tests,
+    TaskTopic::Review,
+    TaskTopic::Research,
+    TaskTopic::Refactor,
+];
+
 /// Every matching signal adds weight and the heaviest class wins, because
 /// first-match over unanchored words picks whichever class is tested first
 /// once a brief is long enough to contain all of them.
@@ -154,9 +212,37 @@ pub fn classify_task(prompt: &str) -> TaskDemand {
         });
     TaskDemand {
         task_class,
+        topic: topic_of(&text),
         difficulty: class_difficulty(task_class),
         reason: class_reason(task_class).to_owned(),
     }
+}
+
+/// The subject the prompt names, if any. Signals are counted, never
+/// first-matched, so a long brief lands where most of its words point.
+fn topic_of(text: &str) -> Option<TaskTopic> {
+    let mut scores = [0i32; 8];
+    for (topic, pattern) in TOPIC_SIGNALS.iter() {
+        if pattern.is_match(text) {
+            scores[topic_index(*topic)] += 1;
+        }
+    }
+    let mut best: Option<TaskTopic> = None;
+    let mut best_score = 0;
+    for candidate in TOPIC_ORDER {
+        if scores[topic_index(candidate)] > best_score {
+            best_score = scores[topic_index(candidate)];
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+fn topic_index(topic: TaskTopic) -> usize {
+    TOPIC_ORDER
+        .iter()
+        .position(|t| *t == topic)
+        .unwrap_or_default()
 }
 
 fn class_index(task_class: TaskClass) -> usize {
@@ -227,5 +313,60 @@ mod tests {
     fn ties_resolve_to_the_cheapest_matching_class() {
         assert_eq!(classify_task("fix").difficulty, Difficulty::Standard);
         assert_eq!(classify_task("rename").difficulty, Difficulty::Mechanical);
+    }
+
+    fn topic(prompt: &str) -> Option<TaskTopic> {
+        classify_task(prompt).topic
+    }
+
+    #[test]
+    fn subjects_read_off_the_prompt_words() {
+        assert_eq!(
+            topic("Restyle the login UI component and its CSS layout."),
+            Some(TaskTopic::Ui)
+        );
+        assert_eq!(
+            topic("Tune the Postgres schema and its indexes."),
+            Some(TaskTopic::Database)
+        );
+        assert_eq!(
+            topic("Update the readme and changelog docs."),
+            Some(TaskTopic::Docs)
+        );
+        assert_eq!(
+            topic("Add tests and raise coverage on the parser."),
+            Some(TaskTopic::Tests)
+        );
+        assert_eq!(
+            topic("Review this pull request for race conditions."),
+            Some(TaskTopic::Review)
+        );
+        assert_eq!(
+            topic("Research a comparison of queue backends."),
+            Some(TaskTopic::Research)
+        );
+        assert_eq!(
+            topic("Refactor the importer to clean up the tech debt."),
+            Some(TaskTopic::Refactor)
+        );
+    }
+
+    #[test]
+    fn a_prompt_naming_no_subject_has_no_topic() {
+        assert_eq!(topic("Rename this symbol across the package."), None);
+        assert_eq!(topic("Draft the release notes."), None);
+    }
+
+    #[test]
+    fn topic_ties_resolve_in_a_fixed_order() {
+        // UI before backend, whatever the word order.
+        assert_eq!(
+            topic("Fix the backend behind the login UI."),
+            Some(TaskTopic::Ui)
+        );
+        assert_eq!(
+            topic("Fix the login UI behind the backend."),
+            Some(TaskTopic::Ui)
+        );
     }
 }

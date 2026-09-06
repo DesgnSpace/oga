@@ -20,8 +20,8 @@ use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
     ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, Difficulty,
     EventKind, HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource,
-    ModelQuery, Profile, Provider, Task, TaskClass, TaskEvent, TaskListQuery, TaskState,
-    TaskSummary, TaskWorktree, VERSION, WorktreeOption,
+    ModelQuery, Profile, Provider, Task, TaskEvent, TaskListQuery, TaskState, TaskSummary,
+    TaskTopic, TaskWorktree, VERSION, WorkKind, WorktreeOption,
 };
 use oga_events::{EventSocketOptions, SocketError, event_socket_path, start_event_socket};
 use oga_http::HttpState;
@@ -56,8 +56,8 @@ const CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const HOLD_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the broker checks whether the host was suspended under it.
 const WAKE_WATCH_INTERVAL: Duration = Duration::from_secs(30);
-const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nKinds are context, mechanical, build, reasoning, general, comma-separated.";
-const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
+const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nKinds are context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor, comma-separated.";
+const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --kind <kind>          Name the subject: ui, backend, database, docs, tests, review, research, refactor.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
 type CliResult<T> = Result<T, CliError>;
 
 #[derive(Debug, Error)]
@@ -691,7 +691,7 @@ Usage: oga <command> [options]
   query "<question>"   Ask in plain words and get the file, line, and name that
                        answer it. --limit N sets how many; --code prints the code.
   love [worker:model[:effort]]  Send work that names no model to one model. Add
-                       --when context,mechanical to send only those kinds of
+                       --when ui,review to send only those kinds of
                        work there. Run it bare to see this project's rules,
                        --clear to go back to choosing per task, --global for
                        every project.
@@ -701,9 +701,9 @@ Usage: oga <command> [options]
   inflight             List the tasks still running, so you know what stopping
                         the service would interrupt.
   delegate "<task>"    Hand a task to a worker and print its id. Pass - to read
-                       the task from standard input. Add --worker, --model, or
-                       --difficulty to choose who runs it, --worktree to run it
-                       in its own checkout, --cwd to run it elsewhere.
+                       the task from standard input. Add --worker, --model,
+                       --difficulty, or --kind to choose who runs it, --worktree
+                       to run it in its own checkout, --cwd to run it elsewhere.
   tasks [options]      List today's tasks. Add --query or -q to search history.
   inspect <task-id>    Show one task record.
   archive <task-id>... Archive tasks; restore reverses this.
@@ -876,6 +876,7 @@ struct DelegateOptions {
     worker: Option<String>,
     model: Option<String>,
     difficulty: Option<Difficulty>,
+    kind: Option<TaskTopic>,
     worktree: bool,
     cwd: Option<String>,
     json: bool,
@@ -903,6 +904,7 @@ fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<Strin
             "--model" => options.model = Some(take("--model")?),
             "--cwd" => options.cwd = Some(take("--cwd")?),
             "--difficulty" => options.difficulty = Some(parse_difficulty(&take("--difficulty")?)?),
+            "--kind" => options.kind = Some(parse_kind(&take("--kind")?)?),
             value if value.starts_with("--worker=") => {
                 options.worker = Some(value.trim_start_matches("--worker=").to_owned());
             }
@@ -915,6 +917,9 @@ fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<Strin
             value if value.starts_with("--difficulty=") => {
                 options.difficulty =
                     Some(parse_difficulty(value.trim_start_matches("--difficulty="))?);
+            }
+            value if value.starts_with("--kind=") => {
+                options.kind = Some(parse_kind(value.trim_start_matches("--kind="))?);
             }
             "-" => values.push("-".to_owned()),
             value if value.starts_with('-') => {
@@ -931,6 +936,21 @@ fn parse_difficulty(value: &str) -> CliResult<Difficulty> {
     serde_json::from_value(json!(value)).map_err(|_| {
         CliError::new(format!(
             "difficulty must be mechanical, standard, hard, or critical, got {value}"
+        ))
+    })
+}
+
+/// Name the subject of the work so a love rule for it applies even when the
+/// task text never says so. Unknown names fail here, not at dispatch.
+fn parse_kind(value: &str) -> CliResult<TaskTopic> {
+    TaskTopic::parse(value).ok_or_else(|| {
+        CliError::new(format!(
+            "there is no kind of work called '{value}'; name one of {}",
+            TaskTopic::ALL
+                .iter()
+                .map(|topic| topic.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
     })
 }
@@ -989,6 +1009,7 @@ async fn run_delegate(args: &[String]) -> CliResult<i32> {
     request.profile = options.worker;
     request.model = options.model;
     request.difficulty = options.difficulty;
+    request.kind = options.kind;
     if options.worktree {
         request.worktree = Some(WorktreeOption::Bare(true));
     }
@@ -3212,7 +3233,7 @@ struct LoveArgs {
     global: bool,
     clear: bool,
     target: Option<String>,
-    when: Vec<TaskClass>,
+    when: Vec<WorkKind>,
 }
 
 fn parse_love_args(args: &[String]) -> CliResult<LoveArgs> {
@@ -3253,16 +3274,16 @@ fn parse_love_args(args: &[String]) -> CliResult<LoveArgs> {
     Ok(parsed)
 }
 
-fn parse_work_kinds(value: &str) -> CliResult<Vec<TaskClass>> {
+fn parse_work_kinds(value: &str) -> CliResult<Vec<WorkKind>> {
     let mut kinds = Vec::new();
     for part in value.split(',').map(str::trim).filter(|p| !p.is_empty()) {
-        let class = TaskClass::parse(part).ok_or_else(|| {
+        let kind = WorkKind::parse(part).ok_or_else(|| {
             CliError::new(format!(
                 "there is no kind of work called '{part}'\n{LOVE_USAGE}"
             ))
         })?;
-        if !kinds.contains(&class) {
-            kinds.push(class);
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
         }
     }
     if kinds.is_empty() {
@@ -3277,13 +3298,13 @@ fn parse_work_kinds(value: &str) -> CliResult<Vec<TaskClass>> {
 /// the catch-all when no kind was named.
 fn replaced_rules<'a>(
     current: &'a oga_config::LoveRules,
-    when: &[TaskClass],
+    when: &[WorkKind],
 ) -> Vec<&'a oga_config::LoveRule> {
     current
         .iter()
         .filter(|rule| match when.is_empty() {
             true => rule.when.is_empty(),
-            false => rule.when.iter().any(|class| when.contains(class)),
+            false => rule.when.iter().any(|kind| when.contains(kind)),
         })
         .collect()
 }
@@ -3292,7 +3313,7 @@ fn replaced_rules<'a>(
 /// no kind was named.
 fn cleared_rules<'a>(
     current: &'a oga_config::LoveRules,
-    when: &[TaskClass],
+    when: &[WorkKind],
 ) -> Vec<&'a oga_config::LoveRule> {
     match when.is_empty() {
         true => current.iter().collect(),
@@ -3302,18 +3323,26 @@ fn cleared_rules<'a>(
 
 /// What a kind of work is called where someone reads it, never the router's own
 /// name for it.
-fn work_label(when: &[TaskClass]) -> String {
+fn work_label(when: &[WorkKind]) -> String {
     if when.is_empty() {
         return "Every other kind of work".into();
     }
     let labels = when
         .iter()
-        .map(|class| match class {
-            TaskClass::Context => "reading and lookups",
-            TaskClass::Mechanical => "small edits",
-            TaskClass::Build => "building and fixing",
-            TaskClass::Reasoning => "hard thinking",
-            TaskClass::General => "open-ended work",
+        .map(|kind| match kind {
+            WorkKind::Context => "reading and lookups",
+            WorkKind::Mechanical => "small edits",
+            WorkKind::Build => "building and fixing",
+            WorkKind::Reasoning => "hard thinking",
+            WorkKind::General => "open-ended work",
+            WorkKind::Ui => "UI work",
+            WorkKind::Backend => "backend work",
+            WorkKind::Database => "database work",
+            WorkKind::Docs => "docs and writing",
+            WorkKind::Tests => "tests",
+            WorkKind::Review => "reviews",
+            WorkKind::Research => "research",
+            WorkKind::Refactor => "refactoring",
         })
         .collect::<Vec<_>>();
     let mut label = labels.join(", ");
@@ -3429,12 +3458,12 @@ enum LoveEdit {
     Set {
         profile_id: String,
         model: String,
-        when: Vec<TaskClass>,
+        when: Vec<WorkKind>,
         effort: Option<String>,
         turn_on: bool,
     },
     Clear {
-        when: Vec<TaskClass>,
+        when: Vec<WorkKind>,
     },
 }
 
@@ -3459,7 +3488,7 @@ fn update_love_text(source: &str, edit: &LoveEdit) -> String {
                 rule.insert(
                     "when".into(),
                     when.iter()
-                        .map(|class| class.as_str())
+                        .map(|kind| kind.as_str())
                         .collect::<Vec<_>>()
                         .into(),
                 );
@@ -3556,7 +3585,7 @@ fn prune_empty_models(models: &mut serde_yaml::Mapping) {
 /// Take these kinds of work away from whichever rules hold them, dropping a
 /// rule left with nothing to take. No kinds means the catch-all rule gives its
 /// place up to the rule being written.
-fn release_kinds(rules: &mut Vec<serde_yaml::Value>, when: &[TaskClass]) {
+fn release_kinds(rules: &mut Vec<serde_yaml::Value>, when: &[WorkKind]) {
     if when.is_empty() {
         rules.retain(|rule| rule.get("when").is_some());
         return;
@@ -3569,8 +3598,8 @@ fn release_kinds(rules: &mut Vec<serde_yaml::Value>, when: &[TaskClass]) {
             .iter()
             .filter(|kind| {
                 kind.as_str()
-                    .and_then(TaskClass::parse)
-                    .is_none_or(|class| !when.contains(&class))
+                    .and_then(WorkKind::parse)
+                    .is_none_or(|kind| !when.contains(&kind))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -3601,6 +3630,7 @@ fn switch_model_on(root: &mut serde_yaml::Value, profile_id: &str, model: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oga_domain::TaskClass;
 
     #[test]
     fn parses_watch_duration_and_flags() {
@@ -3710,7 +3740,7 @@ mod tests {
         assert_eq!(parsed.older_than_days, 30);
     }
 
-    fn set(profile_id: &str, model: &str, when: &[TaskClass], effort: Option<&str>) -> LoveEdit {
+    fn set(profile_id: &str, model: &str, when: &[WorkKind], effort: Option<&str>) -> LoveEdit {
         LoveEdit::Set {
             profile_id: profile_id.into(),
             model: model.into(),
@@ -3728,7 +3758,7 @@ mod tests {
             &set(
                 "opencode",
                 "luna",
-                &[TaskClass::Context, TaskClass::Mechanical],
+                &[WorkKind::Context, WorkKind::Mechanical],
                 Some("low"),
             ),
         );
@@ -3756,11 +3786,11 @@ mod tests {
             &set(
                 "opencode",
                 "luna",
-                &[TaskClass::Context, TaskClass::Build],
+                &[WorkKind::Context, WorkKind::Build],
                 None,
             ),
         );
-        let next = update_love_text(&source, &set("claude", "opus", &[TaskClass::Build], None));
+        let next = update_love_text(&source, &set("claude", "opus", &[WorkKind::Build], None));
         let rules = read_rules(&next);
 
         assert_eq!(rules.for_class(TaskClass::Context).unwrap().model, "luna");
@@ -3770,7 +3800,7 @@ mod tests {
         let cleared = update_love_text(
             &next,
             &LoveEdit::Clear {
-                when: vec![TaskClass::Context],
+                when: vec![WorkKind::Context],
             },
         );
         let rules = read_rules(&cleared);
@@ -3791,7 +3821,7 @@ mod tests {
             &LoveEdit::Set {
                 profile_id: "opencode".into(),
                 model: "luna".into(),
-                when: vec![TaskClass::Context],
+                when: vec![WorkKind::Context],
                 effort: None,
                 turn_on: true,
             },
@@ -3817,7 +3847,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(parsed.target.as_deref(), Some("opencode:luna"));
-        assert_eq!(parsed.when, [TaskClass::Context, TaskClass::Mechanical]);
+        assert_eq!(parsed.when, [WorkKind::Context, WorkKind::Mechanical]);
         assert!(parsed.global);
 
         assert_eq!(
@@ -3830,6 +3860,35 @@ mod tests {
             "there is no kind of work called 'refactoring'"
         );
         assert!(parse_love_args(&["--clear".into(), "claude:opus".into()]).is_err());
+    }
+
+    #[test]
+    fn love_arguments_read_subjects_and_aliases() {
+        let parsed =
+            parse_love_args(&["opencode:muse".into(), "--when=ui,frontend".into()]).unwrap();
+        // `frontend` is how people write it; one rule, one subject.
+        assert_eq!(parsed.when, [WorkKind::Ui]);
+
+        let source = update_love_text("", &set("opencode", "muse", &parsed.when, None));
+        let rules = read_rules(&source);
+        assert_eq!(
+            rules
+                .for_task(TaskClass::General, Some(TaskTopic::Ui))
+                .unwrap()
+                .model,
+            "muse"
+        );
+        assert!(source.contains("ui"));
+    }
+
+    #[test]
+    fn delegate_kind_names_a_subject_or_fails_loudly() {
+        let (options, _) = parse_delegate_args(&["--kind=review".into(), "look".into()]).unwrap();
+        assert_eq!(options.kind, Some(TaskTopic::Review));
+        let (options, _) =
+            parse_delegate_args(&["--kind".into(), "frontend".into(), "look".into()]).unwrap();
+        assert_eq!(options.kind, Some(TaskTopic::Ui));
+        assert!(parse_delegate_args(&["--kind=refactoring".into(), "look".into()]).is_err());
     }
 
     fn read_rules(source: &str) -> oga_config::LoveRules {

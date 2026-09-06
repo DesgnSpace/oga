@@ -29,7 +29,7 @@ const DELEGATE_DESCRIPTION: &str = concat!(
 
 const MODELS_DESCRIPTION: &str = concat!(
     "Read a project's capacity before naming a destination: preferred, enabled models, plus every model the project's routing rules name. ",
-    "Answers `{ love, models }` — `love` is the rules that route work naming no model, where a rule's `when` lists the kinds of work it takes and an empty `when` takes every other kind. ",
+    "Answers `{ love, models }` — `love` is the rules that route work naming no model, where a rule's `when` names the kinds of work it takes: classes, or subjects such as ui, backend, database, docs, tests, review, research, refactor. An empty `when` takes every other kind, and a subject match outranks a class match. ",
     "Each model row is ready to pass to delegate and carries a usage summary. ",
     "Widen it with `onlyPreferred: false`, or `onlyEnabled: false` to see what is switched off."
 );

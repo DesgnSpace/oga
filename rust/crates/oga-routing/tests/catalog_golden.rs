@@ -410,7 +410,7 @@ fn a_model_any_love_rule_names_survives_the_narrowed_view() {
         LoveRule {
             model: "opus".into(),
             profile_id: None,
-            when: vec![oga_domain::TaskClass::Reasoning],
+            when: vec![oga_domain::WorkKind::Reasoning],
             effort: Some("max".into()),
             scope: "project".into(),
         },

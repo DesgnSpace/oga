@@ -62,6 +62,180 @@ impl TaskClass {
     }
 }
 
+/// What the work is about, orthogonal to how hard the router judges it. A
+/// task has at most one: the strongest subject signal in the prompt wins, and
+/// a prompt with none has no topic rather than a guessed one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskTopic {
+    Ui,
+    Backend,
+    Database,
+    Docs,
+    Tests,
+    Review,
+    Research,
+    Refactor,
+}
+
+impl TaskTopic {
+    pub const ALL: [TaskTopic; 8] = [
+        TaskTopic::Ui,
+        TaskTopic::Backend,
+        TaskTopic::Database,
+        TaskTopic::Docs,
+        TaskTopic::Tests,
+        TaskTopic::Review,
+        TaskTopic::Research,
+        TaskTopic::Refactor,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskTopic::Ui => "ui",
+            TaskTopic::Backend => "backend",
+            TaskTopic::Database => "database",
+            TaskTopic::Docs => "docs",
+            TaskTopic::Tests => "tests",
+            TaskTopic::Review => "review",
+            TaskTopic::Research => "research",
+            TaskTopic::Refactor => "refactor",
+        }
+    }
+
+    /// Read a topic the way a config file writes it, ignoring case, padding,
+    /// and the few aliases people reach for first. Anything else is not a
+    /// topic, so a typo fails where it is written instead of routing quietly.
+    pub fn parse(value: &str) -> Option<TaskTopic> {
+        let normalized = value.trim().to_lowercase();
+        match normalized.as_str() {
+            "frontend" => return Some(TaskTopic::Ui),
+            "db" => return Some(TaskTopic::Database),
+            "doc" => return Some(TaskTopic::Docs),
+            "test" => return Some(TaskTopic::Tests),
+            _ => {}
+        }
+        TaskTopic::ALL
+            .into_iter()
+            .find(|topic| topic.as_str() == normalized)
+    }
+}
+
+/// One entry of a love rule's `when` list: either a class of work or a topic.
+/// The class names are the five the router always knew; the topic names are
+/// the subjects callers actually ask about. Existing files naming only
+/// classes read back unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkKind {
+    Mechanical,
+    Context,
+    Build,
+    Reasoning,
+    General,
+    Ui,
+    Backend,
+    Database,
+    Docs,
+    Tests,
+    Review,
+    Research,
+    Refactor,
+}
+
+impl WorkKind {
+    pub const ALL: [WorkKind; 13] = [
+        WorkKind::Mechanical,
+        WorkKind::Context,
+        WorkKind::Build,
+        WorkKind::Reasoning,
+        WorkKind::General,
+        WorkKind::Ui,
+        WorkKind::Backend,
+        WorkKind::Database,
+        WorkKind::Docs,
+        WorkKind::Tests,
+        WorkKind::Review,
+        WorkKind::Research,
+        WorkKind::Refactor,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WorkKind::Mechanical => "mechanical",
+            WorkKind::Context => "context",
+            WorkKind::Build => "build",
+            WorkKind::Reasoning => "reasoning",
+            WorkKind::General => "general",
+            WorkKind::Ui => "ui",
+            WorkKind::Backend => "backend",
+            WorkKind::Database => "database",
+            WorkKind::Docs => "docs",
+            WorkKind::Tests => "tests",
+            WorkKind::Review => "review",
+            WorkKind::Research => "research",
+            WorkKind::Refactor => "refactor",
+        }
+    }
+
+    /// Read a kind the way a config file or `--when` writes it: class names,
+    /// topic names, and the topic aliases, ignoring case and padding.
+    pub fn parse(value: &str) -> Option<WorkKind> {
+        if let Some(class) = TaskClass::parse(value) {
+            return Some(match class {
+                TaskClass::Mechanical => WorkKind::Mechanical,
+                TaskClass::Context => WorkKind::Context,
+                TaskClass::Build => WorkKind::Build,
+                TaskClass::Reasoning => WorkKind::Reasoning,
+                TaskClass::General => WorkKind::General,
+            });
+        }
+        TaskTopic::parse(value).map(|topic| match topic {
+            TaskTopic::Ui => WorkKind::Ui,
+            TaskTopic::Backend => WorkKind::Backend,
+            TaskTopic::Database => WorkKind::Database,
+            TaskTopic::Docs => WorkKind::Docs,
+            TaskTopic::Tests => WorkKind::Tests,
+            TaskTopic::Review => WorkKind::Review,
+            TaskTopic::Research => WorkKind::Research,
+            TaskTopic::Refactor => WorkKind::Refactor,
+        })
+    }
+
+    /// The class this kind names, if it names one.
+    pub fn as_class(self) -> Option<TaskClass> {
+        match self {
+            WorkKind::Mechanical => Some(TaskClass::Mechanical),
+            WorkKind::Context => Some(TaskClass::Context),
+            WorkKind::Build => Some(TaskClass::Build),
+            WorkKind::Reasoning => Some(TaskClass::Reasoning),
+            WorkKind::General => Some(TaskClass::General),
+            _ => None,
+        }
+    }
+
+    /// The topic this kind names, if it names one.
+    pub fn as_topic(self) -> Option<TaskTopic> {
+        match self {
+            WorkKind::Ui => Some(TaskTopic::Ui),
+            WorkKind::Backend => Some(TaskTopic::Backend),
+            WorkKind::Database => Some(TaskTopic::Database),
+            WorkKind::Docs => Some(TaskTopic::Docs),
+            WorkKind::Tests => Some(TaskTopic::Tests),
+            WorkKind::Review => Some(TaskTopic::Review),
+            WorkKind::Research => Some(TaskTopic::Research),
+            WorkKind::Refactor => Some(TaskTopic::Refactor),
+            _ => None,
+        }
+    }
+
+    /// Whether this kind names a topic rather than a class. A topic match
+    /// outranks a class match when both claim one task.
+    pub fn is_topic(self) -> bool {
+        self.as_topic().is_some()
+    }
+}
+
 /// How hard the caller judges the work: the one routing input the caller
 /// knows better than Oga does, since it wrote the prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

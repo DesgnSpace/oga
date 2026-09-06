@@ -22,6 +22,7 @@ pub(crate) struct PreviewBody {
     pub cwd: String,
     pub prompt: String,
     pub difficulty: Option<Difficulty>,
+    pub kind: Option<oga_domain::TaskTopic>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ pub(crate) struct RouteInput {
     pub profile: Option<String>,
     pub model: Option<String>,
     pub difficulty: Option<Difficulty>,
+    pub topic: Option<oga_domain::TaskTopic>,
     pub effort: Option<String>,
     pub default_profile_shortcut: bool,
 }
@@ -59,6 +61,7 @@ pub async fn preview(
             profile: None,
             model: None,
             difficulty: body.difficulty,
+            topic: body.kind,
             effort: None,
             default_profile_shortcut: false,
         },
@@ -160,6 +163,7 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
                 && input.profile.is_none()
                 && input.model.is_none()
                 && input.difficulty.is_none()
+                && input.topic.is_none()
                 && default_profile(&profiles).is_some();
             let profile_id = if default_route {
                 default_profile(&profiles).map(|profile| profile.id.clone())
@@ -174,6 +178,7 @@ pub(crate) fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Ht
                 &RoutePreferences {
                     model_hint: input.model.clone(),
                     difficulty,
+                    topic: input.topic,
                     profile_id,
                     ..RoutePreferences::default()
                 },
@@ -368,6 +373,7 @@ mod tests {
                 profile: None,
                 model: Some(MODEL.into()),
                 difficulty: None,
+                topic: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -403,6 +409,7 @@ mod tests {
                 profile: None,
                 model: None,
                 difficulty: None,
+                topic: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -431,6 +438,7 @@ mod tests {
                 profile: None,
                 model: None,
                 difficulty: None,
+                topic: None,
                 effort: None,
                 default_profile_shortcut: false,
             },
@@ -439,6 +447,60 @@ mod tests {
 
         assert_eq!(route.model, MODEL);
         assert_eq!(route.profile_id, "profile");
+    }
+
+    #[test]
+    fn a_love_rule_for_a_subject_beats_one_for_the_class() {
+        use oga_domain::TaskTopic;
+
+        let (directory, store) = fixture();
+        switch(&store, directory.path(), true);
+        std::fs::write(
+            directory.path().join(".oga.yaml"),
+            format!("love:\n  - model: profile:{MODEL}\n    when: [ui]\n"),
+        )
+        .expect("project config");
+
+        // The prompt reads as build work about a UI subject; the ui rule wins.
+        let route = plan(
+            &HttpState::new(store.clone()),
+            RouteInput {
+                prompt: "Implement the login UI component.".into(),
+                cwd: directory.path().display().to_string(),
+                profile: None,
+                model: None,
+                difficulty: None,
+                topic: None,
+                effort: None,
+                default_profile_shortcut: false,
+            },
+        )
+        .expect("route");
+
+        assert_eq!(route.model, MODEL);
+        assert!(
+            route.reason.contains("loved for ui work"),
+            "{}",
+            route.reason
+        );
+
+        // A named subject at dispatch applies even when the prompt never says so.
+        let route = plan(
+            &HttpState::new(store),
+            RouteInput {
+                prompt: "Implement the thing described in the plan.".into(),
+                cwd: directory.path().display().to_string(),
+                profile: None,
+                model: None,
+                difficulty: None,
+                topic: Some(TaskTopic::Ui),
+                effort: None,
+                default_profile_shortcut: false,
+            },
+        )
+        .expect("route");
+
+        assert_eq!(route.model, MODEL);
     }
 
     #[test]

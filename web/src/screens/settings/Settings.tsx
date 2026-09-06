@@ -521,6 +521,14 @@ const WORK_LABELS = {
   build: "Building and fixing",
   reasoning: "Hard thinking",
   general: "Open-ended work",
+  ui: "UI work",
+  backend: "Backend work",
+  database: "Database work",
+  docs: "Docs and writing",
+  tests: "Tests",
+  review: "Reviews",
+  research: "Research",
+  refactor: "Refactoring",
 } satisfies Record<WorkKind, string>;
 
 function workLabel(when: WorkKind[]): string {
