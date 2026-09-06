@@ -144,22 +144,6 @@ pub enum WorkKind {
 }
 
 impl WorkKind {
-    pub const ALL: [WorkKind; 13] = [
-        WorkKind::Mechanical,
-        WorkKind::Context,
-        WorkKind::Build,
-        WorkKind::Reasoning,
-        WorkKind::General,
-        WorkKind::Ui,
-        WorkKind::Backend,
-        WorkKind::Database,
-        WorkKind::Docs,
-        WorkKind::Tests,
-        WorkKind::Review,
-        WorkKind::Research,
-        WorkKind::Refactor,
-    ];
-
     pub fn as_str(self) -> &'static str {
         match self {
             WorkKind::Mechanical => "mechanical",
@@ -227,12 +211,6 @@ impl WorkKind {
             WorkKind::Refactor => Some(TaskTopic::Refactor),
             _ => None,
         }
-    }
-
-    /// Whether this kind names a topic rather than a class. A topic match
-    /// outranks a class match when both claim one task.
-    pub fn is_topic(self) -> bool {
-        self.as_topic().is_some()
     }
 }
 

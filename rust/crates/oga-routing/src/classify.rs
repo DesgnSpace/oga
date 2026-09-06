@@ -177,19 +177,6 @@ static TOPIC_SIGNALS: LazyLock<Vec<(TaskTopic, Regex)>> = LazyLock::new(|| {
     ]
 });
 
-/// The order ties resolve in: the subject named first wins, so the outcome is
-/// the same every time whatever the prompt's word order.
-const TOPIC_ORDER: [TaskTopic; 8] = [
-    TaskTopic::Ui,
-    TaskTopic::Backend,
-    TaskTopic::Database,
-    TaskTopic::Docs,
-    TaskTopic::Tests,
-    TaskTopic::Review,
-    TaskTopic::Research,
-    TaskTopic::Refactor,
-];
-
 /// Every matching signal adds weight and the heaviest class wins, because
 /// first-match over unanchored words picks whichever class is tested first
 /// once a brief is long enough to contain all of them.
@@ -219,27 +206,28 @@ pub fn classify_task(prompt: &str) -> TaskDemand {
 }
 
 /// The subject the prompt names, if any. Signals are counted, never
-/// first-matched, so a long brief lands where most of its words point.
+/// first-matched, so a long brief lands where most of its words point. Ties
+/// go to the earliest subject in `TaskTopic::ALL`, so the same prompt always
+/// lands in the same place whatever its word order.
 fn topic_of(text: &str) -> Option<TaskTopic> {
-    let mut scores = [0i32; 8];
+    let mut scores = [0usize; TaskTopic::ALL.len()];
     for (topic, pattern) in TOPIC_SIGNALS.iter() {
         if pattern.is_match(text) {
             scores[topic_index(*topic)] += 1;
         }
     }
-    let mut best: Option<TaskTopic> = None;
-    let mut best_score = 0;
-    for candidate in TOPIC_ORDER {
-        if scores[topic_index(candidate)] > best_score {
-            best_score = scores[topic_index(candidate)];
-            best = Some(candidate);
+    let mut best: Option<(TaskTopic, usize)> = None;
+    for candidate in TaskTopic::ALL {
+        let score = scores[topic_index(candidate)];
+        if score > best.map_or(0, |(_, seen)| seen) {
+            best = Some((candidate, score));
         }
     }
-    best
+    best.map(|(topic, _)| topic)
 }
 
 fn topic_index(topic: TaskTopic) -> usize {
-    TOPIC_ORDER
+    TaskTopic::ALL
         .iter()
         .position(|t| *t == topic)
         .unwrap_or_default()
