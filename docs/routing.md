@@ -16,15 +16,18 @@ oga love --clear
 
 `--when` accepts the classes `context`, `mechanical`, `build`, `reasoning`,
 `general`, and the subjects `ui`, `backend`, `database`, `docs`, `tests`,
-`review`, `research`, `refactor` (`frontend` also means `ui`). Oga reads the
-subject off the task text, or takes it from `oga delegate --kind <subject>`
-when the text never says so.
+`review`, `research`, `refactor`. `frontend`, `db`, `doc`, and `test` are read
+as `ui`, `database`, `docs`, and `tests`. Oga reads the subject off the task
+text; `oga delegate --kind <subject>` names it instead, and replaces whatever
+the text reads like.
 
 When several rules match one task, the subject rule wins over the class rule,
 and the class rule wins over the rule with no `when`. Within one tier the
-first rule in the file wins. A subject no rule names falls back to the class,
-then to the rule with no `when`. The same kind in two rules is refused when
-it is written, so the fleet reads top to bottom.
+first rule in the file wins. A task whose subject no rule names falls back to
+its class, then to the rule with no `when`, and a task with no subject at all
+starts at its class. Naming the same kind in two rules is refused where it is
+written, so no task is ever claimed twice. `oga love` and **Settings** list the
+rules in that same order, not the file's.
 
 Use `--global` to apply a rule outside the current project.
 

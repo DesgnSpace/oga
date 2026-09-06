@@ -541,6 +541,15 @@ function modelLabel(rule: LoveRule): string {
   return rule.profileId ? `${rule.profileId} · ${rule.model}` : rule.model;
 }
 
+const SUBJECT_KINDS = new Set<WorkKind>(["ui", "backend", "database", "docs", "tests", "review", "research", "refactor"]);
+
+/** Rules in the order they win a task: subjects, then classes, then the rest. */
+function byPrecedence(rules: LoveRule[]): LoveRule[] {
+  const tier = (rule: LoveRule) =>
+    rule.when.length === 0 ? 2 : rule.when.some((kind) => SUBJECT_KINDS.has(kind)) ? 0 : 1;
+  return [...rules].sort((a, b) => tier(a) - tier(b));
+}
+
 /** Where work that names no model goes, kind of work by kind of work. */
 function FavouriteModels({ rules }: { rules: LoveRule[] }) {
   if (rules.length === 0) return null;
@@ -548,7 +557,7 @@ function FavouriteModels({ rules }: { rules: LoveRule[] }) {
     <div className="settings-favourites">
       <p className="eyebrow">Favourite models</p>
       <ul className="settings-favourite-rules">
-        {rules.map((rule, index) => (
+        {byPrecedence(rules).map((rule, index) => (
           <li className="settings-favourite-rule" key={`${rule.model}-${index}`}>
             <span className="settings-favourite-work">{workLabel(rule.when)}</span>
             <span className="settings-favourite-model">{modelLabel(rule)}</span>

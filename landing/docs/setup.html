@@ -75,7 +75,11 @@
         <p>Settings controls which workers and models can receive work. A model has to be turned on before Oga can select it.</p>
         <p>Mark one account and model as <strong>loved</strong> to make it the default for work that names nothing. From the terminal:</p>
         <pre><code>oga love claude:opus</code></pre>
-        <p>Run <code>oga love</code> on its own to see what this project does today. <code>oga love --clear</code> goes back to choosing per piece of work, and <code>--global</code> applies your choice to every project instead of this one.</p>
+        <p>Send one kind of work somewhere else with <code>--when</code>:</p>
+        <pre><code>oga love opencode:muse --when ui
+oga love codex:beast --when backend,database</code></pre>
+        <p>You can name a subject — <code>ui</code>, <code>backend</code>, <code>database</code>, <code>docs</code>, <code>tests</code>, <code>review</code>, <code>research</code>, <code>refactor</code> — or how demanding the work is: <code>context</code>, <code>mechanical</code>, <code>build</code>, <code>reasoning</code>, <code>general</code>. Oga reads the subject off the task itself. When a task fits two rules, the one naming its subject takes it.</p>
+        <p>Run <code>oga love</code> on its own to see what this project does today, listed in the order the rules take work. <code>oga love --clear</code> goes back to choosing per piece of work, and <code>--global</code> applies your choice to every project instead of this one.</p>
 
         <div class="docs-callout">
           <p><code>oga config</code> prints what a folder actually resolves to — accounts, models, and which file each setting came from.</p>
