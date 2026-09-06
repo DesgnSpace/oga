@@ -2,7 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { broker } from "@/bridge/client";
 import type { UsageBreakdown, UsageDay, UsagePeriod, UsageResponse } from "@/bridge/types";
 import { formatCost, formatTokenCount } from "@/lib/format";
-import { buildHeatmapCalendar, type HeatmapCell } from "./heatmap";
+import { BackArrowIcon, ForwardArrowIcon } from "@/ui/icons";
+import {
+  addMonths,
+  buildHeatmapMonth,
+  clampMonth,
+  compareMonths,
+  heatmapMonthBounds,
+  monthLabel,
+  type HeatmapCell,
+  type MonthKey,
+} from "./heatmap";
 
 type UsageTab = "overview" | "models";
 type ModelSort = "cost" | "tokens" | "tasks";
@@ -156,7 +166,7 @@ function OverviewPanel({
           </div>
         ))}
       </dl>
-      <Heatmap days={period.days} activeDays={period.activeDays} start={period.start} end={period.end} />
+      <Heatmap days={period.days} start={period.start} end={period.end} />
     </div>
   );
 }
@@ -171,61 +181,84 @@ function formatPeakHour(hour: number): string {
   return `${twelve} ${hour < 12 ? "AM" : "PM"}`;
 }
 
-const WEEKDAY_LABELS: ReadonlyArray<string> = ["", "Mon", "", "Wed", "", "Fri", ""];
+const WEEKDAY_LABELS: ReadonlyArray<string> = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function Heatmap({
   days,
-  activeDays,
   start,
   end,
 }: {
   days: UsageDay[];
-  activeDays: number;
   start?: string;
   end?: string;
 }) {
-  const calendar = useMemo(() => buildHeatmapCalendar(days, { start, end }), [days, start, end]);
+  const bounds = useMemo(() => heatmapMonthBounds(days, { start, end }), [days, start, end]);
+  const [month, setMonth] = useState<MonthKey>(bounds.max);
+  useEffect(() => {
+    setMonth(bounds.max);
+  }, [days, start, end]);
+
+  const calendar = useMemo(() => buildHeatmapMonth(days, month), [days, month]);
   const max = Math.max(0, ...days.map((day) => day.costUsd));
+  const hasActivity = calendar.weeks.some((week) => week.some((cell) => cell.inMonth && cell.day !== undefined));
+  const canGoBack = compareMonths(month, bounds.min) > 0;
+  const canGoForward = compareMonths(month, bounds.max) < 0;
+  const label = monthLabel(month);
+
   return (
-    <div className="usage-heatmap-scroll">
-      <div className="usage-heatmap-months" aria-hidden="true">
-        {calendar.monthLabels.map((label, index) => (
-          <span key={index} className="usage-heatmap-month">
-            {label ?? ""}
+    <div className="usage-heatmap">
+      <div className="usage-heatmap-header">
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Previous month"
+          title="Previous month"
+          disabled={!canGoBack}
+          onClick={() => setMonth((current) => clampMonth(addMonths(current, -1), bounds))}
+        >
+          <BackArrowIcon />
+        </button>
+        <span className="usage-heatmap-month-label" aria-live="polite">
+          {label}
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Next month"
+          title="Next month"
+          disabled={!canGoForward}
+          onClick={() => setMonth((current) => clampMonth(addMonths(current, 1), bounds))}
+        >
+          <ForwardArrowIcon />
+        </button>
+      </div>
+      <div className="usage-heatmap-weekdays" aria-hidden="true">
+        {WEEKDAY_LABELS.map((weekday) => (
+          <span key={weekday} className="usage-heatmap-weekday">
+            {weekday}
           </span>
         ))}
       </div>
-      <div className="usage-heatmap-body">
-        <div className="usage-heatmap-weekdays" aria-hidden="true">
-          {Array.from({ length: 7 }, (_, row) => (
-            <span key={row} className="usage-heatmap-weekday">
-              {WEEKDAY_LABELS[row]}
-            </span>
-          ))}
-        </div>
-        <div
-          className="usage-heatmap"
-          role="img"
-          aria-label={`Daily activity, ${activeDays} ${activeDays === 1 ? "active day" : "active days"}`}
-        >
-          {calendar.weeks.flatMap((week) =>
-            week.map((cell) => (
-              <span
-                className="usage-heatmap-cell"
-                key={cell.date}
-                data-level={cell.day !== undefined && cell.inPeriod ? intensityLevel(cell.day.costUsd, max) : 0}
-                title={heatmapTooltip(cell)}
-              />
-            )),
-          )}
-        </div>
+      <div className="usage-heatmap-grid" role="img" aria-label={`Daily activity for ${label}`}>
+        {calendar.weeks.flatMap((week) =>
+          week.map((cell) => (
+            <span
+              className="usage-heatmap-cell"
+              key={cell.date}
+              data-in-month={cell.inMonth}
+              data-level={cell.day !== undefined && cell.inMonth ? intensityLevel(cell.day.costUsd, max) : 0}
+              title={heatmapTooltip(cell)}
+            />
+          )),
+        )}
       </div>
+      {!hasActivity && <p className="usage-heatmap-empty">No activity in {label}.</p>}
     </div>
   );
 }
 
 function heatmapTooltip(cell: HeatmapCell): string {
-  if (cell.day !== undefined && cell.inPeriod) {
+  if (cell.day !== undefined && cell.inMonth) {
     const cost = formatCost(cell.day.costUsd) ?? "$0.00";
     const tasks = `${cell.day.tasks} ${cell.day.tasks === 1 ? "task" : "tasks"}`;
     return `${cell.date} · ${cost} · ${formatTokenCount(cell.day.tokens)} tokens · ${tasks}`;
