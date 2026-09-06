@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed the task header's options menu opening clipped inside the header strip.
 - Fixed workers on your main Claude account failing with "Not logged in" while the same account worked in the terminal.
 
 ## 0.0.6 - 2026-09-05
