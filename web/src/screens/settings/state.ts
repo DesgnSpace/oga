@@ -33,7 +33,7 @@ export function tabLabel(tab: SettingsTab): string {
     case "memories":
       return "Memories";
     case "prompts":
-      return "Prompts";
+      return "Worker Prompt";
     case "storage":
       return "Storage";
     case "about":

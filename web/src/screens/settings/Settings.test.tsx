@@ -472,7 +472,7 @@ describe("worker instructions", () => {
     setTransport(makeTransport());
     render(<SettingsPage />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Prompts" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Worker Prompt" }));
 
     const editor = await screen.findByLabelText("Worker instructions");
     expect(editor.hasAttribute("readonly")).toBe(true);
