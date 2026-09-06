@@ -60,9 +60,26 @@ function renderChangelog(markdown) {
   return output.join("\n          ");
 }
 
+function latestVersion(markdown) {
+  return markdown.match(/^## (?!Unreleased\b)(\S+)/m)?.[1];
+}
+
 const out = process.argv[2] ?? "landing/docs/changelog.html";
 const page = template.replace(
   "<!-- CHANGELOG_BODY -->",
   renderChangelog(changelog),
 );
 await writeFile(join(root, out), page + (page.endsWith("\n") ? "" : "\n"));
+
+const landingDocsSuffix = /\/docs\/changelog\.html$/;
+if (landingDocsSuffix.test(out)) {
+  const version = latestVersion(changelog);
+  if (version) {
+    const indexPath = join(root, out.replace(landingDocsSuffix, "/index.html"));
+    const index = await readFile(indexPath, "utf8");
+    await writeFile(
+      indexPath,
+      index.replace("<!-- LATEST_VERSION -->", `v${escapeHtml(version)}`),
+    );
+  }
+}
