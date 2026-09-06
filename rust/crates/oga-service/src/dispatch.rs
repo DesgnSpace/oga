@@ -450,7 +450,7 @@ impl Dispatcher {
         };
         let attribution = prompt::attribution_for(
             &workspace,
-            &profile.id,
+            profile.provider.as_str(),
             &task.model,
             request.effort.as_deref(),
         );
@@ -936,7 +936,7 @@ impl Dispatcher {
                             allow_questions: task.allow_questions,
                             scope: Some(task.scope.clone()),
                             worker_prompt: DEFAULT_WORKER_PROMPT.to_owned(),
-                            attribution: prompt::attribution_for_task(&task),
+                            attribution: prompt::attribution_for_task(&task, profile.provider),
                             ..WorkerPromptInput::default()
                         },
                     };
@@ -1006,7 +1006,7 @@ impl Dispatcher {
                         allow_questions: queued.allow_questions,
                         scope: Some(queued.scope.clone()),
                         worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
-                        attribution: prompt::attribution_for_task(&queued),
+                        attribution: prompt::attribution_for_task(&queued, profile.provider),
                         ..WorkerPromptInput::default()
                     };
                     self.launch_task(queued, profile, prompt, None);

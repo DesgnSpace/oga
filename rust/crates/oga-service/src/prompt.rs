@@ -29,15 +29,17 @@ pub const ATTRIBUTION_EMAIL: &str = "oga@desgn.space";
 
 /// The run this prompt was built for. Rendered verbatim into the attribution
 /// instruction below, so the stamp always names the worker that ran.
+/// `provider` is the provider type (`claude`, `codex`, …), never the user's
+/// own profile name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkerAttribution {
-    pub profile: String,
+    pub provider: String,
     pub model: String,
     pub effort: Option<String>,
 }
 
 impl WorkerAttribution {
-    /// `opencode/gpt-5 (effort high)`, or `opencode/gpt-5` when no effort ran.
+    /// `claude/opus (effort high)`, or `claude/opus` when no effort ran.
     pub fn summary(&self) -> String {
         match self
             .effort
@@ -45,8 +47,8 @@ impl WorkerAttribution {
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            Some(effort) => format!("{}/{} (effort {effort})", self.profile, self.model),
-            None => format!("{}/{}", self.profile, self.model),
+            Some(effort) => format!("{}/{} (effort {effort})", self.provider, self.model),
+            None => format!("{}/{}", self.provider, self.model),
         }
     }
 
@@ -60,12 +62,12 @@ impl WorkerAttribution {
 /// cannot be read fails open: attribution stays on, the default.
 pub fn attribution_for(
     cwd: &std::path::Path,
-    profile: &str,
+    provider: &str,
     model: &str,
     effort: Option<&str>,
 ) -> Option<WorkerAttribution> {
     let attribution = WorkerAttribution {
-        profile: profile.to_owned(),
+        provider: provider.to_owned(),
         model: model.to_owned(),
         effort: effort.map(str::to_owned),
     };
@@ -85,7 +87,10 @@ pub fn attribution_for(
 /// Same as [`attribution_for`], but read from the project the task was
 /// delegated against: a worktree task runs in a checkout whose own directory
 /// holds no `.oga.yaml`, so the origin directory decides.
-pub fn attribution_for_task(task: &oga_domain::Task) -> Option<WorkerAttribution> {
+pub fn attribution_for_task(
+    task: &oga_domain::Task,
+    provider: oga_domain::Provider,
+) -> Option<WorkerAttribution> {
     let cwd = task
         .worktree
         .as_ref()
@@ -93,7 +98,7 @@ pub fn attribution_for_task(task: &oga_domain::Task) -> Option<WorkerAttribution
         .unwrap_or(task.cwd.as_str());
     attribution_for(
         std::path::Path::new(cwd),
-        &task.profile_id,
+        provider.as_str(),
         &task.model,
         task.effort.as_deref(),
     )
@@ -816,15 +821,15 @@ mod tests {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
             attribution: Some(WorkerAttribution {
-                profile: "opencode".into(),
-                model: "gpt-5".into(),
+                provider: "claude".into(),
+                model: "opus".into(),
                 effort: Some("high".into()),
             }),
             ..WorkerPromptInput::default()
         });
         assert!(prompt.contains("## Attribution"));
-        assert!(prompt.contains("Oga: Done with Oga opencode/gpt-5 (effort high)"));
-        assert!(prompt.contains("Done with Oga opencode/gpt-5 (effort high)"));
+        assert!(prompt.contains("Oga: Done with Oga claude/opus (effort high)"));
+        assert!(prompt.contains("Done with Oga claude/opus (effort high)"));
         assert!(prompt.contains(ATTRIBUTION_EMAIL));
         assert!(prompt.contains("Never stamp the same commit twice"));
         assert!(!prompt.contains("without an AI attribution trailer"));
@@ -835,13 +840,13 @@ mod tests {
         let prompt = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),
             attribution: Some(WorkerAttribution {
-                profile: "opencode".into(),
-                model: "gpt-5".into(),
+                provider: "claude".into(),
+                model: "opus".into(),
                 effort: None,
             }),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Oga: Done with Oga opencode/gpt-5"));
+        assert!(prompt.contains("Oga: Done with Oga claude/opus"));
         assert!(!prompt.contains("(effort"));
 
         let silent = assemble_worker_prompt(&WorkerPromptInput {

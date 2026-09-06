@@ -81,7 +81,7 @@
         <pre><code>git log oga/&lt;branch-name&gt;
 git merge oga/&lt;branch-name&gt;</code></pre>
         <p>Work on its own branch can also commit, push, and open a pull request for you. When it does, the link comes back with the rest of the report.</p>
-        <p>Commits it creates end with an <code>Oga:</code> trailer naming the worker, model, and effort behind them. Pull requests it opens end with the same stamp. Turn the stamp off for a project with <code>worker: attribution: false</code> in <code>.oga.yaml</code>, or everywhere with the same key in <code>~/.oga.yaml</code>.</p>
+        <p>Commits it creates end with an <code>Oga:</code> trailer naming the provider, model, and effort behind them. Pull requests it opens end with the same stamp. Turn the stamp off for a project with <code>worker: attribution: false</code> in <code>.oga.yaml</code>, or everywhere with the same key in <code>~/.oga.yaml</code>.</p>
 
         <h2 id="space">Freeing the space</h2>
         <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. To delete, use <code>oga cleanup --older-than 30d --delete</code>. Only finished, archived work is eligible. Cleanup can remove a clean task copy, but the branch remains.</p>
