@@ -68,6 +68,8 @@ pub enum BrokerCall {
     ArchiveTask {
         task_id: String,
         archived: bool,
+        #[serde(default)]
+        delete_branch: bool,
     },
     CancelTask {
         task_id: String,
@@ -277,9 +279,14 @@ mod native {
                 BrokerCall::RunCleanup => encode(self.run_cleanup().await),
                 BrokerCall::Waiting => encode(self.waiting().await),
                 BrokerCall::PutWaiting { settings } => encode(self.put_waiting(&settings).await),
-                BrokerCall::ArchiveTask { task_id, archived } => {
-                    encode(self.archive_task(&task_id, archived).await)
-                }
+                BrokerCall::ArchiveTask {
+                    task_id,
+                    archived,
+                    delete_branch,
+                } => encode(
+                    self.archive_task_with_branch_deletion(&task_id, archived, delete_branch)
+                        .await,
+                ),
                 BrokerCall::CancelTask { task_id } => {
                     encode(self.cancel_task(&task_id, None).await)
                 }

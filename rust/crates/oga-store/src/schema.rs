@@ -105,6 +105,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS tasks_profile_updated ON tasks(profile_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS tasks_worktree_path ON tasks(worktree_path, archived_at);
     CREATE INDEX IF NOT EXISTS tasks_title_nocase ON tasks(title COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS tasks_tldr_nocase ON tasks(tldr COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS tasks_prompt_nocase ON tasks(prompt COLLATE NOCASE);

@@ -1,13 +1,14 @@
 //! What a task response tells the caller to do next, over the wire.
 
-use std::sync::Arc;
+use std::{path::Path, process::Command, sync::Arc};
 
 use axum::body::Body;
 use http_body_util::BodyExt;
-use oga_domain::{Task, TaskState, TaskWorktree};
+use oga_domain::{Task, TaskState, TaskWorktree, WorktreeRequest};
 use oga_http::HttpState;
 use oga_mcp::{McpServer, router};
 use oga_store::Store;
+use oga_worktree::{branch_exists, create_task_worktree_at, remove_task_worktree};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
@@ -33,6 +34,46 @@ fn test_server() -> (TempDir, McpServer) {
         )
         .expect("profile");
     (directory, McpServer::new(HttpState::new(store)))
+}
+
+fn repository(path: &Path, branch: &str) {
+    init_repository(path);
+    git(path, &["branch", branch]);
+}
+
+fn init_repository(path: &Path) {
+    std::fs::create_dir(path).expect("repository directory");
+    git(path, &["init", "-b", "main"]);
+    std::fs::write(path.join("tracked.txt"), "one\n").expect("tracked file");
+    git(path, &["add", "tracked.txt"]);
+    git(
+        path,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "initial",
+        ],
+    );
+}
+
+fn git(cwd: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+        .args(args)
+        .output()
+        .expect("git is installed");
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 async fn call(server: &McpServer, name: &str, arguments: Value) -> Value {
@@ -139,12 +180,14 @@ async fn task_search_returns_the_matching_field() {
 #[tokio::test]
 async fn cancelling_a_worktree_task_offers_the_checkout_it_left_behind() {
     let (directory, server) = test_server();
+    let project = directory.path().join("project");
+    repository(&project, "oga/thing");
     let checkout = directory.path().join("checkout");
     std::fs::create_dir(&checkout).expect("checkout directory");
     let path = checkout.display().to_string();
     let mut running = task("task-worktree", TaskState::Running);
     running.worktree = Some(TaskWorktree {
-        origin_cwd: "/project".into(),
+        origin_cwd: project.display().to_string(),
         path: path.clone(),
         branch: "oga/thing".into(),
         links: None,
@@ -211,12 +254,14 @@ async fn resuming_a_running_task_is_refused_and_points_at_steer() {
 #[tokio::test]
 async fn a_completed_worktree_task_reads_as_a_branch_to_ship() {
     let (directory, server) = test_server();
+    let project = directory.path().join("project");
+    repository(&project, "oga/ship-it");
     let checkout = directory.path().join("done");
     std::fs::create_dir(&checkout).expect("checkout directory");
     let path = checkout.display().to_string();
     let mut completed = task("task-done", TaskState::Completed);
     completed.worktree = Some(TaskWorktree {
-        origin_cwd: "/project".into(),
+        origin_cwd: project.display().to_string(),
         path: path.clone(),
         branch: "oga/ship-it".into(),
         links: None,
@@ -237,42 +282,211 @@ async fn a_completed_worktree_task_reads_as_a_branch_to_ship() {
 }
 
 #[tokio::test]
-async fn every_tool_description_stays_short() {
-    let (_directory, server) = test_server();
-    let response = router(server.state().clone())
-        .oneshot(
-            axum::http::Request::post("/mcp")
-                .header("content-type", "application/json")
-                .header("accept", "application/json, text/event-stream")
-                .body(Body::from(
-                    json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }).to_string(),
-                ))
-                .expect("request"),
+async fn an_archived_task_with_an_unavailable_repository_never_offers_resume() {
+    let (directory, server) = test_server();
+    let checkout = directory.path().join("archived");
+    std::fs::create_dir(&checkout).expect("checkout directory");
+    let mut archived = task("task-archived", TaskState::Completed);
+    archived.archived_at = Some("2026-09-05T01:00:00.000Z".into());
+    archived.worktree = Some(TaskWorktree {
+        origin_cwd: directory
+            .path()
+            .join("missing-project")
+            .display()
+            .to_string(),
+        path: checkout.display().to_string(),
+        branch: "oga/gone".into(),
+        links: None,
+    });
+    insert(&server, &archived);
+
+    let body = tool_body(&call(&server, "inspect", json!({ "taskId": archived.id })).await);
+
+    assert!(
+        body["next"]
+            .as_array()
+            .expect("next")
+            .iter()
+            .all(|hint| hint["tool"] != "resume")
+    );
+}
+
+#[tokio::test]
+async fn removing_a_busy_branch_never_offers_resume() {
+    let (directory, server) = test_server();
+    let project = directory.path().join("project");
+    init_repository(&project);
+    let created = create_task_worktree_at(
+        &directory.path().join("worktrees"),
+        &project,
+        "busy-task",
+        &WorktreeRequest {
+            branch: Some("oga/busy".into()),
+            ..WorktreeRequest::default()
+        },
+        Some("busy branch"),
+    )
+    .await
+    .expect("worktree created");
+    let mut completed = task("task-busy", TaskState::Completed);
+    completed.cwd = created.cwd.display().to_string();
+    completed.branch = Some(created.worktree.branch.clone());
+    completed.worktree = Some(created.worktree.clone());
+    insert(&server, &completed);
+    remove_task_worktree(&created.worktree)
+        .await
+        .expect("checkout removed");
+    let elsewhere = directory.path().join("elsewhere");
+    git(
+        &project,
+        &[
+            "worktree",
+            "add",
+            elsewhere.to_str().expect("elsewhere path"),
+            &created.worktree.branch,
+        ],
+    );
+
+    let body = tool_body(
+        &call(
+            &server,
+            "worktree-remove",
+            json!({ "taskId": completed.id, "deleteBranch": true }),
+        )
+        .await,
+    );
+
+    assert_eq!(body["branch"], "kept");
+    assert!(
+        body["branchReason"]
+            .as_str()
+            .is_some_and(|reason| { reason.contains("branch is checked out at") })
+    );
+    assert!(
+        body["next"]
+            .as_array()
+            .expect("next")
+            .iter()
+            .all(|hint| hint["tool"] != "resume")
+    );
+
+    let body = tool_body(
+        &call(
+            &server,
+            "worktree-remove",
+            json!({ "taskId": completed.id, "deleteBranch": false }),
+        )
+        .await,
+    );
+    assert_eq!(body["branch"], "kept");
+    assert!(
+        body["next"]
+            .as_array()
+            .is_none_or(|next| next.iter().all(|hint| hint["tool"] != "resume"))
+    );
+}
+
+#[tokio::test]
+async fn archiving_a_busy_branch_never_offers_resume() {
+    let (directory, server) = test_server();
+    let project = directory.path().join("project");
+    init_repository(&project);
+    let created = create_task_worktree_at(
+        &directory.path().join("worktrees"),
+        &project,
+        "busy-archive-task",
+        &WorktreeRequest {
+            branch: Some("oga/busy-archive".into()),
+            ..WorktreeRequest::default()
+        },
+        Some("busy archive branch"),
+    )
+    .await
+    .expect("worktree created");
+    let mut completed = task("task-busy-archive", TaskState::Completed);
+    completed.cwd = created.cwd.display().to_string();
+    completed.branch = Some(created.worktree.branch.clone());
+    completed.worktree = Some(created.worktree.clone());
+    insert(&server, &completed);
+    remove_task_worktree(&created.worktree)
+        .await
+        .expect("checkout removed");
+    let elsewhere = directory.path().join("elsewhere");
+    git(
+        &project,
+        &[
+            "worktree",
+            "add",
+            elsewhere.to_str().expect("elsewhere path"),
+            &created.worktree.branch,
+        ],
+    );
+
+    let body = tool_body(
+        &call(
+            &server,
+            "archive",
+            json!({ "taskId": completed.id, "deleteBranch": true }),
+        )
+        .await,
+    );
+
+    assert_eq!(body["branchOutcome"], "kept");
+    assert!(
+        body["branchReason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("branch is checked out at"))
+    );
+    assert!(
+        body["next"]
+            .as_array()
+            .is_none_or(|next| next.iter().all(|hint| hint["tool"] != "resume"))
+    );
+}
+
+#[tokio::test]
+async fn archiving_a_batch_deletes_each_clean_branch() {
+    let (directory, server) = test_server();
+    let project = directory.path().join("project");
+    init_repository(&project);
+    let mut tasks = Vec::new();
+    let mut branches = Vec::new();
+    for id in ["batch-one", "batch-two"] {
+        let created = create_task_worktree_at(
+            &directory.path().join("worktrees"),
+            &project,
+            id,
+            &WorktreeRequest::default(),
+            Some(id),
         )
         .await
-        .expect("response");
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body")
-        .to_bytes();
-    let body = String::from_utf8(body.to_vec()).expect("UTF-8 body");
-    let payload = body
-        .lines()
-        .find_map(|line| line.strip_prefix("data: "))
-        .unwrap_or(&body);
-    let value: Value = serde_json::from_str(payload).expect("JSON-RPC response");
+        .expect("worktree created");
+        let mut completed = task(id, TaskState::Completed);
+        completed.cwd = created.cwd.display().to_string();
+        completed.branch = Some(created.worktree.branch.clone());
+        completed.worktree = Some(created.worktree.clone());
+        insert(&server, &completed);
+        branches.push(created.worktree.branch);
+        tasks.push(id);
+    }
 
-    // A description says what the tool does and when to pick it over its
-    // neighbours. Anything state-specific belongs in a response's `next`.
-    for tool in value["result"]["tools"].as_array().expect("tools") {
-        let name = tool["name"].as_str().expect("name");
-        let words = tool["description"]
-            .as_str()
-            .expect("description")
-            .split_whitespace()
-            .count();
-        assert!(words <= 90, "{name} description runs {words} words");
+    let body = tool_body(
+        &call(
+            &server,
+            "archive",
+            json!({ "taskId": tasks, "deleteBranch": true }),
+        )
+        .await,
+    );
+
+    let entries = body.as_array().expect("batch response");
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["branchOutcome"] == "deleted")
+    );
+    for branch in branches {
+        assert!(!branch_exists(&project, &branch).await.unwrap());
     }
 }

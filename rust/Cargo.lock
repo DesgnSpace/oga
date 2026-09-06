@@ -2847,6 +2847,7 @@ dependencies = [
  "oga-routing",
  "oga-service",
  "oga-store",
+ "oga-worktree",
  "rusqlite",
  "serde",
  "serde_json",

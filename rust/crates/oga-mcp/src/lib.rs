@@ -195,7 +195,7 @@ impl McpServer {
         let (value, cwd) = match name.as_str() {
             "delegate" => self.delegate(&args).await?,
             "models" => self.models(&args).await?,
-            "inspect" => self.inspect(&args)?,
+            "inspect" => self.inspect(&args).await?,
             "health" => (self.health(), None),
             "tasks" => (self.tasks(&args)?, None),
             "memory" => self.memory(&args)?,
@@ -206,7 +206,7 @@ impl McpServer {
             "steer" => self.steer(&args).await?,
             "handoff" => self.handoff(&args).await?,
             "cancel" => self.cancel(&args).await?,
-            "complete" => self.complete(&args)?,
+            "complete" => self.complete(&args).await?,
             "archive" => self.archive(&args).await?,
             "worktree-remove" => self.worktree_remove(&args).await?,
             _ => return Err(McpError::Message(format!("unknown tool: {name}"))),
@@ -292,7 +292,7 @@ impl McpServer {
         ))
     }
 
-    fn inspect(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
+    async fn inspect(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
         let task_id = required_string(args, "taskId")?;
         let task = self.enrich_task(
             self.state
@@ -302,10 +302,11 @@ impl McpServer {
         )?;
         let fields = fields(args.get("fields"))?.unwrap_or_else(shaping::default_inspect_fields);
         let cwd = project_cwd(&task);
+        let branch_gone = task_branch_unavailable(&task).await;
         let action = if task.archived_at.is_some() {
-            hints::Move::Archived
+            hints::Move::Archived { branch_gone }
         } else {
-            hints::Move::Settled
+            hints::Move::Settled { branch_gone }
         };
         Ok((
             shaping::with_next(shaping::task_view(&task, &fields), &task, action),
@@ -533,7 +534,7 @@ impl McpServer {
             .map_err(McpError::from)?;
         if let Some(queue) = optional_string(args, "queue") {
             let follow_ups = FollowUpQueue::new(self.state.store.clone());
-            let action = match queue.as_str() {
+            let cleared = match queue.as_str() {
                 "add" => {
                     let instruction = required_string(args, "instruction")?;
                     if args.get("timeoutMs").is_some()
@@ -548,21 +549,29 @@ impl McpServer {
                         ));
                     }
                     follow_ups.queue(&task_id, current.state, &instruction)?;
-                    hints::Move::Queued
+                    false
                 }
                 "clear" => {
                     follow_ups.clear(&task_id, current.state, "removed on request")?;
-                    hints::Move::Settled
+                    true
                 }
                 _ => return Err(McpError::InvalidParams("queue must be add or clear".into())),
             };
+            let task = self.enrich_task(
+                self.state
+                    .dispatcher
+                    .task(&task_id)
+                    .map_err(McpError::from)?,
+            )?;
+            let action = if cleared {
+                hints::Move::Settled {
+                    branch_gone: task_branch_unavailable(&task).await,
+                }
+            } else {
+                hints::Move::Queued
+            };
             return self.started_response(
-                self.enrich_task(
-                    self.state
-                        .dispatcher
-                        .task(&task_id)
-                        .map_err(McpError::from)?,
-                )?,
+                task,
                 fields(args.get("fields"))?.unwrap_or_default(),
                 action,
             );
@@ -673,7 +682,18 @@ impl McpServer {
         for future in outcomes {
             let (id, result) = future.await;
             resolved.push(match result {
-                Ok(task) => Ok((self.enrich_task(task)?, None, None)),
+                Ok(task) => {
+                    let task = self.enrich_task(task)?;
+                    let branch_gone = task_branch_unavailable(&task).await;
+                    Ok(shaping::TaskActionSuccess {
+                        task,
+                        stopped: None,
+                        checkout: None,
+                        branch_outcome: None,
+                        branch_reason: None,
+                        branch_gone,
+                    })
+                }
                 Err(error) => Err((id.clone(), error.to_string())),
             });
         }
@@ -687,12 +707,17 @@ impl McpServer {
             None
         };
         Ok((
-            shaping::task_action_response(&ids, resolved, &fields, hints::Move::Settled),
+            shaping::task_action_response(
+                &ids,
+                resolved,
+                &fields,
+                hints::Move::Settled { branch_gone: false },
+            ),
             cwd,
         ))
     }
 
-    fn complete(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
+    async fn complete(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
         let task_id = required_string(args, "taskId")?;
         let asserted_by = required_string(args, "assertedBy")?;
         let reason = required_string(args, "reason")?;
@@ -702,11 +727,12 @@ impl McpServer {
             .force_complete(CompletionAssertion::new(task_id, asserted_by, reason))?;
         let task = self.enrich_task(task)?;
         let cwd = project_cwd(&task);
+        let branch_gone = task_branch_unavailable(&task).await;
         Ok((
             shaping::with_next(
                 shaping::task_view(&task, &fields(args.get("fields"))?.unwrap_or_default()),
                 &task,
-                hints::Move::Settled,
+                hints::Move::Settled { branch_gone },
             ),
             Some(cwd),
         ))
@@ -715,24 +741,34 @@ impl McpServer {
     async fn archive(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
         let ids = task_ids(args.get("taskId"))?;
         let archived = optional_bool(args, "archived").unwrap_or(true);
+        let delete_branch = optional_bool(args, "deleteBranch").unwrap_or(false);
+        if delete_branch && !archived {
+            return Err(McpError::InvalidParams(
+                "deleteBranch only applies when archiving".into(),
+            ));
+        }
         let fields = fields(args.get("fields"))?.unwrap_or_default();
         let mut outcomes = Vec::with_capacity(ids.len());
         for id in &ids {
-            outcomes.push(
-                match self
-                    .state
-                    .dispatcher
-                    .archive(ArchiveRequest::new(id, archived))
-                    .await
-                {
-                    Ok(result) => Ok((
-                        self.enrich_task(result.task)?,
-                        result.stopped.then_some("stopped".into()),
-                        result.checkout,
-                    )),
-                    Err(error) => Err((id.clone(), error.to_string())),
-                },
-            );
+            let mut request = ArchiveRequest::new(id, archived);
+            if delete_branch {
+                request = request.delete_branch();
+            }
+            outcomes.push(match self.state.dispatcher.archive(request).await {
+                Ok(result) => {
+                    let task = self.enrich_task(result.task)?;
+                    let branch_gone = task_branch_unavailable(&task).await;
+                    Ok(shaping::TaskActionSuccess {
+                        task,
+                        stopped: result.stopped.then_some("stopped".into()),
+                        checkout: result.checkout,
+                        branch_outcome: result.branch,
+                        branch_reason: result.branch_reason,
+                        branch_gone,
+                    })
+                }
+                Err(error) => Err((id.clone(), error.to_string())),
+            });
         }
         let cwd = if ids.len() == 1 {
             self.state
@@ -744,9 +780,9 @@ impl McpServer {
             None
         };
         let action = if archived {
-            hints::Move::Archived
+            hints::Move::Archived { branch_gone: false }
         } else {
-            hints::Move::Settled
+            hints::Move::Settled { branch_gone: false }
         };
         Ok((
             shaping::task_action_response(&ids, outcomes, &fields, action),
@@ -787,9 +823,11 @@ impl McpServer {
             // A skipped removal left the checkout where it was, so the moves
             // that follow one being gone do not apply to it.
             let skipped = removed.get("skipped").is_some();
-            let branch_kept = removed.get("branch").and_then(Value::as_str) != Some("deleted");
             match self.state.dispatcher.task(&task_id) {
                 Ok(task) if !skipped => {
+                    let branch_gone = task_branch_unavailable(&task).await;
+                    let branch_kept = removed.get("branch").and_then(Value::as_str) == Some("kept")
+                        && !branch_gone;
                     shaping::with_next(removed, &task, hints::Move::CheckoutRemoved { branch_kept })
                 }
                 _ => removed,
@@ -1491,4 +1529,13 @@ fn project_cwd(task: &Task) -> String {
     task.worktree
         .as_ref()
         .map_or_else(|| task.cwd.clone(), |worktree| worktree.origin_cwd.clone())
+}
+
+async fn task_branch_unavailable(task: &Task) -> bool {
+    let Some(worktree) = task.worktree.as_ref() else {
+        return false;
+    };
+    !oga_worktree::branch_recreatable(worktree)
+        .await
+        .unwrap_or(false)
 }

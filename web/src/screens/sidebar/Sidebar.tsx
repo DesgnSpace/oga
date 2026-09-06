@@ -19,6 +19,7 @@ import {
 import { SearchField } from "@/components/SearchField";
 import {
   archiveTitles,
+  ArchiveBranchDialog,
   canComplete,
   canPause,
   canResume,
@@ -30,6 +31,7 @@ import {
   resumeTitles,
   stopTitles,
   type TaskToastTitles,
+  type ArchiveBranchTask,
 } from "@/screens/task/Actions";
 import { isExplainedWait, taskStatusLabel, waitLabel } from "@/screens/task/format";
 import {
@@ -117,8 +119,10 @@ function rowMenuSections(
     titles: TaskToastTitles,
   ) => void,
   offline: boolean,
+  onDeleteBranch: (task: TaskSummary) => void,
 ): MenuAction[][] {
   const archived = task.archivedAt !== undefined;
+  const canDeleteBranch = !archived && task.originCwd !== undefined && task.branch !== undefined;
   const lifecycle: MenuAction[] = [];
   if (canPause(task)) {
     lifecycle.push({
@@ -148,6 +152,16 @@ function rowMenuSections(
       onSelect: () => run(() => executeArchive(task.id, !archived), archiveTitles(task, archived)),
     },
   ];
+  if (canDeleteBranch) {
+    admin.push({
+      key: "archive-delete-branch",
+      label: "Archive and delete branch",
+      icon: <ArchiveIcon />,
+      destructive: true,
+      disabled: offline,
+      onSelect: () => onDeleteBranch(task),
+    });
+  }
   if (canComplete(task)) {
     admin.push({
       key: "complete",
@@ -188,6 +202,7 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   const [itemHeight, setItemHeight] = useState(VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT);
   const [resizeStart, setResizeStart] = useState<{ x: number; width: number } | null>(null);
   const [rowMenu, setRowMenu] = useState<{ task: TaskSummary } | null>(null);
+  const [archiveBranchTask, setArchiveBranchTask] = useState<ArchiveBranchTask | null>(null);
   const [rowMenuPlacement, setRowMenuPlacement] = useState<{ top: number; left: number } | null>(null);
   const connectionWasLive = useRef(false);
   const connectionState = useRef<ConnectionState>(sidebarRef.snapshot.connection);
@@ -472,6 +487,13 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
     event.preventDefault();
     rowMenuAnchorRef.current = event.currentTarget;
     setRowMenu({ task });
+  }, []);
+
+  const handleDeleteBranch = useCallback((task: TaskSummary) => {
+    setRowMenu(null);
+    if (task.originCwd !== undefined && task.branch !== undefined) {
+      setArchiveBranchTask({ ...task, branch: task.branch });
+    }
   }, []);
 
   const runRowAction = useCallback(
@@ -840,10 +862,22 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
           }}
         >
           <MenuPanel
-            sections={rowMenuSections(rowMenu.task, runRowAction, sidebar.connection !== "connected")}
+            sections={rowMenuSections(rowMenu.task, runRowAction, sidebar.connection !== "connected", handleDeleteBranch)}
             onClose={() => setRowMenu(null)}
           />
         </div>
+      )}
+
+      {archiveBranchTask && (
+        <ArchiveBranchDialog
+          task={archiveBranchTask}
+          open
+          onClose={() => setArchiveBranchTask(null)}
+          onChanged={() => {
+            setArchiveBranchTask(null);
+            void sidebarRef.refresh();
+          }}
+        />
       )}
 
       {connectionStatus !== undefined && (

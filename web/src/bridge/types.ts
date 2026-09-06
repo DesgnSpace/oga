@@ -16,6 +16,17 @@ export type TaskState =
   | "failed"
   | "cancelled";
 
+export type BranchOutcome = "kept" | "deleted" | "already_gone";
+
+export interface ArchiveTaskResponse {
+  id: string;
+  state: TaskState;
+  stopped?: boolean;
+  checkout?: string;
+  branchOutcome?: BranchOutcome;
+  branchReason?: string;
+}
+
 export type ArchivedFilter = "active" | "only" | "include";
 
 export type CompletionCode =
@@ -654,7 +665,7 @@ export type BrokerCall =
   | { call: "runCleanup" }
   | { call: "waiting" }
   | { call: "putWaiting"; settings: WaitSettings }
-  | { call: "archiveTask"; taskId: string; archived: boolean }
+  | { call: "archiveTask"; taskId: string; archived: boolean; deleteBranch?: boolean }
   | { call: "cancelTask"; taskId: string }
   | { call: "resumeTask"; taskId: string; request: ResumeRequest }
   | { call: "replyTask"; taskId: string; request: ReplyRequest }
@@ -686,7 +697,7 @@ export interface BrokerCallResult {
   runCleanup: CleanupResult;
   waiting: WaitSettings;
   putWaiting: WaitSettings;
-  archiveTask: void;
+  archiveTask: ArchiveTaskResponse;
   cancelTask: void;
   resumeTask: void;
   replyTask: void;

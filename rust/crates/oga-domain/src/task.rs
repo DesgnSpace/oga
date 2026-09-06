@@ -491,6 +491,8 @@ pub struct WorktreeDeleteResult {
     pub task_id: String,
     pub checkout: CheckoutOutcome,
     pub branch: BranchOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

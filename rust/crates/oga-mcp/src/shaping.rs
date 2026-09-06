@@ -1,6 +1,6 @@
 //! Public task response shaping shared by MCP tools.
 
-use oga_domain::{Task, TaskMatch, TaskSummary};
+use oga_domain::{BranchOutcome, Task, TaskMatch, TaskSummary};
 use serde_json::{Map, Value, json};
 
 use crate::hints;
@@ -372,7 +372,16 @@ pub fn with_next(mut value: Value, task: &Task, action: hints::Move) -> Value {
     value
 }
 
-type TaskActionOutcome = Result<(Task, Option<String>, Option<String>), (String, String)>;
+pub(crate) struct TaskActionSuccess {
+    pub(crate) task: Task,
+    pub(crate) stopped: Option<String>,
+    pub(crate) checkout: Option<String>,
+    pub(crate) branch_outcome: Option<BranchOutcome>,
+    pub(crate) branch_reason: Option<String>,
+    pub(crate) branch_gone: bool,
+}
+
+type TaskActionOutcome = Result<TaskActionSuccess, (String, String)>;
 
 pub fn task_action_response(
     ids: &[String],
@@ -383,7 +392,18 @@ pub fn task_action_response(
     let entries = outcomes
         .into_iter()
         .map(|outcome| match outcome {
-            Ok((task, stopped, checkout)) => {
+            Ok(TaskActionSuccess {
+                task,
+                stopped,
+                checkout,
+                branch_outcome,
+                branch_reason,
+                branch_gone,
+            }) => {
+                let branch_gone = branch_gone
+                    || branch_outcome.is_some_and(|outcome| {
+                        matches!(outcome, BranchOutcome::Deleted | BranchOutcome::AlreadyGone)
+                    });
                 let mut value = task_view(&task, fields);
                 if let Some(object) = value.as_object_mut() {
                     if stopped.is_some() {
@@ -392,7 +412,18 @@ pub fn task_action_response(
                     if let Some(checkout) = checkout {
                         object.insert("checkout".into(), json!(checkout));
                     }
+                    if let Some(branch) = branch_outcome {
+                        object.insert("branchOutcome".into(), json!(branch));
+                    }
+                    if let Some(reason) = branch_reason {
+                        object.insert("branchReason".into(), json!(reason));
+                    }
                 }
+                let action = match action {
+                    hints::Move::Archived { .. } => hints::Move::Archived { branch_gone },
+                    hints::Move::Settled { .. } => hints::Move::Settled { branch_gone },
+                    action => action,
+                };
                 with_next(value, &task, action)
             }
             Err((id, error)) => json!({ "id": id, "error": error }),
@@ -405,5 +436,69 @@ pub fn task_action_response(
             .unwrap_or_else(|| json!({ "id": ids[0] }))
     } else {
         Value::Array(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oga_domain::TaskState;
+
+    #[test]
+    fn branch_outcome_does_not_replace_the_task_branch() {
+        let task = Task {
+            id: "task".into(),
+            state: TaskState::Completed,
+            branch: Some("oga/ship-it".into()),
+            ..Default::default()
+        };
+        let task_id = task.id.clone();
+
+        let value = task_action_response(
+            std::slice::from_ref(&task_id),
+            vec![Ok(TaskActionSuccess {
+                task,
+                stopped: None,
+                checkout: None,
+                branch_outcome: Some(BranchOutcome::Kept),
+                branch_reason: Some("branch has unmerged commits".into()),
+                branch_gone: false,
+            })],
+            &["context".into()],
+            hints::Move::Settled { branch_gone: false },
+        );
+
+        assert_eq!(value["branch"], "oga/ship-it");
+        assert_eq!(value["branchOutcome"], "kept");
+    }
+
+    #[test]
+    fn deleted_branch_does_not_offer_resume() {
+        let task = Task {
+            id: "task".into(),
+            state: TaskState::Completed,
+            ..Default::default()
+        };
+        let task_id = task.id.clone();
+
+        let value = task_action_response(
+            std::slice::from_ref(&task_id),
+            vec![Ok(TaskActionSuccess {
+                task,
+                stopped: None,
+                checkout: None,
+                branch_outcome: Some(BranchOutcome::Deleted),
+                branch_reason: None,
+                branch_gone: false,
+            })],
+            &[],
+            hints::Move::Archived { branch_gone: false },
+        );
+
+        assert!(
+            value["next"]
+                .as_array()
+                .is_none_or(|next| { next.iter().all(|hint| hint["tool"] != "resume") })
+        );
     }
 }

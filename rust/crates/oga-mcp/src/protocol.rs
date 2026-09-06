@@ -82,10 +82,10 @@ const COMPLETE_DESCRIPTION: &str = concat!(
 );
 
 const ARCHIVE_DESCRIPTION: &str = concat!(
-    "Archive or restore a delegated task without deleting its history: it stays addressable by Oga task id and drops out of active task lists. ",
-    "A task that is not settled is stopped first, so it is never hidden while its worker is alive. ",
-    "Archiving a worktree task removes its checkout and keeps the branch the work is on; a checkout holding uncommitted work stays, and the entry's `checkout` names the path. ",
-    "A batch reports each id's outcome."
+    "Archive or restore a delegated task without deleting its history. Archived tasks stay addressable by id and leave active lists. ",
+    "A live task is stopped before archive. A clean worktree checkout is removed; uncommitted work keeps it, and `checkout` says where. ",
+    "`deleteBranch` also requests safe deletion of its local branch. `branchOutcome` and `branchReason` report whether it was kept or removed. ",
+    "Batches report each id."
 );
 
 const DELETE_WORKTREE_DESCRIPTION: &str = concat!(
@@ -854,6 +854,13 @@ pub fn tool_list() -> Value {
             "archived".into(),
             json!({ "type": "boolean", "default": true }),
         ),
+        (
+            "deleteBranch".into(),
+            described(
+                json!({ "type": "boolean", "default": false }),
+                "Also delete the local branch when it has no unmerged commits and is not checked out elsewhere. The branch stays when either safety check refuses it.",
+            ),
+        ),
     ]);
     field_property(&mut archive);
     tools.push(tool(
@@ -885,7 +892,7 @@ pub fn tool_list() -> Value {
                     "deleteBranch".into(),
                     described(
                         json!({ "type": "boolean", "default": false }),
-                        "Also delete the task's own branch. The branch survives by default.",
+                        "Also safely delete the task's own local branch when it has no unmerged commits and is not checked out elsewhere. The branch survives by default.",
                     ),
                 ),
             ]),

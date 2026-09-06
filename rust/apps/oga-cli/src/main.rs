@@ -706,7 +706,8 @@ Usage: oga <command> [options]
                        to run it in its own checkout, --cwd to run it elsewhere.
   tasks [options]      List today's tasks. Add --query or -q to search history.
   inspect <task-id>    Show one task record.
-  archive <task-id>... Archive tasks; restore reverses this.
+  archive <task-id>... Archive tasks. Add --delete-branch to remove each
+                        worktree's local branch safely.
   cancel <task-id>...  Cancel tasks.
   resume <task-id>     Resume a task, optionally with -m instruction. Add
                        --start-at 4h (or an exact time) to have it start later
@@ -743,6 +744,7 @@ struct TaskCliOptions {
     json: bool,
     state: Option<TaskState>,
     archived: bool,
+    delete_branch: bool,
     limit: Option<u64>,
     instruction: Option<String>,
     start_at: Option<String>,
@@ -757,6 +759,7 @@ fn parse_task_options(args: &[String]) -> CliResult<(TaskCliOptions, Vec<String>
         match args[index].as_str() {
             "--json" => options.json = true,
             "--archived" => options.archived = true,
+            "--delete-branch" => options.delete_branch = true,
             "--state" => {
                 index += 1;
                 options.state = Some(cli_parse_task_state(
@@ -815,6 +818,13 @@ fn parse_task_options(args: &[String]) -> CliResult<(TaskCliOptions, Vec<String>
         index += 1;
     }
     Ok((options, values))
+}
+
+fn reject_delete_branch(options: &TaskCliOptions) -> CliResult<()> {
+    if options.delete_branch {
+        return Err(CliError::new("--delete-branch only applies to archive"));
+    }
+    Ok(())
 }
 
 fn parse_limit(value: &str) -> CliResult<u64> {
@@ -1043,6 +1053,7 @@ async fn run_delegate(args: &[String]) -> CliResult<i32> {
 
 async fn run_tasks(args: &[String]) -> CliResult<i32> {
     let (options, values) = parse_task_options(args)?;
+    reject_delete_branch(&options)?;
     if !values.is_empty() {
         return Err(CliError::new("tasks does not take task ids"));
     }
@@ -1139,7 +1150,8 @@ async fn resolve_task(client: &LoopbackClient, id: &str) -> CliResult<TaskSummar
 }
 
 async fn run_inspect(args: &[String]) -> CliResult<i32> {
-    let (_options, values) = parse_task_options(args)?;
+    let (options, values) = parse_task_options(args)?;
+    reject_delete_branch(&options)?;
     let id = values
         .first()
         .ok_or_else(|| CliError::new("usage: oga inspect <task-id> [--json]"))?;
@@ -1158,30 +1170,99 @@ async fn run_archive(args: &[String], archived: bool) -> CliResult<i32> {
     if ids.is_empty() {
         return Err(CliError::new("at least one task id is required"));
     }
+    if options.delete_branch && !archived {
+        return Err(CliError::new(
+            "--delete-branch only applies to archive, not restore",
+        ));
+    }
     let client = broker_client()?;
     let mut output = Vec::new();
+    let mut failed = false;
     for id in ids {
-        let task = resolve_task(&client, &id).await?;
-        let response = client.archive_task(&task.id, archived).await?;
-        output.push(json!({"id": response.id, "state": response.state, "title": task_title(&task), "action": if archived { "archived" } else { "restored" }}));
+        let task = match resolve_task(&client, &id).await {
+            Ok(task) => task,
+            Err(error) => {
+                failed = true;
+                output.push(json!({"id": id, "error": error.to_string()}));
+                continue;
+            }
+        };
+        let response = match client
+            .archive_task_with_branch_deletion(&task.id, archived, options.delete_branch)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                failed = true;
+                output.push(json!({"id": task.id, "error": error.to_string()}));
+                continue;
+            }
+        };
+        let mut item = json!({
+            "id": response.id,
+            "state": response.state,
+            "title": task_title(&task),
+            "action": if archived { "archived" } else { "restored" },
+        });
+        if let Some(checkout) = response.checkout {
+            item["checkout"] = json!(checkout);
+        }
+        if let Some(branch) = response.branch_outcome {
+            item["branchOutcome"] = json!(branch);
+        }
+        if let Some(reason) = response.branch_reason {
+            item["branchReason"] = json!(reason);
+        }
+        output.push(item);
     }
     if options.json {
         print_json(&Value::Array(output))?;
     } else {
         for item in output {
+            if let Some(error) = item["error"].as_str() {
+                println!(
+                    "Couldn't {} {}: {}",
+                    if archived { "archive" } else { "restore" },
+                    item["id"].as_str().unwrap_or_default(),
+                    error
+                );
+                continue;
+            }
+            let mut details = Vec::new();
+            if let Some(checkout) = item["checkout"].as_str() {
+                details.push(format!("checkout {checkout}"));
+            }
+            if let Some(branch) = item["branchOutcome"].as_str() {
+                let branch = match branch {
+                    "already_gone" => "already gone",
+                    other => other,
+                };
+                let reason = item["branchReason"].as_str();
+                details.push(match reason {
+                    Some(reason) => format!("branch {branch} ({reason})"),
+                    None => format!("branch {branch}"),
+                });
+            }
+            let details = if details.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", details.join(", "))
+            };
             println!(
-                "{} {} {}",
+                "{} {} {}{}",
                 if archived { "Archived" } else { "Restored" },
                 item["id"].as_str().unwrap_or_default(),
-                item["title"].as_str().unwrap_or_default()
+                item["title"].as_str().unwrap_or_default(),
+                details,
             );
         }
     }
-    Ok(0)
+    Ok(i32::from(failed))
 }
 
 async fn run_cancel(args: &[String]) -> CliResult<i32> {
     let (options, ids) = parse_task_options(args)?;
+    reject_delete_branch(&options)?;
     if ids.is_empty() {
         return Err(CliError::new("at least one task id is required"));
     }
@@ -1208,6 +1289,7 @@ async fn run_cancel(args: &[String]) -> CliResult<i32> {
 
 async fn run_resume(args: &[String]) -> CliResult<i32> {
     let (options, values) = parse_task_options(args)?;
+    reject_delete_branch(&options)?;
     let id = values.first().ok_or_else(|| {
         CliError::new("usage: oga resume <task-id> [-m instruction] [--start-at 4h]")
     })?;
@@ -1330,6 +1412,7 @@ async fn run_handoff(args: &[String]) -> CliResult<i32> {
 
 async fn run_complete(args: &[String]) -> CliResult<i32> {
     let (options, values) = parse_task_options(args)?;
+    reject_delete_branch(&options)?;
     let id = values
         .first()
         .ok_or_else(|| CliError::new("usage: oga complete <task-id>"))?;
@@ -2140,7 +2223,7 @@ fn inflight_report(tasks: &[InFlightTask]) -> String {
 }
 
 fn cleanup_usage() -> &'static str {
-    "usage: oga cleanup [--older-than <days>] [--delete]\n\n  Reports what would be permanently deleted and deletes nothing. Add --delete\n  to actually remove it.\n\n  --older-than <days>  How long finished work keeps its activity. 30 or 30d.\n                       Defaults to 30 days for a preview; --delete requires it.\n  --delete             Delete, permanently. There is nothing to restore from.\n\n  Only tasks that have finished and that you archived are ever eligible.\n  Work that is running or waiting on you and project memories are never deleted."
+    "usage: oga cleanup [--older-than <days>] [--delete]\n\n  Reports what would be permanently deleted and deletes nothing. Add --delete\n  to actually remove it.\n\n  --older-than <days>  How long finished work keeps its activity. 30 or 30d.\n                       Defaults to 30 days for a preview; --delete requires it.\n  --delete             Delete, permanently. There is nothing to restore from.\n\n  Only tasks that have finished and that you archived are ever eligible.\n  Work that is running or waiting on you and project memories are never deleted.\n  Stop the broker before using --delete."
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2286,6 +2369,12 @@ async fn run_cleanup(args: &[String]) -> CliResult<i32> {
         return Ok(0);
     }
 
+    if broker_is_running().await {
+        return Err(CliError::new(
+            "stop the broker before using cleanup --delete",
+        ));
+    }
+
     let store = Store::open_maintenance(&path)?;
     let worktrees = cleanup_worktrees(&store, &cutoff)?;
     let (removed_worktrees, uncommitted) = remove_cleanup_worktrees(&store, &worktrees).await?;
@@ -2313,7 +2402,7 @@ struct CleanupWorktree {
 }
 
 fn cleanup_worktrees(store: &Store, cutoff: &str) -> CliResult<Vec<CleanupWorktree>> {
-    store
+    let worktrees = store
         .with_connection(|connection| {
             let mut statement = connection.prepare(&format!(
                 "SELECT id,origin_cwd,worktree_path,worktree_branch,worktree_links_json FROM tasks WHERE id IN ({ELIGIBLE_TASKS}) AND worktree_path IS NOT NULL"
@@ -2343,25 +2432,41 @@ fn cleanup_worktrees(store: &Store, cutoff: &str) -> CliResult<Vec<CleanupWorktr
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows
-                .into_iter()
-                .filter(|entry| Path::new(&entry.worktree.path).exists())
-                .collect())
+            Ok(rows)
         })
-        .map_err(Into::into)
+        .map_err(CliError::from)?;
+    let mut removable = Vec::new();
+    for entry in worktrees {
+        if Path::new(&entry.worktree.path).exists()
+            && !checkout_in_use(store, &entry.worktree.path, &entry.task_id)?
+        {
+            removable.push(entry);
+        }
+    }
+    Ok(removable)
 }
 
-fn active_checkout(store: &Store, path: &str) -> CliResult<bool> {
+fn checkout_in_use(store: &Store, path: &str, task_id: &str) -> CliResult<bool> {
     store
         .with_connection(|connection| {
             let count = connection.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE worktree_path=? AND state NOT IN ('completed','failed','cancelled')",
-                [path],
+                "SELECT COUNT(*) FROM tasks WHERE worktree_path=? AND id != ?",
+                params![path, task_id],
                 |row| row.get::<_, u64>(0),
             )?;
             Ok(count > 0)
         })
         .map_err(Into::into)
+}
+
+async fn broker_is_running() -> bool {
+    let path = env::var_os("OGA_SOCK")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| event_socket_path(database_path()));
+    matches!(
+        timeout(Duration::from_millis(100), UnixStream::connect(path)).await,
+        Ok(Ok(_))
+    )
 }
 
 async fn count_uncommitted_worktrees(worktrees: &[CleanupWorktree]) -> CliResult<u64> {
@@ -2386,7 +2491,7 @@ async fn remove_cleanup_worktrees(
     let mut uncommitted = 0;
     for entry in worktrees {
         if !Path::new(&entry.worktree.path).exists()
-            || active_checkout(store, &entry.worktree.path)?
+            || checkout_in_use(store, &entry.worktree.path, &entry.task_id)?
         {
             continue;
         }
@@ -3741,6 +3846,15 @@ mod tests {
         assert!(parse_delegate_args(&["--model".into()]).is_err());
         let (_, stdin) = parse_delegate_args(&["-".into()]).unwrap();
         assert_eq!(stdin, ["-"]);
+    }
+
+    #[test]
+    fn parses_branch_deletion_only_for_archive() {
+        let (options, values) =
+            parse_task_options(&["task-1".into(), "--delete-branch".into()]).unwrap();
+        assert!(options.delete_branch);
+        assert_eq!(values, ["task-1"]);
+        assert!(reject_delete_branch(&options).is_err());
     }
 
     #[test]

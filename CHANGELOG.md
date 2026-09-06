@@ -6,6 +6,7 @@
 
 - `oga love --when` now routes by subject as well as class: `oga love opencode:muse --when ui` sends UI work there, with `backend`, `database`, `docs`, `tests`, `review`, `research`, and `refactor` alongside the existing kinds. A subject rule wins over a class rule, and `oga delegate --kind <subject>` names the subject when the task text never says so.
 - Work a delegated worker ships now carries a short stamp naming the provider, model, and effort behind it: a `Supervised-by:` trailer on commits it creates and a footer on pull requests it opens. Turn it off per project with `worker: attribution: false` in `.oga.yaml`, or everywhere with the same key in `~/.oga.yaml`.
+- `oga archive --delete-branch` can now remove a worktree task's local branch safely, while explaining when Git keeps it.
 
 ### Changed
 

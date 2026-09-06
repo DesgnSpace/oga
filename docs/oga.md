@@ -17,7 +17,7 @@ follow it, or operate without the app open.
 | `oga inflight` | List work a broker restart would interrupt. |
 | `oga tasks [--query <text>]` | List today's tasks, or search active history. |
 | `oga inspect <task-id>` | Print a complete task record. |
-| `oga archive` / `oga restore` | Hide or restore task records. |
+| `oga archive` / `oga restore` | Hide or restore task records. Add `--delete-branch` to archive a worktree task and safely remove its local branch. |
 | `oga cancel <task-id>...` | Stop a task. |
 | `oga resume <task-id>` | Continue a task, optionally with `-m` or `--start-at`. |
 | `oga handoff <task-id>` | Move a task to another worker or model with `--worker`, `--model`, `--effort`. |
@@ -84,6 +84,16 @@ an instruction. Move a task to a different account or model with
 line, and one still waiting on other work or on a start time keeps waiting.
 Archive hides a record without deleting it. `cleanup` is the
 only command that permanently removes task activity.
+
+To archive a worktree task and also ask Git to remove its local branch:
+
+```sh
+oga archive <task-id> --delete-branch
+```
+
+Oga uses Git's safe branch delete. Unmerged commits, another checkout, or a
+checkout kept for uncommitted work keep the branch, and the result explains why.
+`oga restore` does not accept `--delete-branch`.
 
 Before starting work, search for a task on the same feature, file, or command:
 

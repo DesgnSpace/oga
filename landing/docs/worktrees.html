@@ -77,11 +77,16 @@
         <p>Everything else — the files it may touch, what it knows about the project, who does the work — stays tied to your original repository, so this is approved exactly like any other work on that project.</p>
 
         <h2 id="after">After it finishes</h2>
-        <p>The copy stays put. Review the branch from your own repository and merge it, or throw it away:</p>
+        <p>The copy stays put. Review the branch from your own repository and merge it, or archive the task when you are finished:</p>
         <pre><code>git log oga/&lt;branch-name&gt;
 git merge oga/&lt;branch-name&gt;</code></pre>
         <p>Work on its own branch can also commit, push, and open a pull request for you. When it does, the link comes back with the rest of the report.</p>
         <p>Commits it creates end with a <code>Supervised-by:</code> trailer naming the provider, model, and effort behind them. Pull requests it opens end with the same stamp. Turn the stamp off for a project with <code>worker: attribution: false</code> in <code>.oga.yaml</code>, or everywhere with the same key in <code>~/.oga.yaml</code>.</p>
+
+        <h2 id="archive">Archive the task and branch</h2>
+        <p>Archive keeps the branch by default. When the work is finished and you also want to remove that local branch, ask Oga to do it safely:</p>
+        <pre><code>oga archive &lt;task-id&gt; --delete-branch</code></pre>
+        <p>Git's safe delete refuses branches with unmerged commits or another checkout. Uncommitted work keeps the checkout and branch. The task still archives, and the result tells you what stayed. The Oga app offers the same action from the task menu after confirmation.</p>
 
         <h2 id="space">Freeing the space</h2>
         <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. To delete, use <code>oga cleanup --older-than 30d --delete</code>. Only finished, archived work is eligible. Cleanup can remove a clean task copy, but the branch remains.</p>
@@ -98,6 +103,7 @@ git merge oga/&lt;branch-name&gt;</code></pre>
           <li><a href="#turn-on">Turning it on</a></li>
           <li><a href="#where">Where the branch lives</a></li>
           <li><a href="#after">After it finishes</a></li>
+          <li><a href="#archive">Archive the task and branch</a></li>
           <li><a href="#space">Freeing the space</a></li>
         </ul>
       </aside>

@@ -16,4 +16,5 @@ worktrees when they have no uncommitted changes. The branch remains in the
 repository.
 
 The app offers the same preview in **Settings → Storage**. Review the preview
-before deleting: cleanup is permanent.
+before deleting: cleanup is permanent. Stop the broker before using
+`--delete`.

@@ -34,6 +34,12 @@ pub struct WorktreeGitPaths {
     pub links: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchRemoval {
+    pub outcome: BranchOutcome,
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorktreeJoinCode {
     NotFound,
@@ -148,8 +154,19 @@ fn absolute_path(path: &Path) -> Result<PathBuf, WorktreeError> {
 }
 
 async fn repository_root(cwd: &Path) -> Result<Option<PathBuf>, WorktreeError> {
-    let root = git_output(cwd, &["rev-parse".into(), "--show-toplevel".into()]).await?;
-    Ok(root.map(PathBuf::from))
+    let run = run_git(cwd, &["rev-parse".into(), "--show-toplevel".into()]).await?;
+    if run.succeeded() {
+        let root = run.stdout.trim();
+        return Ok((!root.is_empty()).then(|| PathBuf::from(root)));
+    }
+    let detail = run.stderr.trim();
+    if detail.contains("not a git repository") {
+        return Ok(None);
+    }
+    Err(WorktreeError::Message(format!(
+        "could not inspect repository {}: {detail}",
+        cwd.display()
+    )))
 }
 
 fn checkout_cwd(checkout: &Path, root: &Path, origin_cwd: &Path) -> Result<PathBuf, WorktreeError> {
@@ -403,7 +420,15 @@ async fn branch_exists_locked(root: &Path, branch: &str) -> Result<bool, Worktre
         "--quiet".into(),
         format!("refs/heads/{branch}"),
     ];
-    Ok(run_git(root, &args).await?.succeeded())
+    let run = run_git(root, &args).await?;
+    match run.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(WorktreeError::Message(format!(
+            "could not inspect branch {branch}: {}",
+            run.stderr.trim()
+        ))),
+    }
 }
 
 async fn available_default_branch(
@@ -435,50 +460,114 @@ async fn available_default_branch(
     unreachable!()
 }
 
-fn remove_path(path: &Path) -> Result<(), WorktreeError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => return Err(file_system_error("inspect", path, source)),
-    };
-    let result = if metadata.file_type().is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    };
-    result.map_err(|source| file_system_error("remove", path, source))
-}
-
 async fn remove_task_worktree_locked(
     root: Option<&Path>,
     worktree: &TaskWorktree,
+    force: bool,
 ) -> Result<(), WorktreeError> {
-    if let Some(root) = root {
-        let remove_args = vec![
-            "worktree".into(),
-            "remove".into(),
-            "--force".into(),
-            worktree.path.clone(),
-        ];
-        let _ = run_git(root, &remove_args).await;
-        let _ = run_git(root, &["worktree".into(), "prune".into()]).await;
+    let Some(root) = root else {
+        if Path::new(&worktree.path).exists() {
+            return Err(WorktreeError::Message(format!(
+                "could not verify the checkout's repository: {}",
+                worktree.origin_cwd
+            )));
+        }
+        return Ok(());
+    };
+    let mut remove_args = vec!["worktree".into(), "remove".into()];
+    if force {
+        remove_args.push("--force".into());
     }
-    remove_path(Path::new(&worktree.path))
+    remove_args.push(worktree.path.clone());
+    let removed = run_git(root, &remove_args).await?;
+    if !removed.succeeded() && Path::new(&worktree.path).exists() {
+        return Err(WorktreeError::Message(format!(
+            "could not remove the checkout: {}",
+            removed.stderr.trim()
+        )));
+    }
+    let pruned = run_git(root, &["worktree".into(), "prune".into()]).await?;
+    if !pruned.succeeded() {
+        return Err(WorktreeError::Message(format!(
+            "could not prune git worktrees: {}",
+            pruned.stderr.trim()
+        )));
+    }
+    Ok(())
 }
 
 async fn remove_task_branch_locked(
     root: &Path,
     worktree: &TaskWorktree,
-) -> Result<BranchOutcome, WorktreeError> {
+) -> Result<BranchRemoval, WorktreeError> {
     if !branch_exists_locked(root, &worktree.branch).await? {
-        return Ok(BranchOutcome::AlreadyGone);
+        return Ok(BranchRemoval {
+            outcome: BranchOutcome::AlreadyGone,
+            reason: None,
+        });
     }
-    let args = vec!["branch".into(), "-D".into(), worktree.branch.clone()];
-    Ok(if run_git(root, &args).await?.succeeded() {
-        BranchOutcome::Deleted
+    if let Some(path) = checked_out_worktree_locked(root, &worktree.branch).await? {
+        return Ok(BranchRemoval {
+            outcome: BranchOutcome::Kept,
+            reason: Some(format!("branch is checked out at {path}")),
+        });
+    }
+    let args = vec!["branch".into(), "-d".into(), worktree.branch.clone()];
+    let run = run_git(root, &args).await?;
+    if run.succeeded() {
+        return Ok(BranchRemoval {
+            outcome: BranchOutcome::Deleted,
+            reason: None,
+        });
+    }
+    let detail = run
+        .stderr
+        .trim()
+        .strip_prefix("error: ")
+        .unwrap_or(run.stderr.trim());
+    let reason = if detail.to_ascii_lowercase().contains("not fully merged") {
+        "branch has unmerged commits".into()
+    } else if detail.is_empty() {
+        "git refused to delete the branch".into()
     } else {
-        BranchOutcome::Kept
+        format!("git refused to delete the branch: {detail}")
+    };
+    Ok(BranchRemoval {
+        outcome: BranchOutcome::Kept,
+        reason: Some(reason),
     })
+}
+
+async fn checked_out_worktree_locked(
+    root: &Path,
+    branch: &str,
+) -> Result<Option<String>, WorktreeError> {
+    let run = run_git(
+        root,
+        &["worktree".into(), "list".into(), "--porcelain".into()],
+    )
+    .await?;
+    if !run.succeeded() {
+        return Err(WorktreeError::Message(format!(
+            "could not list git worktrees: {}",
+            run.stderr.trim()
+        )));
+    }
+    let reference = format!("refs/heads/{branch}");
+    let mut path = None;
+    for line in run.stdout.lines() {
+        if let Some(value) = line.strip_prefix("worktree ") {
+            path = Some(value.to_owned());
+        } else if line
+            .strip_prefix("branch ")
+            .is_some_and(|value| value == reference)
+        {
+            return Ok(path);
+        } else if line.is_empty() {
+            path = None;
+        }
+    }
+    Ok(None)
 }
 
 pub fn worktrees_root() -> PathBuf {
@@ -683,7 +772,7 @@ pub async fn create_task_worktree_at(
     match setup_checkout(&checkout, &root, origin_cwd, &links) {
         Ok(cwd) => Ok(CreatedWorktree { worktree, cwd }),
         Err(error) => {
-            let _ = remove_task_worktree_locked(Some(&root), &worktree).await;
+            let _ = remove_task_worktree_locked(Some(&root), &worktree, true).await;
             let _ = remove_task_branch_locked(&root, &worktree).await;
             Err(error)
         }
@@ -691,21 +780,30 @@ pub async fn create_task_worktree_at(
 }
 
 pub async fn worktree_has_uncommitted_work(worktree: &TaskWorktree) -> Result<bool, WorktreeError> {
-    let run = match run_git(
+    let run = run_git(
         Path::new(&worktree.path),
-        &["status".into(), "--porcelain".into(), "-z".into()],
+        &[
+            "status".into(),
+            "--porcelain".into(),
+            "--ignored".into(),
+            "-z".into(),
+        ],
     )
-    .await
-    {
-        Ok(run) => run,
-        Err(_) => return Ok(false),
-    };
-    if !run.succeeded() || run.stdout.is_empty() {
+    .await?;
+    if !run.succeeded() {
+        return Err(WorktreeError::Message(format!(
+            "could not inspect worktree status: {}",
+            run.stderr.trim()
+        )));
+    }
+    if run.stdout.is_empty() {
         return Ok(false);
     }
     let links = worktree_linked_status_paths(worktree).await?;
     for record in run.stdout.split('\0').filter(|record| !record.is_empty()) {
-        if record.starts_with("?? ") && links.contains(record[3..].trim_end_matches('/')) {
+        if (record.starts_with("?? ") || record.starts_with("!! "))
+            && links.contains(record[3..].trim_end_matches('/'))
+        {
             continue;
         }
         return Ok(true);
@@ -746,15 +844,24 @@ pub async fn remove_task_worktree(worktree: &TaskWorktree) -> Result<(), Worktre
     let lock = root.as_deref().map(repository_lock);
     if let Some(lock) = lock {
         let _guard = lock.lock().await;
-        remove_task_worktree_locked(root.as_deref(), worktree).await
+        remove_task_worktree_locked(root.as_deref(), worktree, false).await
     } else {
-        remove_task_worktree_locked(None, worktree).await
+        remove_task_worktree_locked(None, worktree, false).await
     }
 }
 
 pub async fn remove_task_branch(worktree: &TaskWorktree) -> Result<BranchOutcome, WorktreeError> {
+    Ok(remove_task_branch_safely(worktree).await?.outcome)
+}
+
+pub async fn remove_task_branch_safely(
+    worktree: &TaskWorktree,
+) -> Result<BranchRemoval, WorktreeError> {
     let Some(root) = repository_root(Path::new(&worktree.origin_cwd)).await? else {
-        return Ok(BranchOutcome::AlreadyGone);
+        return Ok(BranchRemoval {
+            outcome: BranchOutcome::Kept,
+            reason: Some("could not verify the task's repository".into()),
+        });
     };
     let lock = repository_lock(&root);
     let _guard = lock.lock().await;
@@ -763,6 +870,20 @@ pub async fn remove_task_branch(worktree: &TaskWorktree) -> Result<BranchOutcome
 
 pub async fn branch_exists(root: &Path, branch: &str) -> Result<bool, WorktreeError> {
     branch_exists_locked(root, branch).await
+}
+
+pub async fn branch_recreatable(worktree: &TaskWorktree) -> Result<bool, WorktreeError> {
+    let Some(root) = repository_root(Path::new(&worktree.origin_cwd)).await? else {
+        return Ok(false);
+    };
+    let lock = repository_lock(&root);
+    let _guard = lock.lock().await;
+    if !branch_exists_locked(&root, &worktree.branch).await? {
+        return Ok(false);
+    }
+    Ok(checked_out_worktree_locked(&root, &worktree.branch)
+        .await?
+        .is_none_or(|path| Path::new(&path) == Path::new(&worktree.path)))
 }
 
 pub fn require_task_worktree(task: &Task) -> Result<Option<WorktreeGitPaths>, WorktreeError> {
@@ -865,7 +986,7 @@ pub async fn recreate_task_worktree(worktree: &TaskWorktree) -> Result<(), Workt
     }
     let links: Vec<String> = worktree.links.as_deref().unwrap_or_default().to_vec();
     if let Err(error) = setup_checkout(Path::new(&worktree.path), &root, origin, &links) {
-        let _ = remove_task_worktree_locked(Some(&root), worktree).await;
+        let _ = remove_task_worktree_locked(Some(&root), worktree, true).await;
         return Err(error);
     }
     Ok(())
