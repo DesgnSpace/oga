@@ -123,23 +123,25 @@ fn nest(
             ),
             None => item.name.clone(),
         };
-        symbols.push(ExtractedSymbol {
+        let mut symbol = ExtractedSymbol {
             kind,
             name: item.name,
-            qualified: qualified.clone(),
+            qualified,
             line: item.node.start_position().row as u64 + 1,
             end_line: end_line(item.node),
             signature: signature(item.node, source),
             doc: doc_comment(item.node, adapter, source),
             exported: adapter.exported(item.node, source),
             parent: parent.map(|frame| frame.qualified.clone()),
-        });
+        };
+        adapter.refine(&mut symbol, item.node, source);
         open.push(Enclosing {
             end: item.node.end_byte(),
             kind,
-            qualified,
+            qualified: symbol.qualified.clone(),
             opaque: is_opaque(kind),
         });
+        symbols.push(symbol);
         if symbols.len() == MAX_SYMBOLS_PER_FILE {
             break;
         }
@@ -207,10 +209,19 @@ fn signature(node: Node<'_>, source: &str) -> String {
         .map(|body| body.start_byte())
         .unwrap_or(node.end_byte())
         .min(node.end_byte());
-    let text = source.get(node.start_byte()..end).unwrap_or_default();
+    one_line(source.get(node.start_byte()..end).unwrap_or_default())
+}
+
+/// A declaration's first line, collapsed to single spaces and capped. What a
+/// signature looks like once it is a searchable string.
+pub fn one_line(text: &str) -> String {
     let text = text.split('\n').next().unwrap_or(text);
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    text.chars().take(MAX_SIGNATURE_CHARS).collect()
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(MAX_SIGNATURE_CHARS)
+        .collect()
 }
 
 /// The comment block directly above the declaration, markers stripped.

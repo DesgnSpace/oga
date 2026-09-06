@@ -5,7 +5,8 @@
 ### Changed
 
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
-- Answers cite Rust, TypeScript, TSX, JavaScript, Swift, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
+- Answers cite Rust, TypeScript, TSX, JavaScript, Swift, Python, Go, PHP, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
+- Asking about a setting lands on the exact line in a JSON, TOML, or YAML file, named by its full path through the file, so "sparkle feed url" points at the key that holds it.
 - Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
 
 ### Fixed
