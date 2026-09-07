@@ -1,8 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const changelog = await readFile(join(root, "CHANGELOG.md"), "utf8");
 const template = await readFile(
   join(root, "landing/docs/changelog.template.html"),
@@ -99,7 +99,9 @@ function latestVersion(markdown) {
   return markdown.match(/^## (?!Unreleased\b)(\S+)/m)?.[1];
 }
 
-const out = process.argv[2] ?? "landing/docs/changelog.html";
+const out = process.argv[2] ?? "dist/changelog.html";
+const outputPath = resolve(root, out);
+await mkdir(dirname(outputPath), { recursive: true });
 const page = template.replace(
   "<!-- CHANGELOG_BODY -->",
   renderChangelog(changelog),
@@ -108,10 +110,10 @@ const pageWithNav = page.replaceAll("<!-- CHANGELOG_NAV -->", renderReleaseNav(c
 await writeFile(join(root, out), pageWithNav + (pageWithNav.endsWith("\n") ? "" : "\n"));
 
 const landingDocsSuffix = /\/docs\/changelog\.html$/;
-if (landingDocsSuffix.test(out)) {
+if (landingDocsSuffix.test(outputPath)) {
   const version = latestVersion(changelog);
   if (version) {
-    const indexPath = join(root, out.replace(landingDocsSuffix, "/index.html"));
+    const indexPath = outputPath.replace(landingDocsSuffix, "/index.html");
     const index = await readFile(indexPath, "utf8");
     await writeFile(
       indexPath,
