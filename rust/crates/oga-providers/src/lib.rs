@@ -551,6 +551,7 @@ pub fn usage_from_event(event: &Value) -> Usage {
     let usage = nested
         .and_then(|v| v.get("usage"))
         .or_else(|| event.get("usage"))
+        .or_else(|| event.get("message").and_then(|v| v.get("usage")))
         .and_then(Value::as_object);
     let kind = event
         .get("type")
@@ -604,19 +605,28 @@ pub fn usage_from_event(event: &Value) -> Usage {
         };
     }
     if kind == Some("message_end") {
+        let pi_usage = event
+            .get("message")
+            .and_then(|value| value.get("usage"))
+            .is_some();
         return Usage {
             tokens_in: number(usage.and_then(|v| v.get("input"))),
             tokens_out: number(usage.and_then(|v| v.get("output"))),
-            cost_usd: number(
-                usage
-                    .and_then(|v| v.get("cost"))
-                    .and_then(|v| v.get("total")),
-            ),
+            cached_tokens: number(usage.and_then(|v| v.get("cacheRead"))),
+            // Let lifecycle pricing use the shared catalogue for Pi usage.
+            cost_usd: if pi_usage {
+                None
+            } else {
+                number(
+                    usage
+                        .and_then(|v| v.get("cost"))
+                        .and_then(|v| v.get("total")),
+                )
+            },
             ..Usage::default()
         };
     }
     if kind == Some("turn_end") {
-        let usage = event.get("usage").and_then(Value::as_object);
         let has_turn_usage = usage
             .and_then(|value| value.get("cost"))
             .is_some_and(|value| value.is_object())
@@ -848,6 +858,40 @@ mod tests {
         assert_eq!(usage.tokens_in, Some(100.0));
         assert_eq!(usage.tokens_out, Some(25.0));
         assert_eq!(usage.cached_tokens, Some(30.0));
+    }
+    #[test]
+    fn pi_events_report_tokens_for_models_dev_pricing() {
+        let usage = serde_json::json!({
+            "input": 1520,
+            "output": 177,
+            "cacheRead": 13312,
+            "cacheWrite": 0,
+            "reasoning": 11,
+            "totalTokens": 15009,
+            "cost": {
+                "input": 0.0002128,
+                "output": 0.00004956,
+                "cacheRead": 0.0000372736,
+                "cacheWrite": 0,
+                "total": 0.0002996336
+            }
+        });
+        let message_end = serde_json::json!({
+            "type": "message_end",
+            "message": {"usage": usage.clone()}
+        });
+        let turn_end = serde_json::json!({
+            "type": "turn_end",
+            "message": {"usage": usage}
+        });
+        let message_usage = usage_from_event(&message_end);
+        assert_eq!(message_usage.tokens_in, Some(1520.0));
+        assert_eq!(message_usage.tokens_out, Some(177.0));
+        assert_eq!(message_usage.cached_tokens, Some(13312.0));
+        assert_eq!(message_usage.cost_usd, None);
+        let turn_usage = usage_from_event(&turn_end);
+        assert_eq!(turn_usage.tokens_in, None);
+        assert_eq!(turn_usage.turns, Some(1.0));
     }
     #[test]
     fn claude_prompt_is_separated_from_variadic_options() {
