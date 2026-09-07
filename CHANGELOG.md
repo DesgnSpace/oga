@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.8 - 2026-09-07
+
 ### Removed
 
 - `difficulty` is gone from `oga delegate`, the delegate MCP tool, and the routing API. Sending it now gets a clear error naming what to send instead — `kind` for what the work is, `effort` for how hard the model thinks — rather than a silent drop.
