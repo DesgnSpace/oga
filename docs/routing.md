@@ -25,11 +25,13 @@ destination can take the work does the task fall back to the usual per-task
 choice.
 
 `--when` accepts the classes `context`, `mechanical`, `build`, `reasoning`,
-`general`, and the subjects `ui`, `backend`, `database`, `docs`, `tests`,
+`general`, and the subjects `ui`, `ux`, `backend`, `database`, `docs`, `tests`,
 `review`, `research`, `refactor`. `frontend`, `db`, `doc`, and `test` are read
 as `ui`, `database`, `docs`, and `tests`. Oga reads the subject off the task
 text; `oga delegate --kind <subject>` names it instead, and replaces whatever
-the text reads like.
+the text reads like. Which model runs is a `kind`/`oga love` decision, never a
+hardness score — `oga delegate --effort` sets how hard the chosen model
+thinks, separately.
 
 When several rules match one task, the subject rule wins over the class rule,
 and the class rule wins over the rule with no `when`. Within one tier the

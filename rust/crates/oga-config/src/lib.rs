@@ -22,7 +22,7 @@ const DEFAULT_MODELS: &[(Provider, &str)] = &[
 
 pub const EFFORT_LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 const EFFORT_MESSAGE: &str = "must be one of minimal, low, medium, high, xhigh, max";
-const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, context, build, reasoning, general, ui, \
+const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, context, build, reasoning, general, ui, ux, \
      backend, database, docs, tests, review, research, refactor";
 
 pub const MODEL_SETTINGS_KEY: &str = "models";

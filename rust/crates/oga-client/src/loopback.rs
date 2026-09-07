@@ -1562,7 +1562,6 @@ mod tests {
             .routing_preview(&RoutingPreviewRequest {
                 cwd: "/home/test".into(),
                 prompt: "inspect".into(),
-                difficulty: None,
                 kind: None,
             })
             .await

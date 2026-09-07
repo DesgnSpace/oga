@@ -231,17 +231,15 @@ impl McpServer {
         validate_length(&title, 60, "title")?;
         validate_delegate_options(args)?;
         // Validated above, so parsing cannot fail here.
-        let difficulty = optional_string(args, "difficulty")
-            .map(|value| serde_json::from_value(json!(value)).expect("difficulty validated above"));
         let kind = optional_string(args, "kind")
             .map(|value| WorkKind::parse(&value).expect("kind validated above"));
         let profile_arg = optional_string(args, "profile");
         let model_arg = optional_string(args, "model");
         let effort_arg = optional_string(args, "effort");
         // Automatic routing — the caller named neither account — is the one
-        // path a stated difficulty or kind can actually reach: it is what
-        // reads the prompt, applies a loved rule, and projects an effort.
-        // Naming a profile or a model is the caller's own call, same as ever.
+        // path a stated kind can actually reach: it is what reads the prompt,
+        // applies a loved rule, and resolves an effort. Naming a profile or a
+        // model is the caller's own call, same as ever.
         let (profile_id, model, route_effort) = if profile_arg.is_none() && model_arg.is_none() {
             let route = oga_http::routing::plan(
                 &self.state,
@@ -250,7 +248,6 @@ impl McpServer {
                     cwd: cwd.clone(),
                     profile: None,
                     model: None,
-                    difficulty,
                     kind,
                     effort: effort_arg.clone(),
                     default_profile_shortcut: false,
@@ -1320,11 +1317,11 @@ fn validate_delegate_options(args: &Value) -> Result<(), McpError> {
             "preference must be balanced, quality, cost, or speed".into(),
         ));
     }
-    if let Some(difficulty) = optional_string(args, "difficulty")
-        && !["mechanical", "standard", "hard", "critical"].contains(&difficulty.as_str())
-    {
+    if args.get("difficulty").is_some() {
         return Err(McpError::InvalidParams(
-            "difficulty must be mechanical, standard, hard, or critical".into(),
+            "difficulty is no longer an option; name the kind of work with kind, and set how \
+             hard the model thinks with effort"
+                .into(),
         ));
     }
     if let Some(kind) = optional_string(args, "kind")

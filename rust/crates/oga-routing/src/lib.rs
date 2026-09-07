@@ -1,6 +1,7 @@
-//! Task classification, difficulty and effort projection, routing policy,
-//! model selection with quota and availability awareness, provider catalog
-//! parsing, and the `/api/models` row shape — the decision half of dispatch.
+//! Task classification, the internal difficulty heuristic and the model's
+//! own default effort, routing policy, model selection with quota and
+//! availability awareness, provider catalog parsing, and the `/api/models`
+//! row shape — the decision half of dispatch.
 
 pub mod catalog;
 pub mod classify;
@@ -18,8 +19,7 @@ pub use catalog::{
 };
 pub use classify::{TaskDemand, classify_task};
 pub use effort::{
-    EFFORT_ORDER, ProjectedEffort, difficulty_floor, difficulty_preference, heuristic_note,
-    project_effort,
+    EFFORT_ORDER, ProjectedEffort, default_effort, difficulty_floor, difficulty_preference,
 };
 pub use policy::{
     AllowedModel, PolicyError, PolicyRoute, RoutingPolicy, load_routing_policy, merge_policies,

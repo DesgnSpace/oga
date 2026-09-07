@@ -69,7 +69,7 @@
         <h2 id="from-the-terminal">Or straight from your shell</h2>
         <p>When you already know what you want done, you don't need to go through an agent. <code>oga delegate</code> starts the work and hands you its ID:</p>
         <pre><code>oga delegate "Port the CSV importer to the new parser and keep its tests green."</code></pre>
-        <p>It runs in the folder you're standing in, on the account and model Oga picks. Name one yourself with <code>--worker</code> and <code>--model</code>, say how hard the work is with <code>--difficulty</code>, give it its own branch with <code>--worktree</code>, or point it at another folder with <code>--cwd</code>. Already know what kind of work this is? Say so with <code>--kind</code>, so a <a href="/docs/setup.html#default-model">loved model</a> for that kind isn't missed.</p>
+        <p>It runs in the folder you're standing in, on the account and model Oga picks. Name one yourself with <code>--worker</code> and <code>--model</code>, give it its own branch with <code>--worktree</code>, or point it at another folder with <code>--cwd</code>. Already know what kind of work this is? Say so with <code>--kind</code>, so a <a href="/docs/setup.html#default-model">loved model</a> for that kind isn't missed. Want a say in how hard the model thinks? Set <code>--effort</code> directly.</p>
         <p>Pass <code>-</code> to take the brief from standard input, for when you've already written it down:</p>
         <pre><code>oga delegate - &lt; brief.md</code></pre>
 

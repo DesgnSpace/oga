@@ -274,7 +274,6 @@ fn one_account_routes_every_class_from_defaults_alone() {
             "Rename this symbol across the package.",
             TaskClass::Mechanical,
             Difficulty::Mechanical,
-            "low",
             "haiku",
         ),
         (
@@ -282,7 +281,6 @@ fn one_account_routes_every_class_from_defaults_alone() {
             "Run these commands and report what you saw.",
             TaskClass::Mechanical,
             Difficulty::Mechanical,
-            "low",
             "haiku",
         ),
         (
@@ -290,7 +288,6 @@ fn one_account_routes_every_class_from_defaults_alone() {
             "Draft the release notes from this changelog.",
             TaskClass::General,
             Difficulty::Standard,
-            "medium",
             "sonnet",
         ),
         (
@@ -298,7 +295,6 @@ fn one_account_routes_every_class_from_defaults_alone() {
             "Implement the feature described in the plan.",
             TaskClass::Build,
             Difficulty::Standard,
-            "medium",
             "sonnet",
         ),
         (
@@ -306,7 +302,6 @@ fn one_account_routes_every_class_from_defaults_alone() {
             "Review this codebase and explain how auth works.",
             TaskClass::Context,
             Difficulty::Hard,
-            "high",
             "sonnet",
         ),
         (
@@ -314,11 +309,10 @@ fn one_account_routes_every_class_from_defaults_alone() {
             "Design the architecture and root-cause the race condition.",
             TaskClass::Reasoning,
             Difficulty::Critical,
-            "max",
             "fable",
         ),
     ];
-    for (label, prompt, task_class, difficulty, effort, model) in cases {
+    for (label, prompt, task_class, difficulty, model) in cases {
         let route = choose_model(
             prompt,
             &catalog,
@@ -329,7 +323,9 @@ fn one_account_routes_every_class_from_defaults_alone() {
         .unwrap();
         assert_eq!(route.task_class, task_class, "{label}");
         assert_eq!(route.difficulty, difficulty, "{label}");
-        assert_eq!(route.effort.as_deref(), Some(effort), "{label}");
+        // No model here publishes a default effort, and nothing about how
+        // hard the prompt reads infers one any more.
+        assert_eq!(route.effort, None, "{label}");
         assert_eq!(route.model, model, "{label}");
         assert!(route.candidates[0].traits.quality >= 2, "{label}");
         // Nothing was set aside to get here: the defaults reach a real model on
@@ -359,13 +355,10 @@ fn one_account_routes_every_class_from_defaults_alone() {
 }
 
 #[test]
-fn the_capability_floor_difficulty_buys() {
+fn the_capability_floor_the_prompt_buys() {
     let catalog = models();
     let workers = profiles();
-    let mut opts = RoutePreferences {
-        difficulty: Some(Difficulty::Mechanical),
-        ..RoutePreferences::default()
-    };
+    let opts = RoutePreferences::default();
     let mechanical = choose_model(
         "Apply this diff.",
         &catalog,
@@ -377,9 +370,9 @@ fn the_capability_floor_difficulty_buys() {
     assert_eq!(mechanical.floor, 2);
     assert_eq!(mechanical.model, "haiku");
 
-    opts.difficulty = Some(Difficulty::Critical);
+    let critical_prompt = "Design the architecture and root-cause the race condition.";
     let critical = choose_model(
-        "Apply this diff.",
+        critical_prompt,
         &catalog,
         &workers,
         &opts,
@@ -413,7 +406,7 @@ fn the_capability_floor_difficulty_buys() {
     )];
     let workers_small = [profile("claude", Provider::Claude, "sonnet")];
     let route = choose_model(
-        "Apply this diff.",
+        critical_prompt,
         &only_small,
         &workers_small,
         &opts,
@@ -430,7 +423,7 @@ fn the_capability_floor_difficulty_buys() {
             .any(|w| w.contains("ran the strongest one available"))
     );
 
-    // The project policy raises the floor above the declared difficulty.
+    // The project policy raises the floor above what the prompt buys.
     let raised = policy(&[(
         "mechanical",
         PolicyRoute {
@@ -443,10 +436,7 @@ fn the_capability_floor_difficulty_buys() {
         "Rename this symbol.",
         &catalog,
         &workers,
-        &RoutePreferences {
-            difficulty: Some(Difficulty::Mechanical),
-            ..RoutePreferences::default()
-        },
+        &RoutePreferences::default(),
         &SelectionInputs::new(&settings()).policy(&raised),
     )
     .unwrap();
@@ -454,35 +444,25 @@ fn the_capability_floor_difficulty_buys() {
     assert_eq!(route.model, "sonnet");
 }
 
+// Difficulty is purely the router's own read of the prompt now: nothing a
+// caller sends can declare it, so different prompts land on different tiers
+// with no agreement bookkeeping to reconcile.
 #[test]
-fn the_prompt_heuristic_is_a_cross_check_not_an_override() {
+fn difficulty_is_read_off_the_prompt_alone() {
     let catalog = models();
     let workers = profiles();
-    let disagreeing = "Architect a secure migration and analyze race conditions.";
-    let mut opts = RoutePreferences {
-        difficulty: Some(Difficulty::Mechanical),
-        ..RoutePreferences::default()
-    };
     let route = choose_model(
-        disagreeing,
+        "Architect a secure migration and analyze race conditions.",
         &catalog,
         &workers,
-        &opts,
+        &RoutePreferences::default(),
         &SelectionInputs::new(&settings()),
     )
     .unwrap();
     assert_eq!(route.task_class, TaskClass::Reasoning);
-    assert!(!route.heuristic_agreed);
-    assert_eq!(route.model, "haiku");
-    assert!(
-        route
-            .warnings
-            .iter()
-            .any(|w| w.contains("raise difficulty"))
-    );
+    assert_eq!(route.difficulty, Difficulty::Critical);
+    assert_eq!(route.model, "opencode/kimi-k3");
 
-    // A caller declaring nothing gets the difficulty the prompt reads as, and
-    // cannot contradict a declaration that was never made.
     let build = choose_model(
         "Implement the feature.",
         &catalog,
@@ -492,41 +472,6 @@ fn the_prompt_heuristic_is_a_cross_check_not_an_override() {
     )
     .unwrap();
     assert_eq!(build.difficulty, Difficulty::Standard);
-    assert!(build.heuristic_agreed);
-    assert!(
-        !build
-            .warnings
-            .iter()
-            .any(|w| w.contains("raise difficulty"))
-    );
-    let reasoning = choose_model(
-        "Root-cause the race condition.",
-        &catalog,
-        &workers,
-        &RoutePreferences::default(),
-        &SelectionInputs::new(&settings()),
-    )
-    .unwrap();
-    assert_eq!(reasoning.task_class, TaskClass::Reasoning);
-    assert_eq!(reasoning.difficulty, Difficulty::Critical);
-
-    // Agreement when the declaration is at least as strong as the heuristic.
-    opts.difficulty = Some(Difficulty::Critical);
-    let route = choose_model(
-        disagreeing,
-        &catalog,
-        &workers,
-        &opts,
-        &SelectionInputs::new(&settings()),
-    )
-    .unwrap();
-    assert!(route.heuristic_agreed);
-    assert!(
-        !route
-            .warnings
-            .iter()
-            .any(|w| w.contains("raise difficulty"))
-    );
 }
 
 #[test]
@@ -736,7 +681,6 @@ fn remaining_usage_filters_automatic_routing_but_not_a_named_account() {
 
     let named = RoutePreferences {
         profile_id: Some("claude".into()),
-        difficulty: Some(Difficulty::Hard),
         ..RoutePreferences::default()
     };
     let route = choose_model(
@@ -903,13 +847,10 @@ fn perishable_headroom_breaks_score_ties() {
     // The quality floor still wins over a perishable account below it.
     let rows = [weekly("claude", Provider::Claude, 5.0, 1.0)];
     let route = choose_model(
-        "Apply this diff.",
+        "Design the architecture and root-cause the race condition.",
         &models(),
         &profiles(),
-        &RoutePreferences {
-            difficulty: Some(Difficulty::Critical),
-            ..RoutePreferences::default()
-        },
+        &RoutePreferences::default(),
         &SelectionInputs::new(&settings()).usage(&rows),
     )
     .unwrap();
@@ -991,10 +932,7 @@ fn when_every_candidate_is_filtered_out_the_failure_says_what_would_help() {
 #[test]
 fn deprioritizes_profiles_deep_into_a_rate_limit_window() {
     let near_limit = [spent("claude", Provider::Claude, 96.0)];
-    let opts = RoutePreferences {
-        difficulty: Some(Difficulty::Mechanical),
-        ..RoutePreferences::default()
-    };
+    let opts = RoutePreferences::default();
     let baseline = choose_model(
         "Rename this variable in two files.",
         &models(),
@@ -1046,10 +984,7 @@ fn an_exhausted_model_window_leaves_the_accounts_other_models_routable() {
             },
         ],
     )];
-    let opts = RoutePreferences {
-        difficulty: Some(Difficulty::Mechanical),
-        ..RoutePreferences::default()
-    };
+    let opts = RoutePreferences::default();
     let route = choose_model(
         "Rename this variable in two files.",
         &models(),
@@ -1275,41 +1210,44 @@ fn missing_price_keeps_candidates_visible_and_scores_cost_neutrally() {
     );
 }
 
+// The model's own default effort applies no matter how hard the prompt
+// reads — nothing about the work's difficulty ever picks a rung any more.
 #[test]
-fn effort_is_read_off_the_chosen_models_own_ladder() {
+fn effort_is_read_off_the_chosen_models_own_default() {
     let mut catalog = models();
     for model in &mut catalog {
-        if model.id == "sonnet" {
-            model.efforts = Some(
-                ["low", "medium", "high", "xhigh", "max"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-            );
+        if model.profile_id == "claude" {
+            model.default_effort = Some("high".into());
         }
     }
     let solo_worker = vec![profiles()[0].clone()];
-    let opts = RoutePreferences {
-        difficulty: Some(Difficulty::Hard),
-        ..RoutePreferences::default()
-    };
-    let route = choose_model(
-        "Implement the feature.",
+    let cheap = choose_model(
+        "Rename this variable in two files.",
         &catalog,
         &solo_worker,
-        &opts,
+        &RoutePreferences::default(),
         &SelectionInputs::new(&settings()),
     )
     .unwrap();
-    assert_eq!(route.effort.as_deref(), Some("high"));
-    assert!(route.effort_reason.contains("hard"));
+    let hard = choose_model(
+        "Implement the feature.",
+        &catalog,
+        &solo_worker,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings()),
+    )
+    .unwrap();
+    // Whichever model the floor and preference pick for each prompt, both
+    // land on the same default effort — the model's own, not the prompt's.
+    assert_eq!(cheap.effort.as_deref(), Some("high"));
+    assert_eq!(hard.effort.as_deref(), Some("high"));
+    assert!(cheap.effort_reason.contains("default"));
 }
 
 fn named_pair<'a>(profile_id: &'a str, model: &'a str) -> NamedPair<'a> {
     NamedPair {
         profile_id,
         model,
-        difficulty: None,
         effort: None,
         preference: None,
     }
@@ -1470,29 +1408,22 @@ fn the_caller_named_pair_is_advised_never_blocked() {
             .any(|w| w.contains("accepts low, medium, high") && w.contains("passing it through"))
     );
 
-    // A clean named pair produces no findings and still reads its effort.
-    let laddered = models()
+    // A clean named pair produces no findings and still reads the model's
+    // own default effort — nothing here comes from how hard the work reads.
+    let defaulted = models()
         .into_iter()
         .map(|mut m| {
             if m.id == "opus" {
-                m.efforts = Some(
-                    ["low", "medium", "high", "xhigh", "max"]
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                );
+                m.default_effort = Some("low".into());
             }
             m
         })
         .collect::<Vec<_>>();
-    let pair = NamedPair {
-        difficulty: Some(Difficulty::Mechanical),
-        ..named_pair("claude", "opus")
-    };
+    let pair = named_pair("claude", "opus");
     let audit = check_named_route(
         "Rename this symbol in two files.",
         pair,
-        &laddered,
+        &defaulted,
         &workers,
         &SelectionInputs::new(&settings()),
     )
@@ -1611,7 +1542,6 @@ fn model_settings_bound_selection() {
     let workers = profiles();
     let quality = RoutePreferences {
         preference: Some(RoutePreference::Quality),
-        difficulty: Some(Difficulty::Critical),
         ..RoutePreferences::default()
     };
 
@@ -1806,25 +1736,21 @@ fn a_loved_model_changes_the_destination_and_nothing_else() {
         assert!(route.reason.contains("loved model"), "{prompt}");
     }
 
-    // The class still sets the thinking level.
-    let reasoning_ladder = catalog
+    // With no rule effort, the model's own default sets the thinking level —
+    // the same value whether the prompt reads hard or cheap.
+    let defaulted = catalog
         .iter()
         .map(|m| {
             let mut m = m.clone();
             if m.id == "opencode/big-pickle" {
-                m.efforts = Some(
-                    ["low", "medium", "high", "xhigh", "max"]
-                        .into_iter()
-                        .map(String::from)
-                        .collect(),
-                );
+                m.default_effort = Some("medium".into());
             }
             m
         })
         .collect::<Vec<_>>();
     let hard = choose_model(
         architecture,
-        &reasoning_ladder,
+        &defaulted,
         &workers,
         &RoutePreferences::default(),
         &SelectionInputs::new(&loved_settings),
@@ -1832,15 +1758,15 @@ fn a_loved_model_changes_the_destination_and_nothing_else() {
     .unwrap();
     let cheap = choose_model(
         "Rename this variable in two files.",
-        &reasoning_ladder,
+        &defaulted,
         &workers,
         &RoutePreferences::default(),
         &SelectionInputs::new(&loved_settings),
     )
     .unwrap();
     assert_eq!(hard.model, cheap.model);
-    assert_eq!(hard.effort.as_deref(), Some("max"));
-    assert_eq!(cheap.effort.as_deref(), Some("low"));
+    assert_eq!(hard.effort.as_deref(), Some("medium"));
+    assert_eq!(cheap.effort.as_deref(), Some("medium"));
 
     // It loses to a model or account the caller named.
     let hinted = RoutePreferences {

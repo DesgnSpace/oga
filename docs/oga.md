@@ -61,11 +61,13 @@ oga delegate "Port the CSV importer to the new parser and keep its tests green."
 oga delegate - < brief.md
 ```
 
-`--worker`, `--model`, and `--difficulty` choose who runs it; `--worktree` gives
-it its own checkout and branch; `--cwd` runs it somewhere other than the current
-directory; `--json` prints the task record instead of a line. Scope comes from
-the project's saved grant for that account. With no grant the task falls back to
-the whole directory, and the output says so.
+`--worker` and `--model` choose who runs it; `--kind` names what the work is,
+so a loved model for that kind isn't missed; `--effort` sets how hard it
+thinks; `--worktree` gives it its own checkout and branch; `--cwd` runs it
+somewhere other than the current directory; `--json` prints the task record
+instead of a line. Scope comes from the project's saved grant for that
+account. With no grant the task falls back to the whole directory, and the
+output says so.
 
 Either way you get a task ID. Follow it with:
 

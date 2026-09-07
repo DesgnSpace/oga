@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Removed
+
+- `difficulty` is gone from `oga delegate`, the delegate MCP tool, and the routing API. Sending it now gets a clear error naming what to send instead — `kind` for what the work is, `effort` for how hard the model thinks — rather than a silent drop.
+
+### Changed
+
+- Which model a delegated task lands on is decided by `kind` and a loved rule, never a hardness score. `kind` gains a `ux` subject alongside the existing ones.
+- Reasoning effort now comes from `effort` when you set it, else a loved model's own configured effort, else that model's own default — never guessed from how hard the work sounds.
+
 ### Fixed
 
 - The Usage activity grid is now a compact, centred strip with weekday labels aligned to its rows.

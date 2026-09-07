@@ -69,6 +69,7 @@ impl TaskClass {
 #[serde(rename_all = "snake_case")]
 pub enum TaskTopic {
     Ui,
+    Ux,
     Backend,
     Database,
     Docs,
@@ -79,8 +80,9 @@ pub enum TaskTopic {
 }
 
 impl TaskTopic {
-    pub const ALL: [TaskTopic; 8] = [
+    pub const ALL: [TaskTopic; 9] = [
         TaskTopic::Ui,
+        TaskTopic::Ux,
         TaskTopic::Backend,
         TaskTopic::Database,
         TaskTopic::Docs,
@@ -93,6 +95,7 @@ impl TaskTopic {
     pub fn as_str(self) -> &'static str {
         match self {
             TaskTopic::Ui => "ui",
+            TaskTopic::Ux => "ux",
             TaskTopic::Backend => "backend",
             TaskTopic::Database => "database",
             TaskTopic::Docs => "docs",
@@ -134,6 +137,7 @@ pub enum WorkKind {
     Reasoning,
     General,
     Ui,
+    Ux,
     Backend,
     Database,
     Docs,
@@ -144,13 +148,14 @@ pub enum WorkKind {
 }
 
 impl WorkKind {
-    pub const ALL: [WorkKind; 13] = [
+    pub const ALL: [WorkKind; 14] = [
         WorkKind::Mechanical,
         WorkKind::Context,
         WorkKind::Build,
         WorkKind::Reasoning,
         WorkKind::General,
         WorkKind::Ui,
+        WorkKind::Ux,
         WorkKind::Backend,
         WorkKind::Database,
         WorkKind::Docs,
@@ -168,6 +173,7 @@ impl WorkKind {
             WorkKind::Reasoning => "reasoning",
             WorkKind::General => "general",
             WorkKind::Ui => "ui",
+            WorkKind::Ux => "ux",
             WorkKind::Backend => "backend",
             WorkKind::Database => "database",
             WorkKind::Docs => "docs",
@@ -192,6 +198,7 @@ impl WorkKind {
         }
         TaskTopic::parse(value).map(|topic| match topic {
             TaskTopic::Ui => WorkKind::Ui,
+            TaskTopic::Ux => WorkKind::Ux,
             TaskTopic::Backend => WorkKind::Backend,
             TaskTopic::Database => WorkKind::Database,
             TaskTopic::Docs => WorkKind::Docs,
@@ -218,6 +225,7 @@ impl WorkKind {
     pub fn as_topic(self) -> Option<TaskTopic> {
         match self {
             WorkKind::Ui => Some(TaskTopic::Ui),
+            WorkKind::Ux => Some(TaskTopic::Ux),
             WorkKind::Backend => Some(TaskTopic::Backend),
             WorkKind::Database => Some(TaskTopic::Database),
             WorkKind::Docs => Some(TaskTopic::Docs),
@@ -230,8 +238,10 @@ impl WorkKind {
     }
 }
 
-/// How hard the caller judges the work: the one routing input the caller
-/// knows better than Oga does, since it wrote the prompt.
+/// How hard the router reads the prompt as being: a purely internal signal
+/// that sets the capability floor and the cost/quality preference for
+/// automatic routing. Never a caller input — which model runs is `kind` and
+/// a loved rule's call, not a hardness score.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Difficulty {
@@ -316,13 +326,12 @@ pub struct RunnerUp {
 pub struct RoutingRecord {
     pub decided_by: DecidedBy,
     pub router_version: u32,
+    /// How hard the router judged the work, purely from the prompt: it sets
+    /// the capability floor and the cost/quality preference below, never
+    /// something a caller states.
     pub difficulty: Difficulty,
-    pub difficulty_source: DifficultySource,
-    /// What the prompt heuristic made of the work, as a check on the caller's
-    /// declaration.
+    /// What the prompt heuristic made of the work.
     pub heuristic_class: TaskClass,
-    /// False when the heuristic wanted a stronger tier than declared allows.
-    pub heuristic_agreed: bool,
     pub floor: u8,
     /// Constraints dropped to reach a destination; empty when every one held.
     pub relaxed: Vec<SelectionRelaxation>,
@@ -376,17 +385,10 @@ pub enum DecidedBy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DifficultySource {
-    Caller,
-    Default,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum EffortSource {
     Caller,
     Loved,
-    Projected,
+    Default,
     None,
 }
 

@@ -19,10 +19,10 @@ use oga_config::{
 };
 use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
-    ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, Difficulty,
-    EventKind, HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource,
-    ModelQuery, Profile, Provider, Task, TaskEvent, TaskListQuery, TaskState, TaskSummary,
-    TaskWorktree, VERSION, WorkKind, WorktreeOption,
+    ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, EventKind,
+    HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource, ModelQuery,
+    Profile, Provider, Task, TaskEvent, TaskListQuery, TaskState, TaskSummary, TaskWorktree,
+    VERSION, WorkKind, WorktreeOption,
 };
 use oga_events::{EventSocketOptions, SocketError, event_socket_path, start_event_socket};
 use oga_http::HttpState;
@@ -57,8 +57,8 @@ const CLEANUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const HOLD_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 /// How often the broker checks whether the host was suspended under it.
 const WAKE_WATCH_INTERVAL: Duration = Duration::from_secs(30);
-const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <first> <second> ...              try each destination in order, moving on when one cannot take the work\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nEach destination is worker:model:effort with the model or the effort left out: 'claude' alone means its default model, 'claude:high' means that effort on it.\nKinds are context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor, comma-separated.";
-const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --difficulty <level>   mechanical, standard, hard, or critical.\n  --kind <kind>          Name the kind of work: context, mechanical, build, reasoning, general, ui, backend, database, docs, tests, review, research, refactor.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
+const LOVE_USAGE: &str = "Usage: oga love                                   what this project sends unnamed work to\n       oga love <worker>:<model>                  send all of it there from now on\n       oga love <worker>:<model>:<effort>         also choose reasoning effort\n       oga love <first> <second> ...              try each destination in order, moving on when one cannot take the work\n       oga love <worker>:<model> --when <kinds>   send only those kinds of work there\n       oga love --clear                           go back to choosing per task\n       oga love --clear --when <kinds>            drop the rule for those kinds\n       oga love ... --global                      the same, for every project\n\nEach destination is worker:model:effort with the model or the effort left out: 'claude' alone means its default model, 'claude:high' means that effort on it.\nKinds are context, mechanical, build, reasoning, general, ui, ux, backend, database, docs, tests, review, research, refactor, comma-separated.";
+const DELEGATE_USAGE: &str = "Usage: oga delegate \"<task>\" [options]\n       oga delegate -                             read the task from standard input\n\n  --worker <profile>     Run it on this account. Omit to let Oga choose.\n  --model <id>           Run it on this model.\n  --kind <kind>          Name the kind of work: context, mechanical, build, reasoning, general, ui, ux, backend, database, docs, tests, review, research, refactor.\n  --effort <level>       minimal, low, medium, high, xhigh, or max. Omit to let a loved model's own setting or its default decide.\n  --worktree             Run it in its own checkout instead of this directory.\n  --cwd <dir>            Run it in another directory.\n  --json                 Print the task record instead of a line.";
 type CliResult<T> = Result<T, CliError>;
 
 #[derive(Debug, Error)]
@@ -707,8 +707,9 @@ Usage: oga <command> [options]
                         the service would interrupt.
   delegate "<task>"    Hand a task to a worker and print its id. Pass - to read
                        the task from standard input. Add --worker, --model,
-                       --difficulty, or --kind to choose who runs it, --worktree
-                       to run it in its own checkout, --cwd to run it elsewhere.
+                       or --kind to choose who runs it, --effort for how hard
+                       it thinks, --worktree to run it in its own checkout,
+                       --cwd to run it elsewhere.
   tasks [options]      List today's tasks. Add --query or -q to search history.
   inspect <task-id>    Show one task record.
   archive <task-id>... Archive tasks. Add --delete-branch to remove each
@@ -890,13 +891,18 @@ fn print_json(value: &Value) -> CliResult<()> {
 struct DelegateOptions {
     worker: Option<String>,
     model: Option<String>,
-    difficulty: Option<Difficulty>,
     kind: Option<WorkKind>,
+    effort: Option<String>,
     worktree: bool,
     cwd: Option<String>,
     json: bool,
     help: bool,
 }
+
+/// What a caller still sending `--difficulty` gets instead of a silent drop
+/// or an unknown-option error: which flags replaced it.
+const DIFFICULTY_REMOVED_MESSAGE: &str = "difficulty is no longer an option; use --kind to name \
+     the work and --effort to set how hard the model thinks";
 
 fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<String>)> {
     let mut options = DelegateOptions::default();
@@ -918,8 +924,9 @@ fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<Strin
             "--worker" => options.worker = Some(take("--worker")?),
             "--model" => options.model = Some(take("--model")?),
             "--cwd" => options.cwd = Some(take("--cwd")?),
-            "--difficulty" => options.difficulty = Some(parse_difficulty(&take("--difficulty")?)?),
+            "--difficulty" => return Err(CliError::new(DIFFICULTY_REMOVED_MESSAGE)),
             "--kind" => options.kind = Some(parse_kind(&take("--kind")?)?),
+            "--effort" => options.effort = Some(take("--effort")?),
             value if value.starts_with("--worker=") => {
                 options.worker = Some(value.trim_start_matches("--worker=").to_owned());
             }
@@ -930,11 +937,13 @@ fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<Strin
                 options.cwd = Some(value.trim_start_matches("--cwd=").to_owned());
             }
             value if value.starts_with("--difficulty=") => {
-                options.difficulty =
-                    Some(parse_difficulty(value.trim_start_matches("--difficulty="))?);
+                return Err(CliError::new(DIFFICULTY_REMOVED_MESSAGE));
             }
             value if value.starts_with("--kind=") => {
                 options.kind = Some(parse_kind(value.trim_start_matches("--kind="))?);
+            }
+            value if value.starts_with("--effort=") => {
+                options.effort = Some(value.trim_start_matches("--effort=").to_owned());
             }
             "-" => values.push("-".to_owned()),
             value if value.starts_with('-') => {
@@ -945,14 +954,6 @@ fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<Strin
         index += 1;
     }
     Ok((options, values))
-}
-
-fn parse_difficulty(value: &str) -> CliResult<Difficulty> {
-    serde_json::from_value(json!(value)).map_err(|_| {
-        CliError::new(format!(
-            "difficulty must be mechanical, standard, hard, or critical, got {value}"
-        ))
-    })
 }
 
 /// Name the kind of work — a class or a subject — so a love rule for it
@@ -1024,8 +1025,8 @@ async fn run_delegate(args: &[String]) -> CliResult<i32> {
     request.title = Some(title);
     request.profile = options.worker;
     request.model = options.model;
-    request.difficulty = options.difficulty;
     request.kind = options.kind;
+    request.effort = options.effort;
     if options.worktree {
         request.worktree = Some(WorktreeOption::Bare(true));
     }
@@ -3472,6 +3473,7 @@ fn work_label(when: &[WorkKind]) -> String {
             WorkKind::Reasoning => "hard thinking",
             WorkKind::General => "open-ended work",
             WorkKind::Ui => "UI work",
+            WorkKind::Ux => "UX work",
             WorkKind::Backend => "backend work",
             WorkKind::Database => "database work",
             WorkKind::Docs => "docs and writing",
@@ -3976,8 +3978,9 @@ mod tests {
             "--worker=claude".into(),
             "--model".into(),
             "opus".into(),
-            "--difficulty".into(),
-            "hard".into(),
+            "--kind".into(),
+            "reasoning".into(),
+            "--effort=high".into(),
             "--worktree".into(),
             "--cwd=/tmp/project".into(),
             "port the parser".into(),
@@ -3985,15 +3988,23 @@ mod tests {
         let (options, values) = parse_delegate_args(&args).unwrap();
         assert_eq!(options.worker.as_deref(), Some("claude"));
         assert_eq!(options.model.as_deref(), Some("opus"));
-        assert_eq!(options.difficulty, Some(Difficulty::Hard));
+        assert_eq!(options.kind, Some(WorkKind::Reasoning));
+        assert_eq!(options.effort.as_deref(), Some("high"));
         assert!(options.worktree);
         assert_eq!(options.cwd.as_deref(), Some("/tmp/project"));
         assert_eq!(values, ["port the parser"]);
 
-        assert!(parse_delegate_args(&["--difficulty=easy".into()]).is_err());
         assert!(parse_delegate_args(&["--model".into()]).is_err());
         let (_, stdin) = parse_delegate_args(&["-".into()]).unwrap();
         assert_eq!(stdin, ["-"]);
+    }
+
+    #[test]
+    fn rejects_difficulty_with_a_clear_message() {
+        let refusal = parse_delegate_args(&["--difficulty".into(), "hard".into()]).unwrap_err();
+        assert!(refusal.to_string().contains("--kind"), "{refusal}");
+        assert!(refusal.to_string().contains("--effort"), "{refusal}");
+        assert!(parse_delegate_args(&["--difficulty=hard".into()]).is_err());
     }
 
     #[test]

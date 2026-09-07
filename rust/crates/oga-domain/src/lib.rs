@@ -36,8 +36,8 @@ pub use event::{
 pub use health::{HealthReport, MCP_CONTRACT_VERSION, Staleness, VERSION};
 pub use profile::{Config, MemoryEntry, MemoryProject, Profile, ProfileView, ScopeGrant};
 pub use routing::{
-    AccountFailure, ChosenRoute, DecidedBy, Difficulty, DifficultySource, EffortSource, ModelCost,
-    ModelInfo, ModelInfoSource, ModelQuery, ModelSettingsRow, ModelUsageSummary, ObservedRateLimit,
+    AccountFailure, ChosenRoute, DecidedBy, Difficulty, EffortSource, ModelCost, ModelInfo,
+    ModelInfoSource, ModelQuery, ModelSettingsRow, ModelUsageSummary, ObservedRateLimit,
     ProfileUsage, RateLimitByModel, RoutePreference, RoutingRecord, RunnerUp, SelectionDecision,
     SelectionRejection, SelectionRelaxation, SelectionStage, TaskClass, TaskSelection, TaskTopic,
     UsageQuery, UsageSource, UsageWindow, UsageWindowKind, WorkKind,
