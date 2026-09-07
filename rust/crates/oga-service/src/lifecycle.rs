@@ -19,7 +19,7 @@ use oga_domain::{
     TaskWorker, TaskWorktree,
 };
 use oga_providers::{
-    CommandOptions, ParsedEvent, Usage, final_text, resume_command_for_with_options,
+    CommandOptions, OgaServer, ParsedEvent, Usage, final_text, resume_command_for_with_options,
 };
 use oga_runner::{ProviderRunner, RunRequest, RunResult, RunnerError, RunningProcess, Termination};
 use oga_store::{Store, StoreError};
@@ -143,7 +143,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
     store.with_connection(|connection| {
         let mut task = connection
             .query_row(
-                "SELECT id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,attachments_json FROM tasks WHERE id=?",
+                "SELECT id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,attachments_json,can_delegate FROM tasks WHERE id=?",
                 [task_id],
                 task_from_row,
             )
@@ -239,6 +239,7 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         scope,
         grant_id: row.get(20)?,
         allow_questions: row.get::<_, i64>(21)? != 0,
+        can_delegate: row.get::<_, i64>(37)? != 0,
         timeout_ms: row.get(22)?,
         effort: row.get(23)?,
         effort_actual: row.get(24)?,
@@ -399,12 +400,14 @@ pub(crate) async fn run_task_with_session_and_active(
         assemble_worker_prompt(&prompt)
     };
     let hook_url = hook_url_for(&task.id);
-    let mcp_config = worker_mcp_config(&profile, &task.id);
+    let base_url = broker_base_url();
     let command_options = CommandOptions {
         hook_url: Some(hook_url.as_str()),
         effort: task.effort.as_deref(),
-        allowed_tools: None,
-        mcp_config: mcp_config.as_deref(),
+        oga_server: Some(OgaServer {
+            base_url: &base_url,
+            task_id: &task.id,
+        }),
     };
     let initial_command = if let Some(session_id) = options.session_id.as_deref() {
         resume_command_for_with_options(
@@ -1690,15 +1693,6 @@ fn broker_base_url() -> String {
 
 fn hook_url_for(task_id: &str) -> String {
     format!("{}/api/hooks/{task_id}", broker_base_url())
-}
-
-/// The oga MCP server rides on the command line for a stock claude worker,
-/// which is the only provider that takes one there. A profile with its own
-/// command decides its own tools, and every other provider is configured
-/// outside the argv.
-fn worker_mcp_config(profile: &Profile, task_id: &str) -> Option<String> {
-    (profile.provider == Provider::Claude && profile.command.is_none())
-        .then(|| oga_providers::worker_mcp_config(&broker_base_url(), task_id))
 }
 
 /// What a worker needs to know about itself. `oga query` and `oga

@@ -409,6 +409,8 @@ pub struct DispatchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_questions: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub can_delegate: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// The kind of work, when the caller names it, in the same vocabulary
     /// `oga love --when` accepts: a class of work or a subject. Lets a love

@@ -262,10 +262,10 @@ impl Tasks<'_> {
         let scope = encode(&task.scope)?;
         let completion = task.completion.as_ref().map(encode).transpose()?;
         let attempts = encode(&task.attempts)?;
-        self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,bool_value(task.allow_questions),task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at])?; Ok(()) })
+        self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,bool_value(task.allow_questions),task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at,bool_value(task.can_delegate)])?; Ok(()) })
     }
     pub fn get(&self, id: &str) -> Result<Option<Task>, StoreError> {
-        self.store.with_connection(|c| c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at FROM tasks WHERE id=?", [id], task_from_row).optional().map_err(Into::into))
+        self.store.with_connection(|c| c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate FROM tasks WHERE id=?", [id], task_from_row).optional().map_err(Into::into))
     }
     pub fn search(&self, query: &TaskListQuery) -> Result<Vec<TaskSearchResult>, StoreError> {
         let text = query
@@ -416,6 +416,7 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
         scope,
         grant_id: r.get(14)?,
         allow_questions: r.get::<_, i64>(15)? != 0,
+        can_delegate: r.get::<_, i64>(27)? != 0,
         timeout_ms: r.get(16)?,
         effort: None,
         effort_actual: None,

@@ -56,6 +56,7 @@ impl Fixture {
                 write: vec!["**".into()],
             },
             allow_questions: true,
+            can_delegate: false,
             ..Task::default()
         };
         store.repositories().tasks().insert(&task).expect("task");
