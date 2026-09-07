@@ -15,6 +15,7 @@
   --shadow-small: 3px 3px 0 #000000;
   --shadow: 6px 6px 0 #000000;
   --shadow-large: 9px 9px 0 #000000;
+  --shadow-hover: 8px 8px 0 #000000;
   --radius-small: 0;
   --radius-medium: 0;
   --page-width: 1200px;
@@ -620,7 +621,7 @@ footer {
 @media (hover: hover) and (pointer: fine) {
   .primary-action:hover {
     transform: translate(-2px, -2px);
-    box-shadow: 8px 8px 0 #000000;
+    box-shadow: var(--shadow-hover);
   }
 }
 
@@ -782,6 +783,28 @@ footer {
     --accent-strong: #ffd23f;
     --focus: #d8b4fe;
     --rule: #fffdf5;
+    --border: 3px solid #fffdf5;
+    --shadow-small: 3px 3px 0 #fffdf5;
+    --shadow: 6px 6px 0 #fffdf5;
+    --shadow-large: 9px 9px 0 #fffdf5;
+    --shadow-hover: 8px 8px 0 #fffdf5;
+  }
+
+  /* Cards and buttons sitting on light grounds keep black ink so the
+     offset stays visible on yellow, blue, and green. */
+  .goal-card,
+  .agent,
+  .outcome-grid article,
+  .copy-button {
+    --border: 3px solid #000000;
+    --shadow-small: 3px 3px 0 #000000;
+    --shadow: 6px 6px 0 #000000;
+  }
+
+  /* Yellow bands meet the dark page: keep a black divider. */
+  .outcomes,
+  footer {
+    --border: 3px solid #000000;
   }
 
   .command-block,

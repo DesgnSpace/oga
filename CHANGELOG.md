@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
+
 ## 0.0.10 - 2026-09-07
 
 - Pi activity events now appear while a run is still in progress.
