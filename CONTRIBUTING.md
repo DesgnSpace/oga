@@ -1,5 +1,8 @@
 # Contributing
 
+Oga is an orchestrator for coding agents. The [README](README.md) carries the
+definition; use its wording when a change touches how Oga describes itself.
+
 ## Dev setup
 
 ```bash
@@ -36,6 +39,11 @@ what. A comment exists only when the reason would not survive the next reader.
 
 Prose in the codebase is plain and concrete — reasons over rules, active voice,
 short sentences. Doc strings and tool descriptions follow the same voice.
+
+Anything a reader sees calls Oga an orchestrator for coding agents, and points
+at the README rather than inventing a second description. Internal component
+names — the local service, the event socket, the desktop app — stay in the
+architecture sections that define them.
 
 ## License
 

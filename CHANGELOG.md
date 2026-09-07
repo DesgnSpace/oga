@@ -8,6 +8,7 @@
 
 ### Changed
 
+- The docs and the site now say what Oga is in one consistent way: an orchestrator for coding agents — the layer above the AI coding tools you already use, deciding which one takes each piece of work and carrying it there and back. Pages that called it something else have been corrected.
 - Which model a delegated task lands on is decided by `kind` and a loved rule, never a hardness score. `kind` gains a `ux` subject alongside the existing ones.
 - Reasoning effort now comes from `effort` when you set it, else a loved model's own configured effort, else that model's own default — never guessed from how hard the work sounds.
 

@@ -1,20 +1,20 @@
 # Working with `oga`
 
-The macOS app starts the local broker. Use the command line to inspect work,
+The macOS app starts Oga's local service. Use the command line to inspect work,
 follow it, or operate without the app open.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `oga serve` | Run the local broker. |
+| `oga serve` | Run Oga's local service. |
 | `oga delegate "<task>"` | Start a task and print its ID. `-` reads the task from stdin. |
 | `oga watch <task-id>...` | Stream task events until a watched task settles. |
-| `oga tail` | Stream broker events. |
+| `oga tail` | Stream events from every task. |
 | `oga query "question"` | Find the place in the code that answers a question. Add `--limit` or `--code`. |
 | `oga relearn` | Pick up what changed on disk, or save a hint. Add `--force` to read the project again from scratch. |
 | `oga love` | Read or set defaults for unnamed work. |
-| `oga inflight` | List work a broker restart would interrupt. |
+| `oga inflight` | List work a restart would interrupt. |
 | `oga tasks [--query <text>]` | List today's tasks, or search active history. |
 | `oga inspect <task-id>` | Print a complete task record. |
 | `oga archive` / `oga restore` | Hide or restore task records. Add `--delete-branch` to archive a worktree task and safely remove its local branch. |

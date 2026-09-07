@@ -1,13 +1,17 @@
 # Oga
 
-Oga is a local broker that delegates bounded tasks to external AI provider
-CLIs — Claude Code, Codex, OpenCode, Antigravity, and Pi. You hand it a prompt
-and a working directory; it picks a model, spawns a sandboxed worker on a
-different account, and returns a task ID the moment dispatch succeeds. The
-worker runs independently while you get on with other work. When the task needs
-input, hits a question, or finishes, Oga tells you — through a backgrounded
-`oga watch` process that sleeps for free and reports the moment anything
-settles.
+Oga is an orchestrator for coding agents — the layer above the AI coding tools
+you already use. You describe a piece of work; Oga decides which tool and which
+of your accounts should run it, hands it the brief along with what your project
+has already taught Oga, runs it in the background against only the files you
+allow, and tells you the moment it finishes or needs an answer.
+
+The tools it drives are Claude Code, Codex, OpenCode, Antigravity, and Pi. Oga
+is not one of them and writes no code itself; it decides who does, and carries
+the work there and back. Hand it a prompt and a working directory and you get a
+task ID the moment dispatch succeeds. The worker runs independently while you
+get on with other work, and a backgrounded `oga watch` process sleeps for free
+and reports the moment anything settles.
 
 Oga runs on macOS as a menu-bar app with a built-in SQLite store, a local
 HTTP+MCP API on `127.0.0.1:7331`, and a unix event socket for push delivery.
@@ -67,7 +71,7 @@ A source build installs as **Oga (local)**, so it sits in Applications next to
 a released Oga without replacing it. Only one can run at a time — they share
 port 7331 and `~/.oga` — so quit one before opening the other. `make install`
 quits whichever is open, launches the one it just built, and points `oga` in
-`~/.local/bin` at it. Confirm the broker is running with:
+`~/.local/bin` at it. Confirm Oga is running with:
 
 ```bash
 curl http://127.0.0.1:7331/health
@@ -94,7 +98,7 @@ its own runtime, so every command below works with no Bun and no checkout.
 | Command | What it does |
 | --- | --- |
 | `oga` | Print help — what Oga is, the commands, and a first run. |
-| `oga serve` | Run the broker. The menu-bar app starts it for you. |
+| `oga serve` | Run Oga's local service. The menu-bar app starts it for you. |
 | `oga delegate "<task>"` | Hand a task to a worker and print its id. Pass `-` to read the task from standard input. `--worker`, `--model`, and `--kind` choose who runs it; `--effort` sets how hard it thinks; `--worktree` runs it in its own checkout; `--cwd` runs it elsewhere. |
 | `oga watch <task-id>...` | Wait for a task; prints one line when it settles. |
 | `oga inflight` | List the tasks still running, so you know what a restart interrupts. |
