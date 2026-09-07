@@ -309,7 +309,13 @@ fn build_stamp() -> String {
     env::var("OGA_BUILD_STAMP")
         .ok()
         .or_else(|| option_env!("OGA_BUILD_STAMP").map(str::to_owned))
-        .unwrap_or_else(|| "dev".into())
+        .unwrap_or_else(|| {
+            if cfg!(debug_assertions) {
+                "dev".into()
+            } else {
+                "release".into()
+            }
+        })
 }
 
 fn run_version() -> CliResult<i32> {
