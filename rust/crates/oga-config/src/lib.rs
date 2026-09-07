@@ -1803,7 +1803,7 @@ mod tests {
         ResolvedModelSettings {
             global,
             project,
-            overrides: None,
+            overrides: Some(ModelOverrides::default()),
             love: LoveRules::default(),
         }
     }

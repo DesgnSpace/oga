@@ -1138,6 +1138,11 @@ async fn settings_routes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(settings["workers"][0]["id"], "profile");
     assert_eq!(settings["workers"][0]["enabled"], true);
+    assert_eq!(settings["workers"][0]["models"][0]["enabled"], true);
+    assert_eq!(
+        settings["workers"][0]["models"][0]["inheritedEnabled"],
+        true
+    );
 
     let (status, settings) = json_response(
         request(
@@ -1155,6 +1160,10 @@ async fn settings_routes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(settings["workers"][0]["enabled"], true);
     assert_eq!(settings["workers"][0]["models"][0]["enabled"], false);
+    assert_eq!(
+        settings["workers"][0]["models"][0]["inheritedEnabled"],
+        true
+    );
 
     let (status, projects) =
         json_response(request(&fixture.router, Method::GET, "/api/projects", Body::empty()).await)
@@ -1166,6 +1175,34 @@ async fn settings_routes() {
             .expect("projects")
             .iter()
             .any(|project| project == cwd)
+    );
+}
+
+#[tokio::test]
+async fn model_settings_reflect_yaml_enablement_overrides() {
+    let fixture = Fixture::new();
+    fixture.write_source(".oga.yaml", "models:\n  fake:\n    enabled: false\n");
+
+    let (status, settings) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/model-settings?cwd={}", fixture.cwd),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(settings["workers"][0]["models"][0]["enabled"], false);
+    assert_eq!(
+        settings["workers"][0]["models"][0]["inheritedEnabled"],
+        true
+    );
+    assert_eq!(
+        settings["workers"][0]["models"][0]["hasEnabledOverride"],
+        true
     );
 }
 

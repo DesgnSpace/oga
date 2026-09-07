@@ -13,8 +13,9 @@ use axum::{
     response::IntoResponse,
 };
 use oga_config::{
-    DEFAULT_WORKER_PROMPT, LoveRules, ResolvedModelSettings, config_revision, global_cwd,
-    load_config_layers, model_enabled, read_model_overrides, read_model_settings,
+    ConfigLayers, DEFAULT_WORKER_PROMPT, LoveRules, ModelOverrides, ResolvedModelSettings,
+    config_revision, global_cwd, load_config_layers, model_enabled, model_override_for,
+    read_model_overrides, read_model_settings,
 };
 use oga_domain::{
     CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
@@ -1237,8 +1238,19 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
     let project_settings = project_raw.as_ref().map(read_model_settings);
     let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let (_, love) =
-        read_model_overrides(&layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let overrides = model_override_scopes(&layers)?;
+    let global_model_settings = ResolvedModelSettings {
+        global: global_settings.clone(),
+        project: None,
+        overrides: Some(overrides.global.clone()),
+        love: LoveRules::default(),
+    };
+    let model_settings = ResolvedModelSettings {
+        global: global_settings.clone(),
+        project: project_settings.clone(),
+        overrides: Some(overrides.current.clone()),
+        love: overrides.love.clone(),
+    };
     let models = if refresh {
         discover_catalog(&profiles, true).await
     } else {
@@ -1263,18 +1275,19 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                 .iter()
                 .filter(|model| model.profile_id == profile.id)
                 .map(|model| {
+                    let project_override = overrides
+                        .project
+                        .as_ref()
+                        .and_then(|overrides| {
+                            model_override_for(overrides, &profile.id, &model.id)
+                        });
                     let global_model = model_setting_value(&global_raw, &profile.id, &model.id);
-                    let project_model = project_raw
-                        .as_ref()
-                        .and_then(|raw| model_setting_value(raw, &profile.id, &model.id));
-                    let inherited_enabled = global_model
-                        .as_ref()
-                        .and_then(|setting| setting.enabled)
-                        .unwrap_or(false);
-                    let enabled = project_model
-                        .as_ref()
-                        .and_then(|setting| setting.enabled)
-                        .unwrap_or(inherited_enabled);
+                    let project_model = project_raw.as_ref().and_then(|raw| {
+                        model_setting_value(raw, &profile.id, &model.id)
+                    });
+                    let inherited_enabled =
+                        model_enabled(&global_model_settings, &profile.id, &model.id);
+                    let enabled = model_enabled(&model_settings, &profile.id, &model.id);
                     let inherited_preferred = global_model
                         .as_ref()
                         .and_then(|setting| setting.preferred)
@@ -1297,14 +1310,15 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                         "contextWindow": model.context_window,
                         "enabled": enabled,
                         "inheritedEnabled": inherited_enabled,
-                        "hasEnabledOverride": project_model.as_ref().is_some_and(|setting| setting.enabled.is_some()),
+                        "hasEnabledOverride": project_model.as_ref().is_some_and(|setting| setting.enabled.is_some())
+                            || project_override.as_ref().is_some_and(|setting| setting.enabled.is_some()),
                         "preferred": preferred,
                         "inheritedPreferred": inherited_preferred,
                         "hasPreferredOverride": project_model.as_ref().is_some_and(|setting| setting.preferred.is_some()),
                         "capabilities": capabilities,
                         "inheritedCapabilities": inherited_capabilities,
                         "hasCapabilitiesOverride": project_model.as_ref().is_some_and(|setting| setting.capabilities.is_some()),
-                        "loved": love.names_model(
+                        "loved": overrides.love.names_model(
                             &profile.id,
                             &model.id,
                             Some(profile.default_model.as_str())
@@ -1331,8 +1345,43 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
         "scope": if global == cwd { "global" } else { "project" },
         "revision": current.revision,
         "workers": workers,
-        "love": love,
+        "love": overrides.love,
     }))
+}
+
+struct ModelOverrideScopes {
+    current: ModelOverrides,
+    global: ModelOverrides,
+    project: Option<ModelOverrides>,
+    love: LoveRules,
+}
+
+fn model_override_scopes(layers: &ConfigLayers) -> Result<ModelOverrideScopes, HttpError> {
+    let (current, love) =
+        read_model_overrides(layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let (global, _) = read_model_overrides(&ConfigLayers {
+        user: layers.user.clone(),
+        project: None,
+    })
+    .map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let project = layers
+        .project
+        .clone()
+        .map(|project| {
+            read_model_overrides(&ConfigLayers {
+                user: None,
+                project: Some(project),
+            })
+            .map(|(overrides, _)| overrides)
+            .map_err(|error| HttpError::bad_request(error.to_string()))
+        })
+        .transpose()?;
+    Ok(ModelOverrideScopes {
+        current,
+        global,
+        project,
+        love,
+    })
 }
 
 #[derive(Clone, Default)]
@@ -1344,21 +1393,31 @@ struct ModelSetting {
 
 fn model_setting_value(value: &Value, profile_id: &str, model_id: &str) -> Option<ModelSetting> {
     let profile = value.get("profiles")?.get(profile_id)?.as_object()?;
-    let setting = profile.get("models")?.get(model_id)?.as_object()?;
-    Some(ModelSetting {
-        enabled: setting.get("enabled").and_then(Value::as_bool),
-        preferred: setting.get("preferred").and_then(Value::as_bool),
-        capabilities: setting
-            .get("capabilities")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect()
-            }),
-    })
+    let setting = profile
+        .get("modelEnabled")
+        .or_else(|| profile.get("models"))?
+        .get(model_id)?;
+    match setting {
+        Value::Bool(enabled) => Some(ModelSetting {
+            enabled: Some(*enabled),
+            ..ModelSetting::default()
+        }),
+        Value::Object(setting) => Some(ModelSetting {
+            enabled: setting.get("enabled").and_then(Value::as_bool),
+            preferred: setting.get("preferred").and_then(Value::as_bool),
+            capabilities: setting
+                .get("capabilities")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                }),
+        }),
+        _ => None,
+    }
 }
 
 fn model_capabilities(model: &ModelInfo) -> Vec<String> {
