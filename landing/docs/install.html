@@ -55,18 +55,18 @@
 
       <article class="docs-content">
         <p class="docs-eyebrow">Docs / Install</p>
-        <h1>Get Oga onto your Mac</h1>
+        <h1 id="get-oga-onto-your-mac">Get Oga onto your Mac<a class="heading-anchor" href="#get-oga-onto-your-mac" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
         <p class="docs-intro">Oga needs macOS 14 or later. Windows and Linux aren't ready yet.</p>
 
-        <h2 id="curl">Install in one command</h2>
+        <h2 id="curl">Install in one command<a class="heading-anchor" href="#curl" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Downloads Oga and puts it in your Applications folder:</p>
         <pre><code>curl -fsSL https://downloads.desgn.space/oga/install.sh | sh</code></pre>
 
-        <h2 id="homebrew">Install with Homebrew</h2>
+        <h2 id="homebrew">Install with Homebrew<a class="heading-anchor" href="#homebrew" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>If you already use Homebrew:</p>
         <pre><code>brew install --cask DesgnSpace/tap/oga</code></pre>
 
-        <h2 id="source">Build it yourself</h2>
+        <h2 id="source">Build it yourself<a class="heading-anchor" href="#source" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>For contributors, or to run something ahead of a release:</p>
         <pre><code>git clone https://github.com/yondifon/oga.git
 cd oga
@@ -74,14 +74,14 @@ bun install
 make install</code></pre>
         <p>A build of your own installs as <strong>Oga (local)</strong>, alongside a released Oga rather than replacing it. Only one can run at a time — they share the same port and the same folder — so quit one before opening the other. <code>make install</code> quits whichever is open, starts the one it just built, and points the <code>oga</code> command at it.</p>
 
-        <h2 id="updates">Get new versions</h2>
+        <h2 id="updates">Get new versions<a class="heading-anchor" href="#updates" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Oga checks quietly when it opens. You can also choose <strong>Check for Updates</strong> from the Oga menu or the About section in Settings, then download and install a new version without leaving the app.</p>
 
-        <h2 id="confirm">Check that it's running</h2>
+        <h2 id="confirm">Check that it's running<a class="heading-anchor" href="#confirm" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Opening the app starts everything Oga needs. To confirm it answered:</p>
         <pre><code>curl http://127.0.0.1:7331/health</code></pre>
 
-        <h2 id="cli">Use Oga from the terminal</h2>
+        <h2 id="cli">Use Oga from the terminal<a class="heading-anchor" href="#cli" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Oga also gives you an <code>oga</code> command. It carries everything it needs, so it works without a checkout or any other tooling. Run <code>oga</code> on its own to see what it can do and how to start.</p>
 
         <div class="docs-next">
@@ -113,5 +113,6 @@ make install</code></pre>
       <a href="https://desgn.space">Desgn</a>
     </div>
   </footer>
+  <script src="/docs-links.js"></script>
 </body>
 </html>
