@@ -4,6 +4,7 @@
 
 - `oga query` now indexes Java, C#, C, C++, and Ruby source alongside its existing language support.
 - `oga query` now returns up to 10 candidates by default. Delegated workers can add `--code` when they want code lookups to include the matching source without opening another file.
+- Update notes now show headings, lists, code, and links correctly in the desktop app.
 
 ## 0.0.8 - 2026-09-07
 

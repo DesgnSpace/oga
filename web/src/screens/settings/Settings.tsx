@@ -6,6 +6,7 @@ import { SearchField } from "@/components/SearchField";
 import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
+import { MarkdownContent } from "@/domain/markdown";
 import { toast } from "@/state/toast";
 import { workerToastName } from "@/lib/toast-subject";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
@@ -2056,7 +2057,7 @@ function AboutPanel({
         {updateStatus.kind === "available" ? (
           <>
             <p>Version {updateStatus.version} is ready to install.</p>
-            {updateStatus.notes ? <p className="settings-helper">{updateStatus.notes}</p> : null}
+            {updateStatus.notes ? <MarkdownContent source={updateStatus.notes} /> : null}
             <button className="settings-button settings-button-primary" type="button" onClick={onInstallUpdate}>
               Download and install
             </button>
