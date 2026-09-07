@@ -1,6 +1,7 @@
 # Oga reference
 
-These pages document the maintained Oga surfaces. The Rust source and
+Oga is an orchestrator for coding agents; the [README](../README.md) says what
+that means. These pages document the maintained Oga surfaces. The Rust source and
 `cargo run --manifest-path rust/Cargo.toml --package oga-cli -- help` are the
 source of truth.
 
