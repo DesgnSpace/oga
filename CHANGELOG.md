@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `oga query` now returns up to 10 candidates by default. Delegated workers can add `--code` when they want code lookups to include the matching source without opening another file.
+
 ## 0.0.8 - 2026-09-07
 
 ### Removed
