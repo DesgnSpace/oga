@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.0.10 - 2026-09-07
+
 - Pi activity events now appear while a run is still in progress.
 - The About panel now reports the installed release version and build type correctly.
 
