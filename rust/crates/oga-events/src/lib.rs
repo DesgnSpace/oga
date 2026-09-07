@@ -1890,16 +1890,15 @@ fn pi_result_text(payload: &BTreeMap<String, Value>) -> Option<&str> {
 const PI_MESSAGE_ACTION_ID: &str = "pi:message-stream";
 
 /// `message_start`/`update`/`end` all carry the same `message.role`/`content`
-/// shape (real captures show `message_update` repeats the full
-/// `assistantMessageEvent.partial` message alongside it, not just the raw
-/// delta) — a text-typed content item grows a little on each update and
-/// arrives complete on `message_end`. Deriving title/detail identically for
-/// all three, from the one field they share, means each later event's own
-/// fields safely overwrite the row's without ever needing special-case
-/// merge behaviour: role does not change mid-stream, so the title is stable,
-/// and an update with nothing new (or no `message` at all, per the
-/// documented but unobserved delta-only shape) simply carries `detail: None`,
-/// which `settleAction` already treats as "keep what the row already has".
+/// shape. A `message_update` may carry that shape in
+/// `assistantMessageEvent.partial` instead of the top-level `message`; a
+/// text-typed content item grows a little on each update and arrives complete
+/// on `message_end`. Deriving title/detail identically for all three, from the
+/// one field they share, means each later event's own fields safely overwrite
+/// the row's without ever needing special-case merge behaviour: role does not
+/// change mid-stream, so the title is stable, and an update with nothing new
+/// simply carries `detail: None`, which `settleAction` already treats as "keep
+/// what the row already has".
 fn pi_message_view(
     event: &TaskEvent,
     provider: Provider,
@@ -1907,7 +1906,15 @@ fn pi_message_view(
     raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let event_type = text_value(payload.get("type")).unwrap_or_default();
-    let message = payload.get("message").and_then(Value::as_object);
+    let message = payload
+        .get("message")
+        .and_then(Value::as_object)
+        .or_else(|| {
+            payload
+                .get("assistantMessageEvent")
+                .and_then(|value| value.get("partial"))
+                .and_then(Value::as_object)
+        });
     let role = message
         .and_then(|value| text_value(value.get("role")))
         .unwrap_or("assistant");
@@ -6631,10 +6638,13 @@ mod tests {
                 "agent.message_update",
                 serde_json::json!({
                     "type": "message_update",
-                    "assistantMessageEvent": {"type": "thinking_delta", "delta": "The"},
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "thinking", "thinking": "The"}]
+                    "assistantMessageEvent": {
+                        "type": "thinking_delta",
+                        "delta": "The",
+                        "partial": {
+                            "role": "assistant",
+                            "content": [{"type": "thinking", "thinking": "The"}]
+                        }
                     }
                 }),
             ),
@@ -6649,13 +6659,16 @@ mod tests {
                 "agent.message_update",
                 serde_json::json!({
                     "type": "message_update",
-                    "assistantMessageEvent": {"type": "text_delta", "delta": "## Resume"},
-                    "message": {
-                        "role": "assistant",
-                        "content": [
-                            {"type": "thinking", "thinking": "The"},
-                            {"type": "text", "text": "## Resume"}
-                        ]
+                    "assistantMessageEvent": {
+                        "type": "text_delta",
+                        "delta": "## Resume",
+                        "partial": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "thinking", "thinking": "The"},
+                                {"type": "text", "text": "## Resume"}
+                            ]
+                        }
                     }
                 }),
             ),
@@ -6664,9 +6677,33 @@ mod tests {
         assert_eq!(text_update.detail.as_deref(), Some("## Resume"));
         assert_eq!(text_update.action_id, start.action_id);
 
+        let text_update_again = event_view(
+            &provider_event(
+                4,
+                "agent.message_update",
+                serde_json::json!({
+                    "type": "message_update",
+                    "assistantMessageEvent": {
+                        "type": "text_delta",
+                        "delta": " flag",
+                        "partial": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "thinking", "thinking": "The"},
+                                {"type": "text", "text": "## Resume flag"}
+                            ]
+                        }
+                    }
+                }),
+            ),
+            Provider::Pi,
+        );
+        assert_eq!(text_update_again.detail.as_deref(), Some("## Resume flag"));
+        assert_eq!(text_update_again.action_id, start.action_id);
+
         let end = event_view(
             &provider_event(
-                3,
+                5,
                 "agent.message_end",
                 serde_json::json!({
                     "type": "message_end",
@@ -6690,7 +6727,7 @@ mod tests {
         // reopening the one `message_end` already closed.
         let next_start = event_view(
             &provider_event(
-                4,
+                6,
                 "agent.message_start",
                 serde_json::json!({
                     "type": "message_start",
