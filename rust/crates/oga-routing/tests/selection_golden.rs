@@ -2045,6 +2045,82 @@ fn love_rules_route_each_kind_of_work_to_its_own_model() {
     }));
 }
 
+// `general` is the word for work with nothing particular about it, so a rule
+// naming it takes whatever no other rule claimed — not only the work the
+// prompt reads as general.
+#[test]
+fn a_general_rule_takes_the_work_no_other_rule_claims() {
+    let catalog = models();
+    let workers = profiles();
+    let settings = love_rules(vec![
+        rule(
+            "opencode/big-pickle",
+            Some("opencode"),
+            &[WorkKind::Ui],
+            None,
+        ),
+        rule("haiku", Some("claude"), &[WorkKind::General], None),
+    ]);
+
+    // Docs work: no rule names the subject, and no rule names the class, so
+    // the general rule takes it and the record says why.
+    let docs = choose_model(
+        "Implement the split of the accounts documentation reference page into smaller pages.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(docs.model, "haiku");
+    assert!(
+        docs.reason
+            .contains("loved for general work, the fallback for anything no other rule claims"),
+        "{}",
+        docs.reason
+    );
+
+    // A rule naming the subject still wins over the general one.
+    let ui = choose_model(
+        "Rework the settings page layout and the modal component.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings),
+    )
+    .unwrap();
+    assert_eq!(ui.model, "opencode/big-pickle");
+    assert!(ui.reason.contains("loved for ui work"), "{}", ui.reason);
+
+    // The general rule that cannot take the work names the fallback it is,
+    // rather than claiming the task was general.
+    let statuses = [unavailable(
+        "claude",
+        Provider::Claude,
+        "haiku",
+        "the account is out of credits",
+        None,
+    )];
+    let missed = choose_model(
+        "Implement the split of the accounts documentation reference page into smaller pages.",
+        &catalog,
+        &workers,
+        &RoutePreferences::default(),
+        &SelectionInputs::new(&settings).statuses(&statuses),
+    )
+    .unwrap();
+    assert_ne!(missed.model, "haiku");
+    assert!(
+        missed.warnings.iter().any(|warning| {
+            warning.contains(
+                "is loved here for general work, the fallback for anything no other rule claims",
+            ) && warning.contains("the account is out of credits")
+        }),
+        "{:?}",
+        missed.warnings
+    );
+}
+
 // A rule holds an ordered chain of destinations: the first one that can take
 // the work runs it, each with its own effort, and the record says which one
 // that was.

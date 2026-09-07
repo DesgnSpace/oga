@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use oga_config::{
-    LoveDestination, LoveRule, ResolvedModelSettings, model_enabled, profile_enabled,
+    LoveDestination, LoveMatch, LoveRule, ResolvedModelSettings, model_enabled, profile_enabled,
 };
 use oga_domain::{
     Difficulty, ModelInfo, Profile, ProfileUsage, RoutePreference, SelectionRejection,
@@ -581,7 +581,7 @@ pub fn choose_model(
                 &rejected,
             ));
         }
-        let matched = loved.matching_kind(love_class, topic);
+        let matched = loved.match_for(love_class, topic);
         warnings.push(loved_miss_warning(
             loved,
             matched,
@@ -1039,7 +1039,7 @@ fn finish_loved_route<'a>(
             demand.reason,
             love_route_reason(
                 loved,
-                loved.matching_kind(love_class, topic),
+                loved.match_for(love_class, topic),
                 rule_effort.as_deref(),
                 index,
                 kind_from_caller,
@@ -1064,53 +1064,50 @@ fn finish_loved_route<'a>(
 /// not run where it was first meant to.
 fn love_route_reason(
     loved: &LoveRule,
-    matched: Option<WorkKind>,
+    matched: LoveMatch,
     effort: Option<&str>,
     index: usize,
     kind_from_caller: bool,
 ) -> String {
     let effort = effort.map_or_else(String::new, |effort| format!(" at {effort} effort"));
     let chosen = &loved.destinations[index];
-    let work = |kind: WorkKind| -> String {
-        if kind_from_caller {
-            format!("{} work, the kind you named", kind.as_str())
-        } else {
-            format!("{} work", kind.as_str())
-        }
+    let default = if loved.scope == "project" {
+        "for this project"
+    } else {
+        "everywhere"
     };
+    let claim = love_claim(matched, kind_from_caller);
     if index == 0 {
-        return match matched {
-            None => format!(
-                "sent to the loved model, the default {}{effort}",
-                if loved.scope == "project" {
-                    "for this project"
-                } else {
-                    "everywhere"
-                }
-            ),
-            Some(kind) => format!(
-                "sent to {}, loved for {}{effort}",
-                loved.label(),
-                work(kind)
-            ),
+        return match claim {
+            None => format!("sent to the loved model, the default {default}{effort}"),
+            Some(claim) => format!("sent to {}, loved for {claim}{effort}", loved.label()),
         };
     }
     let place = ordinal(index);
-    match matched {
+    match claim {
         None => format!(
-            "sent to {}, the {place} loved model, the default {}{effort}",
+            "sent to {}, the {place} loved model, the default {default}{effort}",
             chosen.label(),
-            if loved.scope == "project" {
-                "for this project"
-            } else {
-                "everywhere"
-            }
         ),
-        Some(kind) => format!(
-            "sent to {}, {place} loved choice for {}{effort}",
+        Some(claim) => format!(
+            "sent to {}, {place} loved choice for {claim}{effort}",
             chosen.label(),
-            work(kind)
         ),
+    }
+}
+
+/// What the rule claims about this task, for the sentence saying where it went.
+/// `None` on the catch-all, which claims nothing and so needs no phrase.
+fn love_claim(matched: LoveMatch, kind_from_caller: bool) -> Option<String> {
+    match matched {
+        LoveMatch::CatchAll => None,
+        LoveMatch::Fallback => {
+            Some("general work, the fallback for anything no other rule claims".into())
+        }
+        LoveMatch::Claimed(kind) if kind_from_caller => {
+            Some(format!("{} work, the kind you named", kind.as_str()))
+        }
+        LoveMatch::Claimed(kind) => Some(format!("{} work", kind.as_str())),
     }
 }
 
@@ -1130,16 +1127,20 @@ fn ordinal(index: usize) -> String {
 /// does not look like the plan.
 fn loved_miss_warning(
     loved: &LoveRule,
-    matched: Option<WorkKind>,
+    matched: LoveMatch,
     skipped: &[(String, String)],
     task_class: TaskClass,
     kind_from_caller: bool,
 ) -> String {
     let usual = format!(
         "this went to the usual choice for {} work instead",
-        matched.map_or(task_class.as_str(), WorkKind::as_str)
+        match matched {
+            LoveMatch::Claimed(kind) => kind.as_str(),
+            LoveMatch::Fallback | LoveMatch::CatchAll => task_class.as_str(),
+        }
     );
-    let suffix = love_kind_suffix(matched, kind_from_caller);
+    let suffix = love_claim(matched, kind_from_caller)
+        .map_or_else(String::new, |claim| format!(" for {claim}"));
     if skipped.len() <= 1 {
         let reason = skipped
             .first()
@@ -1159,19 +1160,6 @@ fn loved_miss_warning(
         "{} are loved here{suffix} but none could take this task: {details}; {usual}",
         loved.chain_label(),
     )
-}
-
-/// How a warning names the rule that was skipped: the kind of work it claims,
-/// noting when the caller named it themselves, or nothing when it takes
-/// everything else.
-fn love_kind_suffix(matched: Option<WorkKind>, kind_from_caller: bool) -> String {
-    match matched {
-        None => String::new(),
-        Some(kind) if kind_from_caller => {
-            format!(" for {} work, the kind you named", kind.as_str())
-        }
-        Some(kind) => format!(" for {} work", kind.as_str()),
-    }
 }
 
 fn loved_effort(model: &ModelInfo, requested: Option<&str>) -> Option<String> {

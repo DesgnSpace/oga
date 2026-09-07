@@ -262,8 +262,8 @@ impl LoveDestination {
 
 /// One standing answer to "where does work that names no model go": an
 /// ordered list of destinations, and the kinds of work they take. A kind is
-/// either a class of work or a subject; an empty `when` is the catch-all,
-/// taking every kind no other rule claims. The list reads top to bottom: the
+/// either a class of work or a subject; `general` and an empty `when` both
+/// take every kind no other rule claims. The list reads top to bottom: the
 /// first destination that can take the work runs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoveRule {
@@ -288,19 +288,22 @@ impl LoveRule {
             .any(|destination| destination.matches(profile_id, model, default_model))
     }
 
-    /// The first kind on this rule that describes the task: its topic first,
-    /// then its class. `None` on the catch-all, which describes everything by
-    /// claiming nothing.
-    pub fn matching_kind(&self, class: TaskClass, topic: Option<TaskTopic>) -> Option<WorkKind> {
+    /// How this rule came to own the task: the first kind it names that
+    /// describes the work, its topic before its class, else the fallback it
+    /// offers by naming `general` or by naming nothing at all.
+    pub fn match_for(&self, class: TaskClass, topic: Option<TaskTopic>) -> LoveMatch {
         if let Some(topic) = topic
             && let Some(kind) = self.when.iter().find(|kind| kind.as_topic() == Some(topic))
         {
-            return Some(*kind);
+            return LoveMatch::Claimed(*kind);
         }
-        self.when
-            .iter()
-            .find(|kind| kind.as_class() == Some(class))
-            .copied()
+        if let Some(kind) = self.when.iter().find(|kind| kind.as_class() == Some(class)) {
+            return LoveMatch::Claimed(*kind);
+        }
+        if self.when.contains(&WorkKind::General) {
+            return LoveMatch::Fallback;
+        }
+        LoveMatch::CatchAll
     }
 
     /// How the rule is written and read back: its first destination.
@@ -463,6 +466,17 @@ impl<'de> Deserialize<'de> for LoveRule {
     }
 }
 
+/// Why a love rule owns a task, for the record the caller reads back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoveMatch {
+    /// The rule names this task's subject or its class.
+    Claimed(WorkKind),
+    /// The rule names `general`, so it takes what nothing else claims.
+    Fallback,
+    /// The rule names no kind, so it takes what nothing else claims.
+    CatchAll,
+}
+
 /// The love rules of the scope that owns them: a project's list replaces the
 /// global one whole, never merging the two.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -479,8 +493,12 @@ impl LoveRules {
     }
 
     /// The rule that owns this task: the one naming its subject first, then
-    /// the one naming its class, else the catch-all, else nothing. Within
-    /// one tier the file order wins, so the fleet reads top to bottom.
+    /// the one naming its class, then `general`, else the catch-all, else
+    /// nothing. `general` is the word for work with nothing particular about
+    /// it, so a rule naming it takes whatever no other rule claimed — and it
+    /// goes before the catch-all, since writing the word is a choice and
+    /// leaving `when` off is not. Within one tier the file order wins, so the
+    /// fleet reads top to bottom.
     pub fn for_task(&self, class: TaskClass, topic: Option<TaskTopic>) -> Option<&LoveRule> {
         if let Some(topic) = topic
             && let Some(rule) = self
@@ -493,6 +511,11 @@ impl LoveRules {
         self.0
             .iter()
             .find(|rule| rule.when.iter().any(|kind| kind.as_class() == Some(class)))
+            .or_else(|| {
+                self.0
+                    .iter()
+                    .find(|rule| rule.when.contains(&WorkKind::General))
+            })
             .or_else(|| self.0.iter().find(|rule| rule.when.is_empty()))
     }
 
@@ -2046,8 +2069,8 @@ mod tests {
             .unwrap();
         assert_eq!(ui.primary().model.as_deref(), Some("muse"));
         assert_eq!(
-            ui.matching_kind(TaskClass::Build, Some(TaskTopic::Ui)),
-            Some(WorkKind::Ui)
+            ui.match_for(TaskClass::Build, Some(TaskTopic::Ui)),
+            LoveMatch::Claimed(WorkKind::Ui)
         );
         let backend = love
             .for_task(TaskClass::Reasoning, Some(TaskTopic::Backend))
@@ -2109,6 +2132,103 @@ mod tests {
                 .model
                 .as_deref(),
             Some("c")
+        );
+    }
+
+    #[test]
+    fn a_general_rule_takes_the_work_no_other_rule_claims() {
+        let project = layer(
+            "/work/.oga.yaml",
+            r#"
+            love:
+              - model: claude:claude-opus-5
+                when: [general]
+                effort: low
+        "#,
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap();
+
+        // Docs work under a build class: no rule names either, so the general
+        // rule takes it.
+        let rule = love
+            .for_task(TaskClass::Build, Some(TaskTopic::Docs))
+            .unwrap();
+        assert_eq!(rule.primary().model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(
+            rule.match_for(TaskClass::Build, Some(TaskTopic::Docs)),
+            LoveMatch::Fallback
+        );
+        // Work that genuinely reads as general still matches the word itself.
+        assert_eq!(
+            love.for_class(TaskClass::General)
+                .unwrap()
+                .match_for(TaskClass::General, None),
+            LoveMatch::Claimed(WorkKind::General)
+        );
+    }
+
+    #[test]
+    fn a_claimed_kind_wins_over_the_general_rule_and_general_over_the_catch_all() {
+        let project = layer(
+            "/work/.oga.yaml",
+            r#"
+            love:
+              - model: a
+                when: [ui]
+              - model: b
+                when: [build]
+              - model: c
+                when: [general]
+              - model: d
+        "#,
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap();
+        let model = |class, topic| {
+            love.for_task(class, topic)
+                .unwrap()
+                .primary()
+                .model
+                .clone()
+                .unwrap()
+        };
+
+        // A rule naming the subject beats the general rule.
+        assert_eq!(model(TaskClass::Reasoning, Some(TaskTopic::Ui)), "a");
+        // So does a rule naming the class.
+        assert_eq!(model(TaskClass::Build, Some(TaskTopic::Database)), "b");
+        // Nothing claims docs work under a context class: the general rule
+        // takes it, ahead of the bare catch-all.
+        assert_eq!(model(TaskClass::Context, Some(TaskTopic::Docs)), "c");
+        assert_eq!(model(TaskClass::General, None), "c");
+    }
+
+    #[test]
+    fn the_catch_all_still_takes_everything_when_no_rule_names_general() {
+        let project = layer(
+            "/work/.oga.yaml",
+            "love:\n  - model: a\n    when: [ui]\n  - model: b\n",
+        );
+        let (_, love) = read_model_overrides(&ConfigLayers {
+            user: None,
+            project: Some(project),
+        })
+        .unwrap();
+
+        let rule = love
+            .for_task(TaskClass::Context, Some(TaskTopic::Docs))
+            .unwrap();
+        assert_eq!(rule.primary().model.as_deref(), Some("b"));
+        assert_eq!(
+            rule.match_for(TaskClass::Context, Some(TaskTopic::Docs)),
+            LoveMatch::CatchAll
         );
     }
 

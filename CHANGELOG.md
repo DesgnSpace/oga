@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- `oga love <model> --when general` now takes every piece of work no other rule claimed, instead of only the work Oga reads as nothing in particular. A rule naming the task's subject or class still wins, and a rule with no `--when` at all still catches whatever is left.
 - The Usage activity grid is now a compact, centred strip with weekday labels aligned to its rows.
 - `oga query` now returns every strong match, ranked, instead of collapsing to one arbitrary pick when a word was taught as a hint for several unrelated places. Adding or dropping a word no longer flips the answer between unrelated files for no visible reason.
 
