@@ -55,10 +55,10 @@
 
       <article class="docs-content">
         <p class="docs-eyebrow">Docs / Hand off work</p>
-        <h1>Hand off your first piece of work</h1>
+        <h1 id="hand-off-your-first-piece-of-work">Hand off your first piece of work<a class="heading-anchor" href="#hand-off-your-first-piece-of-work" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
         <p class="docs-intro">You don't fill in a form. You ask the coding agent you already use, in plain language, and it sets the work up for you.</p>
 
-        <h2 id="ask">Ask for it in plain language</h2>
+        <h2 id="ask">Ask for it in plain language<a class="heading-anchor" href="#ask" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Once your agent is connected, ask for the work the way you'd ask a colleague:</p>
         <div class="docs-callout">
           <p>"Send the failing test suite off to a fast model."</p>
@@ -66,18 +66,18 @@
         </div>
         <p>Your agent writes the brief, names the folder the work happens in, and either lets Oga choose the account and model or names one itself. You get an ID back as soon as the work starts. From there it runs on its own account, unattended.</p>
 
-        <h2 id="from-the-terminal">Or straight from your shell</h2>
+        <h2 id="from-the-terminal">Or straight from your shell<a class="heading-anchor" href="#from-the-terminal" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>When you already know what you want done, you don't need to go through an agent. <code>oga delegate</code> starts the work and hands you its ID:</p>
         <pre><code>oga delegate "Port the CSV importer to the new parser and keep its tests green."</code></pre>
         <p>It runs in the folder you're standing in, on the account and model Oga picks. Name one yourself with <code>--worker</code> and <code>--model</code>, give it its own branch with <code>--worktree</code>, or point it at another folder with <code>--cwd</code>. Already know what kind of work this is? Say so with <code>--kind</code>, so a <a href="/docs/setup.html#default-model">loved model</a> for that kind isn't missed. Want a say in how hard the model thinks? Set <code>--effort</code> directly.</p>
         <p>Pass <code>-</code> to take the brief from standard input, for when you've already written it down:</p>
         <pre><code>oga delegate - &lt; brief.md</code></pre>
 
-        <h2 id="worth-it">What's worth handing off</h2>
+        <h2 id="worth-it">What's worth handing off<a class="heading-anchor" href="#worth-it" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Handing off costs you a brief and a wait. It pays for itself on work with its own finish line — build this screen, port this module, review this branch, research this question. It doesn't pay for a rename, a typo, or a one-line change: by the time you've described those, you could have done them.</p>
         <p>The same goes for anything you're standing over. Work you'd interrupt every two minutes belongs in your own session.</p>
 
-        <h2 id="files">What it's allowed to touch</h2>
+        <h2 id="files">What it's allowed to touch<a class="heading-anchor" href="#files" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Every piece of work carries the area you approved: what it may read, and what it may change. Reading the whole folder and writing to one part of it is the usual shape.</p>
         <ul>
           <li>Naming a folder covers everything inside it.</li>
@@ -86,7 +86,7 @@
         </ul>
         <p>Approving an area once is enough — later work in the same project reuses it without asking again. The area is a permission, not a reading list; which files actually get opened is up to whoever does the work.</p>
 
-        <h2 id="who">Who ends up doing it</h2>
+        <h2 id="who">Who ends up doing it<a class="heading-anchor" href="#who" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Name nothing, and the work uses your <a href="/docs/setup.html#default-model">default model</a> when you set one. Otherwise Oga chooses from the workers and models you turned on. Name a worker and model when the work needs a specific destination.</p>
         <p>Naming a model, you can use the short name Settings shows instead of typing it in full, as long as it names only one model on that worker. A short name that could mean more than one is refused, listing the models it could mean, and a model you haven't switched on in Settings is always refused, however you asked for it.</p>
         <p>Workers arrive with default habits — clearing small holdups themselves, looking code up before searching blindly, and ending branch work in a pull request. The lookup understands Rust, Python, Go, PHP, Ruby, Java, Swift, C#, C, and C++ source. Those defaults live in Settings as a worker prompt you own top to bottom: reorder it, rewrite it, or delete it, and nothing is added behind your back.</p>
@@ -119,5 +119,6 @@
       <a href="https://desgn.space">Desgn</a>
     </div>
   </footer>
+  <script src="/docs-links.js"></script>
 </body>
 </html>
