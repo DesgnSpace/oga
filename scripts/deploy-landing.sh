@@ -9,5 +9,6 @@ if ! bunx wrangler --version >/dev/null 2>&1; then
 fi
 
 cd "$ROOT"
-bunx wrangler pages deploy landing --project-name oga
+make build-landing
+bunx wrangler pages deploy dist/landing --project-name oga
 echo "Deployed to https://oga.desgn.space"
