@@ -420,7 +420,7 @@ struct QueryCliOptions {
 
 fn parse_query_options(args: &[String]) -> CliResult<(QueryCliOptions, Vec<String>)> {
     let mut options = QueryCliOptions {
-        limit: 3,
+        limit: 10,
         code: false,
     };
     let mut question = Vec::new();
@@ -3950,6 +3950,11 @@ mod tests {
         let (options, question) = parse_query_options(&args).unwrap();
         assert_eq!(options.limit, 1);
         assert!(options.code);
+        assert_eq!(question, ["where is auth"]);
+
+        let (defaults, question) = parse_query_options(&["where is auth".into()]).unwrap();
+        assert_eq!(defaults.limit, 10);
+        assert!(!defaults.code);
         assert_eq!(question, ["where is auth"]);
     }
 

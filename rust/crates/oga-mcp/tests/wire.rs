@@ -95,6 +95,8 @@ async fn initialize_advertises_protocol_and_instructions() {
         .as_str()
         .expect("instructions");
     assert!(instructions.contains("oga watch <taskId>"));
+    assert!(instructions.contains("oga query \"<what you need>\" --code"));
+    assert!(instructions.contains("you do not have to read the file"));
     assert!(instructions.contains("Worker mode"));
 }
 

@@ -16,7 +16,7 @@ use crate::text::{identifier_words, name_key, words};
 /// Beyond this many candidates the ranking has already decided; the rest are
 /// noise carried by one shared word.
 pub const CANDIDATE_POOL: usize = 200;
-pub const DEFAULT_LIMIT: usize = 3;
+pub const DEFAULT_LIMIT: usize = 10;
 
 const ROUTE_EXACT: f64 = 1_000_000.0;
 const ROUTE_HINTED: f64 = 500_000.0;

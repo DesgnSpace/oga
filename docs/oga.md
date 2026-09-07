@@ -29,7 +29,8 @@ follow it, or operate without the app open.
 ## Finding code
 
 `oga query` takes a question in plain words and answers with the file, line,
-and name that hold the answer:
+and name that hold the answer. It returns up to 10 candidates by default.
+Add `--code` when you want the matching source in the answer:
 
 ```sh
 oga query "where does the sandbox binary path come from"
