@@ -1,11 +1,10 @@
 import * as React from "react";
 import {
-  highlight,
   limitHighlightedSource,
   resolveCodeLanguage,
   type CodeLanguage,
   type CodeToken,
-} from "@/domain/review";
+} from "@/domain/review/core";
 import type { DiffRange } from "@/lib/inline-diff";
 
 type DiffKind = "added" | "removed";
@@ -20,6 +19,13 @@ type IdleWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
   cancelIdleCallback?: (handle: number) => void;
 };
+
+type HighlighterModule = typeof import("@/domain/review");
+let highlighterModule: Promise<HighlighterModule> | undefined;
+
+function loadHighlighter(): Promise<HighlighterModule> {
+  return (highlighterModule ??= import("@/domain/review"));
+}
 
 function scheduleHighlight(work: () => void): () => void {
   const browserWindow: IdleWindow | undefined = globalThis.window;
@@ -87,10 +93,11 @@ export function SyntaxTokens({
 
     let active = true;
     const cancel = scheduleHighlight(() => {
-      const tokens = highlight(source, resolvedLanguage, path);
-      if (active) {
+      void loadHighlighter().then(({ highlight }) => {
+        if (!active) return;
+        const tokens = highlight(source, resolvedLanguage, path);
         React.startTransition(() => setHighlighted({ source, language: resolvedLanguage, tokens }));
-      }
+      });
     });
     return () => {
       active = false;

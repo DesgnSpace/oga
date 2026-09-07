@@ -104,7 +104,7 @@ function renderBlock(block: Block, index: number): React.ReactNode {
   }
 }
 
-export function MarkdownContent({ source }: { source: string }) {
+export const MarkdownContent = React.memo(function MarkdownContent({ source }: { source: string }) {
   const { blocks, truncated } = parseBlocks(source);
   return (
     <div className="markdown-content">
@@ -112,7 +112,7 @@ export function MarkdownContent({ source }: { source: string }) {
       {truncated ? <p className="review-token-comment">… truncated</p> : null}
     </div>
   );
-}
+});
 
 export function renderMarkdownToNodes(source: string): React.ReactNode {
   const { blocks, truncated } = parseBlocks(source);

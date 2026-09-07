@@ -42,6 +42,10 @@ function task(id: string, cwd: string, state: TaskState): TaskSummary {
 }
 
 describe("summary paging", () => {
+  it("skips aggregates unused by the sidebar", () => {
+    expect(summaryQuery(defaultSidebarState()).skipSummaryAggregates).toBe(true);
+  });
+
   it("grows by one page", () => {
     const state: SidebarState = { ...defaultSidebarState(), tasksHasMore: true };
     expect(summaryQuery(state).limit).toBe(TASK_PAGE_SIZE);

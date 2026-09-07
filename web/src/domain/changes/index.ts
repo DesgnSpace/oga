@@ -3,7 +3,7 @@
 // Rendering (the changed-files panel, syntax highlighting) is out of scope here;
 // this module only ports the pure event -> file/diff derivation.
 
-import type { EventKind, TaskDiffFileStatus, TaskEventView } from "@/bridge/types";
+import type { TaskDiffFileStatus, TaskEventView } from "@/bridge/types";
 
 export type DiffKind = "context" | "added" | "removed" | "skipped";
 
@@ -443,62 +443,145 @@ export const RUN_CHANGES_EMPTY: RunChangeSet = { files: [], unmatched: 0 };
 /** A run's diffs are bounded to this many lines before the rest counts as hidden. */
 export const RUN_CHANGES_LINE_LIMIT = 600;
 
-export function collectRunChanges(events: TaskEventView[], cwd: string): RunChangeSet {
-  const order: string[] = [];
-  const blocks = new Map<string, DiffLine[][]>();
-  const edits = new Map<string, number>();
-  let unmatched = 0;
+/**
+ * Folds a task's reported edits without rescanning earlier events on append.
+ * The event array is stable while the task stream appends; a replay, overlap,
+ * earlier page, or cwd change supplies a new array and takes the exact rebuild
+ * path instead.
+ */
+export class RunChangeProjection {
+  private source: TaskEventView[] | undefined;
+  private cwd: string | undefined;
+  private length = 0;
+  private result: RunChangeSet = { files: [], unmatched: 0 };
+  private files = new Map<string, MutableRunFile>();
 
-  for (const event of events) {
-    const raw = event.rawText;
-    if (raw === undefined) continue;
-    const skippable: EventKind[] = ["retry"];
-    if (skippable.includes(event.kind) || (event.kind !== "file" && !fileChangeMayContainEdit(raw))) continue;
-    const change = fileChangeFromRaw(raw);
-    if (!change) continue;
-    if (change.path === undefined) {
-      unmatched += 1;
-      continue;
+  update(events: TaskEventView[], cwd: string): RunChangeSet {
+    const canAppend = this.source === events && this.cwd === cwd && events.length >= this.length;
+    if (!canAppend) this.reset(cwd);
+
+    for (let index = canAppend ? this.length : 0; index < events.length; index += 1) {
+      this.consume(events[index], cwd);
     }
-    const path = relativePath(change.path, cwd);
-    const stack = blocks.get(path) ?? [];
-    blocks.set(path, stack);
-    const fresh = change.blocks.filter((block) => !stack.some((existing) => blocksEqual(existing, block)));
-    if (fresh.length === 0) continue;
-    if (!edits.has(path)) order.push(path);
-    stack.push(...fresh);
-    edits.set(path, (edits.get(path) ?? 0) + 1);
+    this.source = events;
+    this.cwd = cwd;
+    this.length = events.length;
+    return this.result;
   }
 
-  const files = order.map((path) => fileEntry(path, blocks.get(path) ?? [], edits.get(path) ?? 0));
-  return { files, unmatched };
+  private reset(cwd: string): void {
+    this.cwd = cwd;
+    this.length = 0;
+    this.files = new Map();
+    this.result = { files: [], unmatched: 0 };
+  }
+
+  private consume(event: TaskEventView, cwd: string): void {
+    const raw = event.rawText;
+    if (raw === undefined) return;
+    if (event.kind === "retry" || (event.kind !== "file" && !fileChangeMayContainEdit(raw))) return;
+    const change = fileChangeFromRaw(raw);
+    if (!change) return;
+    if (change.path === undefined) {
+      this.result.unmatched += 1;
+      return;
+    }
+
+    const path = relativePath(change.path, cwd);
+    const existing = this.files.get(path);
+
+    const fresh: DiffLine[][] = [];
+    for (const block of change.blocks) {
+      const key = diffBlockKey(block);
+      const known = existing?.blocksByKey.get(key);
+      if (known !== undefined && known.some((existing) => blocksEqual(existing, block))) continue;
+      fresh.push(block);
+    }
+    if (fresh.length === 0) return;
+
+    const file = existing ?? createMutableRunFile(path);
+    if (existing === undefined) {
+      this.files.set(path, file);
+      this.result.files.push(file.view);
+    }
+    file.edits += 1;
+    for (const block of fresh) {
+      const key = diffBlockKey(block);
+      const known = file.blocksByKey.get(key);
+      file.blocksByKey.set(key, [...(known ?? []), block]);
+      file.added += countBlockLines(block, "added");
+      file.removed += countBlockLines(block, "removed");
+      file.shortened ||= block.some((line) => line.text.includes("…[truncated: kept "));
+      if (file.drawn >= RUN_CHANGES_LINE_LIMIT) {
+        file.hiddenLines += block.length;
+      } else {
+        file.drawn += block.length;
+        file.kept.push(block);
+      }
+    }
+    file.view.edits = file.edits;
+    file.view.added = file.added;
+    file.view.removed = file.removed;
+    file.view.hiddenLines = file.hiddenLines;
+    file.view.shortened = file.shortened;
+    file.view.change = { path, blocks: file.kept };
+  }
 }
 
-function fileEntry(path: string, blocks: DiffLine[][], edits: number): RunFileChanges {
-  const kept: DiffLine[][] = [];
-  let drawn = 0;
-  let hidden = 0;
-  for (const block of blocks) {
-    if (drawn >= RUN_CHANGES_LINE_LIMIT) {
-      hidden += block.length;
-    } else {
-      drawn += block.length;
-      kept.push(block);
+interface MutableRunFile {
+  blocksByKey: Map<string, DiffLine[][]>;
+  kept: DiffLine[][];
+  drawn: number;
+  hiddenLines: number;
+  edits: number;
+  added: number;
+  removed: number;
+  shortened: boolean;
+  view: RunFileChanges;
+}
+
+function createMutableRunFile(path: string): MutableRunFile {
+  const file: MutableRunFile = {
+    blocksByKey: new Map(),
+    kept: [],
+    drawn: 0,
+    hiddenLines: 0,
+    edits: 0,
+    added: 0,
+    removed: 0,
+    shortened: false,
+    view: {
+      path,
+      change: { path, blocks: [] },
+      edits: 0,
+      added: 0,
+      removed: 0,
+      hiddenLines: 0,
+      shortened: false,
+    },
+  };
+  return file;
+}
+
+function diffBlockKey(block: DiffLine[]): string {
+  let hash = 2_166_136_261;
+  for (const line of block) {
+    hash ^= line.kind.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+    for (let index = 0; index < line.text.length; index += 1) {
+      hash ^= line.text.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
     }
   }
-  const flat = blocks.flat();
-  const added = flat.filter((line) => line.kind === "added").length;
-  const removed = flat.filter((line) => line.kind === "removed").length;
-  const shortened = flat.some((line) => line.text.includes("…[truncated: kept "));
-  return {
-    path,
-    change: { path, blocks: kept },
-    edits,
-    added,
-    removed,
-    hiddenLines: hidden,
-    shortened,
-  };
+  return `${block.length}:${hash >>> 0}`;
+}
+
+function countBlockLines(block: DiffLine[], kind: DiffKind): number {
+  return block.reduce((count, line) => count + (line.kind === kind ? 1 : 0), 0);
+}
+
+export function collectRunChanges(events: TaskEventView[], cwd: string): RunChangeSet {
+  return new RunChangeProjection().update(events, cwd);
 }
 
 export function relativePath(path: string, cwd: string): string {

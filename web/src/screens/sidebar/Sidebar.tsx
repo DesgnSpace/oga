@@ -218,13 +218,19 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   const taskRowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(initialTask);
 
-  const projection = useMemo(() => projectionFromState(sidebar), [sidebar]);
+  const projection = useMemo(
+    () => projectionFromState(sidebar),
+    [sidebar.tasks, sidebar.search, sidebar.projectFilter, sidebar.grouping, sidebar.sort],
+  );
   const effectiveRows = useMemo(
     () => projectionRows(projection, sidebar.collapsed, sidebar.grouping),
     [projection, sidebar.collapsed, sidebar.grouping],
   );
 
-  const emptyMessage = useMemo(() => projectionEmptyMessage(projection, sidebar), [projection, sidebar]);
+  const emptyMessage = useMemo(
+    () => projectionEmptyMessage(projection, sidebar),
+    [projection, sidebar.search, sidebar.archiveFilter, sidebar.projectFilter],
+  );
 
   // Nothing started yet could mean "no workers configured", which the plain
   // message doesn't explain, so this checks once and points at the fix.

@@ -82,7 +82,10 @@ export function mergeEvents(held: TaskEventView[], arriving: TaskEventView[]): T
     }
   }
   if (ordered && arriving[0].id > newest) {
-    return [...held, ...arriving];
+    // The controller owns this array. Keep its identity stable so subscribers
+    // can use the revision as the invalidation signal without copying history.
+    held.push(...arriving);
+    return held;
   }
   const merged = new Map<number, TaskEventView>();
   for (const event of held) merged.set(event.id, event);

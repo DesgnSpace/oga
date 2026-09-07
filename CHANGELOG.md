@@ -5,6 +5,7 @@
 - Work you hand off now reaches the tools you already connected for that project, instead of only Oga's own.
 - Work you hand off stays where you sent it. Ask for it to hand work onward and it can split the job up itself; otherwise it never can.
 - Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
+- Live task updates stay responsive during busy periods, and the app catches up if it falls behind.
 
 ## 0.0.10 - 2026-09-07
 

@@ -9,12 +9,12 @@ use axum::{
 };
 use oga_domain::{
     ActivityCounts, ArchivedFilter, FailureCode, MemoryProject, ProfileFailure, ProfileView,
-    ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskEventView, TaskHoldView,
-    TaskKind, TaskState, TaskSummary, TaskWorktree,
+    Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskEventView,
+    TaskHoldView, TaskKind, TaskState, TaskSummary, TaskWorktree,
 };
 use oga_events::{event_view, mark_repeated_retries};
 use oga_store::Store;
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
@@ -28,6 +28,8 @@ pub struct StateQuery {
     pub compact: Option<String>,
     pub archived: Option<String>,
     pub limit: Option<u64>,
+    #[serde(rename = "skipSummaryAggregates")]
+    pub skip_summary_aggregates: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -38,6 +40,10 @@ pub struct EventQuery {
     pub last: Option<u64>,
     pub before: Option<i64>,
     pub limit: Option<u64>,
+    #[serde(rename = "includeTask")]
+    pub include_task: Option<String>,
+    #[serde(rename = "taskUpdatedAt")]
+    pub task_updated_at: Option<String>,
 }
 
 pub async fn get_state(
@@ -48,12 +54,22 @@ pub async fn get_state(
     let body = run_read(move || {
         let summary = query.view.as_deref() == Some("summary");
         let compact = query.compact.as_deref() == Some("1");
+        let skip_summary_aggregates =
+            summary && query.skip_summary_aggregates.as_deref() == Some("1");
         let archived = archived_filter(query.archived.as_deref());
         let limit = query.limit.unwrap_or(50).clamp(1, 2_000);
         let profiles = public_profiles(&store)?;
         let (tasks, tasks_has_more) = list_tasks(&store, archived, summary, limit)?;
-        let memory_projects = list_memory_projects(&store)?;
-        let spend = spend_totals(&store)?;
+        let memory_projects = if skip_summary_aggregates {
+            Vec::new()
+        } else {
+            list_memory_projects(&store)?
+        };
+        let spend = if skip_summary_aggregates {
+            None
+        } else {
+            Some(spend_totals(&store)?)
+        };
 
         let mut body = serde_json::Map::new();
         body.insert("profiles".into(), serde_json::to_value(profiles).unwrap());
@@ -127,13 +143,11 @@ pub async fn get_task_events(
     Query(query): Query<EventQuery>,
 ) -> Result<Json<Value>, HttpError> {
     let store = state.store.clone();
-    let task = run_read(move || {
-        load_task(&store, &id)?
-            .filter(|task| task.kind != Some(TaskKind::Orchestrator))
-            .ok_or_else(|| HttpError::not_found("unknown task"))
-    })
-    .await?;
-    event_response(&state, &task, &query).await
+    let context = run_read(move || load_event_context(&store, &id)).await?;
+    let context = context
+        .filter(|context| context.kind != TaskKind::Orchestrator)
+        .ok_or_else(|| HttpError::not_found("unknown task"))?;
+    event_response(&state, &context, &query).await
 }
 
 pub async fn mark_task_viewed(
@@ -169,14 +183,71 @@ pub async fn get_agent_events(
     AxumPath(id): AxumPath<String>,
     Query(query): Query<EventQuery>,
 ) -> Result<Json<Value>, HttpError> {
-    let task = load_orchestrator(&state.store, &id)?;
-    event_response(&state, &task, &query).await
+    let store = state.store.clone();
+    let context = run_read(move || load_event_context(&store, &id)).await?;
+    let context = context
+        .filter(|context| context.kind == TaskKind::Orchestrator)
+        .ok_or_else(|| HttpError::not_found("unknown orchestrator"))?;
+    event_response(&state, &context, &query).await
 }
 
 pub(crate) fn load_orchestrator(store: &Store, id: &str) -> Result<Task, HttpError> {
     load_task(store, id)?
         .filter(|task| task.kind == Some(TaskKind::Orchestrator))
         .ok_or_else(|| HttpError::not_found("unknown orchestrator"))
+}
+
+#[derive(Debug, Clone)]
+struct TaskEventContext {
+    task_id: String,
+    kind: TaskKind,
+    state: TaskState,
+    provider: Provider,
+}
+
+fn load_event_context(store: &Store, id: &str) -> Result<Option<TaskEventContext>, HttpError> {
+    let row = store
+        .with_connection(|connection| {
+            Ok(connection
+                .query_row(
+                    "SELECT t.id,t.kind,t.state,p.provider FROM tasks t LEFT JOIN profiles p ON p.id=t.profile_id AND p.deleted_at IS NULL WHERE t.id=?",
+                    [id],
+                    |row| {
+                        let kind = decode_json::<TaskKind>(
+                            &format!("\"{}\"", row.get::<_, String>(1)?),
+                            1,
+                        )?;
+                        let state = decode_json::<TaskState>(
+                            &format!("\"{}\"", row.get::<_, String>(2)?),
+                            2,
+                        )?;
+                        let provider = row
+                            .get::<_, Option<String>>(3)?
+                            .map(|value| {
+                                decode_json::<Provider>(&format!("\"{value}\""), 3)
+                            })
+                            .transpose()?;
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            kind,
+                            state,
+                            provider,
+                        ))
+                    },
+                )
+                .optional()?)
+        })
+        .map_err(HttpError::from)?;
+    let Some((task_id, kind, state, provider)) = row else {
+        return Ok(None);
+    };
+    let provider = provider.ok_or_else(|| HttpError::not_found("unknown task profile"))?;
+    Ok(Some(TaskEventContext {
+        task_id,
+        kind,
+        state,
+        provider,
+    }))
 }
 
 /// A slow decode of a large page runs off the executor with a bound on its
@@ -207,31 +278,18 @@ where
 
 async fn event_response(
     state: &HttpState,
-    task: &Task,
+    context: &TaskEventContext,
     query: &EventQuery,
 ) -> Result<Json<Value>, HttpError> {
-    let store = state.store.clone();
-    let profile_id = task.profile_id.clone();
-    let provider = run_read(move || {
-        store
-            .repositories()
-            .profiles()
-            .get(&profile_id)
-            .map_err(HttpError::from)?
-            .ok_or_else(|| HttpError::not_found("unknown task profile"))
-            .map(|profile| profile.provider)
-    })
-    .await?;
-
     let tail = query.last.is_some() || query.before.is_some();
     let after = query.after.unwrap_or(0).max(0);
     let wait_ms = query.wait_ms.unwrap_or(0).min(30_000);
-    if !tail && after > 0 && wait_ms > 0 && !task.state.settled() {
+    if !tail && after > 0 && wait_ms > 0 && !context.state.settled() {
         state
             .events
             .wait_for_change(
                 after,
-                std::slice::from_ref(&task.id),
+                std::slice::from_ref(&context.task_id),
                 Duration::from_millis(wait_ms),
             )
             .await
@@ -239,40 +297,76 @@ async fn event_response(
     }
 
     let store = state.store.clone();
-    let task_id = task.id.clone();
+    let task_id = context.task_id.clone();
+    let provider = context.provider;
+    let expected_updated_at = query.task_updated_at.clone();
+    let include_task = query.include_task.as_deref() == Some("1");
     let read_query = query.clone();
-    let (views, tail_page) = run_read(move || {
+    let (views, tail_page, updated_task, task_updated_at) = run_read(move || {
         let query = read_query;
-        let events = read_events(&store, &task_id, &query)?;
-        let views = mark_repeated_retries(
-            events
-                .iter()
-                .map(|event| event_view(event, provider))
-                .collect::<Vec<TaskEventView>>(),
-        );
-        if query.last.is_some() || query.before.is_some() {
-            let cursor = views
-                .last()
-                .map_or(query.after.unwrap_or(0), |event| event.id);
-            let oldest_id = views.first().map_or(0, |event| event.id);
-            let has_earlier = oldest_id > 0 && has_event_before(&store, &task_id, oldest_id)?;
-            return Ok((views, Some((cursor, oldest_id, has_earlier))));
-        }
-        Ok((views, None))
+        store
+            .with_connection(|connection| {
+                let events = read_events_with_connection(connection, &task_id, &query)?;
+                let views = mark_repeated_retries(
+                    events
+                        .iter()
+                        .map(|event| event_view(event, provider))
+                        .collect::<Vec<TaskEventView>>(),
+                );
+                let (updated_task, task_updated_at) = if include_task {
+                    let updated_at: String = connection.query_row(
+                        "SELECT updated_at FROM tasks WHERE id=?",
+                        [&task_id],
+                        |row| row.get(0),
+                    )?;
+                    let updated_task = expected_updated_at
+                        .as_deref()
+                        .is_none_or(|expected| expected != updated_at)
+                        .then(|| load_task_with_connection(connection, &task_id))
+                        .transpose()?
+                        .flatten();
+                    (updated_task, Some(updated_at))
+                } else {
+                    (None, None)
+                };
+                if query.last.is_some() || query.before.is_some() {
+                    let cursor = views
+                        .last()
+                        .map_or(query.after.unwrap_or(0), |event| event.id);
+                    let oldest_id = views.first().map_or(0, |event| event.id);
+                    let has_earlier = oldest_id > 0
+                        && has_event_before_with_connection(connection, &task_id, oldest_id)?;
+                    return Ok((
+                        views,
+                        Some((cursor, oldest_id, has_earlier)),
+                        updated_task,
+                        task_updated_at,
+                    ));
+                }
+                Ok((views, None, updated_task, task_updated_at))
+            })
+            .map_err(HttpError::from)
     })
     .await?;
 
     if let Some((cursor, oldest_id, has_earlier)) = tail_page {
-        return Ok(Json(json!({
+        let mut body = json!({
             "events": views,
             "cursor": cursor,
             "hasMore": false,
             "oldestId": oldest_id,
             "hasEarlier": has_earlier,
-        })));
+        });
+        if let Some(task) = updated_task {
+            body["task"] = serde_json::to_value(task).unwrap();
+        }
+        if let Some(updated_at) = task_updated_at {
+            body["taskUpdatedAt"] = json!(updated_at);
+        }
+        return Ok(Json(body));
     }
 
-    if query.after.is_none() && query.wait_ms.is_none() {
+    if query.after.is_none() && query.wait_ms.is_none() && !include_task {
         let limit = query.limit.unwrap_or(5_000).clamp(1, 5_000) as usize;
         return Ok(Json(
             serde_json::to_value(views.into_iter().take(limit).collect::<Vec<_>>()).unwrap(),
@@ -285,11 +379,18 @@ async fn event_response(
     let cursor = events
         .last()
         .map_or(query.after.unwrap_or(0), |event| event.id);
-    Ok(Json(json!({
+    let mut body = json!({
         "events": events,
         "cursor": cursor,
         "hasMore": has_more,
-    })))
+    });
+    if let Some(task) = updated_task {
+        body["task"] = serde_json::to_value(task).unwrap();
+    }
+    if let Some(updated_at) = task_updated_at {
+        body["taskUpdatedAt"] = json!(updated_at);
+    }
+    Ok(Json(body))
 }
 
 /// The tray and dock badge need two numbers, and loading the task list to
@@ -384,20 +485,22 @@ fn list_tasks(
 
 pub(crate) fn load_task(store: &Store, id: &str) -> Result<Option<Task>, HttpError> {
     store
-        .with_connection(|connection| {
-            let mut task = connection
-                .query_row(
-                    &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id=?"),
-                    [id],
-                    task_from_row,
-                )
-                .optional()?;
-            if let Some(task) = &mut task {
-                attach_task_read_fields(connection, std::slice::from_mut(task))?;
-            }
-            Ok(task)
-        })
+        .with_connection(|connection| Ok(load_task_with_connection(connection, id)?))
         .map_err(HttpError::from)
+}
+
+fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Result<Option<Task>> {
+    let mut task = connection
+        .query_row(
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id=?"),
+            [id],
+            task_from_row,
+        )
+        .optional()?;
+    if let Some(task) = &mut task {
+        attach_task_read_fields(connection, std::slice::from_mut(task))?;
+    }
+    Ok(task)
 }
 
 /// Reads the follow-up counts and holds for a whole page of tasks in two
@@ -610,50 +713,46 @@ fn task_summary(task: &Task) -> TaskSummary {
     }
 }
 
-fn read_events(
-    store: &Store,
+fn read_events_with_connection(
+    connection: &Connection,
     task_id: &str,
     query: &EventQuery,
-) -> Result<Vec<TaskEvent>, HttpError> {
-    store
-        .with_connection(|connection| {
-            let tail = query.last.is_some() || query.before.is_some();
-            let limit = query.limit.unwrap_or(5_000).clamp(1, 5_000) as i64;
-            let rows = if tail {
-                let before = query.before.unwrap_or(0);
-                let count = query.last.unwrap_or(5_000).clamp(1, 5_000) as i64;
-                let mut statement = if before > 0 {
-                    connection.prepare(
-                        "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? AND id<? ORDER BY id DESC LIMIT ?",
-                    )?
-                } else {
-                    connection.prepare(
-                        "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? ORDER BY id DESC LIMIT ?",
-                    )?
-                };
-                let rows = if before > 0 {
-                    statement
-                        .query_map(params![task_id, before, count], event_from_row)?
-                        .collect::<Result<Vec<_>, _>>()?
-                } else {
-                    statement
-                        .query_map(params![task_id, count], event_from_row)?
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                rows.into_iter().rev().collect()
-            } else {
-                let after = query.after.unwrap_or(0);
-                let count = limit + 1;
-                let mut statement = connection.prepare(
-                    "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? AND id>? ORDER BY id LIMIT ?",
-                )?;
-                statement
-                    .query_map(params![task_id, after, count], event_from_row)?
-                    .collect::<Result<Vec<_>, _>>()?
-            };
-            Ok(rows)
-        })
-        .map_err(HttpError::from)
+) -> rusqlite::Result<Vec<TaskEvent>> {
+    let tail = query.last.is_some() || query.before.is_some();
+    let limit = query.limit.unwrap_or(5_000).clamp(1, 5_000) as i64;
+    let rows = if tail {
+        let before = query.before.unwrap_or(0);
+        let count = query.last.unwrap_or(5_000).clamp(1, 5_000) as i64;
+        let mut statement = if before > 0 {
+            connection.prepare(
+                "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? AND id<? ORDER BY id DESC LIMIT ?",
+            )?
+        } else {
+            connection.prepare(
+                "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? ORDER BY id DESC LIMIT ?",
+            )?
+        };
+        let rows = if before > 0 {
+            statement
+                .query_map(params![task_id, before, count], event_from_row)?
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            statement
+                .query_map(params![task_id, count], event_from_row)?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        rows.into_iter().rev().collect()
+    } else {
+        let after = query.after.unwrap_or(0);
+        let count = limit + 1;
+        let mut statement = connection.prepare(
+            "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? AND id>? ORDER BY id LIMIT ?",
+        )?;
+        statement
+            .query_map(params![task_id, after, count], event_from_row)?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    Ok(rows)
 }
 
 fn event_from_row(row: &Row<'_>) -> rusqlite::Result<TaskEvent> {
@@ -670,16 +769,16 @@ fn event_from_row(row: &Row<'_>) -> rusqlite::Result<TaskEvent> {
     })
 }
 
-fn has_event_before(store: &Store, task_id: &str, id: i64) -> Result<bool, HttpError> {
-    store
-        .with_connection(|connection| {
-            Ok(connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=? AND id<?)",
-                params![task_id, id],
-                |row| row.get(0),
-            )?)
-        })
-        .map_err(HttpError::from)
+fn has_event_before_with_connection(
+    connection: &Connection,
+    task_id: &str,
+    id: i64,
+) -> rusqlite::Result<bool> {
+    connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=? AND id<?)",
+        params![task_id, id],
+        |row| row.get(0),
+    )
 }
 
 pub(crate) fn list_profile_failures(store: &Store) -> Result<Vec<ProfileFailure>, HttpError> {

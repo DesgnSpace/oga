@@ -44,7 +44,34 @@ function proseRow(text: string, kind: "message" | "reasoning" = "message"): Trac
   });
 }
 
+class TestIntersectionObserver implements IntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = "";
+  readonly thresholds: readonly number[] = [];
+
+  constructor(_callback: IntersectionObserverCallback, _options?: IntersectionObserverInit) {}
+
+  observe(_target: Element) {}
+  disconnect() {}
+  unobserve(_target: Element) {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+
 describe("TraceRows", () => {
+  it("mounts only the newest window of a long trace", () => {
+    const previous = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = TestIntersectionObserver;
+    try {
+      const rows = Array.from({ length: 1_000 }, (_, index) => row({ id: index + 1, target: `step ${index + 1}` }));
+      const { container } = render(<TraceRows rows={rows} />);
+      expect(container.querySelectorAll(".trace-list-static > .trace-row")).toHaveLength(60);
+    } finally {
+      globalThis.IntersectionObserver = previous;
+    }
+  });
+
   it("resolves relative image paths against the task directory", () => {
     expect(resolvePreviewPath(".look-shots/image.png", "/Users/malico/project/")).toBe(
       "/Users/malico/project/.look-shots/image.png",

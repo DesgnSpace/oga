@@ -1,4 +1,5 @@
-import { describe, it, expect } from "bun:test";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   parseInline,
@@ -9,6 +10,8 @@ import {
   MAX_BLOCKS,
 } from "./parse";
 import { MarkdownContent } from "./MarkdownContent";
+
+afterEach(cleanup);
 
 function html(source: string): string {
   return renderToStaticMarkup(<MarkdownContent source={source} />);
@@ -286,6 +289,16 @@ describe("parseBlocks", () => {
 
 // ---- renderer ----
 describe("MarkdownContent renderer", () => {
+  it("updates active text when the source changes", () => {
+    const view = render(<MarkdownContent source="first update" />);
+    expect(view.container.textContent).toContain("first update");
+
+    view.rerender(<MarkdownContent source="second update" />);
+
+    expect(view.container.textContent).toContain("second update");
+    expect(view.container.textContent).not.toContain("first update");
+  });
+
   it("wraps in markdown-content and truncated marker", () => {
     expect(html("hello")).toContain('class="markdown-content"');
     const long = "a ".repeat(MAX_MARKDOWN_CHARS + 10);

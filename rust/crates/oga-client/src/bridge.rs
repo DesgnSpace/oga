@@ -492,19 +492,13 @@ mod native {
                 .mark_task_viewed(task_id)
                 .await
                 .map_err(|error| BridgeError::from(&error))?;
-            let task = self
-                .client
-                .get_task(task_id)
-                .await
-                .map_err(|error| BridgeError::from(&error))?;
-            let page = self
-                .client
-                .get_task_events(
-                    task_id,
-                    &TaskEventsQuery::default().last(events).limit(events),
-                )
-                .await
-                .map_err(|error| BridgeError::from(&error))?;
+            let query = TaskEventsQuery::default().last(events).limit(events);
+            let (task_result, page_result) = tokio::join!(
+                self.client.get_task(task_id),
+                self.client.get_task_events(task_id, &query),
+            );
+            let task = task_result.map_err(|error| BridgeError::from(&error))?;
+            let page = page_result.map_err(|error| BridgeError::from(&error))?;
             let cursor = page.cursor.unwrap_or_default();
             *self.watched.lock().expect("watched task lock") = Some(Watched {
                 task_id: task_id.to_owned(),
@@ -567,7 +561,7 @@ mod native {
 
         /// Holds until the broker says the watched task's log has moved.
         async fn waiting(&self) {
-            let Some((task_id, from_cursor, settled)) = self.watched() else {
+            let Some((task_id, from_cursor, settled, _)) = self.watched() else {
                 return std::future::pending().await;
             };
             // The broker only holds a read open for a task that can still
@@ -588,21 +582,24 @@ mod native {
                 .await;
         }
 
-        fn watched(&self) -> Option<(String, i64, bool)> {
+        fn watched(&self) -> Option<(String, i64, bool, String)> {
             let watched = self.watched.lock().expect("watched task lock");
             let watched = watched.as_ref()?;
             Some((
                 watched.task_id.clone(),
                 watched.cursor,
                 watched.task.state.settled(),
+                watched.task.updated_at.clone(),
             ))
         }
 
         async fn pull(&self) -> Option<TaskDelta> {
-            let (task_id, from_cursor, _) = self.watched()?;
+            let (task_id, from_cursor, _, task_updated_at) = self.watched()?;
 
             let mut events = Vec::new();
             let mut cursor = from_cursor;
+            let mut returned_task = None;
+            let mut returned_task_updated_at = None;
             loop {
                 let page = self
                     .client
@@ -610,10 +607,18 @@ mod native {
                         &task_id,
                         &TaskEventsQuery::default()
                             .after(cursor)
-                            .limit(DELTA_PAGE_SIZE),
+                            .limit(DELTA_PAGE_SIZE)
+                            .include_task(true)
+                            .task_updated_at(task_updated_at.clone()),
                     )
                     .await
                     .ok()?;
+                if page.task_updated_at.is_some() {
+                    returned_task_updated_at = page.task_updated_at;
+                    if page.task.is_some() {
+                        returned_task = page.task;
+                    }
+                }
                 let has_more = page.has_more == Some(true) && !page.events.is_empty();
                 if let Some(next) = page.cursor {
                     cursor = cursor.max(next);
@@ -623,7 +628,18 @@ mod native {
                     break;
                 }
             }
-            let task = self.client.get_task(&task_id).await.ok()?;
+            let task = match returned_task {
+                Some(task) => task,
+                None if returned_task_updated_at.as_deref() == Some(task_updated_at.as_str()) => {
+                    self.watched
+                        .lock()
+                        .expect("watched task lock")
+                        .as_ref()
+                        .filter(|watched| watched.task_id == task_id)
+                        .map(|watched| watched.task.clone())?
+                }
+                None => self.client.get_task(&task_id).await.ok()?,
+            };
 
             let mut watched = self.watched.lock().expect("watched task lock");
             let watched = watched

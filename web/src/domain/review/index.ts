@@ -24,11 +24,22 @@ import tsx from "refractor/tsx";
 import typescript from "refractor/typescript";
 import yaml from "refractor/yaml";
 import toml from "refractor/toml";
-import { codeLanguageFromPath, type CodeLanguage } from "@/domain/trace";
 import type { DiffKind, DiffLine } from "@/domain/changes";
+import {
+  limitHighlightedSource,
+  MAX_HIGHLIGHTED_CHARS,
+  resolveCodeLanguage,
+  type CodeLanguage,
+  type CodeToken,
+} from "./core";
 
-export type { CodeLanguage };
-export { codeLanguageFromPath };
+export {
+  codeLanguageFromPath,
+  limitHighlightedSource,
+  MAX_HIGHLIGHTED_CHARS,
+  resolveCodeLanguage,
+} from "./core";
+export type { CodeLanguage, CodeToken } from "./core";
 
 refractor.register(bash);
 refractor.register(c);
@@ -51,12 +62,6 @@ refractor.register(tsx);
 refractor.register(typescript);
 refractor.register(toml);
 refractor.register(yaml);
-
-export interface CodeToken {
-  text: string;
-  className?: string;
-  changed: boolean;
-}
 
 /** A card renders at most this many lines. Everything past it is reported as a
  * count rather than built, so opening one row costs a bounded amount of DOM. */
@@ -283,25 +288,9 @@ function withinBudget(tokens: CodeToken[], budget: { remaining: number }): CodeT
   return [{ text: tokens.map((token) => token.text).join(""), changed: false }];
 }
 
-/** Past this the trace is a wall of text nobody reads, and highlighting it
- * costs more than the whole rest of the expansion. */
-export const MAX_HIGHLIGHTED_CHARS = 20_000;
-
 /** Every token becomes its own DOM node, and the character cap alone does not
  * bound them when a grammar marks punctuation one character at a time. */
 const MAX_HIGHLIGHTED_TOKENS = 8_000;
-
-export function resolveCodeLanguage(language: CodeLanguage | undefined, path: string | undefined): CodeLanguage {
-  return language !== undefined && language !== "plain" ? language : codeLanguageFromPath(path);
-}
-
-export function limitHighlightedSource(source: string): string {
-  const limited = source.slice(0, MAX_HIGHLIGHTED_CHARS);
-  if (limited.length >= source.length) return limited;
-  const last = limited.charCodeAt(limited.length - 1);
-  const safe = last >= 0xd800 && last <= 0xdbff ? limited.slice(0, -1) : limited;
-  return `${safe}\n… truncated`;
-}
 
 function grammarFor(language: CodeLanguage, path: string | undefined): string | undefined {
   if (language === "plain") return undefined;

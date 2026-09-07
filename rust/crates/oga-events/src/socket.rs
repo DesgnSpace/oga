@@ -25,7 +25,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::event_view;
+use crate::{EventFeed, event_view};
 
 pub const MAX_SOCK_PATH: usize = 103;
 pub const MAX_PENDING_BYTES: usize = 4 * 1024 * 1024;
@@ -122,7 +122,11 @@ pub fn start_event_socket(
     })?;
     let (shutdown, receiver) = watch::channel(false);
     let path = options.path.clone();
-    let task = runtime.spawn(accept_loop(listener, store, options, receiver));
+    let feed = Arc::new(EventFeed::with_poll_interval(
+        store.clone(),
+        options.poll_interval,
+    ));
+    let task = runtime.spawn(accept_loop(listener, store, options, receiver, feed));
     Ok(EventSocketHandle {
         path: Some(path),
         shutdown,
@@ -144,6 +148,7 @@ async fn accept_loop(
     store: Arc<Store>,
     options: EventSocketOptions,
     mut shutdown: watch::Receiver<bool>,
+    feed: Arc<EventFeed>,
 ) {
     loop {
         tokio::select! {
@@ -157,8 +162,16 @@ async fn accept_loop(
                 let connection_shutdown = shutdown.clone();
                 let connection_store = store.clone();
                 let connection_options = options.clone();
+                let connection_feed = feed.clone();
                 tokio::spawn(async move {
-                    serve_connection(connection_store, connection_options, stream, connection_shutdown).await;
+                    serve_connection(
+                        connection_store,
+                        connection_options,
+                        stream,
+                        connection_shutdown,
+                        connection_feed,
+                    )
+                    .await;
                 });
             }
         }
@@ -170,6 +183,7 @@ async fn serve_connection(
     options: EventSocketOptions,
     stream: UnixStream,
     mut shutdown: watch::Receiver<bool>,
+    feed: Arc<EventFeed>,
 ) {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -250,10 +264,10 @@ async fn serve_connection(
         }
         let Some(waited) = wait_for_tasks(
             &store,
+            &feed,
             &watched,
             cursor,
             options.keepalive,
-            options.poll_interval,
             &mut shutdown,
         )
         .await
@@ -316,13 +330,14 @@ struct WaitedBatch {
 
 async fn wait_for_tasks(
     store: &Store,
+    feed: &EventFeed,
     task_ids: &[String],
     cursor: i64,
     wait: Duration,
-    poll_interval: Duration,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Option<WaitedBatch> {
     let deadline = Instant::now() + wait;
+    let mut signal_cursor = cursor;
     loop {
         let events = list_events(store, cursor, MAX_BATCH_EVENTS + 1, task_ids, true).ok()?;
         let tasks = load_tasks(store, task_ids).ok()?;
@@ -353,7 +368,15 @@ async fn wait_for_tasks(
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() { return None; }
             }
-            _ = tokio::time::sleep(poll_interval.min(deadline - now)) => {}
+            changed = feed.wait_for_change(signal_cursor, task_ids, deadline - now) => {
+                match changed {
+                    Ok(true) => {
+                        signal_cursor = feed.latest_event_id(task_ids).ok()?;
+                    }
+                    Ok(false) => {}
+                    Err(_) => return None,
+                }
+            }
         }
     }
 }

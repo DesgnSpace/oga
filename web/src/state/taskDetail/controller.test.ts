@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { Transport } from "@/bridge/transport";
-import type { StreamStatus, Task, TaskDelta, TaskSnapshot } from "@/bridge/types";
+import type { StreamStatus, Task, TaskDelta, TaskEventPage, TaskSnapshot } from "@/bridge/types";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -118,6 +118,53 @@ describe("watch lifecycle", () => {
     expect(controller.snapshot.hasEarlier).toBe(true);
     expect(controller.snapshot.loading).toBe(false);
     expect(controller.snapshot.connection).toBe("live");
+  });
+
+  it("overlaps fallback task and activity reads", async () => {
+    const calls: string[] = [];
+    let resolveTask: (value: Task) => void = () => {};
+    let resolveEvents: (value: TaskEventPage) => void = () => {};
+    let resolveBothStarted: () => void = () => {};
+    const bothStarted = new Promise<void>((resolve) => {
+      resolveBothStarted = resolve;
+    });
+    const transport = fakeTransport({
+      broker_watch_task: () => {
+        throw { message: "native follow unavailable" };
+      },
+      broker_call: (args) => {
+        const call = (args?.call as { call?: string } | undefined)?.call;
+        calls.push(String(call));
+        if (calls.length === 2) resolveBothStarted();
+        if (call === "task") {
+          return new Promise<Task>((resolve) => {
+            resolveTask = resolve;
+          });
+        }
+        if (call === "taskEvents") {
+          return new Promise<TaskEventPage>((resolve) => {
+            resolveEvents = resolve;
+          });
+        }
+        throw new Error(`unexpected broker call: ${String(call)}`);
+      },
+    });
+    const { TaskDetailController } = await freshController(transport);
+    const controller = new TaskDetailController("task");
+    const loading = controller.loadInitial();
+
+    await Promise.race([
+      bothStarted,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("fallback reads did not overlap")), 500)),
+    ]);
+    expect(calls).toEqual(["task", "taskEvents"]);
+
+    resolveTask(task());
+    resolveEvents({ events: [], cursor: 0, hasEarlier: false });
+    await loading;
+
+    expect(controller.snapshot.task?.id).toBe("task");
+    expect(controller.snapshot.loading).toBe(false);
   });
 });
 

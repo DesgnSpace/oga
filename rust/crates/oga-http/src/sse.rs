@@ -1,11 +1,6 @@
 //! Cursor-based broker event streaming.
 
-use std::{
-    collections::HashMap,
-    convert::Infallible,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Duration};
 
 use axum::{
     extract::{RawQuery, State},
@@ -15,16 +10,13 @@ use axum::{
         sse::{Event, Sse},
     },
 };
-use oga_domain::{EventKind, EventPointer, Provider, Task, TaskEvent, TaskKind};
-use oga_events::event_view;
+use oga_domain::{EventKind, EventPointer, Provider, TaskEvent, TaskKind};
+use oga_events::{EventFeed, event_view};
 use oga_store::{Store, StoreError};
 use rusqlite::{Row, ToSql, params_from_iter};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::{
-    sync::mpsc,
-    time::{sleep, timeout},
-};
+use tokio::{sync::mpsc, time::timeout};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
@@ -37,79 +29,9 @@ pub const KEEPALIVE: Duration = Duration::from_secs(30);
 pub const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const STREAM_CHANNEL_CAPACITY: usize = 64;
 
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_SUMMARY_CHARS: usize = 500;
 
-/// The event log read helper shared by SSE and per-task long polls.
-#[derive(Clone)]
-pub struct EventFanout {
-    store: Arc<Store>,
-    poll_interval: Duration,
-}
-
-impl EventFanout {
-    pub fn new(store: Arc<Store>) -> Self {
-        Self {
-            store,
-            poll_interval: POLL_INTERVAL,
-        }
-    }
-
-    pub fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
-        self.poll_interval = poll_interval.max(Duration::from_millis(1));
-        self
-    }
-
-    /// Waits until the cursor has new rows, or the timeout expires.
-    ///
-    /// Event writes can come from a different store handle or process, so the
-    /// durable log remains the source of truth. The short recovery poll closes
-    /// the same insert/wait race as an in-process notification without making
-    /// callers depend on a writer-side callback.
-    pub async fn wait_for_change(
-        &self,
-        after: i64,
-        task_ids: &[String],
-        wait: Duration,
-    ) -> Result<bool, StoreError> {
-        if self.has_events_after(after, task_ids)? {
-            return Ok(true);
-        }
-        if wait.is_zero() {
-            return Ok(false);
-        }
-
-        let deadline = Instant::now() + wait;
-        loop {
-            let now = Instant::now();
-            if now >= deadline {
-                return Ok(false);
-            }
-            sleep(self.poll_interval.min(deadline - now)).await;
-            if self.has_events_after(after, task_ids)? {
-                return Ok(true);
-            }
-        }
-    }
-
-    pub fn latest_event_id(&self, task_ids: &[String]) -> Result<i64, StoreError> {
-        aggregate_event_id(&self.store, "MAX", task_ids)
-    }
-
-    pub fn oldest_event_id(&self, task_ids: &[String]) -> Result<i64, StoreError> {
-        aggregate_event_id(&self.store, "MIN", task_ids)
-    }
-
-    fn has_events_after(&self, after: i64, task_ids: &[String]) -> Result<bool, StoreError> {
-        self.store.with_connection(|connection| {
-            let task_filter = task_clause(task_ids, "task_id");
-            let sql = format!("SELECT EXISTS(SELECT 1 FROM task_events WHERE id > ?{task_filter})");
-            let mut values: Vec<&dyn ToSql> = vec![&after];
-            values.extend(task_ids.iter().map(|id| id as &dyn ToSql));
-            Ok(connection.query_row(&sql, params_from_iter(values), |row| row.get(0))?)
-        })
-    }
-}
+pub type EventFanout = EventFeed;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct EventQuery {
@@ -267,6 +189,9 @@ async fn run_stream(
     fanout: Arc<EventFanout>,
     options: StreamOptions,
 ) {
+    let Ok(_feed) = fanout.retain() else {
+        return;
+    };
     let StreamOptions {
         after,
         task_ids,
@@ -310,8 +235,8 @@ async fn run_stream(
             Err(_) => return,
         };
         if !rows.is_empty() {
-            let tasks = match load_tasks(&store, &rows) {
-                Ok(tasks) => tasks,
+            let contexts = match load_pointer_contexts(&store, &rows) {
+                Ok(contexts) => contexts,
                 Err(_) => return,
             };
             for event in rows {
@@ -319,13 +244,13 @@ async fn run_stream(
                     return;
                 }
                 cursor = event.id;
-                let Some((task, provider)) = tasks.get(&event.task_id) else {
+                let Some(context) = contexts.get(&event.task_id) else {
                     continue;
                 };
-                if task.kind == Some(TaskKind::Orchestrator) && !include_orchestrators {
+                if context.kind == Some(TaskKind::Orchestrator) && !include_orchestrators {
                     continue;
                 }
-                let pointer = event_pointer(&event, task, *provider);
+                let pointer = event_pointer(&event, context);
                 if kinds
                     .as_ref()
                     .is_some_and(|allowed| !allowed.contains(&pointer.kind))
@@ -377,8 +302,16 @@ fn json_event(name: &'static str, value: Value) -> Event {
         .expect("JSON event data")
 }
 
-fn event_pointer(event: &TaskEvent, task: &Task, provider: Provider) -> EventPointer {
-    let view = event_view(event, provider);
+#[derive(Debug)]
+struct PointerTaskContext {
+    kind: Option<TaskKind>,
+    title: Option<String>,
+    tldr: Option<String>,
+    provider: Provider,
+}
+
+fn event_pointer(event: &TaskEvent, context: &PointerTaskContext) -> EventPointer {
+    let view = event_view(event, context.provider);
     let kind = view.kind;
     let summary = if event.kind == "agent.system" {
         event
@@ -441,10 +374,10 @@ fn event_pointer(event: &TaskEvent, task: &Task, provider: Provider) -> EventPoi
         kind,
         state: event.state,
         at: event.created_at.clone(),
-        title: task
+        title: context
             .title
             .as_deref()
-            .or(task.tldr.as_deref())
+            .or(context.tldr.as_deref())
             .unwrap_or(&event.task_id)
             .to_owned(),
         summary: summary.chars().take(MAX_SUMMARY_CHARS).collect(),
@@ -474,26 +407,91 @@ fn list_events(
     })
 }
 
-fn load_tasks(
+fn load_pointer_contexts(
     store: &Store,
     events: &[TaskEvent],
-) -> Result<HashMap<String, (Task, Provider)>, HttpError> {
-    let mut tasks = HashMap::new();
-    for task_id in events.iter().map(|event| &event.task_id) {
-        if tasks.contains_key(task_id) {
-            continue;
-        }
-        let Some(task) = state::load_task(store, task_id)? else {
-            continue;
-        };
-        let provider = store
-            .repositories()
-            .profiles()
-            .get(&task.profile_id)?
-            .map_or(Provider::Claude, |profile| profile.provider);
-        tasks.insert(task_id.clone(), (task, provider));
+) -> Result<HashMap<String, PointerTaskContext>, HttpError> {
+    let mut task_ids = events
+        .iter()
+        .map(|event| event.task_id.as_str())
+        .collect::<Vec<_>>();
+    task_ids.sort_unstable();
+    task_ids.dedup();
+    if task_ids.is_empty() {
+        return Ok(HashMap::new());
     }
-    Ok(tasks)
+
+    store
+        .with_connection(|connection| {
+            let placeholders = std::iter::repeat_n("?", task_ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT t.id,t.kind,t.title,t.tldr,p.provider FROM tasks t LEFT JOIN profiles p ON p.id=t.profile_id AND p.deleted_at IS NULL WHERE t.id IN ({placeholders})"
+            );
+            let mut values: Vec<&dyn ToSql> = Vec::with_capacity(task_ids.len());
+            values.extend(task_ids.iter().map(|id| id as &dyn ToSql));
+            let mut contexts = HashMap::with_capacity(task_ids.len());
+            let mut statement = connection.prepare(&sql)?;
+            let rows = statement.query_map(params_from_iter(values), |row| {
+                let kind = decode_task_kind(row.get(1)?, 1)?;
+                let provider = row
+                    .get::<_, Option<String>>(4)?
+                    .map(|value| decode_provider(&value, 4))
+                    .transpose()?
+                    .unwrap_or(Provider::Claude);
+                Ok((
+                    row.get::<_, String>(0)?,
+                    PointerTaskContext {
+                        kind,
+                        title: row.get(2)?,
+                        tldr: row.get(3)?,
+                        provider,
+                    },
+                ))
+            })?;
+            for row in rows {
+                let (id, context) = row?;
+                contexts.insert(id, context);
+            }
+            Ok(contexts)
+        })
+        .map_err(HttpError::from)
+}
+
+fn decode_task_kind(row: String, column: usize) -> rusqlite::Result<Option<TaskKind>> {
+    serde_json::from_str(&format!("\"{row}\""))
+        .map(Some)
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                column,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+}
+
+fn decode_provider(row: &str, column: usize) -> rusqlite::Result<Provider> {
+    serde_json::from_str(&format!("\"{row}\"")).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+fn task_clause(task_ids: &[String], column: &str) -> String {
+    if task_ids.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " AND {column} IN ({})",
+            std::iter::repeat_n("?", task_ids.len())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
 }
 
 fn event_from_row(row: &Row<'_>) -> rusqlite::Result<TaskEvent> {
@@ -517,32 +515,4 @@ fn event_from_row(row: &Row<'_>) -> rusqlite::Result<TaskEvent> {
         created_at: row.get(5)?,
         turn_id: row.get(6)?,
     })
-}
-
-fn aggregate_event_id(
-    store: &Store,
-    aggregate: &str,
-    task_ids: &[String],
-) -> Result<i64, StoreError> {
-    store.with_connection(|connection| {
-        let task_filter = task_clause(task_ids, "task_id");
-        let sql =
-            format!("SELECT COALESCE({aggregate}(id), 0) FROM task_events WHERE 1=1{task_filter}");
-        let mut values: Vec<&dyn ToSql> = Vec::with_capacity(task_ids.len());
-        values.extend(task_ids.iter().map(|id| id as &dyn ToSql));
-        Ok(connection.query_row(&sql, params_from_iter(values), |row| row.get(0))?)
-    })
-}
-
-fn task_clause(task_ids: &[String], column: &str) -> String {
-    if task_ids.is_empty() {
-        String::new()
-    } else {
-        format!(
-            " AND {column} IN ({})",
-            std::iter::repeat_n("?", task_ids.len())
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    }
 }

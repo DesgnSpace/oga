@@ -30,6 +30,8 @@ pub struct StateQuery {
     pub archived: Option<ArchivedFilter>,
     pub compact: bool,
     pub limit: Option<u64>,
+    #[serde(rename = "skipSummaryAggregates")]
+    pub skip_summary_aggregates: bool,
 }
 
 impl StateQuery {
@@ -47,6 +49,11 @@ impl StateQuery {
         self.limit = Some(limit);
         self
     }
+
+    pub fn skip_summary_aggregates(mut self, skip: bool) -> Self {
+        self.skip_summary_aggregates = skip;
+        self
+    }
 }
 
 /// Query parameters for a task or agent event read.
@@ -58,6 +65,8 @@ pub struct TaskEventsQuery {
     pub last: Option<u64>,
     pub before: Option<i64>,
     pub limit: Option<u64>,
+    pub include_task: bool,
+    pub task_updated_at: Option<String>,
 }
 
 impl TaskEventsQuery {
@@ -83,6 +92,16 @@ impl TaskEventsQuery {
 
     pub fn limit(mut self, limit: u64) -> Self {
         self.limit = Some(limit);
+        self
+    }
+
+    pub fn include_task(mut self, include: bool) -> Self {
+        self.include_task = include;
+        self
+    }
+
+    pub fn task_updated_at(mut self, updated_at: impl Into<String>) -> Self {
+        self.task_updated_at = Some(updated_at.into());
         self
     }
 }
@@ -216,6 +235,10 @@ pub struct TaskEventPage {
     pub oldest_id: Option<i64>,
     #[serde(default)]
     pub has_earlier: Option<bool>,
+    #[serde(default)]
+    pub task: Option<Task>,
+    #[serde(default)]
+    pub task_updated_at: Option<String>,
 }
 
 /// The small response shared by task mutation routes.
