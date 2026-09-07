@@ -8,6 +8,7 @@
 - Update notes now show headings, lists, code, and links correctly in the desktop app.
 - Docs and changelog sections now have shareable links you can copy directly.
 - Pi runs now include token counts and estimated cost in usage summaries.
+- Models switched off in Settings can no longer receive delegated work.
 
 ## 0.0.8 - 2026-09-07
 
