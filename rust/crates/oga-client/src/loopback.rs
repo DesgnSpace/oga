@@ -1185,7 +1185,7 @@ mod tests {
             ("GET", "/health") => json_response(
                 StatusCode::OK,
                 json!({
-                    "status": "ok", "version": "0.6.0", "mcpContractVersion": 32,
+                    "status": "ok", "version": oga_domain::VERSION, "mcpContractVersion": 32,
                     "build": "dev", "stale": false
                 }),
             ),

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The About panel now reports the installed release version and build type correctly.
+
 ## 0.0.9 - 2026-09-07
 
 - `oga query` now indexes Java, C#, C, C++, and Ruby source alongside its existing language support.

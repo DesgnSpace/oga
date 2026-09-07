@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// The one build identity: `/health` serves it, `oga version` prints it,
 /// the event-socket hello carries it, and install verification compares them.
-pub const VERSION: &str = "0.6.0";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MCP_CONTRACT_VERSION: u32 = 32;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,5 +46,17 @@ impl HealthReport {
             current_sha: staleness.current_sha.clone(),
             hint: staleness.hint.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HealthReport, Staleness};
+
+    #[test]
+    fn reported_version_matches_crate_version() {
+        let report = HealthReport::ok("test", &Staleness::default());
+
+        assert_eq!(report.version, env!("CARGO_PKG_VERSION"));
     }
 }

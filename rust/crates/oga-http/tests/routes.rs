@@ -6,7 +6,7 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use http_body_util::BodyExt;
-use oga_domain::{Profile, Provider, Task, TaskEvent, TaskKind, TaskScope, TaskState};
+use oga_domain::{Profile, Provider, Task, TaskEvent, TaskKind, TaskScope, TaskState, VERSION};
 use oga_http::{HttpState, router};
 use oga_runner::ProviderRunner;
 use oga_service::{DispatchRequest, Dispatcher};
@@ -221,7 +221,7 @@ async fn read_routes() {
         health,
         json!({
             "status": "ok",
-            "version": "0.6.0",
+            "version": VERSION,
             "mcpContractVersion": 32,
             "build": "dev",
             "stale": false
