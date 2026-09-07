@@ -182,6 +182,129 @@ async fn wait_for_settlement(dispatcher: &Dispatcher, id: &str) -> TaskState {
 }
 
 #[tokio::test]
+async fn pi_events_are_persisted_before_the_process_exits() {
+    let (directory, store, dispatcher) = service();
+    let partial = directory.path().join("pi-partial");
+    let complete = directory.path().join("pi-complete");
+    let release = directory.path().join("pi-release");
+    let current = store
+        .repositories()
+        .profiles()
+        .get("one")
+        .expect("profile lookup")
+        .expect("profile one");
+    let mut pi = current.clone();
+    pi.provider = Provider::Pi;
+    pi.env.insert(
+        "PI_TEST_PARTIAL".into(),
+        partial.to_string_lossy().into_owned(),
+    );
+    pi.env.insert(
+        "PI_TEST_COMPLETE".into(),
+        complete.to_string_lossy().into_owned(),
+    );
+    pi.env.insert(
+        "PI_TEST_RELEASE".into(),
+        release.to_string_lossy().into_owned(),
+    );
+    pi.command = Some(vec![
+        "sh".into(),
+        "-c".into(),
+        r##"printf '{"type":"session","id":"pi-live-session'
+: > "$PI_TEST_PARTIAL"
+while [ ! -e "$PI_TEST_COMPLETE" ]; do sleep 0.01; done
+printf '"}
+'
+while [ ! -e "$PI_TEST_RELEASE" ]; do sleep 0.01; done
+printf '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}
+OGA_RESULT: completed
+'
+"##
+            .into(),
+    ]);
+    assert!(
+        store
+            .repositories()
+            .profiles()
+            .update_if_unchanged("one", &current, &pi, "2026-01-01T00:00:01.000Z")
+            .expect("update Pi profile")
+    );
+
+    let task = dispatcher
+        .dispatch(oga_service::DispatchRequest::new(
+            "one",
+            "stream Pi events",
+            directory.path(),
+        ))
+        .await
+        .expect("dispatch")
+        .task;
+
+    let mut partial_seen = false;
+    for _ in 0..200 {
+        if partial.exists() {
+            partial_seen = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(partial_seen, "Pi did not write its partial JSON frame");
+    let events = store
+        .repositories()
+        .events()
+        .list(&task.id)
+        .expect("events before completed frame");
+    assert!(
+        !events.iter().any(|event| event.kind == "agent.session"),
+        "an incomplete Pi frame must not emit an event"
+    );
+
+    fs::write(&complete, []).expect("complete partial frame");
+    let mut observed_live_event = false;
+    for _ in 0..400 {
+        let events = store
+            .repositories()
+            .events()
+            .list(&task.id)
+            .expect("live events");
+        if events.iter().any(|event| event.kind == "agent.session") {
+            assert_eq!(
+                dispatcher.task(&task.id).expect("running task").state,
+                TaskState::Running
+            );
+            observed_live_event = true;
+            break;
+        }
+        assert_eq!(
+            dispatcher.task(&task.id).expect("running task").state,
+            TaskState::Running
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    fs::write(&release, []).expect("release Pi process");
+    assert!(
+        observed_live_event,
+        "Pi events must be persisted before process exit"
+    );
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &task.id).await,
+        TaskState::Completed
+    );
+
+    let events = store
+        .repositories()
+        .events()
+        .list(&task.id)
+        .expect("settled events");
+    let agent_kinds = events
+        .iter()
+        .filter(|event| event.kind.starts_with("agent."))
+        .map(|event| event.kind.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(agent_kinds, ["agent.session", "agent.message_end"]);
+}
+
+#[tokio::test]
 async fn cancel_and_timeout_cover_every_legal_source_state() {
     let (directory, store, dispatcher) = service();
     let states = [
