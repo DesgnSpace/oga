@@ -484,6 +484,146 @@ fn extracts_php_namespaces_types_and_members() {
 }
 
 #[test]
+fn extracts_java_csharp_c_and_cpp_declarations() {
+    let java = [
+        "package app.core;",
+        "public class Route {",
+        "    private int hidden;",
+        "    public static final int MAX = 3;",
+        "    public void heal() {}",
+        "}",
+        "interface Adapter { void adapt(); }",
+        "enum Phase { Idle }",
+    ]
+    .join("\n");
+    let java_symbols = extract_symbols("src/Route.java", &java)
+        .expect("java parses")
+        .symbols;
+    assert!(
+        java_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Module && symbol.qualified == "app.core" })
+    );
+    assert!(
+        java_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Class && symbol.qualified == "Route" })
+    );
+    assert!(
+        java_symbols.iter().any(|symbol| {
+            symbol.kind == SymbolKind::Method && symbol.qualified == "Route.heal"
+        })
+    );
+
+    let csharp = [
+        "namespace App.Core;",
+        "public class Route {",
+        "    private int hidden;",
+        "    public int Hint { get; set; }",
+        "    public void Heal() {}",
+        "}",
+        "enum Phase { Idle }",
+    ]
+    .join("\n");
+    let csharp_symbols = extract_symbols("src/Route.cs", &csharp)
+        .expect("csharp parses")
+        .symbols;
+    assert!(
+        csharp_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Module && symbol.qualified == "App.Core" })
+    );
+    assert!(
+        csharp_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Class && symbol.qualified == "Route" })
+    );
+    assert!(
+        csharp_symbols.iter().any(|symbol| {
+            symbol.kind == SymbolKind::Method && symbol.qualified == "Route.Heal"
+        })
+    );
+
+    let c = [
+        "typedef struct Route {",
+        "    int hint;",
+        "} Route;",
+        "enum Phase { Idle };",
+        "static int hidden(void) { return 0; }",
+        "int extract(void) { return 1; }",
+    ]
+    .join("\n");
+    let c_symbols = extract_symbols("src/route.c", &c)
+        .expect("c parses")
+        .symbols;
+    assert!(
+        c_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Struct && symbol.qualified == "Route" })
+    );
+    assert!(
+        c_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Fn && symbol.qualified == "extract" })
+    );
+    assert!(c_symbols.iter().any(|symbol| {
+        symbol.kind == SymbolKind::Fn && symbol.qualified == "hidden" && !symbol.exported
+    }));
+
+    let cpp = [
+        "namespace app {",
+        "class Route { public: int hint; void heal() {} };",
+        "}",
+        "int extract() { return 1; }",
+    ]
+    .join("\n");
+    let cpp_symbols = extract_symbols("src/route.cpp", &cpp)
+        .expect("cpp parses")
+        .symbols;
+    assert!(
+        cpp_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Module && symbol.qualified == "app" })
+    );
+    assert!(
+        cpp_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Class && symbol.qualified == "app::Route" })
+    );
+    assert!(
+        cpp_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Fn && symbol.qualified == "extract" })
+    );
+
+    let ruby = [
+        "module App",
+        "  class Route",
+        "    MAX_HINTS = 12",
+        "    def heal(source); end",
+        "  end",
+        "end",
+    ]
+    .join("\n");
+    let ruby_symbols = extract_symbols("lib/route.rb", &ruby)
+        .expect("ruby parses")
+        .symbols;
+    assert!(
+        ruby_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Module && symbol.qualified == "App" })
+    );
+    assert!(
+        ruby_symbols
+            .iter()
+            .any(|symbol| { symbol.kind == SymbolKind::Class && symbol.qualified == "App::Route" })
+    );
+    assert!(ruby_symbols.iter().any(|symbol| {
+        symbol.kind == SymbolKind::Method && symbol.qualified == "App::Route::heal"
+    }));
+}
+
+#[test]
 fn extracts_json_keys_with_their_dotted_path_and_short_values() {
     let source = [
         "{",

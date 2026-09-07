@@ -3,12 +3,17 @@
 //! engine cannot answer for itself: what counts as public, what a doc comment
 //! looks like, and which files are not worth indexing.
 
+mod c;
+mod c_sharp;
 mod config;
+mod cpp;
 mod go;
+mod java;
 mod json;
 mod markdown;
 mod php;
 mod python;
+mod ruby;
 mod rust;
 mod swift;
 mod toml;
@@ -102,11 +107,16 @@ pub fn adapters() -> &'static [&'static dyn LanguageAdapter] {
         .get_or_init(|| {
             vec![
                 &rust::Rust as &'static dyn LanguageAdapter,
+                &java::Java,
+                &c_sharp::CSharp,
+                &c::C,
+                &cpp::Cpp,
                 &typescript::TypeScript,
                 &swift::Swift,
                 &python::Python,
                 &go::Go,
                 &php::Php,
+                &ruby::Ruby,
                 &markdown::Markdown,
                 &json::Json,
                 &toml::Toml,

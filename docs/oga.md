@@ -37,8 +37,9 @@ oga query --code --limit 1 "how a saved route survives a rename"
 ```
 
 It knows functions, methods, types, classes, protocols, enum cases, constants,
-fields, modules, macros, and documentation headings, across Rust, TypeScript,
-TSX, JavaScript, Swift, and Markdown.
+fields, modules, macros, and documentation headings across Rust, TypeScript,
+TSX, JavaScript, Swift, Python, Go, PHP, Ruby, Java, C#, C, C++, Markdown,
+JSON, TOML, and YAML.
 
 When one place is clearly the answer, you get one line. When several could be,
 you get up to `--limit` of them, each with the words it matched. When nothing

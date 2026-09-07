@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `oga query` now indexes Java, C#, C, C++, and Ruby source alongside its existing language support.
+
 ## 0.0.8 - 2026-09-07
 
 ### Removed
