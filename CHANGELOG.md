@@ -7,6 +7,7 @@
 - Pi runs now show thinking, replies, tool calls, and their results in the activity view.
 - Update notes now show headings, lists, code, and links correctly in the desktop app.
 - Docs and changelog sections now have shareable links you can copy directly.
+- Pi runs now include token counts and estimated cost in usage summaries.
 
 ## 0.0.8 - 2026-09-07
 
