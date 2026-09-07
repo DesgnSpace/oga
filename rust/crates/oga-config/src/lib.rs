@@ -54,7 +54,7 @@ pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks.\n",
     "9. Clear local, reversible obstacles yourself — a stray generated file blocking a checkout, a stale lockfile, a missing directory, a tool needing a flag — decide, apply the fix, retry, and note it in the report. Stop only when the obstacle needs the caller: a credential, a scope or product decision, or an action that is irreversible or outside scope. A blocker is a decision you cannot make, not a step that failed once.\n",
     "10. If a clearly separate continuation is needed, state why it is separate and emit a compact caller-facing pointer with the child task ID and title, so the caller can start `oga watch <childTaskId>` and inspect after settlement. Do not include prompt or output in the pointer.\n",
-    "11. Finding code starts with `oga query \"<what you are looking for>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Read the source it names before acting.\n",
+    "11. Finding code starts with `oga query \"<what you need>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Add `--code` when you want the code back instead of just the location, so you do not have to open the file. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place. Use the returned code before acting.\n",
     "12. Run the relevant checks before reporting completion, and say what you ran. Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.\n",
     "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`. After the pull request, run `oga relearn` once with symbols that exist in the diff; rejected route hints are a warning when the deliverable already exists.\n",
     "\n",
@@ -2452,6 +2452,10 @@ mod tests {
         assert!(DEFAULT_WORKER_PROMPT.contains("{{reporting}}"));
         assert!(DEFAULT_WORKER_PROMPT.contains("Clear local, reversible obstacles yourself"));
         assert!(DEFAULT_WORKER_PROMPT.contains("oga query"));
+        assert!(
+            DEFAULT_WORKER_PROMPT
+                .contains("Add `--code` when you want the code back instead of just the location")
+        );
         assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
         assert!(DEFAULT_WORKER_PROMPT.contains("oga relearn"));
         assert!(DEFAULT_WORKER_PROMPT.contains("Do not use Oga to delegate")); // default text, deletable

@@ -8,9 +8,9 @@ pub const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";
 pub const EARLIEST_PROTOCOL_VERSION: &str = "2025-06-18";
 
 pub const MCP_INSTRUCTIONS: &str = concat!(
-    "The loop: read the cwd's memories, list tasks, query for the code, delegate the work, watch, inspect. ",
+    "The loop: read the cwd's memories, list tasks, and locate code with `oga query \"<what you need>\"`; add `--code` when you want the code back instead of just the location; then delegate the work, watch, inspect. ",
     "Before delegating, search `tasks` with `query` for the same feature, file, or command; resume a match. ",
-    "Before any call — locate code with query rather than glob or grep, and read what it names; resume the task that already owns the same work instead of dispatching a duplicate; keep decisions and conventions in memory, never secrets or task status. ",
+    "Before any call — locate code with `oga query \"<what you need>\"` rather than glob or grep; add `--code` when you want the code back instead of just the location; resume the task that already owns the same work instead of dispatching a duplicate; keep decisions and conventions in memory, never secrets or task status. ",
     "Use delegate for bounded implementation, research, review, writing, and analysis, and keep goal-setting, architecture, integration, and final review here. ",
     "Delegation sends the prompt, the cwd's memories, and whatever the worker reads to an external account: approve the destination and data scope once per cwd and profile, and ask again only when a task would widen it. ",
     "After delegate, resume, or reply returns a task id, background `oga watch <taskId>` in the caller's terminal; it holds no chat turn, so several tasks run at once. ",
