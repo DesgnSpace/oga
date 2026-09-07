@@ -95,7 +95,7 @@ its own runtime, so every command below works with no Bun and no checkout.
 | --- | --- |
 | `oga` | Print help — what Oga is, the commands, and a first run. |
 | `oga serve` | Run the broker. The menu-bar app starts it for you. |
-| `oga delegate "<task>"` | Hand a task to a worker and print its id. Pass `-` to read the task from standard input. `--worker`, `--model`, and `--difficulty` choose who runs it; `--worktree` runs it in its own checkout; `--cwd` runs it elsewhere. |
+| `oga delegate "<task>"` | Hand a task to a worker and print its id. Pass `-` to read the task from standard input. `--worker`, `--model`, and `--kind` choose who runs it; `--effort` sets how hard it thinks; `--worktree` runs it in its own checkout; `--cwd` runs it elsewhere. |
 | `oga watch <task-id>...` | Wait for a task; prints one line when it settles. |
 | `oga inflight` | List the tasks still running, so you know what a restart interrupts. |
 | `oga tasks --query <text>` | Search active task history by title, summary, or prompt. |

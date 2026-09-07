@@ -509,6 +509,7 @@ export type WorkKind =
   | "reasoning"
   | "general"
   | "ui"
+  | "ux"
   | "backend"
   | "database"
   | "docs"

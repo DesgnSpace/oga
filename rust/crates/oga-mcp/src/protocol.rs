@@ -24,7 +24,7 @@ const DELEGATE_DESCRIPTION: &str = concat!(
     "Hand new bounded work — implementation, research, review, writing, analysis — to an external provider, including a second opinion or work past this provider's usage limit. ",
     "Returns an Oga task id, the only handle you get, and the run carries on after the call returns. ",
     "Before delegating, search `tasks` with `query` for the same feature, file, or command; resume a match. ",
-    "Give difficulty, and kind whenever you already know it better than the prompt shows; omit profile and model unless this task needs a particular account. Routing otherwise reads the kind of work from the prompt, and a stated kind is what a loved model per kind of work (see models) actually matches against."
+    "Give kind whenever you already know it better than the prompt shows; omit profile and model unless this task needs a particular account. Routing otherwise reads the kind of work from the prompt, and a stated kind is what a loved model per kind of work (see models) actually matches against. Give effort when you want to set how hard the model thinks yourself, separately from kind."
 );
 
 const MODELS_DESCRIPTION: &str = concat!(
@@ -95,9 +95,8 @@ const DELETE_WORKTREE_DESCRIPTION: &str = concat!(
 
 const SCOPE_DESCRIPTION: &str = "Paths the worker may touch, relative to cwd: literal file paths, dir/** for a subtree, ** for the whole tree. `**` is the recommended read default. Write access takes the directory, not the file, and a path that does not exist yet needs a `/**` suffix; read paths never permit writes, so generated build paths belong in write when checks need them. Stating scope records it as this cwd's grant; omitting it reuses the newest grant for the cwd. The only place permissions belong — never restate them in the prompt, and never treat a grant as a reading plan.";
 const WORKTREE_DESCRIPTION: &str = "Give the task its own checkout of the repository at cwd, on a branch of its own, so the worker commits there instead of in the user's working tree — or `join` a checkout another task already has. cwd must be inside a git repository with at least one commit. `true` takes every default: ignored directories and .env* files are seeded from the original at any depth, editor and agent state is not, and the branch is oga/<slug-of-title>, falling back to oga/<taskId>. It also widens the task's read to the whole repository history, so get approval where that history holds anything private.";
-const DIFFICULTY_DESCRIPTION: &str = "How hard this work is, which decides the model and how much it thinks. mechanical: fully specified, just apply it. standard: a named target and a clear endpoint, the worker decides how. hard: the answer's shape is part of the work — design, root-cause, a cross-cutting refactor. critical: being wrong is expensive and hard to spot — security, concurrency, migrations, data loss. Omit it and the prompt decides.";
-const KIND_DESCRIPTION: &str = "What this work is, in the caller's own words, when you already know it better than the prompt shows: a class — mechanical, general, build, context, reasoning — or a subject — ui, backend, database, docs, tests, review, research, refactor. This is what decides which loved model (see models) takes the task when profile and model are left out, so name it whenever the prompt's own wording would not tip off a regex — a one-line brief, or words that read as one kind while the work is really another. Omit it and the prompt decides.";
-const EFFORT_DESCRIPTION: &str = "Reasoning effort for this run, when you want to set it yourself; left out, Oga reads it off difficulty and the model's own levels. Honoured by claude, codex, opencode, opencode-2 and pi; antigravity bakes its level into the model id.";
+const KIND_DESCRIPTION: &str = "What this work is, in the caller's own words, when you already know it better than the prompt shows: a class — mechanical, general, build, context, reasoning — or a subject — ui, ux, backend, database, docs, tests, review, research, refactor. This is what a loved model (see models) is matched against, so name it whenever the prompt's own wording would not tip off a regex — a one-line brief, or words that read as one kind while the work is really another. Some models are simply better at a given kind of work than others; that is what this decides, not how hard the work is. Omit it and the prompt decides.";
+const EFFORT_DESCRIPTION: &str = "How hard the model thinks, when you want to set it yourself — the lever for that, separate from kind. Left out, a loved model's own configured effort applies if it has one, else the model's own default. Honoured by claude, codex, opencode, opencode-2 and pi; antigravity bakes its level into the model id.";
 const ALLOW_QUESTIONS_DESCRIPTION: &str =
     "Whether the worker may pause in needs_input to ask. False makes it guess or stop.";
 const TIMEOUT_DESCRIPTION: &str = "Hard runtime limit. The task lands in failed with code timeout.";
@@ -333,18 +332,11 @@ pub fn tool_list() -> Value {
             ),
         ),
         (
-            "difficulty".into(),
-            described(
-                json!({ "type": "string", "enum": ["mechanical", "standard", "hard", "critical"] }),
-                DIFFICULTY_DESCRIPTION,
-            ),
-        ),
-        (
             "kind".into(),
             described(
                 json!({ "type": "string", "enum": [
                     "mechanical", "general", "build", "context", "reasoning",
-                    "ui", "backend", "database", "docs", "tests", "review", "research", "refactor"
+                    "ui", "ux", "backend", "database", "docs", "tests", "review", "research", "refactor"
                 ] }),
                 KIND_DESCRIPTION,
             ),

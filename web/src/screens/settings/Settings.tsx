@@ -505,6 +505,7 @@ const WORK_LABELS = {
   reasoning: "Hard thinking",
   general: "Open-ended work",
   ui: "UI work",
+  ux: "UX work",
   backend: "Backend work",
   database: "Database work",
   docs: "Docs and writing",
@@ -536,7 +537,7 @@ function effortLabel(rule: LoveRule): string {
   return `${chain.map((destination) => destination.effort ?? "as needed").join(" → ")} effort`;
 }
 
-const SUBJECT_KINDS = new Set<WorkKind>(["ui", "backend", "database", "docs", "tests", "review", "research", "refactor"]);
+const SUBJECT_KINDS = new Set<WorkKind>(["ui", "ux", "backend", "database", "docs", "tests", "review", "research", "refactor"]);
 
 /** Rules in the order they win a task: subjects, then classes, then the rest. */
 function byPrecedence(rules: LoveRule[]): LoveRule[] {

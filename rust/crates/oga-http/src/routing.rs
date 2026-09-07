@@ -3,25 +3,36 @@
 use std::path::Path;
 
 use axum::{Json, body::Bytes, extract::State, response::IntoResponse};
-use oga_domain::{DecidedBy, Difficulty, DifficultySource, EffortSource, SelectionDecision};
+use oga_domain::{DecidedBy, EffortSource, SelectionDecision};
 use oga_routing::{
     NamedPair, ROUTER_VERSION, RoutePreferences, SelectionInputs, check_named_route, choose_model,
     load_routing_policy,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::{
     router::{HttpError, HttpState, parse_json},
     settings, state,
 };
 
+/// The message a caller sending `difficulty` gets on every route-starting
+/// surface: it names what replaced the option instead of dropping it silently.
+const DIFFICULTY_REMOVED_MESSAGE: &str = "difficulty is no longer an option; name the kind of \
+     work with kind, and set how hard the model thinks with effort";
+
+pub(crate) fn reject_difficulty(value: &Value) -> Result<(), HttpError> {
+    if value.get("difficulty").is_some() {
+        return Err(HttpError::bad_request(DIFFICULTY_REMOVED_MESSAGE));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PreviewBody {
     pub cwd: String,
     pub prompt: String,
-    pub difficulty: Option<Difficulty>,
     pub kind: Option<oga_domain::WorkKind>,
 }
 
@@ -35,7 +46,6 @@ pub struct RouteInput {
     pub cwd: String,
     pub profile: Option<String>,
     pub model: Option<String>,
-    pub difficulty: Option<Difficulty>,
     pub kind: Option<oga_domain::WorkKind>,
     pub effort: Option<String>,
     pub default_profile_shortcut: bool,
@@ -55,6 +65,9 @@ pub async fn preview(
     State(state): State<HttpState>,
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
+    let raw: Value =
+        serde_json::from_slice(&body).map_err(|_| HttpError::bad_request("invalid JSON body"))?;
+    reject_difficulty(&raw)?;
     let body: PreviewBody = parse_json(&body)?;
     validate_preview(&body)?;
     let route = plan(
@@ -64,7 +77,6 @@ pub async fn preview(
             cwd: body.cwd,
             profile: None,
             model: None,
-            difficulty: body.difficulty,
             kind: body.kind,
             effort: None,
             default_profile_shortcut: false,
@@ -142,7 +154,6 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
                 NamedPair {
                     profile_id,
                     model,
-                    difficulty: input.difficulty,
                     effort: input.effort.as_deref(),
                     preference: None,
                 },
@@ -155,15 +166,7 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
                 profile_id: profile_id.clone(),
                 model: audit.resolved_model.clone(),
                 effort: input.effort.clone().or(audit.effort.clone()),
-                decision: decision_from_audit(
-                    &audit,
-                    if input.difficulty.is_some() {
-                        DifficultySource::Caller
-                    } else {
-                        DifficultySource::Default
-                    },
-                    input.effort.is_some(),
-                ),
+                decision: decision_from_audit(&audit, input.effort.is_some()),
                 warnings: audit.warnings,
                 reason: format!("caller chose {profile_id}/{}", audit.resolved_model),
             })
@@ -172,7 +175,6 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
             let default_route = input.default_profile_shortcut
                 && input.profile.is_none()
                 && input.model.is_none()
-                && input.difficulty.is_none()
                 && input.kind.is_none()
                 && default_profile(&profiles).is_some();
             let profile_id = if default_route {
@@ -180,14 +182,12 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
             } else {
                 input.profile.clone()
             };
-            let difficulty = input.difficulty;
             let route = choose_model(
                 &input.prompt,
                 &models,
                 &profiles,
                 &RoutePreferences {
                     model_hint: input.model.clone(),
-                    difficulty,
                     kind: input.kind,
                     profile_id,
                     ..RoutePreferences::default()
@@ -210,11 +210,6 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
                         DecidedBy::CallerProfile
                     } else {
                         DecidedBy::Router
-                    },
-                    if input.difficulty.is_some() {
-                        DifficultySource::Caller
-                    } else {
-                        DifficultySource::Default
                     },
                     input.effort.is_some(),
                 ),
@@ -242,7 +237,6 @@ fn validate_preview(body: &PreviewBody) -> Result<(), HttpError> {
 fn decision_from_route(
     route: &oga_routing::ModelRoute,
     decided_by: DecidedBy,
-    difficulty_source: DifficultySource,
     caller_effort: bool,
 ) -> SelectionDecision {
     SelectionDecision {
@@ -250,9 +244,7 @@ fn decision_from_route(
             decided_by,
             router_version: ROUTER_VERSION,
             difficulty: route.difficulty,
-            difficulty_source,
             heuristic_class: route.task_class,
-            heuristic_agreed: route.heuristic_agreed,
             floor: route.floor,
             relaxed: route.relaxed.clone(),
             preference: route.preference,
@@ -261,7 +253,7 @@ fn decision_from_route(
             } else if route.effort_reason == "the loved model's configured reasoning effort" {
                 EffortSource::Loved
             } else if route.effort.is_some() {
-                EffortSource::Projected
+                EffortSource::Default
             } else {
                 EffortSource::None
             },
@@ -290,7 +282,6 @@ fn decision_from_route(
 
 fn decision_from_audit(
     audit: &oga_routing::NamedRouteAudit,
-    difficulty_source: DifficultySource,
     caller_effort: bool,
 ) -> SelectionDecision {
     SelectionDecision {
@@ -298,16 +289,14 @@ fn decision_from_audit(
             decided_by: DecidedBy::CallerExplicit,
             router_version: ROUTER_VERSION,
             difficulty: audit.difficulty,
-            difficulty_source,
             heuristic_class: audit.task_class,
-            heuristic_agreed: audit.heuristic_agreed,
             floor: audit.floor,
             relaxed: Vec::new(),
             preference: audit.preference,
             effort_source: if caller_effort {
                 EffortSource::Caller
             } else if audit.effort.is_some() {
-                EffortSource::Projected
+                EffortSource::Default
             } else {
                 EffortSource::None
             },
@@ -382,7 +371,6 @@ mod tests {
                 cwd: cwd.display().to_string(),
                 profile: None,
                 model: Some(MODEL.into()),
-                difficulty: None,
                 kind: None,
                 effort: None,
                 default_profile_shortcut: false,
@@ -418,7 +406,6 @@ mod tests {
                 cwd: directory.path().display().to_string(),
                 profile: None,
                 model: None,
-                difficulty: None,
                 kind: None,
                 effort: None,
                 default_profile_shortcut: false,
@@ -447,7 +434,6 @@ mod tests {
                 cwd: directory.path().display().to_string(),
                 profile: None,
                 model: None,
-                difficulty: None,
                 kind: None,
                 effort: None,
                 default_profile_shortcut: false,
@@ -479,7 +465,6 @@ mod tests {
                 cwd: directory.path().display().to_string(),
                 profile: None,
                 model: None,
-                difficulty: None,
                 kind: None,
                 effort: None,
                 default_profile_shortcut: false,
@@ -502,7 +487,6 @@ mod tests {
                 cwd: directory.path().display().to_string(),
                 profile: None,
                 model: None,
-                difficulty: None,
                 kind: Some(WorkKind::Ui),
                 effort: None,
                 default_profile_shortcut: false,
@@ -534,7 +518,6 @@ mod tests {
                 cwd: directory.path().display().to_string(),
                 profile: None,
                 model: None,
-                difficulty: None,
                 kind: None,
                 effort: None,
                 default_profile_shortcut: false,
@@ -552,7 +535,6 @@ mod tests {
                 cwd: directory.path().display().to_string(),
                 profile: None,
                 model: None,
-                difficulty: None,
                 kind: Some(WorkKind::Mechanical),
                 effort: None,
                 default_profile_shortcut: false,
@@ -593,5 +575,13 @@ mod tests {
         assert!(route_to_model(store.clone(), directory.path()).is_ok());
         switch(&store, directory.path(), false);
         assert!(route_to_model(store, directory.path()).is_err());
+    }
+
+    #[test]
+    fn a_caller_still_sending_difficulty_gets_a_clear_message() {
+        let refusal = reject_difficulty(&json!({ "difficulty": "hard" })).unwrap_err();
+        assert!(refusal.message.contains("kind"), "{}", refusal.message);
+        assert!(refusal.message.contains("effort"), "{}", refusal.message);
+        assert!(reject_difficulty(&json!({ "kind": "ui" })).is_ok());
     }
 }

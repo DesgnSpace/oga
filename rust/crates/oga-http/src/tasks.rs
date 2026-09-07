@@ -33,7 +33,6 @@ pub(crate) struct DispatchBody {
     pub parent: Option<String>,
     pub scope: Option<TaskScope>,
     pub allow_questions: Option<bool>,
-    pub difficulty: Option<oga_domain::Difficulty>,
     pub effort: Option<String>,
     /// The kind of work, when the caller names it, in the same vocabulary
     /// `oga love --when` accepts. Wins over whatever the prompt reads like
@@ -190,7 +189,6 @@ pub(crate) async fn dispatch_body(
             cwd: cwd.display().to_string(),
             profile,
             model: body.model,
-            difficulty: body.difficulty,
             kind: body.kind,
             effort: body.effort,
             default_profile_shortcut: true,
@@ -245,6 +243,7 @@ pub(crate) async fn dispatch_body(
 pub(crate) fn parse_dispatch_body(body: &[u8]) -> Result<DispatchBody, HttpError> {
     let value: Value =
         serde_json::from_slice(body).map_err(|_| HttpError::bad_request("invalid JSON body"))?;
+    routing::reject_difficulty(&value)?;
     if let Some(prompt) = value.get("prompt")
         && !prompt.is_string()
     {

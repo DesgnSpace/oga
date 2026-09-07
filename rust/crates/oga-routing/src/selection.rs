@@ -13,9 +13,7 @@ use oga_domain::{
 };
 
 use crate::classify::{TaskDemand, classify_task};
-use crate::effort::{
-    EFFORT_ORDER, difficulty_floor, difficulty_preference, heuristic_note, project_effort,
-};
+use crate::effort::{EFFORT_ORDER, default_effort, difficulty_floor, difficulty_preference};
 use crate::policy::{RoutingPolicy, unoffered_rule_message};
 use crate::status::{AvailabilityState, ProfileStatus};
 use crate::traits::{CostSource, ModelTraits, model_traits};
@@ -61,13 +59,12 @@ struct Attempt {
 pub struct RoutePreferences {
     pub preference: Option<RoutePreference>,
     pub model_hint: Option<String>,
-    pub difficulty: Option<Difficulty>,
     /// The kind of work, named by the caller in the same vocabulary `oga
     /// love --when` accepts: a class of work or a subject. Wins over
     /// whichever half of it the prompt reads like for love-rule and
     /// warning-text purposes; absent means the prompt's own signals decide.
-    /// Never overrides the difficulty floor or [routes] policy, which stay
-    /// keyed to the prompt's own read.
+    /// Never overrides the internal difficulty floor or [routes] policy,
+    /// which stay keyed to the prompt's own read.
     pub kind: Option<WorkKind>,
     /// Restrict routing to one profile the caller already named, leaving only
     /// the model to choose. Within a named profile the policy allow order
@@ -98,9 +95,6 @@ pub struct ModelRoute {
     /// Constraints dropped, in the order they may be dropped, to reach any
     /// destination at all. Empty on the ordinary path.
     pub relaxed: Vec<SelectionRelaxation>,
-    /// False when the prompt read wanted a stronger tier than the declared
-    /// difficulty allows. Never overrides the declaration; it only records it.
-    pub heuristic_agreed: bool,
     pub effort: Option<String>,
     pub effort_reason: String,
     pub reason: String,
@@ -276,7 +270,7 @@ pub fn choose_model(
     extra: &SelectionInputs,
 ) -> Result<ModelRoute, RouteError> {
     let demand = classify_task(prompt);
-    let difficulty = options.difficulty.unwrap_or(demand.difficulty);
+    let difficulty = demand.difficulty;
     // A stated kind is the caller's own answer to "what is this", so it wins
     // over the prompt's guess for whichever half of the pair it names — a
     // class replaces the guessed class, a subject replaces the guessed
@@ -306,13 +300,11 @@ pub fn choose_model(
         .preference
         .or(policy_route.and_then(|route| route.preference))
         .unwrap_or_else(|| difficulty_preference(difficulty));
-    let declared_floor = difficulty_floor(difficulty);
-    let floor = declared_floor.max(
+    let floor = difficulty_floor(difficulty).max(
         policy_route
             .and_then(|route| route.min_quality)
             .unwrap_or(0),
     );
-    let heuristic_agreed = difficulty_floor(demand.difficulty) <= declared_floor;
     let mut warnings: Vec<String> = Vec::new();
     let mut rejected: Vec<SelectionRejection> = Vec::new();
 
@@ -575,8 +567,6 @@ pub fn choose_model(
                 difficulty,
                 preference,
                 floor,
-                heuristic_agreed,
-                options,
                 love_class,
                 topic,
                 kind_from_caller,
@@ -910,7 +900,7 @@ pub fn choose_model(
         .map(|index| usable[*index])
         .find(|model| model.profile_id == selected_profile_id && model.id == selected_model_id)
         .expect("selected came from the clearing models");
-    let projected = project_effort(chosen, difficulty);
+    let projected = default_effort(chosen);
     let used = used_by(chosen);
     let mut reason = demand.reason.clone();
     if policy_route.is_some() && applied.policy {
@@ -924,9 +914,6 @@ pub fn choose_model(
         selected_traits.quality, selected_traits.cost, selected_traits.speed
     ));
 
-    if options.difficulty.is_some() && !heuristic_agreed {
-        warnings.push(heuristic_note(&demand.reason, difficulty));
-    }
     warnings.extend(config_warnings);
     if candidates
         .iter()
@@ -944,7 +931,6 @@ pub fn choose_model(
         difficulty,
         floor: effective_floor,
         relaxed,
-        heuristic_agreed,
         effort: projected.effort,
         effort_reason: projected.reason,
         reason,
@@ -962,8 +948,6 @@ struct LovedContext<'a> {
     difficulty: Difficulty,
     preference: RoutePreference,
     floor: u8,
-    heuristic_agreed: bool,
-    options: &'a RoutePreferences,
     /// The class fed to love matching: the caller's stated kind when it names
     /// one, else the prompt's own guess.
     love_class: TaskClass,
@@ -992,8 +976,6 @@ fn finish_loved_route<'a>(
         difficulty,
         preference,
         floor,
-        heuristic_agreed,
-        options,
         love_class,
         topic,
         kind_from_caller,
@@ -1009,7 +991,7 @@ fn finish_loved_route<'a>(
             effort: Some(effort),
             reason: "the loved model's configured reasoning effort".into(),
         })
-        .unwrap_or_else(|| project_effort(pick.model, difficulty));
+        .unwrap_or_else(|| default_effort(pick.model));
     if traits.quality < floor {
         warnings.push(format!(
             "the loved model is tier {} of 5, under what {} work usually asks for; it ran \
@@ -1042,9 +1024,6 @@ fn finish_loved_route<'a>(
             loved.destinations[index].label(),
         ));
     }
-    if options.difficulty.is_some() && !heuristic_agreed {
-        route_warnings.push(heuristic_note(&demand.reason, difficulty));
-    }
     ModelRoute {
         profile_id: pick.model.profile_id.clone(),
         model: pick.model.id.clone(),
@@ -1053,7 +1032,6 @@ fn finish_loved_route<'a>(
         difficulty,
         floor,
         relaxed: Vec::new(),
-        heuristic_agreed,
         effort: projected.effort,
         effort_reason: projected.reason,
         reason: format!(
@@ -1222,7 +1200,6 @@ fn loved_effort(model: &ModelInfo, requested: Option<&str>) -> Option<String> {
 pub struct NamedPair<'a> {
     pub profile_id: &'a str,
     pub model: &'a str,
-    pub difficulty: Option<Difficulty>,
     pub effort: Option<&'a str>,
     pub preference: Option<RoutePreference>,
 }
@@ -1237,7 +1214,6 @@ pub struct NamedRouteAudit {
     pub preference: RoutePreference,
     pub difficulty: Difficulty,
     pub floor: u8,
-    pub heuristic_agreed: bool,
     pub effort: Option<String>,
     pub effort_reason: String,
     pub quota_used_percent: Option<f64>,
@@ -1269,15 +1245,12 @@ pub fn check_named_route(
     let NamedPair {
         profile_id,
         model: model_id,
-        difficulty: declared,
         effort: wanted_effort,
         preference: named_preference,
     } = pair;
     let demand = classify_task(prompt);
-    let difficulty = declared.unwrap_or(demand.difficulty);
+    let difficulty = demand.difficulty;
     let policy_route = policy.and_then(|policy| policy.route_for_task(demand.task_class));
-    let declared_floor = difficulty_floor(difficulty);
-    let heuristic_agreed = difficulty_floor(demand.difficulty) <= declared_floor;
     let mut warnings: Vec<String> = Vec::new();
     let mut rejected: Vec<SelectionRejection> = Vec::new();
     let mut add = |stage: SelectionStage, reason: String, retry_at: Option<String>| {
@@ -1412,7 +1385,7 @@ pub fn check_named_route(
         ));
     }
 
-    let projected = chosen.map(|chosen| project_effort(chosen, difficulty));
+    let projected = chosen.map(default_effort);
     let (projected_effort, effort_reason) =
         projected.map(|p| (p.effort, p.reason)).unwrap_or_else(|| {
             (
@@ -1433,9 +1406,6 @@ pub fn check_named_route(
             levels.join(", ")
         ));
     }
-    if declared.is_some() && !heuristic_agreed {
-        warnings.push(heuristic_note(&demand.reason, difficulty));
-    }
 
     Ok(NamedRouteAudit {
         task_class: demand.task_class,
@@ -1443,12 +1413,11 @@ pub fn check_named_route(
             .or(policy_route.and_then(|route| route.preference))
             .unwrap_or_else(|| difficulty_preference(difficulty)),
         difficulty,
-        floor: declared_floor.max(
+        floor: difficulty_floor(difficulty).max(
             policy_route
                 .and_then(|route| route.min_quality)
                 .unwrap_or(0),
         ),
-        heuristic_agreed,
         effort: projected_effort,
         effort_reason,
         quota_used_percent: used,
