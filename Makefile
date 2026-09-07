@@ -40,7 +40,7 @@ endif
 BROKER_BUILD := server
 BROKER_BINARY := $(RUST_BROKER)
 
-.PHONY: dev dev-broker dev-desktop server rust-fmt rust-lint rust-test smoke desktop desktop-app bundle app-bundle install changelog deploy-landing clean sync-version publish release _publish major minor fix check-publish-tools
+.PHONY: dev dev-broker dev-desktop server rust-fmt rust-lint rust-test smoke desktop desktop-app bundle app-bundle install changelog build-landing deploy-landing clean sync-version publish release _publish major minor fix check-publish-tools
 
 dev: dev-desktop
 
@@ -184,12 +184,12 @@ install: app-bundle
 		fi; \
 	fi
 
-# Local preview only, written under dist/ next to deploy output.
+# Local preview only, written under dist/.
 changelog:
 	mkdir -p $(DIST)
 	bun scripts/changelog-to-html.mjs $(DIST)/changelog.html
 
-deploy-landing:
+build-landing:
 	rm -rf $(DIST)/landing
 	mkdir -p $(DIST)
 	cp -R landing $(DIST)/landing
@@ -197,7 +197,10 @@ deploy-landing:
 	rm $(DIST)/landing/docs/changelog.template.html
 	# Local asset links get a version query so the edge cache cannot serve an
 	# older stylesheet or image next to new HTML.
-	sed -i '' -E 's/(src|srcset|href)="([A-Za-z0-9_./-]+\.(css|png|svg))"/\1="\2?v=$(BUILD_STAMP)"/g' $(DIST)/landing/index.html
+	sed -i.bak -E 's/(src|srcset|href)="([A-Za-z0-9_./-]+\.(css|png|svg))"/\1="\2?v=$(BUILD_STAMP)"/g' $(DIST)/landing/index.html
+	rm -f $(DIST)/landing/index.html.bak
+
+deploy-landing: build-landing
 	bunx wrangler pages deploy $(DIST)/landing --project-name oga --env-file /dev/null
 
 sync-version:
