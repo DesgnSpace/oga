@@ -465,7 +465,11 @@ pub(crate) async fn run_task_with_session_and_active(
         let process = Arc::new(process);
         let process_events = matches!(
             profile.provider,
-            Provider::Codex | Provider::OpenCode | Provider::OpenCode2 | Provider::Antigravity
+            Provider::Codex
+                | Provider::OpenCode
+                | Provider::OpenCode2
+                | Provider::Antigravity
+                | Provider::Pi
         )
         .then(|| {
             process

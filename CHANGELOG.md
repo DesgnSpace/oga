@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pi activity events now appear while a run is still in progress.
+
 ## 0.0.9 - 2026-09-07
 
 - `oga query` now indexes Java, C#, C, C++, and Ruby source alongside its existing language support.
