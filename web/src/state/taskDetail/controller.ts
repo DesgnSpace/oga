@@ -65,11 +65,13 @@ export class TaskDetailController {
   }
 
   private async loadFromBroker(): Promise<void> {
-    const task = await broker.task(this.taskId);
-    const page = await broker.taskEvents(this.taskId, {
-      last: INITIAL_EVENT_LIMIT,
-      limit: INITIAL_EVENT_LIMIT,
-    });
+    const [task, page] = await Promise.all([
+      broker.task(this.taskId),
+      broker.taskEvents(this.taskId, {
+        last: INITIAL_EVENT_LIMIT,
+        limit: INITIAL_EVENT_LIMIT,
+      }),
+    ]);
     const pageError = page.ok ? undefined : page.error.message;
     if (page.ok) {
       this.absorbPage(page.value);

@@ -4,8 +4,8 @@
 import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { TaskDiff, TaskEventView } from "@/bridge/types";
-import { collectRunChanges, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
-import { collectRunChangesByTurn, gitChangeSet } from "@/domain/changes/grouped";
+import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
+import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskWallTime } from "@/lib/format";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
 import type { TaskTitleBarInfo } from "@/shell/TitleBar";
@@ -198,6 +198,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
 
   const state = watched.controller.snapshot;
   const task = state.task;
+  const eventRevision = state.revision;
 
   // The newest activity is what a reader opens the task for, so the view sits
   // at the end and stays there as activity arrives — until they scroll away,
@@ -246,9 +247,11 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
 
   const events = watched.controller.withEvents((all) => all);
   const segmentCache = React.useMemo(() => new WorkSegmentCache(), [taskId]);
+  const changeProjection = React.useMemo(() => new RunChangeProjection(), [taskId]);
+  const changeTurnsProjection = React.useMemo(() => new RunChangeByTurnProjection(), [taskId]);
   const transcriptItems = React.useMemo(
     () => (task ? buildTranscript(task, events, segmentCache) : []),
-    [task, events, segmentCache],
+    [task, eventRevision, events, segmentCache],
   );
   const [showThinking, toggleThinking] = useShowThinking();
   const hasThinking = React.useMemo(() => transcriptHasThinking(transcriptItems), [transcriptItems]);
@@ -273,13 +276,17 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
     setGroupByTurn(grouped);
     storeChangesGrouped(grouped);
   };
+  const cwd = task?.cwd;
   const reportedChanges = React.useMemo(
-    () => (task ? collectRunChanges(events, task.cwd) : RUN_CHANGES_EMPTY),
-    [task, events],
+    () => (cwd !== undefined ? changeProjection.update(events, cwd) : RUN_CHANGES_EMPTY),
+    [cwd, eventRevision, events, changeProjection],
   );
   const reportedTurns = React.useMemo(
-    () => (task && groupByTurn ? collectRunChangesByTurn(events, task.cwd) : undefined),
-    [task, events, groupByTurn],
+    () =>
+      cwd !== undefined && showingChanges && changesSource === "reported" && groupByTurn
+        ? changeTurnsProjection.update(events, cwd)
+        : undefined,
+    [cwd, eventRevision, events, showingChanges, changesSource, groupByTurn, changeTurnsProjection],
   );
   const gitChanges = React.useMemo(
     () => (git.diff ? gitChangeSet(git.diff) : RUN_CHANGES_EMPTY),
@@ -309,7 +316,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
       secondary: <TaskDetailSecondary task={task} events={events} onChanged={refreshDetail} />,
     });
     return () => onHeader(undefined);
-  }, [task, reportedChanges, showingChanges, events, onHeader]);
+  }, [task, reportedChanges, showingChanges, events, eventRevision, onHeader]);
 
   React.useEffect(() => {
     const listener = () => refreshDetail();

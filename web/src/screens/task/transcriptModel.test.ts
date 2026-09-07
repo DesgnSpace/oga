@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Task, TaskAttempt, TaskEventView } from "@/bridge/types";
-import { buildTranscript, REQUEST_ID } from "./transcriptModel";
+import { buildTranscript, REQUEST_ID, WorkSegmentCache } from "./transcriptModel";
 
 /**
  * Turn ids below mirror what the broker's database actually stores: real
@@ -122,6 +122,19 @@ describe("buildTranscript work segments", () => {
     expect(workItems[0].segment.startsExpanded).toBe(false);
     expect(workItems[1].segment.live).toBe(true);
     expect(workItems[1].segment.startsExpanded).toBe(true);
+  });
+
+  it("refreshes segment metadata when the same activity settles", () => {
+    const events: TaskEventView[] = [event(1, 100)];
+    const cache = new WorkSegmentCache();
+    const running = buildTranscript(task({ state: "running" }), events, cache);
+    const completed = buildTranscript(task({ state: "completed" }), events, cache);
+    const runningWork = running.find((item) => item.type === "work");
+    const completedWork = completed.find((item) => item.type === "work");
+
+    if (runningWork?.type !== "work" || completedWork?.type !== "work") throw new Error("expected work items");
+    expect(runningWork.segment.live).toBe(true);
+    expect(completedWork.segment.live).toBe(false);
   });
 });
 

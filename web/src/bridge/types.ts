@@ -357,6 +357,7 @@ export interface StateQuery {
   archived?: ArchivedFilter;
   compact: boolean;
   limit?: number;
+  skipSummaryAggregates?: boolean;
 }
 
 export interface TaskEventsQuery {

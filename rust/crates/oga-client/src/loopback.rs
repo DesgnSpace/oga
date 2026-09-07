@@ -790,6 +790,8 @@ impl LoopbackClient {
                 has_more: None,
                 oldest_id: None,
                 has_earlier: None,
+                task: None,
+                task_updated_at: None,
             });
         }
         serde_json::from_value(value).map_err(|source| ClientError::Decode {
@@ -956,6 +958,10 @@ fn append_state_query(url: &mut Url, query: &StateQuery, summary: bool) {
     if query.compact {
         url.query_pairs_mut().append_pair("compact", "1");
     }
+    if summary && query.skip_summary_aggregates {
+        url.query_pairs_mut()
+            .append_pair("skipSummaryAggregates", "1");
+    }
     if let Some(archived) = query.archived {
         url.query_pairs_mut()
             .append_pair("archived", archived_name(archived));
@@ -985,6 +991,13 @@ fn append_event_query(url: &mut Url, query: &TaskEventsQuery) {
     if let Some(limit) = query.limit {
         url.query_pairs_mut()
             .append_pair("limit", &limit.to_string());
+    }
+    if query.include_task {
+        url.query_pairs_mut().append_pair("includeTask", "1");
+    }
+    if let Some(updated_at) = &query.task_updated_at {
+        url.query_pairs_mut()
+            .append_pair("taskUpdatedAt", updated_at);
     }
 }
 
@@ -1486,12 +1499,25 @@ mod tests {
 
     #[tokio::test]
     async fn covers_all_loopback_endpoints() {
-        let (base_url, _, server) = start_mock(false).await;
+        let (base_url, state, server) = start_mock(false).await;
         let client = LoopbackClient::new(base_url).expect("client");
         let state_query = StateQuery::default().compact(true).limit(20);
         client.health().await.expect("health");
         client.get_state(&state_query).await.expect("state");
-        client.get_summary(&state_query).await.expect("summary");
+        client
+            .get_summary(&state_query.clone().skip_summary_aggregates(true))
+            .await
+            .expect("summary");
+        assert!(
+            state
+                .requests
+                .lock()
+                .expect("request lock")
+                .iter()
+                .any(|request| request.contains(
+                    "/api/state?view=summary&compact=1&skipSummaryAggregates=1&limit=20",
+                ))
+        );
         client.get_task("task").await.expect("task");
         client.get_task_turns("task").await.expect("task turns");
         client

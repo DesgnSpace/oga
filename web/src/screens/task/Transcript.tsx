@@ -45,7 +45,7 @@ function itemKey(item: TranscriptItem): string {
   }
 }
 
-function TranscriptBubble({ bubble, cwd }: { bubble: Bubble; cwd?: string }) {
+const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: { bubble: Bubble; cwd?: string }) {
   const full = bubble.text;
   const previewRef = React.useRef<HTMLDivElement>(null);
   const [hasMore, setHasMore] = React.useState<boolean>();
@@ -101,9 +101,9 @@ function TranscriptBubble({ bubble, cwd }: { bubble: Bubble; cwd?: string }) {
       </div>
     </div>
   );
-}
+});
 
-function TranscriptResponse({ block, question }: { block: ResponseBlock; question: boolean }) {
+const TranscriptResponse = React.memo(function TranscriptResponse({ block, question }: { block: ResponseBlock; question: boolean }) {
   const className = question
     ? "detail-response detail-response-question"
     : block.error
@@ -143,7 +143,7 @@ function TranscriptResponse({ block, question }: { block: ResponseBlock; questio
       <MarkdownContent source={block.text} />
     </div>
   );
-}
+});
 
 function workLabel(segment: WorkSegment): string {
   const verb = segment.live ? "Working" : "Worked";
@@ -184,7 +184,7 @@ function traceRowCount(row: TraceRow): number {
   return Math.max(1, row.children.reduce((total, child) => total + traceRowCount(child), 0));
 }
 
-function TranscriptWork({
+const TranscriptWork = React.memo(function TranscriptWork({
   segment,
   open,
   showThinking,
@@ -193,7 +193,7 @@ function TranscriptWork({
   segment: WorkSegment;
   open: boolean;
   showThinking: boolean;
-  onToggle: () => void;
+  onToggle: (id: number, startsExpanded: boolean) => void;
 }) {
   const rows = React.useMemo(() => {
     const all = TraceVisibility.interleavedRows(segment.composition, segment.cwd, segment.live).filter(
@@ -206,7 +206,12 @@ function TranscriptWork({
 
   return (
     <div className="transcript-work">
-      <button className="transcript-work-toggle" type="button" aria-expanded={open} onClick={onToggle}>
+      <button
+        className="transcript-work-toggle"
+        type="button"
+        aria-expanded={open}
+        onClick={() => onToggle(segment.id, segment.startsExpanded)}
+      >
         <span className="transcript-work-label">{workLabel(segment)}{summary ? ` · ${summary}` : ""}</span>
         <span className={`transcript-work-chevron${open ? " transcript-work-chevron-open" : ""}`} aria-hidden="true">
           <ChevronIcon size={14} />
@@ -219,11 +224,35 @@ function TranscriptWork({
       )}
     </div>
   );
-}
+});
 
 type NonWorkTranscriptItem = Exclude<TranscriptItem, { type: "work" }>;
 
-function TranscriptRow({ item, cwd }: { item: NonWorkTranscriptItem; cwd?: string }) {
+function sameNonWorkItem(left: NonWorkTranscriptItem, right: NonWorkTranscriptItem): boolean {
+  if (left.type === "bubble") {
+    if (right.type !== "bubble") return false;
+    const a = left.bubble;
+    const b = right.bubble;
+    return (
+      a.id === b.id &&
+      a.text === b.text &&
+      a.at === b.at &&
+      a.kind === b.kind &&
+      a.rawText === b.rawText &&
+      a.attachments?.join("\0") === b.attachments?.join("\0")
+    );
+  }
+  if (right.type === "bubble" || left.type !== right.type) return false;
+  return (
+    left.block.id === right.block.id &&
+    left.block.text === right.block.text &&
+    left.block.error === right.block.error &&
+    left.block.awaitingDecision === right.block.awaitingDecision &&
+    left.block.marker === right.block.marker
+  );
+}
+
+const TranscriptRow = React.memo(function TranscriptRow({ item, cwd }: { item: NonWorkTranscriptItem; cwd?: string }) {
   switch (item.type) {
     case "bubble":
       return <TranscriptBubble bubble={item.bubble} cwd={cwd} />;
@@ -232,7 +261,7 @@ function TranscriptRow({ item, cwd }: { item: NonWorkTranscriptItem; cwd?: strin
     case "question":
       return <TranscriptResponse block={item.block} question={true} />;
   }
-}
+}, (left, right) => left.cwd === right.cwd && sameNonWorkItem(left.item, right.item));
 
 export function Transcript({
   items,
@@ -244,6 +273,13 @@ export function Transcript({
   showThinking?: boolean;
 }) {
   const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(new Map());
+  const toggleWork = React.useCallback((id: number, startsExpanded: boolean) => {
+    setManualExpansion((current) => {
+      const next = new Map(current);
+      next.set(id, !(current.get(id) ?? startsExpanded));
+      return next;
+    });
+  }, []);
 
   return (
     <div className="transcript">
@@ -253,13 +289,7 @@ export function Transcript({
             segment={item.segment}
             showThinking={showThinking}
             open={manualExpansion.get(item.segment.id) ?? item.segment.startsExpanded}
-            onToggle={() =>
-              setManualExpansion((current) => {
-                const next = new Map(current);
-                next.set(item.segment.id, !(current.get(item.segment.id) ?? item.segment.startsExpanded));
-                return next;
-              })
-            }
+            onToggle={toggleWork}
             key={itemKey(item)}
           />
         ) : (

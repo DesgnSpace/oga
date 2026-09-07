@@ -4,8 +4,8 @@
 
 import type { TaskDiff, TaskEventView } from "@/bridge/types";
 import {
-  collectRunChanges,
   fileChangeFromPatch,
+  RunChangeProjection,
   type ChangedFileSet,
   type ChangedFileView,
   type RunFileChanges,
@@ -50,6 +50,107 @@ interface Bucket {
   events: TaskEventView[];
 }
 
+interface BucketState {
+  bucket: Bucket;
+  projection: RunChangeProjection;
+  unmatched: number;
+  turn?: ChangeTurn;
+}
+
+/**
+ * Keeps the grouped reported view append-only while the panel is visible.
+ * Pages, replays, and inferred turn boundaries use the exact rebuild path.
+ */
+export class RunChangeByTurnProjection {
+  private source: TaskEventView[] | undefined;
+  private length = 0;
+  private cwd: string | undefined;
+  private explicitTurns = true;
+  private current: BucketState | undefined;
+  private cause: string | undefined;
+  private ordinal = 0;
+  private result: ChangeTurnSet = { turns: [], unmatched: 0 };
+
+  update(events: TaskEventView[], cwd: string): ChangeTurnSet {
+    const append = this.canAppend(events, cwd);
+    if (!append) this.reset(cwd, events);
+
+    if (append) {
+      for (let index = this.length; index < events.length; index += 1) this.consume(events[index], cwd);
+    } else {
+      const source = this.explicitTurns ? events : deriveTurnIds(events);
+      for (const event of source) this.consume(event, cwd);
+    }
+
+    this.source = events;
+    this.length = events.length;
+    this.cwd = cwd;
+    return this.result;
+  }
+
+  private canAppend(events: TaskEventView[], cwd: string): boolean {
+    if (!this.explicitTurns || this.source !== events || this.cwd !== cwd || events.length < this.length) return false;
+    for (let index = this.length; index < events.length; index += 1) {
+      if (events[index].turnId === undefined) return false;
+    }
+    return true;
+  }
+
+  private reset(cwd: string, events: TaskEventView[]): void {
+    this.cwd = cwd;
+    this.explicitTurns = events.every((event) => event.turnId !== undefined);
+    this.length = 0;
+    this.current = undefined;
+    this.cause = undefined;
+    this.ordinal = 0;
+    this.result = { turns: [], unmatched: 0 };
+  }
+
+  private consume(event: TaskEventView, cwd: string): void {
+    if (event.turnId !== undefined && this.current?.bucket.turnId !== event.turnId) {
+      this.ordinal += 1;
+      this.current = this.newBucket(
+        event,
+        event.turnId,
+        this.ordinal === 1 ? "First run" : (this.cause ?? `Turn ${this.ordinal}`),
+      );
+      this.cause = undefined;
+    } else if (this.current === undefined) {
+      this.current = this.newBucket(event, undefined, EARLIER_LABEL);
+    }
+
+    this.current.bucket.events.push(event);
+    const changes = this.current.projection.update(this.current.bucket.events, cwd);
+    this.result.unmatched += changes.unmatched - this.current.unmatched;
+    this.current.unmatched = changes.unmatched;
+    if (changes.files.length > 0) {
+      if (this.current.turn === undefined) {
+        this.current.turn = {
+          turnId: this.current.bucket.turnId,
+          ordinal: this.current.bucket.ordinal,
+          label: this.current.bucket.label,
+          at: this.current.bucket.at,
+          files: changes.files,
+        };
+        this.result.turns = [this.current.turn, ...this.result.turns];
+      } else {
+        this.current.turn.files = changes.files;
+      }
+    }
+
+    const next = TURN_CAUSES.get(event.type);
+    if (next !== undefined) this.cause = next;
+  }
+
+  private newBucket(event: TaskEventView, turnId: number | undefined, label: string): BucketState {
+    return {
+      bucket: { turnId, ordinal: turnId === undefined ? 0 : this.ordinal, label, at: event.createdAt, events: [] },
+      projection: new RunChangeProjection(),
+      unmatched: 0,
+    };
+  }
+}
+
 /**
  * Splits a run's changed files by the turn that produced them.
  *
@@ -57,49 +158,7 @@ interface Bucket {
  * contents: an event without one belongs to the turn still open around it.
  */
 export function collectRunChangesByTurn(events: TaskEventView[], cwd: string): ChangeTurnSet {
-  const buckets: Bucket[] = [];
-  let current: Bucket | undefined;
-  let cause: string | undefined;
-  let ordinal = 0;
-
-  for (const event of deriveTurnIds(events)) {
-    const turnId = event.turnId;
-    if (turnId !== undefined && current?.turnId !== turnId) {
-      ordinal += 1;
-      current = {
-        turnId,
-        ordinal,
-        label: ordinal === 1 ? "First run" : (cause ?? `Turn ${ordinal}`),
-        at: event.createdAt,
-        events: [],
-      };
-      buckets.push(current);
-      cause = undefined;
-    } else if (current === undefined) {
-      current = { ordinal: 0, label: EARLIER_LABEL, at: event.createdAt, events: [] };
-      buckets.push(current);
-    }
-    current.events.push(event);
-    const next = TURN_CAUSES.get(event.type);
-    if (next !== undefined) cause = next;
-  }
-
-  let unmatched = 0;
-  const turns: ChangeTurn[] = [];
-  for (const bucket of buckets) {
-    const changes = collectRunChanges(bucket.events, cwd);
-    unmatched += changes.unmatched;
-    if (changes.files.length === 0) continue;
-    turns.push({
-      turnId: bucket.turnId,
-      ordinal: bucket.ordinal,
-      label: bucket.label,
-      at: bucket.at,
-      files: changes.files,
-    });
-  }
-  turns.reverse();
-  return { turns, unmatched };
+  return new RunChangeByTurnProjection().update(events, cwd);
 }
 
 /** Maps the broker's git diff onto the model the panel already renders. */

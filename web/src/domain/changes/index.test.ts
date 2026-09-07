@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import type { EventKind, TaskEventView } from "@/bridge/types";
 import {
   collectRunChanges,
+  RunChangeProjection,
   fileChangeAdded,
   fileChangeFromRaw,
   fileChangeMayContainEdit,
@@ -276,6 +277,28 @@ describe("collectRunChanges", () => {
     expect(drawn + file.hiddenLines).toBe(1600);
     expect(drawn).toBeGreaterThanOrEqual(RUN_CHANGES_LINE_LIMIT);
     expect(drawn).toBeLessThan(RUN_CHANGES_LINE_LIMIT + 40);
+  });
+});
+
+describe("RunChangeProjection", () => {
+  it("matches a full rebuild after an append and keeps the file view", () => {
+    const events = [event(1, "tool", edit("src/a.ts", "one", "ONE"))];
+    const projection = new RunChangeProjection();
+    const first = projection.update(events, "/repo");
+    events.push(event(2, "tool", edit("src/a.ts", "two", "TWO")));
+
+    const incremental = projection.update(events, "/repo");
+    expect(incremental).toEqual(collectRunChanges(events, "/repo"));
+    expect(incremental.files[0]).toBe(first.files[0]);
+  });
+
+  it("rebuilds after an earlier page replaces the event array", () => {
+    const recent = [event(2, "tool", edit("src/a.ts", "two", "TWO"))];
+    const projection = new RunChangeProjection();
+    projection.update(recent, "/repo");
+
+    const complete = [event(1, "tool", edit("src/a.ts", "one", "ONE")), ...recent];
+    expect(projection.update(complete, "/repo")).toEqual(collectRunChanges(complete, "/repo"));
   });
 });
 

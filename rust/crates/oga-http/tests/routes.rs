@@ -6,7 +6,9 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use http_body_util::BodyExt;
-use oga_domain::{Profile, Provider, Task, TaskEvent, TaskKind, TaskScope, TaskState, VERSION};
+use oga_domain::{
+    MemoryEntry, Profile, Provider, Task, TaskEvent, TaskKind, TaskScope, TaskState, VERSION,
+};
 use oga_http::{HttpState, router};
 use oga_runner::ProviderRunner;
 use oga_service::{DispatchRequest, Dispatcher};
@@ -213,6 +215,22 @@ async fn sse_frames(response: axum::response::Response, count: usize) -> Vec<(St
 #[tokio::test]
 async fn read_routes() {
     let fixture = Fixture::new();
+    fixture
+        .store
+        .repositories()
+        .memories()
+        .upsert(
+            &MemoryEntry {
+                cwd: fixture.cwd.clone(),
+                key: "rule".into(),
+                value: "value".into(),
+                version: 1,
+                created_at: "2026-01-01T00:00:00.000Z".into(),
+                updated_at: "2026-01-01T00:00:00.000Z".into(),
+            },
+            None,
+        )
+        .expect("memory insert");
 
     let (status, health) =
         json_response(request(&fixture.router, Method::GET, "/health", Body::empty()).await).await;
@@ -273,6 +291,34 @@ async fn read_routes() {
     assert_eq!(events[0]["type"], "created");
     assert_eq!(events[0]["title"], "Task queued");
 
+    let (status, combined) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/tasks/task/events?last=1&includeTask=1",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(combined["task"]["id"], "task");
+    assert_eq!(combined["taskUpdatedAt"], "2026-01-01T00:01:00.000Z");
+
+    let (status, unchanged) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/tasks/task/events?last=1&includeTask=1&taskUpdatedAt=2026-01-01T00:01:00.000Z",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(unchanged.get("task").is_none());
+    assert_eq!(unchanged["taskUpdatedAt"], "2026-01-01T00:01:00.000Z");
+
     let (status, state) = json_response(
         request(
             &fixture.router,
@@ -288,6 +334,24 @@ async fn read_routes() {
     assert_eq!(state["tasks"][0]["promptPreview"], "inspect the fixture");
     assert_eq!(state["tasksHasMore"], false);
     assert!(state.get("profileFailures").is_none());
+    assert_eq!(state["memoryProjects"][0]["count"], 1);
+    assert!(state["spend"].is_object());
+
+    let (status, sidebar_state) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/state?view=summary&compact=1&skipSummaryAggregates=1",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(sidebar_state["profiles"], state["profiles"]);
+    assert_eq!(sidebar_state["tasks"], state["tasks"]);
+    assert_eq!(sidebar_state["memoryProjects"], json!([]));
+    assert_eq!(sidebar_state["spend"], Value::Null);
 
     let (status, missing) = json_response(
         request(

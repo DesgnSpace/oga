@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { TaskDiff, TaskEventView } from "@/bridge/types";
-import { collectRunChangesByTurn, gitChangeSet } from "./grouped";
+import { collectRunChangesByTurn, gitChangeSet, RunChangeByTurnProjection } from "./grouped";
 
 function edit(id: number, turnId: number | undefined, path: string, oldText: string, newText: string): TaskEventView {
   const view: TaskEventView = {
@@ -87,6 +87,24 @@ describe("collectRunChangesByTurn", () => {
     );
 
     expect(grouped.turns.map((turn) => turn.label)).toEqual(["First run"]);
+  });
+
+  it("matches a full grouped rebuild after an append", () => {
+    const events = [edit(1, 7, "/repo/first.ts", "a", "b")];
+    const projection = new RunChangeByTurnProjection();
+    projection.update(events, "/repo");
+    events.push(edit(2, 7, "/repo/second.ts", "c", "d"));
+
+    expect(projection.update(events, "/repo")).toEqual(collectRunChangesByTurn(events, "/repo"));
+  });
+
+  it("rebuilds grouped changes when an earlier page replaces the array", () => {
+    const recent = [edit(2, 7, "/repo/second.ts", "c", "d")];
+    const projection = new RunChangeByTurnProjection();
+    projection.update(recent, "/repo");
+    const complete = [edit(1, 7, "/repo/first.ts", "a", "b"), ...recent];
+
+    expect(projection.update(complete, "/repo")).toEqual(collectRunChangesByTurn(complete, "/repo"));
   });
 });
 

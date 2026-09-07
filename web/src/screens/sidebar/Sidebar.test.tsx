@@ -1,8 +1,16 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
-import { SidebarController } from "@/state";
+import { SidebarController } from "@/state/sidebar-state";
+import * as sidebarProjection from "@/state/sidebar-projection";
 import Sidebar from "./Sidebar";
+
+const projectionFromState = mock(sidebarProjection.projectionFromState);
+
+mock.module("@/state/sidebar-projection", () => ({
+  ...sidebarProjection,
+  projectionFromState,
+}));
 
 function task(id: string, preview: string) {
   return {
@@ -41,6 +49,7 @@ function transport(
 }
 
 describe("the sidebar", () => {
+  beforeEach(() => projectionFromState.mockClear());
   afterEach(cleanup);
 
   it("hands a clicked task to the shell", async () => {
@@ -74,5 +83,44 @@ describe("the sidebar", () => {
 
     await screen.findByText("second task");
     expect(screen.getAllByText(/^Unknown worker/)).toHaveLength(2);
+  });
+
+  it("keeps the projection stable for unrelated state changes", async () => {
+    setTransport(transport());
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    await screen.findByText("second task");
+    projectionFromState.mockClear();
+
+    act(() => {
+      controller.setSidebarWidth(controller.snapshot.sidebarWidth + 1);
+      controller.selectTask("two");
+      controller.applyConnection({ connected: false, cursor: 0, streamFloor: 0, stale: false });
+      controller.applyBatch({ cursor: 1, streamFloor: 0, stale: false, pointers: [] });
+    });
+
+    expect(projectionFromState).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds the projection when tasks change", async () => {
+    setTransport(transport());
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    await screen.findByText("second task");
+    projectionFromState.mockClear();
+
+    act(() => {
+      controller.update((state) => ({
+        ...state,
+        tasks: state.tasks.map((entry) => entry.id === "two" ? { ...entry, title: "updated task" } : entry),
+      }));
+    });
+
+    await screen.findByText("updated task");
+    expect(projectionFromState).toHaveBeenCalledTimes(1);
   });
 });

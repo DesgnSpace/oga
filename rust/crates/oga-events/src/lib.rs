@@ -2,14 +2,23 @@
 
 pub mod socket;
 
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use oga_domain::{
     BatchEvent, BatchTask, EventKind, EventLevel, EventPhase, EventSource, MAX_EVENT_OUTCOME,
     MAX_EVENT_TITLE, OUTCOME_STATES, PresentationType, Provider, Task, TaskEvent,
     TaskEventPresentation, TaskEventView, TaskState, WireTaskOutcome,
 };
+use oga_store::{Store, StoreError};
 use serde_json::{Map, Value};
+use tokio::{sync::watch, time::sleep};
 
 pub use socket::{
     EventSocketHandle, EventSocketOptions, SocketError, event_socket_path, start_event_socket,
@@ -20,6 +29,388 @@ const MAX_REASONING_PAYLOAD_BYTES: usize = 32 * 1024;
 const MIN_TRUNCATABLE_BYTES: usize = 256;
 const MARKER_RESERVE_BYTES: usize = 80;
 pub const RETRY_REPEAT_THRESHOLD: usize = 3;
+
+/// Maximum number of event keys retained by one feed.
+pub const MAX_TRACKED_EVENTS: usize = 4_096;
+const DEFAULT_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// A shared, lossless hint that the durable event log may have advanced.
+///
+/// The feed retains only event ids and task ids. Readers still load the rows
+/// from SQLite, so a coalesced or evicted hint can never discard history.
+#[derive(Clone)]
+pub struct EventFeed {
+    store: Arc<Store>,
+    poll_interval: Duration,
+    state: Arc<FeedState>,
+}
+
+struct FeedState {
+    updates: watch::Sender<u64>,
+    snapshot: Mutex<FeedSnapshot>,
+    metrics: FeedMetrics,
+    users: AtomicUsize,
+    polling: AtomicBool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+/// Counters for the feed's durable polling and bounded key window.
+pub struct EventFeedStats {
+    pub database_queries: u64,
+    pub poll_queries: u64,
+    pub observed_events: u64,
+    pub notifications: u64,
+    pub retained_events: usize,
+}
+
+#[derive(Default)]
+struct FeedMetrics {
+    database_queries: AtomicU64,
+    poll_queries: AtomicU64,
+    observed_events: AtomicU64,
+    notifications: AtomicU64,
+}
+
+#[derive(Default)]
+struct FeedSnapshot {
+    head: i64,
+    generation: u64,
+    events: VecDeque<TrackedEvent>,
+    error: Option<String>,
+}
+
+struct TrackedEvent {
+    id: i64,
+    task_id: String,
+}
+
+/// Keeps the shared feed alive while a stream or waiter uses it.
+pub struct EventFeedGuard {
+    state: Arc<FeedState>,
+}
+
+impl Drop for EventFeedGuard {
+    fn drop(&mut self) {
+        self.state.users.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl EventFeed {
+    pub fn new(store: Arc<Store>) -> Self {
+        Self::with_poll_interval(store, DEFAULT_EVENT_POLL_INTERVAL)
+    }
+
+    pub fn with_poll_interval(store: Arc<Store>, poll_interval: Duration) -> Self {
+        let (updates, _) = watch::channel(0);
+        Self {
+            store,
+            poll_interval: poll_interval.max(Duration::from_millis(1)),
+            state: Arc::new(FeedState {
+                updates,
+                snapshot: Mutex::new(FeedSnapshot::default()),
+                metrics: FeedMetrics::default(),
+                users: AtomicUsize::new(0),
+                polling: AtomicBool::new(false),
+            }),
+        }
+    }
+
+    /// Retain one bounded change feed user and start its shared poller.
+    pub fn retain(&self) -> Result<EventFeedGuard, StoreError> {
+        self.state.users.fetch_add(1, Ordering::AcqRel);
+        if self
+            .state
+            .polling
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.state
+                .metrics
+                .database_queries
+                .fetch_add(1, Ordering::Relaxed);
+            let head = match latest_event_id(&self.store, &[]) {
+                Ok(head) => head,
+                Err(error) => {
+                    self.state.users.fetch_sub(1, Ordering::AcqRel);
+                    self.state.polling.store(false, Ordering::Release);
+                    return Err(error);
+                }
+            };
+            let Ok(mut snapshot) = self.state.snapshot.lock() else {
+                self.state.users.fetch_sub(1, Ordering::AcqRel);
+                self.state.polling.store(false, Ordering::Release);
+                return Err(StoreError::Refusal("event feed lock poisoned".into()));
+            };
+            snapshot.head = head;
+            snapshot.generation = 0;
+            snapshot.events.clear();
+            snapshot.error = None;
+            let state = self.state.clone();
+            let store = self.store.clone();
+            let poll_interval = self.poll_interval;
+            tokio::spawn(async move {
+                poll_changes(store, state, poll_interval).await;
+            });
+        }
+        Ok(EventFeedGuard {
+            state: self.state.clone(),
+        })
+    }
+
+    /// Waits for a durable event after `after` that matches `task_ids`.
+    ///
+    /// The shared poller wakes all potentially interested readers once per
+    /// observed batch. A bounded task-id window avoids unrelated SQLite
+    /// existence queries; an unknown window falls back to the durable check.
+    pub async fn wait_for_change(
+        &self,
+        after: i64,
+        task_ids: &[String],
+        wait: Duration,
+    ) -> Result<bool, StoreError> {
+        if wait.is_zero() {
+            return self.has_events_after(after, task_ids);
+        }
+
+        let mut updates = self.state.updates.subscribe();
+        let _guard = self.retain()?;
+        let generation = *updates.borrow_and_update();
+        let initial = {
+            let snapshot = self
+                .state
+                .snapshot
+                .lock()
+                .map_err(|_| StoreError::Refusal("event feed lock poisoned".into()))?;
+            if let Some(error) = &snapshot.error {
+                return Err(StoreError::Refusal(error.clone()));
+            }
+            if snapshot.head <= after {
+                Some(false)
+            } else if generation == 0 {
+                if task_ids.is_empty() {
+                    Some(true)
+                } else {
+                    None
+                }
+            } else {
+                relevant_change(&snapshot, generation, after, task_ids)
+            }
+        };
+        if initial == Some(true) || (initial.is_none() && self.has_events_after(after, task_ids)?) {
+            return Ok(true);
+        }
+
+        let deadline = Instant::now() + wait;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(false);
+            }
+            if tokio::time::timeout(remaining, updates.changed())
+                .await
+                .is_err()
+            {
+                return Ok(false);
+            }
+            let generation = *updates.borrow_and_update();
+            let snapshot = self
+                .state
+                .snapshot
+                .lock()
+                .map_err(|_| StoreError::Refusal("event feed lock poisoned".into()))?;
+            if let Some(error) = &snapshot.error {
+                return Err(StoreError::Refusal(error.clone()));
+            }
+            let relevant = relevant_change(&snapshot, generation, after, task_ids);
+            drop(snapshot);
+            match relevant {
+                Some(true) => return Ok(true),
+                Some(false) => {}
+                None => {
+                    if self.has_events_after(after, task_ids)? {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn latest_event_id(&self, task_ids: &[String]) -> Result<i64, StoreError> {
+        aggregate_event_id(&self.store, "MAX", task_ids)
+    }
+
+    pub fn oldest_event_id(&self, task_ids: &[String]) -> Result<i64, StoreError> {
+        aggregate_event_id(&self.store, "MIN", task_ids)
+    }
+
+    /// Returns counters collected since this feed was created.
+    pub fn stats(&self) -> EventFeedStats {
+        let retained_events = self
+            .state
+            .snapshot
+            .lock()
+            .map_or(0, |snapshot| snapshot.events.len());
+        EventFeedStats {
+            database_queries: self.state.metrics.database_queries.load(Ordering::Relaxed),
+            poll_queries: self.state.metrics.poll_queries.load(Ordering::Relaxed),
+            observed_events: self.state.metrics.observed_events.load(Ordering::Relaxed),
+            notifications: self.state.metrics.notifications.load(Ordering::Relaxed),
+            retained_events,
+        }
+    }
+
+    fn has_events_after(&self, after: i64, task_ids: &[String]) -> Result<bool, StoreError> {
+        self.state
+            .metrics
+            .database_queries
+            .fetch_add(1, Ordering::Relaxed);
+        self.store.with_connection(|connection| {
+            let task_filter = task_clause(task_ids, "task_id");
+            let sql = format!("SELECT EXISTS(SELECT 1 FROM task_events WHERE id > ?{task_filter})");
+            let mut values: Vec<&dyn rusqlite::ToSql> = vec![&after];
+            values.extend(task_ids.iter().map(|id| id as &dyn rusqlite::ToSql));
+            Ok(connection.query_row(&sql, rusqlite::params_from_iter(values), |row| row.get(0))?)
+        })
+    }
+}
+
+async fn poll_changes(store: Arc<Store>, state: Arc<FeedState>, poll_interval: Duration) {
+    let mut after = state
+        .snapshot
+        .lock()
+        .ok()
+        .map_or(0, |snapshot| snapshot.head);
+    loop {
+        if state.users.load(Ordering::Acquire) == 0 {
+            state.polling.store(false, Ordering::Release);
+            restart_poller_if_needed(&store, &state, poll_interval);
+            return;
+        }
+
+        state
+            .metrics
+            .database_queries
+            .fetch_add(1, Ordering::Relaxed);
+        state.metrics.poll_queries.fetch_add(1, Ordering::Relaxed);
+        match list_event_keys(&store, after, MAX_TRACKED_EVENTS + 1) {
+            Ok(events) => {
+                if let Some(last) = events.last() {
+                    state
+                        .metrics
+                        .observed_events
+                        .fetch_add(events.len() as u64, Ordering::Relaxed);
+                    after = last.0;
+                    if let Ok(mut snapshot) = state.snapshot.lock() {
+                        snapshot.head = after;
+                        for (id, task_id) in events {
+                            snapshot.events.push_back(TrackedEvent { id, task_id });
+                        }
+                        while snapshot.events.len() > MAX_TRACKED_EVENTS {
+                            snapshot.events.pop_front();
+                        }
+                        snapshot.generation = snapshot.generation.wrapping_add(1);
+                        snapshot.error = None;
+                        state.metrics.notifications.fetch_add(1, Ordering::Relaxed);
+                        let _ = state.updates.send(snapshot.generation);
+                    }
+                }
+            }
+            Err(error) => {
+                if let Ok(mut snapshot) = state.snapshot.lock() {
+                    snapshot.error = Some(error.to_string());
+                    snapshot.generation = snapshot.generation.wrapping_add(1);
+                    let _ = state.updates.send(snapshot.generation);
+                }
+                state.polling.store(false, Ordering::Release);
+                return;
+            }
+        }
+        sleep(poll_interval).await;
+    }
+}
+
+fn restart_poller_if_needed(store: &Arc<Store>, state: &Arc<FeedState>, poll_interval: Duration) {
+    if state.users.load(Ordering::Acquire) == 0
+        || state
+            .polling
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+    {
+        return;
+    }
+    tokio::spawn(poll_changes(store.clone(), state.clone(), poll_interval));
+}
+
+fn relevant_change(
+    snapshot: &FeedSnapshot,
+    generation: u64,
+    after: i64,
+    task_ids: &[String],
+) -> Option<bool> {
+    if generation == 0 || snapshot.head <= after {
+        return Some(false);
+    }
+    let first = snapshot.events.front()?.id;
+    if after < first.saturating_sub(1) {
+        return None;
+    }
+    if task_ids.is_empty() {
+        return Some(true);
+    }
+    Some(
+        snapshot.events.iter().any(|event| {
+            event.id > after && task_ids.iter().any(|task_id| task_id == &event.task_id)
+        }),
+    )
+}
+
+fn list_event_keys(
+    store: &Store,
+    after: i64,
+    limit: usize,
+) -> Result<Vec<(i64, String)>, StoreError> {
+    store.with_connection(|connection| {
+        let mut statement = connection
+            .prepare("SELECT id,task_id FROM task_events WHERE id > ? ORDER BY id LIMIT ?")?;
+        Ok(statement
+            .query_map(rusqlite::params![after, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+fn latest_event_id(store: &Store, task_ids: &[String]) -> Result<i64, StoreError> {
+    aggregate_event_id(store, "MAX", task_ids)
+}
+
+fn aggregate_event_id(
+    store: &Store,
+    aggregate: &str,
+    task_ids: &[String],
+) -> Result<i64, StoreError> {
+    store.with_connection(|connection| {
+        let task_filter = task_clause(task_ids, "task_id");
+        let sql =
+            format!("SELECT COALESCE({aggregate}(id), 0) FROM task_events WHERE 1=1{task_filter}");
+        let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(task_ids.len());
+        values.extend(task_ids.iter().map(|id| id as &dyn rusqlite::ToSql));
+        Ok(connection.query_row(&sql, rusqlite::params_from_iter(values), |row| row.get(0))?)
+    })
+}
+
+fn task_clause(task_ids: &[String], column: &str) -> String {
+    if task_ids.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " AND {column} IN ({})",
+            std::iter::repeat_n("?", task_ids.len())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+}
 
 fn byte_len(value: &str) -> usize {
     value.len()

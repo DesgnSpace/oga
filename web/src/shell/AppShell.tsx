@@ -1,24 +1,63 @@
 // The persistent chrome: the task sidebar beside whichever screen the route
 // picks. Mirrors rust/crates/oga-ui/src/lib.rs `App`.
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SidebarController } from "@/state";
 import type { ConnectionState } from "@/state/sidebar-state";
 import { readStorage, writeStorage } from "@/state/storage";
 import { Sidebar } from "@/screens/sidebar";
-import { SettingsPage } from "@/screens/settings";
-import { UsagePage } from "@/screens/usage";
-import { TaskDetail } from "@/screens/task/TaskDetail";
-import { IconGallery } from "@/ui/IconGallery";
+import { LoadingState } from "@/components/atoms/ListState";
 import { type Route, RouterProvider, handlesClick, routePath, useRouter } from "@/router";
 import { Modal } from "@/components/primitives/Modal";
 import { ToastViewport } from "@/components/ToastViewport";
 import { TitleBar, type TaskTitleBarInfo } from "./TitleBar";
-import { subscribeMenuCommands, syncMenuAvailability } from "./menuCommands";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAppUpdates } from "./useAppUpdates";
 
 const LAST_SELECTED_TASK_KEY = "lastSelectedTask";
+
+const SettingsPage = lazy(() => import("@/screens/settings").then(({ SettingsPage }) => ({ default: SettingsPage })));
+const UsagePage = lazy(() => import("@/screens/usage").then(({ UsagePage }) => ({ default: UsagePage })));
+const TaskDetailPage = lazy(() => import("@/screens/task/TaskDetail").then(({ TaskDetail }) => ({ default: TaskDetail })));
+const IconGallery = lazy(() => import("@/ui/IconGallery").then(({ IconGallery }) => ({ default: IconGallery })));
+
+type MenuCommandsModule = typeof import("./menuCommands");
+let menuCommandsModule: Promise<MenuCommandsModule> | undefined;
+
+function loadMenuCommands(): Promise<MenuCommandsModule> {
+  return (menuCommandsModule ??= import("./menuCommands"));
+}
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+function scheduleMenuCommands(work: () => void): () => void {
+  const browserWindow: IdleWindow | undefined = globalThis.window;
+  if (browserWindow?.requestIdleCallback) {
+    const handle = browserWindow.requestIdleCallback(work, { timeout: 200 });
+    return () => browserWindow.cancelIdleCallback?.(handle);
+  }
+  const handle = globalThis.setTimeout(work, 0);
+  return () => globalThis.clearTimeout(handle);
+}
+
+function ScreenLoading({ route }: { route: Route }) {
+  const label = route.kind === "task" ? "Loading task activity…" : route.kind === "settings" ? "Loading settings…" : route.kind === "usage" ? "Loading usage…" : "Loading…";
+  return <LoadingState label={label} />;
+}
+
+function TaskDetailRoute({ taskId, onHeader }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void }) {
+  const [, forceUpdate] = useState(0);
+  // Task detail starts its request during render, so read its snapshot again
+  // after the subscription effects have been installed.
+  useEffect(() => {
+    const handle = setTimeout(() => forceUpdate((value) => value + 1), 0);
+    return () => clearTimeout(handle);
+  }, [taskId]);
+  return <TaskDetailPage taskId={taskId} onHeader={onHeader} />;
+}
 
 function offlineBannerCopy(connection: ConnectionState): string | undefined {
   switch (connection) {
@@ -197,12 +236,32 @@ function Shell() {
   const contextRef = useRef({ sidebar: sidebarController, route, navigate, checkForUpdates: () => void checkForUpdates() });
   contextRef.current = { sidebar: sidebarController, route, navigate, checkForUpdates: () => void checkForUpdates() };
 
-  useEffect(
-    () => subscribeMenuCommands(() => contextRef.current),
-    [],
-  );
   useEffect(() => {
-    syncMenuAvailability(route);
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    const cancel = scheduleMenuCommands(() => {
+      void loadMenuCommands().then(({ subscribeMenuCommands }) => {
+        if (!active) return;
+        unsubscribe = subscribeMenuCommands(() => contextRef.current);
+      });
+    });
+    return () => {
+      active = false;
+      cancel();
+      unsubscribe?.();
+    };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const cancel = scheduleMenuCommands(() => {
+      void loadMenuCommands().then(({ syncMenuAvailability }) => {
+        if (active) syncMenuAvailability(route);
+      });
+    });
+    return () => {
+      active = false;
+      cancel();
+    };
   }, [route]);
 
   const connection = useSyncExternalStore(
@@ -245,12 +304,14 @@ function Shell() {
             task={taskHeader}
           />
           <section className={contentClassName(underlyingRoute)} aria-labelledby="page-title">
-            {underlyingRoute.kind === "task" && <TaskDetail taskId={underlyingRoute.id} onHeader={setTaskHeader} />}
-            {underlyingRoute.kind === "home" && (
-              <EmptyWorkspace sidebarController={sidebarController} onOpenSettings={openSettings} />
-            )}
-            {underlyingRoute.kind === "icons" && <IconGallery />}
-            {underlyingRoute.kind === "not-found" && <NotFoundScreen onBack={() => navigate({ kind: "home" })} />}
+            <Suspense fallback={<ScreenLoading route={underlyingRoute} />}>
+              {underlyingRoute.kind === "task" && <TaskDetailRoute taskId={underlyingRoute.id} onHeader={setTaskHeader} />}
+              {underlyingRoute.kind === "home" && (
+                <EmptyWorkspace sidebarController={sidebarController} onOpenSettings={openSettings} />
+              )}
+              {underlyingRoute.kind === "icons" && <IconGallery />}
+              {underlyingRoute.kind === "not-found" && <NotFoundScreen onBack={() => navigate({ kind: "home" })} />}
+            </Suspense>
           </section>
         </div>
       </div>
@@ -260,17 +321,21 @@ function Shell() {
         labelledBy="settings-modal-title"
         className="modal-dialog-settings"
       >
-        <SettingsPage
-          open={route.kind === "settings"}
-          offline={offline}
-          initialTab={route.kind === "settings" ? route.tab : undefined}
-          updateStatus={updateStatus}
-          onCheckForUpdates={() => void checkForUpdates()}
-          onInstallUpdate={() => void installUpdate()}
-        />
+        <Suspense fallback={<ScreenLoading route={route} />}>
+          <SettingsPage
+            open={route.kind === "settings"}
+            offline={offline}
+            initialTab={route.kind === "settings" ? route.tab : undefined}
+            updateStatus={updateStatus}
+            onCheckForUpdates={() => void checkForUpdates()}
+            onInstallUpdate={() => void installUpdate()}
+          />
+        </Suspense>
       </Modal>
       <Modal open={route.kind === "usage"} onClose={() => navigate(underlyingRoute)} labelledBy="usage-modal-title" className="modal-dialog-usage">
-        <UsagePage />
+        <Suspense fallback={<ScreenLoading route={route} />}>
+          <UsagePage />
+        </Suspense>
       </Modal>
       <ToastViewport />
     </main>

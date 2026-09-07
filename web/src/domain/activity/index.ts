@@ -230,6 +230,187 @@ export const ActivityStory = {
   isTechnical,
 };
 
+/**
+ * Keeps a live segment's simple action run incremental. Complex boundaries
+ * still use the canonical composer, so replay and grouping semantics retain a
+ * single source of truth.
+ */
+export class ActivityStoryProjection {
+  private events: TaskEventView[] | undefined;
+  private eventLength = 0;
+  private simple: SimpleAppendState | undefined;
+  private settled = false;
+  private showReceipt = false;
+
+  update(
+    events: TaskEventView[],
+    settled: boolean,
+    ending: ActivityEnding | undefined,
+    showReceipt = settled,
+  ): ActivityComposition {
+    const canAppend = this.isAppend(events, settled, showReceipt, ending);
+    if (canAppend && this.simple !== undefined) {
+      for (let index = this.eventLength; index < events.length; index += 1) {
+        if (!appendSimpleEvent(this.simple, events[index])) {
+          this.simple = undefined;
+          break;
+        }
+      }
+      if (this.simple !== undefined) {
+        this.simple.events = events;
+        this.events = events;
+        this.eventLength = events.length;
+        return simpleComposition(this.simple);
+      }
+    }
+
+    const composition = ActivityStory.composeWithState(events, settled, ending, showReceipt);
+    this.events = events;
+    this.eventLength = events.length;
+    this.settled = settled;
+    this.showReceipt = showReceipt;
+    this.simple = simpleAppendState(events);
+    return composition;
+  }
+
+  private isAppend(
+    events: TaskEventView[],
+    settled: boolean,
+    showReceipt: boolean,
+    ending: ActivityEnding | undefined,
+  ): boolean {
+    const previous = this.events;
+    if (previous === undefined || events.length <= this.eventLength || this.settled !== settled || this.showReceipt !== showReceipt) {
+      return false;
+    }
+    if (ending !== undefined) return false;
+    return events[0] === previous[0] && events[this.eventLength - 1] === previous[this.eventLength - 1];
+  }
+}
+
+interface SimpleAppendState {
+  events: TaskEventView[];
+  key: string;
+  turnId?: number;
+  signatures: Set<string>;
+  lastEvent: TaskEventView;
+  rows: ChapterRow[];
+  hidden: TaskEventView[];
+  count: number;
+  checkNames: string[];
+  titles: Set<string>;
+}
+
+function simpleAppendState(events: TaskEventView[]): SimpleAppendState | undefined {
+  const first = events[0];
+  if (first === undefined || !isSimpleEvent(first)) return undefined;
+  const key = runKey(first);
+  const signatures = new Set<string>();
+  const rows: ChapterRow[] = [];
+  const hidden: TaskEventView[] = [];
+  const checkNames: string[] = [];
+  const titles = new Set<string>();
+  let lastEvent = first;
+  for (const [index, event] of events.entries()) {
+    if (
+      !isSimpleEvent(event) ||
+      runKey(event) !== key ||
+      event.turnId !== first.turnId ||
+      (index > 0 && sameShape(lastEvent, event)) ||
+      exceedsGap(lastEvent, event, RUN_GAP_SECONDS) ||
+      !signatures.add(simpleSignature(event))
+    ) {
+      return undefined;
+    }
+    rows.push({ type: "work", event });
+    hidden.push(event);
+    const checkName = CHECK_NAMES.get(eventTitleKey(event));
+    if (checkName !== undefined && !checkNames.includes(checkName)) checkNames.push(checkName);
+    titles.add(eventTitleKey(event));
+    lastEvent = event;
+  }
+  return { events, key, turnId: first.turnId, signatures, lastEvent, rows, hidden, count: events.length, checkNames, titles };
+}
+
+function appendSimpleEvent(state: SimpleAppendState, event: TaskEventView): boolean {
+  if (
+    !isSimpleEvent(event) ||
+    runKey(event) !== state.key ||
+    event.turnId !== state.turnId ||
+    sameShape(state.lastEvent, event) ||
+    exceedsGap(state.lastEvent, event, RUN_GAP_SECONDS)
+  ) {
+    return false;
+  }
+  if (!state.signatures.add(simpleSignature(event))) return false;
+  state.rows.push({ type: "work", event });
+  state.hidden.push(event);
+  const checkName = CHECK_NAMES.get(eventTitleKey(event));
+  if (checkName !== undefined && !state.checkNames.includes(checkName)) state.checkNames.push(checkName);
+  state.titles.add(eventTitleKey(event));
+  state.count += 1;
+  state.lastEvent = event;
+  return true;
+}
+
+function isSimpleEvent(event: TaskEventView): boolean {
+  return (
+    (event.kind === "tool" || event.kind === "command" || event.kind === "file") &&
+    event.title !== "API retry" &&
+    !event.title.startsWith("Auto Retry ") &&
+    event.title !== "Turn Failed" &&
+    event.actionId === undefined &&
+    event.rawText === undefined &&
+    event.presentation === undefined &&
+    event.minor !== true &&
+    !isSignal(event) &&
+    !isTechnical(event)
+  );
+}
+
+function simpleSignature(event: TaskEventView): string {
+  return `${event.kind}|${event.title}|${event.target ?? event.detail ?? ""}`;
+}
+
+function simpleComposition(state: SimpleAppendState): ActivityComposition {
+  const first = state.events[0];
+  if (first === undefined) return { blocks: [], technical: [] };
+  const floor = runFloor(first);
+  const grouped = state.count >= floor
+    ? [{
+        type: "group" as const,
+        group: {
+          kind: "run" as const,
+          anchor: first,
+          children: state.rows,
+          members: [],
+          runLabel: simpleRunLabel(state),
+          turnTitle: undefined,
+          hidden: state.hidden,
+        },
+      }]
+    : state.rows;
+  return { blocks: [{ type: "chapter", id: first.id, rows: grouped }], technical: [] };
+}
+
+function simpleRunLabel(state: SimpleAppendState): string {
+  const first = state.events[0];
+  if (first === undefined) return "";
+  if (state.key === "check") {
+    return state.checkNames.length > 0 ? `Checked ${state.checkNames.join(", ")}` : `Ran ${state.count} checks`;
+  }
+  if (state.key.startsWith("edit:")) return `Edited ${fileName(eventSubject(first))} ×${state.count}`;
+  if (state.key === "lookup") {
+    if (state.titles.size > 1) return `Ran ${state.count} lookups`;
+    const title = eventTitleKey(first);
+    if (title === "read file") return `Read ${state.count} files`;
+    return `Ran ${state.count} ${LOOKUP_NOUNS.get(title)}`;
+  }
+  if (first.kind === "command") return `Ran ${state.count} commands`;
+  if (first.kind === "file") return `Changed ${state.count} files`;
+  return `Ran ${state.count} calls`;
+}
+
 function composeWithState(
   rawEvents: TaskEventView[],
   settled: boolean,

@@ -357,7 +357,7 @@ interface TraceRowViewProps {
   insideGroup?: boolean;
 }
 
-function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd, insideGroup = false }: TraceRowViewProps) {
+const TraceRowView = React.memo(function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd, insideGroup = false }: TraceRowViewProps) {
   const isOpen = expanded.get(path) ?? row.startsExpanded;
   const hasControl = traceRowOffersExpansion(row);
   const controlLabel = row.expansion
@@ -428,7 +428,7 @@ function TraceRowView({ row, path, expanded, onToggle, onOpenPreview, cwd, insid
       )}
     </article>
   );
-}
+});
 
 function FilePreviewModalBody({ preview }: { preview: OpenFilePreview }) {
   const [diskImage, setDiskImage] = React.useState<string | null>(null);
@@ -546,6 +546,13 @@ export function TraceRows({ rows, cwd }: { rows: TraceRow[]; cwd?: string }) {
     });
   }, []);
   const { from, sentinelRef } = useRowWindow(rows.length);
+  const visibleRows = React.useMemo(() => rows.slice(from), [from, rows]);
+  const openPreviewFile = React.useCallback(
+    (expansion: ContentExpansion, filePath: string | undefined, imageDataUrl?: string) => {
+      setOpenPreview({ cwd, path: filePath, expansion, imageDataUrl });
+    },
+    [cwd],
+  );
 
   return (
     <section className="trace-panel" aria-label="What the worker did">
@@ -554,14 +561,14 @@ export function TraceRows({ rows, cwd }: { rows: TraceRow[]; cwd?: string }) {
       ) : (
         <div className="trace-list-static">
           {from > 0 && <div className="trace-list-reach" ref={sentinelRef} aria-hidden="true" />}
-          {rows.slice(from).map((row) => (
+          {visibleRows.map((row) => (
             <TraceRowView
               row={row}
               path={String(row.id)}
               expanded={expanded}
-               onToggle={toggle}
-                onOpenPreview={(expansion, filePath, imageDataUrl) => setOpenPreview({ cwd, path: filePath, expansion, imageDataUrl })}
-                cwd={cwd}
+              onToggle={toggle}
+              onOpenPreview={openPreviewFile}
+              cwd={cwd}
               key={row.id}
             />
           ))}

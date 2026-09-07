@@ -6,6 +6,7 @@
 import type { Task, TaskAttempt, TaskCompletion, TaskEventView, TaskState } from "@/bridge/types";
 import {
   ActivityStory,
+  ActivityStoryProjection,
   deriveTurnIds,
   normalizeAntigravityEvents,
   type ActivityComposition,
@@ -75,6 +76,7 @@ export function activityIsSettled(state: TaskState): boolean {
  * the run still in progress, or the one the task last settled on.
  */
 export function buildTranscript(task: Task, events: TaskEventView[], cache = new WorkSegmentCache()): TranscriptItem[] {
+  cache.begin(events);
   const items: TranscriptItem[] = [
     { type: "bubble", bubble: { id: REQUEST_ID, text: task.prompt, at: task.createdAt, attachments: task.attachments } },
   ];
@@ -101,11 +103,54 @@ export function buildTranscript(task: Task, events: TaskEventView[], cache = new
 export class WorkSegmentCache {
   private held = new Map<string, CachedSegment>();
   private built = new Map<string, CachedSegment>();
+  private source: TaskEventView[] | undefined;
+  private sourceLength = 0;
+  private activeSource: TaskEventView[] | undefined;
+
+  begin(source: TaskEventView[]): void {
+    this.activeSource = source;
+  }
 
   /** The segment for this turn, composed only if the last build did not have it unchanged. */
-  reuse(key: string, turn: TaskEventView[], compose: () => WorkSegment): WorkSegment {
+  reuse(
+    key: string,
+    turn: TaskEventView[],
+    options: { settled: boolean; ending?: ActivityEnding },
+    compose: (composition: ActivityComposition) => WorkSegment,
+  ): WorkSegment {
     const previous = this.held.get(key);
-    const entry = previous && sameEvents(previous.turn, turn) ? previous : { turn, segment: compose() };
+    const activeSource = this.activeSource;
+    const append =
+      previous !== undefined &&
+      activeSource !== undefined &&
+      activeSource === this.source &&
+      this.sourceLength <= activeSource.length &&
+      turn.length > previous.turn.length &&
+      turn[0] === previous.turn[0] &&
+      turn[previous.turn.length - 1] === previous.turn[previous.turn.length - 1];
+    const sameEventsAsPrevious = previous !== undefined &&
+      ((activeSource === this.source &&
+        turn.length === previous.turn.length &&
+        turn[0] === previous.turn[0] &&
+        turn[turn.length - 1] === previous.turn[previous.turn.length - 1]) ||
+        sameEvents(previous.turn, turn));
+    const unchanged = previous !== undefined &&
+      append === false &&
+      sameEventsAsPrevious &&
+      previous.settled === options.settled &&
+      previous.endingKey === endingKey(options.ending);
+    const entry = unchanged
+      ? previous
+      : (() => {
+          const projection = previous?.projection ?? new ActivityStoryProjection();
+          return {
+            turn,
+            segment: compose(projection.update(turn, options.settled, options.ending)),
+            projection,
+            settled: options.settled,
+            endingKey: endingKey(options.ending),
+          };
+        })();
     this.built.set(key, entry);
     return entry.segment;
   }
@@ -114,12 +159,24 @@ export class WorkSegmentCache {
   settle(): void {
     this.held = this.built;
     this.built = new Map();
+    this.source = this.activeSource;
+    this.sourceLength = this.source?.length ?? 0;
+    this.activeSource = undefined;
   }
 }
 
 interface CachedSegment {
   turn: TaskEventView[];
   segment: WorkSegment;
+  projection: ActivityStoryProjection;
+  settled: boolean;
+  endingKey: string;
+}
+
+function endingKey(ending: ActivityEnding | undefined): string {
+  return ending === undefined
+    ? ""
+    : `${ending.state}:${ending.updatedAt}:${ending.error ?? ""}:${ending.reason ?? ""}:${ending.code ?? ""}`;
 }
 
 /** Merging replaces a revised event with a new object, so identity is the test. */
@@ -289,17 +346,22 @@ function pushWork(
     const isLive = live && isLast;
     const startsExpanded = openLast && isLast;
     const turnEnding = isLast ? ending : undefined;
-    const key = turnKey(turn, task.cwd, isLive, startsExpanded, turnEnding);
+    const key = turnKey(turn, task.cwd, turnEnding);
     items.push({
       type: "work",
-      segment: cache.reuse(key, turn, () => ({
-        id,
-        composition: ActivityStory.composeWithState(turn, !isLive, turnEnding),
-        cwd: task.cwd,
-        live: isLive,
-        startsExpanded,
-        durationMs: segmentDurationMs(turn),
-      })),
+      segment: cache.reuse(
+        key,
+        turn,
+        { settled: !isLive, ending: turnEnding },
+        (composition) => ({
+          id,
+          composition,
+          cwd: task.cwd,
+          live: isLive,
+          startsExpanded,
+          durationMs: segmentDurationMs(turn),
+        }),
+      ),
     });
   });
 }
@@ -308,14 +370,10 @@ function pushWork(
 function turnKey(
   turn: TaskEventView[],
   cwd: string,
-  live: boolean,
-  startsExpanded: boolean,
   ending: ActivityEnding | undefined,
 ): string {
   const first = turn[0]?.id ?? REQUEST_ID;
-  const last = turn[turn.length - 1]?.id ?? REQUEST_ID;
-  const end = ending ? `${ending.state}:${ending.updatedAt}:${ending.error ?? ""}:${ending.reason ?? ""}:${ending.code ?? ""}` : "";
-  return `${first}-${last}-${turn.length}-${cwd}-${live ? 1 : 0}-${startsExpanded ? 1 : 0}-${end}`;
+  return `${first}-${cwd}-${endingKey(ending)}`;
 }
 
 /**

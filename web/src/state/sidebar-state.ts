@@ -123,6 +123,7 @@ export function summaryQuery(state: SidebarState): StateQuery {
     compact: true,
     archived: state.archiveFilter,
     limit: state.loadedPages * TASK_PAGE_SIZE,
+    skipSummaryAggregates: true,
   };
 }
 

@@ -5,6 +5,7 @@ import type { EventKind, TaskEventView } from "@/bridge/types";
 import {
   type ActivityBlock,
   ActivityStory,
+  ActivityStoryProjection,
   chapterCallCount,
   chapterDurationMs,
   groupDurationMs,
@@ -658,6 +659,60 @@ describe("ActivityStory.compose", () => {
       0,
     );
     expect(rows).toBe(events.length);
+  });
+});
+
+describe("ActivityStoryProjection", () => {
+  it("matches the canonical composition while appending a simple run", () => {
+    const events = Array.from({ length: 3 }, (_, index) => ({
+      ...event(index + 1, "command", "Run command"),
+      detail: `step ${index + 1}`,
+      turnId: 1,
+    }));
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+
+    events.push({ ...event(4, "command", "Run command"), detail: "step 4", turnId: 1 });
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+  });
+
+  it("falls back when an append changes the grouping shape", () => {
+    const events = [{ ...event(1, "command", "Run command"), detail: "step 1", turnId: 1 }];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push({ ...event(2, "command", "Run command"), detail: "step 1", turnId: 1 });
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+  });
+
+  it("falls back for retry events that the canonical composer rewrites", () => {
+    const events = [{ ...event(1, "command", "API retry"), detail: "retrying" }];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push({ ...event(2, "command", "Run command"), detail: "step 2" });
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+  });
+
+  it("falls back for canonical signal rows", () => {
+    const events = [{ ...event(1, "command", "Worker needs input"), detail: "answer this" }];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push({ ...event(2, "command", "Run command"), detail: "step 2" });
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+  });
+
+  it("falls back when canonical composition removes a redundant failure row", () => {
+    const events = [
+      { ...event(1, "command", "Agent error"), detail: "failed" },
+      { ...event(2, "command", "Task failed"), detail: "failed" },
+    ];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push({ ...event(3, "command", "Turn Failed"), detail: "failed" });
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
   });
 });
 
