@@ -196,6 +196,14 @@ export function virtualListOffsetFor(list: VirtualList, index: number): number {
 
 const MAX_PARENT_DEPTH = 32;
 export const HEADING_LIMIT = 38;
+/** Longest project a row prints before it crowds out the time and cost. */
+const ROW_PROJECT_LIMIT = 22;
+
+function clamped(text: string, limit: number): string {
+  const characters = Array.from(text);
+  if (characters.length <= limit) return text;
+  return `${characters.slice(0, limit - 1).join("")}…`;
+}
 
 export function projectName(path: string): string {
   const trimmed = path.replace(/\/+$/, "");
@@ -208,6 +216,17 @@ export function projectName(path: string): string {
 
 function projectId(task: TaskSummary): string {
   return task.originCwd ?? task.cwd;
+}
+
+/**
+ * Where a task runs, short enough for a row: the project, and for work with a
+ * copy of its own the branch that copy holds, so two copies of one project
+ * never read as the same place.
+ */
+export function taskProjectLabel(task: TaskSummary): string {
+  const project = projectName(projectId(task));
+  const ownCopy = task.originCwd !== undefined && task.branch !== undefined;
+  return clamped(ownCopy ? `${project}/${task.branch}` : project, ROW_PROJECT_LIMIT);
 }
 
 export function projects(tasks: TaskSummary[]): TaskProject[] {
@@ -298,9 +317,7 @@ export function visibleTasksInNode(node: ProjectSidebarNode, collapsed: Set<stri
 
 export function heading(label: string): string {
   const firstLine = (label.split("\n")[0] ?? label).trim();
-  const characters = Array.from(firstLine);
-  if (characters.length <= HEADING_LIMIT) return firstLine;
-  return `${characters.slice(0, HEADING_LIMIT - 1).join("")}…`;
+  return clamped(firstLine, HEADING_LIMIT);
 }
 
 export function displayLabel(task: TaskSummary): string {

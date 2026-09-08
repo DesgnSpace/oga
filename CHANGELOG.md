@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Every task in the list now names the project it runs in, right after the worker. Work with a copy of its own shows the branch too, so two copies of one project never look alike.
 - Oga now tells you when a task finishes, stops short, or needs an answer, even with the window closed. Click the notification to open that task. The task you are already reading stays quiet, tasks landing together arrive as one notification, and you can turn all of it off under Settings ▸ Notifications.
 - Work you hand off now reaches the tools you already connected for that project, instead of only Oga's own.
 - Work you hand off stays where you sent it. Ask for it to hand work onward and it can split the job up itself; otherwise it never can.
