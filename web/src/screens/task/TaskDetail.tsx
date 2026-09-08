@@ -8,6 +8,7 @@ import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/dom
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
+import { taskOutcomeKey, taskOutcomeViews } from "@/state/task-outcome-views";
 import type { TaskTitleBarInfo } from "@/shell/TitleBar";
 import {
   CHANGED_FILES_DEFAULT_WIDTH,
@@ -188,6 +189,10 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   }, [resizeStart, applyChangedFilesWidth]);
 
   const watched = React.useMemo(() => watchTaskDetail(taskId), [taskId]);
+  React.useLayoutEffect(() => {
+    taskOutcomeViews.setActiveTask(taskId);
+    return () => taskOutcomeViews.clearActiveTask(taskId);
+  }, [taskId]);
   React.useEffect(() => {
     const unsubscribe = watched.controller.subscribe(forceUpdate);
     return () => {
@@ -198,8 +203,13 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
 
   const state = watched.controller.snapshot;
   const task = state.task;
+  const currentOutcome = task ? taskOutcomeKey(task) : undefined;
   const eventRevision = state.revision;
   const viewState = watched.controller.viewState;
+
+  React.useEffect(() => {
+    if (task) taskOutcomeViews.markViewed(task);
+  }, [task, currentOutcome]);
 
   React.useEffect(() => {
     if (task?.state !== "running") return;

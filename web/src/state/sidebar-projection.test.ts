@@ -196,6 +196,92 @@ describe("empty messages", () => {
   });
 });
 
+describe("unread-first priority ordering", () => {
+  const unread = (ids: string[]) => (entry: TaskSummary) => ids.includes(entry.id);
+
+  it("floats unread outcomes above read tasks of the same priority", () => {
+    const read = { ...task("read", "/work/oga", "failed"), updatedAt: "2026-07-29T11:00:00Z" };
+    const fresh = { ...task("fresh", "/work/oga", "failed"), updatedAt: "2026-07-29T08:00:00Z" };
+    const groups = organize([read, fresh], undefined, "none", "priority", unread(["fresh"]));
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["fresh", "read"]);
+  });
+
+  it("keeps priority above unreadness across states", () => {
+    const readNeeds = task("read-needs", "/work/oga", "needs_input");
+    const unreadDone = task("unread-done", "/work/oga", "completed");
+    const groups = organize([unreadDone, readNeeds], undefined, "none", "priority", unread(["unread-done"]));
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["read-needs", "unread-done"]);
+  });
+
+  it("keeps the arrival order inside the unread and read buckets", () => {
+    const tasks = [
+      task("read-b", "/work/oga", "failed"),
+      task("unread-b", "/work/oga", "failed"),
+      task("read-a", "/work/oga", "failed"),
+      task("unread-a", "/work/oga", "failed"),
+    ];
+    const groups = organize(tasks, undefined, "none", "priority", unread(["unread-a", "unread-b"]));
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["unread-b", "unread-a", "read-b", "read-a"]);
+  });
+
+  it("leaves newest-first and recently-updated sorts untouched", () => {
+    const older = { ...task("older", "/work/oga", "completed"), createdAt: "2026-07-29T08:00:00Z", updatedAt: "2026-07-29T08:00:00Z" };
+    const newer = { ...task("newer", "/work/oga", "completed"), createdAt: "2026-07-29T09:00:00Z", updatedAt: "2026-07-29T09:00:00Z" };
+    const isUnread = unread(["older"]);
+    expect(organize([older, newer], undefined, "none", "recent", isUnread)[0].tasks.map((entry) => entry.id)).toEqual([
+      "newer",
+      "older",
+    ]);
+    expect(organize([older, newer], undefined, "none", "updated", isUnread)[0].tasks.map((entry) => entry.id)).toEqual([
+      "newer",
+      "older",
+    ]);
+  });
+
+  it("orders unread first inside every group without moving children", () => {
+    const root = { ...task("root", "/work/oga", "completed"), title: "Ship the page" };
+    const readChild = { ...task("read-child", "/work/oga", "completed"), parentTaskId: "root" };
+    const freshChild = { ...task("fresh-child", "/work/oga", "completed"), parentTaskId: "root" };
+    const groups = organize([root, readChild, freshChild], undefined, "parent", "priority", unread(["fresh-child"]));
+    expect(groups).toHaveLength(1);
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["fresh-child", "root", "read-child"]);
+  });
+
+  it("orders unread first inside status groups", () => {
+    const read = task("read", "/work/oga", "failed");
+    const fresh = task("fresh", "/work/oga", "failed");
+    const groups = organize([read, fresh], undefined, "status", "priority", unread(["fresh"]));
+    expect(groups.map((group) => group.id)).toEqual(["failed"]);
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["fresh", "read"]);
+  });
+
+  it("orders later pages and reloaded lists the same way", () => {
+    const state: SidebarState = {
+      ...defaultSidebarState(),
+      grouping: "none",
+      sort: "priority",
+      tasks: [task("read", "/work/oga", "failed"), task("fresh", "/work/oga", "failed")],
+    };
+    const projection = projectionFromState(state, unread(["fresh"]));
+    expect(projection.groups[0].tasks.map((entry) => entry.id)).toEqual(["fresh", "read"]);
+
+    const reloaded: SidebarState = { ...state, tasks: [...state.tasks] };
+    expect(projectionFromState(reloaded, unread(["fresh"])).groups[0].tasks.map((entry) => entry.id)).toEqual([
+      "fresh",
+      "read",
+    ]);
+  });
+
+  it("preserves the legacy priority order without an unread predicate", () => {
+    const tasks = [
+      task("done", "/work/oga", "completed"),
+      task("failed", "/work/oga", "failed"),
+    ];
+    const groups = organize(tasks, undefined, "none", "priority");
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["failed", "done"]);
+  });
+});
+
 describe("unread projection", () => {
   it("lists only visible rows", () => {
     const state: SidebarState = {

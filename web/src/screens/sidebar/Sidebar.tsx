@@ -74,6 +74,7 @@ import { formatCost, taskDuration } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
+import { isTaskWaiting, taskDotTone, taskOutcomeViews } from "@/state/task-outcome-views";
 
 const FILTERS_LABEL = "Filter and sort tasks";
 
@@ -196,6 +197,11 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   const sidebarRef = useMemo(() => sidebarController ?? new SidebarController(), [sidebarController]);
 
   const sidebar = useStore(sidebarRef as unknown as { snapshot: SidebarState; subscribe: (l: () => void) => () => void });
+  const taskOutcomeVersion = useSyncExternalStore(
+    taskOutcomeViews.subscribe,
+    () => taskOutcomeViews.snapshot,
+    () => 0,
+  );
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
@@ -227,8 +233,8 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   }, [sidebar.tasks]);
 
   const projection = useMemo(
-    () => projectionFromState(sidebar),
-    [sidebar.tasks, sidebar.search, sidebar.projectFilter, sidebar.grouping, sidebar.sort],
+    () => projectionFromState(sidebar, (task) => taskOutcomeViews.isOrderingUnread(task)),
+    [sidebar.tasks, sidebar.search, sidebar.projectFilter, sidebar.grouping, sidebar.sort, taskOutcomeVersion],
   );
   const effectiveRows = useMemo(
     () => projectionRows(projection, sidebar.collapsed, sidebar.grouping),
@@ -333,18 +339,18 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   }, [initialTask, sidebarRef]);
 
   useEffect(() => {
+    taskOutcomeViews.observeTasks(sidebar.tasks);
+  }, [sidebar.tasks, taskOutcomeVersion]);
+
+  useEffect(() => {
     void sidebarRef.refresh();
   }, [sidebarRef]);
 
   useEffect(() => {
-    void streamStatus().then((result) => {
-      if (result.ok) {
-        connectionState.current = result.value.connected ? "connected" : "reconnecting";
-        connectionWasLive.current ||= result.value.connected;
-        sidebarRef.applyConnection(result.value);
-      }
-    });
+    let active = true;
+    let receivedStatus = false;
     const unsub = onBrokerStatus((status) => {
+      receivedStatus = true;
       const wasConnected = connectionState.current === "connected";
       if (!status.connected && wasConnected && connectionWasLive.current) {
         toast.error("Connection lost", { description: "Live task updates are reconnecting." });
@@ -356,7 +362,16 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
       connectionState.current = status.connected ? "connected" : "reconnecting";
       sidebarRef.applyConnection(status);
     });
-    return unsub;
+    void streamStatus().then((result) => {
+      if (!active || receivedStatus || !result.ok) return;
+      connectionState.current = result.value.connected ? "connected" : "reconnecting";
+      connectionWasLive.current ||= result.value.connected;
+      sidebarRef.applyConnection(result.value);
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
   }, [sidebarRef]);
 
   useEffect(() => {
@@ -949,6 +964,17 @@ function SidebarRowView({
   const subtitle = taskSubtitle(task, sidebar);
   const label = displayLabel(task);
   const isSelected = sidebar.selectedTask === task.id;
+  const outcomeViewed = taskOutcomeViews.isViewed(task);
+  const waiting = isTaskWaiting(task);
+  const status = taskStatusLabel(task);
+  const viewLabel = outcomeViewed ? "Viewed" : "New update";
+  const dotClassName = [
+    "task-dot",
+    `task-dot-${task.state}`,
+    `task-dot-tone-${taskDotTone(task.state)}`,
+    `task-dot-${outcomeViewed ? "viewed" : "unread"}`,
+    waiting && "task-dot-waiting",
+  ].filter(Boolean).join(" ");
   const href = `/tasks/${task.id}`;
   const className = [
     "sidebar-task",
@@ -977,9 +1003,9 @@ function SidebarRowView({
         }}
         onContextMenu={(event) => onContextMenu(event, task)}
       >
-        <span className={`task-dot task-dot-${task.state}`} aria-hidden="true" />
+        <span className={dotClassName} aria-hidden="true" title={status} />
         <span className="visually-hidden">
-          {taskStatusLabel(task)}
+          {`${status} · ${viewLabel}`}
         </span>
         <span className="task-copy">
           <span className="task-line">

@@ -32,8 +32,10 @@ export interface SidebarProjection {
   projects: TaskProject[];
 }
 
-export function projectionFromState(state: SidebarState): SidebarProjection {
-  const groups = organize(matching(state.tasks, searchTerm(state)), state.projectFilter, state.grouping, state.sort);
+export type TaskUnread = (task: TaskSummary) => boolean;
+
+export function projectionFromState(state: SidebarState, isUnread?: TaskUnread): SidebarProjection {
+  const groups = organize(matching(state.tasks, searchTerm(state)), state.projectFilter, state.grouping, state.sort, isUnread);
   const projectNodes = state.grouping === "project" ? projectTree(groups) : undefined;
   return { groups, projectNodes, projects: projects(state.tasks) };
 }
@@ -252,6 +254,7 @@ export function organize(
   project: string | undefined,
   grouping: TaskGrouping,
   sort: TaskSort,
+  isUnread?: TaskUnread,
 ): TaskGroup[] {
   const known = new Set(tasks.map((task) => projectId(task)));
   const activeProject = project !== undefined && known.has(project) ? project : undefined;
@@ -259,16 +262,17 @@ export function organize(
 
   switch (grouping) {
     case "none":
-      return [{ id: "all", title: undefined, tasks: sorted(scoped, sort) }];
+      return [{ id: "all", title: undefined, tasks: sorted(scoped, sort, isUnread) }];
     case "project":
       return sortedGroups(
         bucket(scoped, (task) => [projectId(task), projectName(projectId(task))]),
         sort,
+        isUnread,
       );
     case "parent":
-      return sortedGroups(parentGroups(scoped), sort);
+      return sortedGroups(parentGroups(scoped), sort, isUnread);
     case "status":
-      return sortedGroups(statusGroups(scoped), sort);
+      return sortedGroups(statusGroups(scoped), sort, isUnread);
   }
 }
 
@@ -402,19 +406,32 @@ function statusGroups(tasks: TaskSummary[]): TaskGroup[] {
   return groups;
 }
 
-function sorted(tasks: TaskSummary[], sort: TaskSort): TaskSummary[] {
+function sorted(tasks: TaskSummary[], sort: TaskSort, isUnread?: TaskUnread): TaskSummary[] {
   switch (sort) {
     case "recent":
       return tasks.slice().sort((left, right) => compareTimes(right.createdAt, left.createdAt));
     case "updated":
       return tasks.slice().sort((left, right) => compareTimes(right.updatedAt, left.updatedAt));
     case "priority":
-      return tasks.slice().sort((left, right) => priorityRank(left.state) - priorityRank(right.state));
+      // New outcomes float above read tasks of the same priority so they are
+      // easy to find. Date sorts keep their selected meaning untouched.
+      if (isUnread === undefined) {
+        return tasks.slice().sort((left, right) => priorityRank(left.state) - priorityRank(right.state));
+      }
+      return tasks.slice().sort((left, right) => {
+        const priority = priorityRank(left.state) - priorityRank(right.state);
+        if (priority !== 0) return priority;
+        return unreadRank(left, isUnread) - unreadRank(right, isUnread);
+      });
   }
 }
 
-function sortedGroups(groups: TaskGroup[], sort: TaskSort): TaskGroup[] {
-  return groups.map((group) => ({ ...group, tasks: sorted(group.tasks, sort) }));
+function unreadRank(task: TaskSummary, isUnread: TaskUnread): number {
+  return isUnread(task) ? 0 : 1;
+}
+
+function sortedGroups(groups: TaskGroup[], sort: TaskSort, isUnread?: TaskUnread): TaskGroup[] {
+  return groups.map((group) => ({ ...group, tasks: sorted(group.tasks, sort, isUnread) }));
 }
 
 function parentDirectory(path: string): string {
