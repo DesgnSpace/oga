@@ -3030,6 +3030,16 @@ h1 {
     white-space: pre;
 }
 
+.diff-split-row > .trace-diff-line {
+    min-width: 0;
+}
+
+.diff-split-row > .trace-diff-line code {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .trace-diff-removed {
     background: color-mix(in srgb, var(--color-danger) 12%, transparent);
 }
