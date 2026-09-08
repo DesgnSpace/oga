@@ -3,11 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Oga is an orchestrator for coding agents. It decides which of your AI coding tools — Codex, Claude Code, Pi, OpenCode, Antigravity — takes each piece of work, and runs them in parallel.">
+  <title>Oga — Desktop Orchestrator for Coding Agents</title>
+  <meta name="description" content="Oga is a macOS orchestrator for coding agents. Hand work out from Claude Code, Codex, OpenCode, Pi, or Antigravity across your accounts in parallel.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga - Give your coding agent more hands</title>
+  <link rel="canonical" href="https://oga.desgn.space/">
   <link rel="icon" href="logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Oga">
+  <meta property="og:title" content="Oga — Desktop Orchestrator for Coding Agents">
+  <meta property="og:description" content="Run coding agents in parallel across the accounts you already pay for, right from inside the AI coding tool you already use.">
+  <meta property="og:url" content="https://oga.desgn.space/">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Oga — Desktop Orchestrator for Coding Agents">
+  <meta name="twitter:description" content="Run coding agents in parallel across the accounts you already pay for, right from inside the AI coding tool you already use.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Oga",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS 14+",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "Desktop orchestrator for coding agents. Connects to Claude Code, Codex, OpenCode, Pi, or Antigravity over MCP to run delegated tasks in parallel across accounts.",
+    "url": "https://oga.desgn.space/",
+    "downloadUrl": "https://downloads.desgn.space/oga/Oga-latest.dmg",
+    "image": "https://oga.desgn.space/og-image.png",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -35,17 +75,17 @@
         <p class="install-note">Requires macOS 14 or later.</p>
         <ul class="platform-list" aria-label="Platform availability">
           <li class="platform platform-available">
-            <img class="platform-mark" src="logos/macos.svg" alt="" width="24" height="24">
+            <img class="platform-mark" src="logos/macos.svg" alt="macOS logo" width="24" height="24">
             <span>macOS</span>
             <strong>Available</strong>
           </li>
           <li class="platform platform-soon">
-            <img class="platform-mark" src="logos/windows.svg" alt="" width="24" height="24">
+            <img class="platform-mark" src="logos/windows.svg" alt="Windows logo" width="24" height="24">
             <span>Windows</span>
             <strong>Coming soon</strong>
           </li>
           <li class="platform platform-soon">
-            <img class="platform-mark" src="logos/linux.svg" alt="" width="24" height="24">
+            <img class="platform-mark" src="logos/linux.svg" alt="Linux logo" width="24" height="24">
             <span>Linux</span>
             <strong>Coming soon</strong>
           </li>
@@ -76,31 +116,31 @@
         </div>
         <ul class="agent-row">
           <li class="agent">
-            <img class="agent-mark" src="logos/codex.svg" alt="" width="28" height="28">
+            <img class="agent-mark" src="logos/codex.svg" alt="Codex logo" width="28" height="28">
             <span class="agent-name">Codex</span>
             <span class="agent-task">Builds the feature</span>
             <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
           </li>
           <li class="agent">
-            <img class="agent-mark" src="logos/claude-code.svg" alt="" width="28" height="28">
+            <img class="agent-mark" src="logos/claude-code.svg" alt="Claude Code logo" width="28" height="28">
             <span class="agent-name">Claude Code</span>
             <span class="agent-task">Writes the tests</span>
             <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
           </li>
           <li class="agent">
-            <img class="agent-mark" src="logos/pi.svg" alt="" width="28" height="28">
+            <img class="agent-mark" src="logos/pi.svg" alt="Pi logo" width="28" height="28">
             <span class="agent-name">Pi</span>
             <span class="agent-task">Reviews the change</span>
             <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
           </li>
           <li class="agent">
-            <img class="agent-mark" src="logos/opencode.svg" alt="" width="28" height="28">
+            <img class="agent-mark" src="logos/opencode.svg" alt="OpenCode logo" width="28" height="28">
             <span class="agent-name">OpenCode</span>
             <span class="agent-task">Updates the docs</span>
             <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
           </li>
           <li class="agent">
-            <img class="agent-mark" src="logos/antigravity.svg" alt="" width="28" height="28">
+            <img class="agent-mark" src="logos/antigravity.svg" alt="Antigravity logo" width="28" height="28">
             <span class="agent-name">Antigravity</span>
             <span class="agent-task">Checks the build</span>
             <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
