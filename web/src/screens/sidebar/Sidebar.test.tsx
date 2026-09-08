@@ -89,6 +89,23 @@ describe("the sidebar", () => {
     expect(link.textContent).toContain("Viewed");
   });
 
+  it("keeps the running pulse class after direct navigation marks it viewed", async () => {
+    const running = task("running", "running task");
+    setTransport(transport({ tasks: [running] }));
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    const row = await screen.findByText("running task");
+    const link = row.closest("a")!;
+    act(() => taskOutcomeViews.markViewed(running));
+
+    const dot = link.querySelector(".task-dot")!;
+    expect(dot.className).toContain("task-dot-running");
+    expect(dot.className).toContain("task-dot-viewed");
+    expect(dot.className).not.toContain("task-dot-waiting");
+  });
+
   it("does not mark a task viewed from selection alone", async () => {
     setTransport(transport());
     const selected = mock();

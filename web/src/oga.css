@@ -1072,10 +1072,6 @@ a {
     background: transparent;
 }
 
-.task-sidebar .task-dot-viewed.task-dot-running {
-    animation: none;
-}
-
 .task-sidebar .task-dot-waiting {
     --task-dot-color: var(--color-warning);
     border: 1.5px dashed var(--task-dot-color);

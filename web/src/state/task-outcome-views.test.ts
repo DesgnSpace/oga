@@ -63,6 +63,55 @@ describe("task outcome views", () => {
     expect(store.isViewed(failed)).toBe(true);
   });
 
+  it("keeps running activity distinct when direct navigation marks it viewed", () => {
+    const store = new TaskOutcomeViewStore();
+    const running = task("task", "running");
+
+    store.setActiveTask(running.id);
+    store.observeTasks([running]);
+    store.markViewed(running);
+
+    expect(store.isViewed(running)).toBe(true);
+    expect(store.isOrderingUnread(running)).toBe(true);
+    expect(isTaskWaiting(running)).toBe(false);
+    expect(taskDotTone(running.state)).toBe("muted");
+  });
+
+  it("keeps read state separate through waiting, input, and settled outcomes", () => {
+    const store = new TaskOutcomeViewStore();
+    const running = task("task", "running");
+    const waiting = task("task", "pending", {
+      hold: {
+        kind: "dependency",
+        waitingOn: "blocker",
+        note: "Waiting for another task",
+        expiresAt: "2026-09-09T10:00:00Z",
+      },
+    });
+    const needsInput = task("task", "needs_input", { question: "Choose a path" });
+    const completed = task("task", "completed");
+    const failed = task("task", "failed", { error: "worker stopped" });
+
+    store.markViewed(running);
+    store.observeTasks([waiting]);
+    expect(store.isViewed(waiting)).toBe(false);
+    expect(isTaskWaiting(waiting)).toBe(true);
+    expect(taskDotTone(waiting.state)).toBe("warning");
+
+    store.observeTasks([needsInput]);
+    expect(store.isViewed(needsInput)).toBe(false);
+    expect(isTaskWaiting(needsInput)).toBe(false);
+    expect(taskDotTone(needsInput.state)).toBe("info");
+
+    store.observeTasks([completed]);
+    expect(store.isViewed(completed)).toBe(false);
+    expect(taskDotTone(completed.state)).toBe("success");
+
+    store.observeTasks([failed]);
+    expect(store.isViewed(failed)).toBe(false);
+    expect(taskDotTone(failed.state)).toBe("danger");
+  });
+
   it("keeps rapid task switches isolated", () => {
     const store = new TaskOutcomeViewStore();
     const first = task("first", "running");
