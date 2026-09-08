@@ -16,6 +16,21 @@
 - A later completion, failure, or input request starts unread again.
 - An outcome arriving while its task is open is treated as viewed.
 
+## Ordering
+
+- The default priority list floats new outcomes above viewed tasks of the same priority, so fresh results are easy to find.
+- Priority still decides first: a viewed request for input stays above a new completed result.
+- Tasks of equal priority keep their existing order inside the new and viewed groups.
+- Newest-first and recently-updated sorts keep their selected meaning and do not float new outcomes.
+- Grouping, project filters, collapsed groups, and loaded pages all work as before; ordering applies within each group and to every loaded page, including after reload.
+
+## Selection
+
+- Opening a task marks its outcome viewed at once, so its dot updates immediately.
+- The opened row keeps its place until selection moves to another task, so it never shifts underneath the pointer.
+- New outcomes arriving in other tasks still move to the top immediately.
+- A new outcome arriving in the open task counts as viewed while it stays open.
+
 ## Persistence
 
 Viewed outcomes use `localStorage` under `taskOutcomeViews`.

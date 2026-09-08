@@ -104,6 +104,9 @@ function boundedEntries(entries: Map<string, StoredTaskOutcomeView>): Map<string
 export class TaskOutcomeViewStore {
   private entries = boundedEntries(loadTaskOutcomeViews());
   private activeTaskId: string | undefined;
+  private pinnedTaskId: string | undefined;
+  private pinnedOutcome: string | undefined;
+  private activeNeedsDecision = false;
   private version = 0;
   private readonly listeners = new Set<() => void>();
 
@@ -118,8 +121,23 @@ export class TaskOutcomeViewStore {
 
   isViewed(task: TaskOutcomeSource): boolean {
     if (this.activeTaskId === task.id) return true;
-    const entry = this.entries.get(task.id);
-    return entry?.outcome === taskOutcomeKey(task) && entry.viewed;
+    return this.storedViewed(task);
+  }
+
+  /**
+   * Whether a task counts as unread for list ordering. Opening an outcome
+   * marks its dot read at once, but the row keeps its unread position until
+   * the open task changes, so the selected row never moves underneath the
+   * pointer. Genuinely new unread outcomes still order first immediately.
+   */
+  isOrderingUnread(task: TaskOutcomeSource): boolean {
+    const outcome = taskOutcomeKey(task);
+    if (this.pinnedTaskId === task.id && this.pinnedOutcome === outcome) return true;
+    if (task.id === this.activeTaskId) {
+      if (this.activeNeedsDecision) return !this.storedViewed(task);
+      return false;
+    }
+    return !this.isViewed(task);
   }
 
   observeTasks(tasks: readonly TaskOutcomeSource[]): void {
@@ -137,26 +155,48 @@ export class TaskOutcomeViewStore {
   setActiveTask(taskId: string | undefined): void {
     if (this.activeTaskId === taskId) return;
     this.activeTaskId = taskId;
+    this.pinnedTaskId = undefined;
+    this.pinnedOutcome = undefined;
+    this.activeNeedsDecision = taskId !== undefined;
     this.notify();
   }
 
   clearActiveTask(taskId: string): void {
     if (this.activeTaskId !== taskId) return;
     this.activeTaskId = undefined;
+    this.pinnedTaskId = undefined;
+    this.pinnedOutcome = undefined;
+    this.activeNeedsDecision = false;
     this.notify();
   }
 
   resetForTests(): void {
     this.entries = new Map();
     this.activeTaskId = undefined;
+    this.pinnedTaskId = undefined;
+    this.pinnedOutcome = undefined;
+    this.activeNeedsDecision = false;
     this.version = 0;
     writeStorage(TASK_OUTCOME_VIEWS_KEY, "[]");
     this.notify();
   }
 
+  private storedViewed(task: TaskOutcomeSource): boolean {
+    const entry = this.entries.get(task.id);
+    return entry?.outcome === taskOutcomeKey(task) && entry.viewed;
+  }
+
   private observe(task: TaskOutcomeSource, viewed: boolean): boolean {
     const outcome = taskOutcomeKey(task);
     const current = this.entries.get(task.id);
+    if (task.id === this.activeTaskId && viewed && this.activeNeedsDecision) {
+      const wasUnread = current?.outcome !== outcome || !current.viewed;
+      if (wasUnread) {
+        this.pinnedTaskId = task.id;
+        this.pinnedOutcome = outcome;
+      }
+      this.activeNeedsDecision = false;
+    }
     if (current?.outcome === outcome && (!viewed || current.viewed)) return false;
     this.entries.set(task.id, {
       outcome,

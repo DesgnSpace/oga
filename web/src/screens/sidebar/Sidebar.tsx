@@ -233,8 +233,8 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   }, [sidebar.tasks]);
 
   const projection = useMemo(
-    () => projectionFromState(sidebar),
-    [sidebar.tasks, sidebar.search, sidebar.projectFilter, sidebar.grouping, sidebar.sort],
+    () => projectionFromState(sidebar, (task) => taskOutcomeViews.isOrderingUnread(task)),
+    [sidebar.tasks, sidebar.search, sidebar.projectFilter, sidebar.grouping, sidebar.sort, taskOutcomeVersion],
   );
   const effectiveRows = useMemo(
     () => projectionRows(projection, sidebar.collapsed, sidebar.grouping),

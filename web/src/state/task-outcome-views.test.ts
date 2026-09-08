@@ -124,3 +124,95 @@ describe("task outcome views", () => {
     expect(isTaskWaiting(task("question", "needs_input", { hold }))).toBe(false);
   });
 });
+
+describe("task outcome ordering", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("marks the dot read at once but keeps the open row's unread position", () => {
+    const store = new TaskOutcomeViewStore();
+    const completed = task("task", "completed");
+
+    store.observeTasks([completed]);
+    expect(store.isOrderingUnread(completed)).toBe(true);
+
+    store.setActiveTask(completed.id);
+    expect(store.isViewed(completed)).toBe(true);
+    expect(store.isOrderingUnread(completed)).toBe(true);
+
+    store.observeTasks([completed]);
+    store.markViewed(completed);
+    expect(store.isViewed(completed)).toBe(true);
+    expect(store.isOrderingUnread(completed)).toBe(true);
+  });
+
+  it("drops the opened row to the read position once the open task changes", () => {
+    const store = new TaskOutcomeViewStore();
+    const completed = task("task", "completed");
+
+    store.observeTasks([completed]);
+    store.setActiveTask(completed.id);
+    store.observeTasks([completed]);
+    expect(store.isOrderingUnread(completed)).toBe(true);
+
+    store.setActiveTask("other");
+    expect(store.isOrderingUnread(completed)).toBe(false);
+
+    store.setActiveTask(completed.id);
+    store.observeTasks([completed]);
+    expect(store.isOrderingUnread(completed)).toBe(false);
+    store.clearActiveTask(completed.id);
+    expect(store.isOrderingUnread(completed)).toBe(false);
+  });
+
+  it("does not lift an already-viewed task when it is opened", () => {
+    const store = new TaskOutcomeViewStore();
+    const running = task("task", "running");
+
+    store.markViewed(running);
+    store.setActiveTask(running.id);
+    store.observeTasks([running]);
+
+    expect(store.isViewed(running)).toBe(true);
+    expect(store.isOrderingUnread(running)).toBe(false);
+  });
+
+  it("treats a new outcome arriving while open as viewed for ordering", () => {
+    const store = new TaskOutcomeViewStore();
+    const completed = task("task", "completed");
+    const failed = task("task", "failed", { error: "worker stopped" });
+
+    store.observeTasks([completed]);
+    store.setActiveTask(completed.id);
+    store.observeTasks([completed]);
+    expect(store.isOrderingUnread(completed)).toBe(true);
+
+    expect(store.isOrderingUnread(failed)).toBe(false);
+    store.observeTasks([failed]);
+    expect(store.isOrderingUnread(failed)).toBe(false);
+  });
+
+  it("orders a genuinely new unread arrival first immediately", () => {
+    const store = new TaskOutcomeViewStore();
+    const open = task("open", "completed");
+    const fresh = task("fresh", "completed");
+
+    store.observeTasks([open]);
+    store.setActiveTask(open.id);
+    store.observeTasks([open]);
+
+    store.observeTasks([open, fresh]);
+    expect(store.isOrderingUnread(open)).toBe(true);
+    expect(store.isOrderingUnread(fresh)).toBe(true);
+  });
+
+  it("restores ordering from storage on startup without the open-row pin", () => {
+    const completed = task("task", "completed");
+    const first = new TaskOutcomeViewStore();
+    first.markViewed(completed);
+
+    const restarted = new TaskOutcomeViewStore();
+    expect(restarted.isOrderingUnread(completed)).toBe(false);
+    expect(restarted.isOrderingUnread(task("fresh", "completed"))).toBe(true);
+  });
+});

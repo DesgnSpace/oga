@@ -144,6 +144,22 @@ describe("the sidebar", () => {
     expect(screen.getAllByText(/^Unknown worker/)).toHaveLength(2);
   });
 
+  it("rebuilds the projection when an outcome view changes", async () => {
+    setTransport(transport());
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    await screen.findByText("second task");
+    projectionFromState.mockClear();
+
+    act(() => {
+      taskOutcomeViews.markViewed(task("two", "second task"));
+    });
+
+    expect(projectionFromState).toHaveBeenCalled();
+  });
+
   it("keeps the projection stable for unrelated state changes", async () => {
     setTransport(transport());
     const controller = new SidebarController();
