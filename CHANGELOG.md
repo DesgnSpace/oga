@@ -3,17 +3,14 @@
 ## Unreleased
 
 - Activity rows now name work done through Oga in plain language and show concise results when you expand them, instead of exposing technical tool names or raw response data.
+- Work you hand off now carries a brief the size of the job. A one-line request stays one line, instead of being padded out with headings and numbered steps it doesn't need.
 
 ## 0.0.11 - 2026-09-08
 
-- The landing page's "For bigger jobs" section now leads with what you get — work on a branch of its own, reviewed as a branch or pull request — in three steps, with no jargon and no shell command.
-- The site now explains how Oga differs from the other agent tools, naming and linking them: you keep the coding agent you already use and hand work out from inside it.
-- The landing page now explains what you get in plain terms up front, and shows how to send a task to its own checkout so it never touches your working folder until you're ready to merge.
 - Every task in the list now names the project it runs in, right after the worker. Work with a copy of its own shows the branch too, so two copies of one project never look alike.
 - Oga now tells you when a task finishes, stops short, or needs an answer, even with the window closed. Click the notification to open that task. The task you are already reading stays quiet, tasks landing together arrive as one notification, and you can turn all of it off under Settings ▸ Notifications.
 - Work you hand off now reaches the tools you already connected for that project, instead of only Oga's own.
 - Work you hand off stays where you sent it. Ask for it to hand work onward and it can split the job up itself; otherwise it never can.
-- Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
 - Live task updates stay responsive during busy periods, and the app catches up if it falls behind.
 - Task durations now count only time spent running, not scheduled or interrupted waiting time.
 - Expanding a search step in the activity view now shows what it found, or says plainly that nothing matched, instead of an empty panel.
@@ -21,7 +18,7 @@
 ## 0.0.10 - 2026-09-07
 
 - Pi activity events now appear while a run is still in progress.
-- The About panel now reports the installed release version and build type correctly.
+- The About panel now shows the version you are actually running.
 
 ## 0.0.9 - 2026-09-07
 
@@ -29,7 +26,6 @@
 - `oga query` now returns up to 10 candidates by default. Delegated workers can add `--code` when they want code lookups to include the matching source without opening another file.
 - Pi runs now show thinking, replies, tool calls, and their results in the activity view.
 - Update notes now show headings, lists, code, and links correctly in the desktop app.
-- Docs and changelog sections now have shareable links you can copy directly.
 - Pi runs now include token counts and estimated cost in usage summaries.
 - Models switched off in Settings can no longer receive delegated work.
 
@@ -37,11 +33,10 @@
 
 ### Removed
 
-- `difficulty` is gone from `oga delegate`, the delegate MCP tool, and the routing API. Sending it now gets a clear error naming what to send instead — `kind` for what the work is, `effort` for how hard the model thinks — rather than a silent drop.
+- `difficulty` is gone from `oga delegate`. Sending it now gets a clear error naming what to send instead — `kind` for what the work is, `effort` for how hard the model thinks — rather than being ignored in silence.
 
 ### Changed
 
-- The docs and the site now say what Oga is in one consistent way: an orchestrator for coding agents — the layer above the AI coding tools you already use, deciding which one takes each piece of work and carrying it there and back. Pages that called it something else have been corrected.
 - Which model a delegated task lands on is decided by `kind` and a loved rule, never a hardness score. `kind` gains a `ux` subject alongside the existing ones.
 - Reasoning effort now comes from `effort` when you set it, else a loved model's own configured effort, else that model's own default — never guessed from how hard the work sounds.
 
@@ -57,24 +52,24 @@
 
 - Release manifests now include the release notes shown in the update prompt.
 - `oga love --when` now routes by subject as well as class: `oga love opencode:muse --when ui` sends UI work there, with `backend`, `database`, `docs`, `tests`, `review`, `research`, and `refactor` alongside the existing kinds. A subject rule wins over a class rule, and `oga delegate --kind <subject>` names the subject when the task text never says so.
-- `--kind` (in `oga delegate`, the delegate MCP tool, and the routing API) now also names a class of work — `mechanical`, `general`, `build`, `context`, `reasoning` — not just a subject, so a coding agent that already knows the work is, say, mechanical or a build reaches its loved model for that kind even when the brief itself reads like something else.
+- `--kind` now also names a class of work — `mechanical`, `general`, `build`, `context`, `reasoning` — not just a subject, so a coding agent that already knows the work is, say, mechanical or a build reaches its loved model for that kind even when the brief itself reads like something else.
 - `oga love` now takes an ordered list of destinations per rule, like `oga love opencode:luna:max claude:opus:low --when ui`. The first destination that can take the work runs it; when it is rate-limited, out of credits, or otherwise unavailable, the next one runs instead, and the task record says which one ran and why it was not the first. Each destination is `worker:model:effort` with the model or the effort left out.
-- Work a delegated worker ships now carries a short stamp naming the provider, model, and effort behind it: a `Co-Authored-By:` trailer on commits it creates, so git credits the run. Turn it off per project with `worker: attribution: false` in `.oga.yaml`, or everywhere with the same key in `~/.oga.yaml`.
+- Work a delegated worker ships now says which worker, model, and effort produced it, credited on the commits it makes. Turn it off per project with `worker: attribution: false` in `.oga.yaml`, or everywhere with the same key in `~/.oga.yaml`.
 - `oga archive --delete-branch` can now remove a worktree task's local branch safely, while explaining when Git keeps it.
 - The Usage window can now switch its activity view between the month grid and charts: cost and tokens over the selected range, plus a cost-by-model breakdown. The grid stays the default.
 
 ### Removed
 
-- The project map is gone. `oga query` answers the same questions in plain language and points at the exact line, so browsing a generated listing of files and symbols no longer has a place. Anything the old map stored is cleaned up the first time this version runs. A worker prompt you customized to include `{{context_map}}` keeps working: that spot now fills with nothing rather than showing the placeholder.
+- The project map is gone. Asking `oga query` a question in plain language points at the exact line, so browsing a generated listing no longer has a place. Anything the old map kept is cleaned up the first time this version runs, and a worker prompt that mentioned it keeps working.
 
 ### Changed
 
 - The worker's default habits — clearing small reversible obstacles itself, looking code up with `oga query` first, and delivering through checks, a commit, and a pull request — moved out of the app into the worker rules you can rewrite or delete in Settings. If you already customized your rules, they stay exactly as you left them.
-- The worker prompt is now plain text you own top to bottom: reorder the sections, rewrite one, or drop one, with `{{brief}}`, `{{scope}}`, `{{memories}}`, `{{attribution}}`, and `{{reporting}}` filled in per task and nothing appended behind your back. Prompts customized before templates existed keep working untouched, gaining only the task slot first.
+- The worker prompt is now plain text you own top to bottom: reorder the sections, rewrite one, or drop one. Nothing is appended behind your back, and a prompt you had already customized keeps working.
 - Cleaned up the task activity timeline for Claude runs: shell commands now show a short summary instead of the full command line, and consecutive commands fold into one row with a count.
 - `oga query` now finds constants, types, class members, enum cases, fields, and documentation headings, not only functions.
-- Answers cite Rust, TypeScript, TSX, JavaScript, Swift, Python, Go, PHP, and Markdown from the real syntax of each, so a name inside a comment or a string is no longer mistaken for a definition.
-- Asking about a setting lands on the exact line in a JSON, TOML, or YAML file, named by its full path through the file, so "sparkle feed url" points at the key that holds it.
+- Answers read each language properly, so a name inside a comment or a piece of text is no longer mistaken for the real thing.
+- Asking about a setting lands on the exact line that holds it, named in full, so "sparkle feed url" points straight at it.
 - `oga handoff <task-id> --worker <name>` moves a task to another worker or model from the terminal, keeping its id, request, and place in line.
 - Looking something up returns in milliseconds, and a project you have not touched is ready again almost instantly.
 - The task footer now shows how full the worker's context is, and how far it has grown since the run started.
@@ -110,24 +105,19 @@
 
 - Added in-app updates for the Oga desktop app.
 - Guided new desktop users to connect their AI before delegating work.
-- Add task text search for MCP and `oga tasks --query`.
+- Search your tasks by their text, in the app and with `oga tasks --query`.
 - Added per-kind default model rules with `oga love --when`.
 - Added `oga query --limit` and `oga query --code`.
 - Added scheduled starts for delegated and resumed work.
-- Added task-specific next-step guidance to MCP responses.
+- Every task now suggests what you can do with it next.
 - Added queued follow-up instructions when a running worker cannot accept them.
 - Showed the files and images handed to a worker beside the request that sent them.
-- Added public documentation for installation, setup, delegation, task follow-up, worktrees, local data, and release notes.
-
-### Changed
-
-- Consolidated the maintained reference docs.
 
 ### Fixed
 
 - Kept toast notifications inside the desktop window at every size.
-- Kept Codex and Pi account directories separate for each worker profile.
-- Installed source builds beside released Oga without sharing an app identity.
+- Each worker profile now keeps its own Codex and Pi sign-in, instead of sharing one.
+- A build you made yourself now installs alongside the released Oga instead of replacing it.
 - Let workers clear local, reversible obstacles before reporting a blocker.
 - Moved "Show thinking" next to the reply box, out of the empty space above the transcript.
 - Kept the task menu's "Move to another worker" from being cut off at the top of the window.
@@ -136,6 +126,4 @@
 
 ### Fixed
 
-- Packaged the broker sidecar for supported macOS architectures.
-- Located the bundled broker beside the app executable.
-- Let Tauri handle app notarization during publishing.
+- Oga now installs and launches cleanly on both Intel and Apple silicon Macs.

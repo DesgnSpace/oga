@@ -119,6 +119,11 @@ const DELETE_WORKTREE_DESCRIPTION: &str = concat!(
     "Archiving already removes an idle checkout; this removes one without archiving the task."
 );
 
+const PROMPT_DESCRIPTION: &str = concat!(
+    "The brief the worker runs, as markdown, 1 to 64000 characters. It is the only account of the work the worker gets, since it cannot see this conversation, so anything it needs to know has to be in it. ",
+    "It is sent as written: a one-line brief arrives as one line, a pasted bug report arrives as that report. Headings and numbered steps earn their length on work with several parts, and get in the way on work with one. ",
+    "Oga wraps it with the directory's memories, the scope, and its own reporting protocol before sending it; inspect `fields: [\"shippedPrompt\"]` returns the result."
+);
 const SCOPE_DESCRIPTION: &str = concat!(
     "Paths the worker may read and write, relative to the task's directory: a literal file path, `dir/**` for a subtree, or `**` for the whole tree. Both lists are required, at most 200 entries each. ",
     "Read access never carries write access. A write entry names the directory written into rather than the file, and a directory that does not exist yet needs the `/**` suffix — so an output directory that checks or builds write into has to be listed there for those checks to run. ",
@@ -389,7 +394,7 @@ fn delegate_tool() -> Value {
             "prompt".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 64000 }),
-                "The brief the worker runs, as markdown, 1 to 64000 characters. It is the only account of the work the worker gets: it cannot see this conversation. Goal, context, required behaviour, numbered instructions, guardrails and output format all belong here. Oga wraps it with the directory's memories, the scope, and its own reporting protocol before sending it; inspect `fields: [\"shippedPrompt\"]` returns the result.",
+                PROMPT_DESCRIPTION,
             ),
         ),
         (
@@ -762,7 +767,7 @@ fn shared_tools() -> Vec<Value> {
             "instruction".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 64000 }),
-                "What the continued run should do next, in a few sentences, up to 64000 characters. Optional when retrying a run that failed, was cancelled, ended blocked, or has not started; required to follow up on one that completed. It is not a second brief: the session already holds the goal, guardrails, scope and reporting format, so it carries only what changed.",
+                "What the continued run should do next, in a few sentences, up to 64000 characters. Optional when retrying a run that failed, was cancelled, ended blocked, or has not started; required to follow up on one that completed. It is not a second brief: the session already holds the original one and everything the worker read, so it carries only what changed.",
             ),
         ),
         (

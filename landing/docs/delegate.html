@@ -3,12 +3,43 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="What's worth handing off, how to ask for it, and which files it's allowed to touch.">
+  <title>Hand Off Work to Coding Agents — Oga Documentation</title>
+  <meta name="description" content="How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Hand off work</title>
+  <link rel="canonical" href="https://oga.desgn.space/docs/delegate.html">
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Hand Off Work to Coding Agents — Oga Documentation">
+  <meta property="og:description" content="How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/delegate.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Hand Off Work to Coding Agents — Oga Documentation">
+  <meta name="twitter:description" content="How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Hand off your first piece of work",
+    "description": "How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.",
+    "url": "https://oga.desgn.space/docs/delegate.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -64,9 +95,9 @@
           <p>"Send the failing test suite off to a fast model."</p>
           <p>"Have someone else write the changelog while I keep going on the API."</p>
         </div>
-        <p>Your agent writes the brief, names the folder the work happens in, and either lets Oga choose the account and model or names one itself. You get an ID back as soon as the work starts. From there it runs on its own account, unattended.</p>
+        <p>Your agent writes the brief, names the folder the work happens in, and either lets Oga choose the account and model or names one itself. The brief goes out as written, at whatever length the job needs — a sentence for a small job, more when there is more to say. You get an ID back as soon as the work starts. From there it runs on its own account, unattended.</p>
 
-        <h2 id="from-the-terminal">Or straight from your shell<a class="heading-anchor" href="#from-the-terminal" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <h2 id="from-the-terminal">Or straight from your shell<a class="heading-anchor" href="#from-the-terminal" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>When you already know what you want done, you don't need to go through an agent. <code>oga delegate</code> starts the work and hands you its ID:</p>
         <pre><code>oga delegate "Port the CSV importer to the new parser and keep its tests green."</code></pre>
         <p>It runs in the folder you're standing in, on the account and model Oga picks. Name one yourself with <code>--worker</code> and <code>--model</code>, give it its own branch with <code>--worktree</code>, or point it at another folder with <code>--cwd</code>. Already know what kind of work this is? Say so with <code>--kind</code>, so a <a href="/docs/setup.html#default-model">loved model</a> for that kind isn't missed. Want a say in how hard the model thinks? Set <code>--effort</code> directly.</p>
