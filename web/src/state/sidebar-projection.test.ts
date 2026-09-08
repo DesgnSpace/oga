@@ -16,6 +16,7 @@ import {
   projectName,
   projects,
   projectTree,
+  taskProjectLabel,
   virtualListVisibleRange,
   newVirtualList,
   withScrollOffset,
@@ -219,4 +220,24 @@ it("counts tasks across every group", () => {
 it("names a project from its path", () => {
   expect(projectName("/work/oga/")).toBe("oga");
   expect(projectName("/")).toBe("/");
+});
+
+describe("taskProjectLabel", () => {
+  it("names the project a task runs in", () => {
+    expect(taskProjectLabel(task("one", "/work/oga", "running"))).toBe("oga");
+  });
+
+  it("adds the branch when the work has a copy of its own", () => {
+    const copy = { ...task("one", "/copies/abc", "running"), originCwd: "/work/oga", branch: "fix-login" };
+    expect(taskProjectLabel(copy)).toBe("oga/fix-login");
+  });
+
+  it("keeps a long name short enough for a row", () => {
+    const copy = {
+      ...task("one", "/copies/abc", "running"),
+      originCwd: "/work/oga",
+      branch: "show-the-project-on-every-task-row",
+    };
+    expect(taskProjectLabel(copy)).toBe("oga/show-the-project-…");
+  });
 });

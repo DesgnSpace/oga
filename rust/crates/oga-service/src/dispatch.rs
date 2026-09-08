@@ -84,6 +84,8 @@ pub struct DispatchRequest {
     pub grant_id: Option<String>,
     pub remember_scope: bool,
     pub allow_questions: bool,
+    /// Whether the worker may hand work onward to tasks of its own.
+    pub can_delegate: bool,
     pub timeout: Option<Duration>,
     pub parent_task_id: Option<String>,
     pub orchestrator_id: Option<String>,
@@ -122,6 +124,7 @@ impl DispatchRequest {
             grant_id: None,
             remember_scope: false,
             allow_questions: true,
+            can_delegate: false,
             timeout: None,
             parent_task_id: None,
             orchestrator_id: None,
@@ -431,6 +434,7 @@ impl Dispatcher {
             scope: request.scope.clone(),
             grant_id,
             allow_questions: request.allow_questions,
+            can_delegate: request.can_delegate,
             timeout_ms: request.timeout.map(|value| value.as_millis() as u64),
             effort: request.effort.clone(),
             effort_actual: None,
@@ -1387,7 +1391,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
             }
         }
         tx.execute(
-            "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,can_delegate,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 task.id,
                 kind_string(task.kind.unwrap_or(TaskKind::Delegated)),
@@ -1410,6 +1414,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 scope,
                 task.grant_id,
                 i64::from(task.allow_questions),
+                i64::from(task.can_delegate),
                 task.timeout_ms,
                 task.effort,
                 task.tldr,

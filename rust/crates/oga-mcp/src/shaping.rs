@@ -29,7 +29,13 @@ const GROUPS: &[(&str, &[&str])] = &[
     ("location", &["cwd", "worktree"]),
     (
         "scope",
-        &["scope", "grantId", "allowQuestions", "timeoutMs"],
+        &[
+            "scope",
+            "grantId",
+            "allowQuestions",
+            "canDelegate",
+            "timeoutMs",
+        ],
     ),
     ("prompt", &["prompt"]),
     ("shippedPrompt", &["shippedPrompt"]),
@@ -139,6 +145,9 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
     }
     if want.contains("allowQuestions") {
         view.insert("allowQuestions".into(), json!(task.allow_questions));
+    }
+    if want.contains("canDelegate") {
+        view.insert("canDelegate".into(), json!(task.can_delegate));
     }
     if want.contains("timeoutMs")
         && let Some(timeout) = task.timeout_ms

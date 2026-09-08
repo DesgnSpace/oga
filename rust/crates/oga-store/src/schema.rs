@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 43;
+pub const LATEST_SCHEMA_VERSION: i64 = 44;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -76,6 +76,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       scope_json TEXT NOT NULL DEFAULT '{"read":["**"],"write":["**"]}' CHECK(json_valid(scope_json)),
       grant_id TEXT,
       allow_questions INTEGER NOT NULL DEFAULT 1 CHECK(allow_questions IN (0,1)),
+      can_delegate INTEGER NOT NULL DEFAULT 0 CHECK(can_delegate IN (0,1)),
       timeout_ms INTEGER,
       session_id TEXT,
       shipped_prompt TEXT,
@@ -235,7 +236,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
     );
-     INSERT INTO schema_migrations(version, name) VALUES (43, 'code index without context maps');"#;
+     INSERT INTO schema_migrations(version, name) VALUES (44, 'tasks that may delegate');"#;
 
 /// One row per indexed file, one per symbol, with the symbol search index
 /// derived from the same rows.
@@ -504,6 +505,18 @@ pub fn migrate_v42_to_v43(conn: &Connection) -> Result<(), StoreError> {
         r#"BEGIN IMMEDIATE;
         ALTER TABLE context_maps RENAME TO context_index;
         INSERT INTO schema_migrations(version, name) VALUES (43, 'code index without context maps');
+        COMMIT;"#,
+    )?;
+    Ok(())
+}
+
+/// Record whether a task may hand work onward. Tasks already on file kept
+/// their work to themselves, so they carry the same answer.
+pub fn migrate_v43_to_v44(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"BEGIN IMMEDIATE;
+        ALTER TABLE tasks ADD COLUMN can_delegate INTEGER NOT NULL DEFAULT 0 CHECK(can_delegate IN (0,1));
+        INSERT INTO schema_migrations(version, name) VALUES (44, 'tasks that may delegate');
         COMMIT;"#,
     )?;
     Ok(())

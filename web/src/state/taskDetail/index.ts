@@ -1,4 +1,13 @@
-export { TaskDetailController, watchTaskDetail, type WatchedTaskDetail } from "./controller";
+export {
+  clearTaskDetailCacheForTests,
+  TaskDetailController,
+  taskDetailCacheStats,
+  TASK_DETAIL_CACHE_MAX_BYTES,
+  TASK_DETAIL_CACHE_MAX_ENTRIES,
+  watchTaskDetail,
+  type TaskDetailViewState,
+  type WatchedTaskDetail,
+} from "./controller";
 export {
   absorbPage,
   adopt,

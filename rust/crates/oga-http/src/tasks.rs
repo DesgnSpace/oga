@@ -33,6 +33,7 @@ pub(crate) struct DispatchBody {
     pub parent: Option<String>,
     pub scope: Option<TaskScope>,
     pub allow_questions: Option<bool>,
+    pub can_delegate: Option<bool>,
     pub effort: Option<String>,
     /// The kind of work, when the caller names it, in the same vocabulary
     /// `oga love --when` accepts. Wins over whatever the prompt reads like
@@ -223,6 +224,7 @@ pub(crate) async fn dispatch_body(
     request.grant_id = grant_id;
     request.remember_scope = remember_scope;
     request.allow_questions = body.allow_questions.unwrap_or(true);
+    request.can_delegate = body.can_delegate.unwrap_or(false);
     request.timeout = body.timeout_ms.map(Duration::from_millis);
     request.parent_task_id = body.parent;
     request.orchestrator_id = orchestrator_id;

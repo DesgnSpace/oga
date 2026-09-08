@@ -241,6 +241,16 @@ export class ActivityStoryProjection {
   private simple: SimpleAppendState | undefined;
   private settled = false;
   private showReceipt = false;
+  private incrementalUpdates = 0;
+  private fallbackUpdates = 0;
+
+  get incrementalCount(): number {
+    return this.incrementalUpdates;
+  }
+
+  get fallbackCount(): number {
+    return this.fallbackUpdates;
+  }
 
   update(
     events: TaskEventView[],
@@ -251,7 +261,7 @@ export class ActivityStoryProjection {
     const canAppend = this.isAppend(events, settled, showReceipt, ending);
     if (canAppend && this.simple !== undefined) {
       for (let index = this.eventLength; index < events.length; index += 1) {
-        if (!appendSimpleEvent(this.simple, events[index])) {
+        if (!appendProjectedEvent(this.simple, events[index])) {
           this.simple = undefined;
           break;
         }
@@ -260,10 +270,12 @@ export class ActivityStoryProjection {
         this.simple.events = events;
         this.events = events;
         this.eventLength = events.length;
+        this.incrementalUpdates += 1;
         return simpleComposition(this.simple);
       }
     }
 
+    if (this.events !== undefined && events.length > this.eventLength) this.fallbackUpdates += 1;
     const composition = ActivityStory.composeWithState(events, settled, ending, showReceipt);
     this.events = events;
     this.eventLength = events.length;
@@ -292,7 +304,8 @@ interface SimpleAppendState {
   events: TaskEventView[];
   key: string;
   turnId?: number;
-  signatures: Set<string>;
+  actionRows: Map<string, number>;
+  repeatSignature?: string;
   lastEvent: TaskEventView;
   rows: ChapterRow[];
   hidden: TaskEventView[];
@@ -303,69 +316,104 @@ interface SimpleAppendState {
 
 function simpleAppendState(events: TaskEventView[]): SimpleAppendState | undefined {
   const first = events[0];
-  if (first === undefined || !isSimpleEvent(first)) return undefined;
-  const key = runKey(first);
-  const signatures = new Set<string>();
-  const rows: ChapterRow[] = [];
-  const hidden: TaskEventView[] = [];
-  const checkNames: string[] = [];
-  const titles = new Set<string>();
-  let lastEvent = first;
-  for (const [index, event] of events.entries()) {
-    if (
-      !isSimpleEvent(event) ||
-      runKey(event) !== key ||
-      event.turnId !== first.turnId ||
-      (index > 0 && sameShape(lastEvent, event)) ||
-      exceedsGap(lastEvent, event, RUN_GAP_SECONDS) ||
-      !signatures.add(simpleSignature(event))
-    ) {
-      return undefined;
-    }
-    rows.push({ type: "work", event });
-    hidden.push(event);
-    const checkName = CHECK_NAMES.get(eventTitleKey(event));
-    if (checkName !== undefined && !checkNames.includes(checkName)) checkNames.push(checkName);
-    titles.add(eventTitleKey(event));
-    lastEvent = event;
+  if (first === undefined || !isProjectableEvent(first)) return undefined;
+  const state: SimpleAppendState = {
+    events,
+    key: runKey(first),
+    turnId: first.turnId,
+    actionRows: new Map(),
+    lastEvent: first,
+    rows: [],
+    hidden: [],
+    count: 0,
+    checkNames: [],
+    titles: new Set(),
+  };
+  for (const event of events) {
+    if (!appendProjectedEvent(state, event)) return undefined;
   }
-  return { events, key, turnId: first.turnId, signatures, lastEvent, rows, hidden, count: events.length, checkNames, titles };
+  return state;
 }
 
-function appendSimpleEvent(state: SimpleAppendState, event: TaskEventView): boolean {
+function appendProjectedEvent(state: SimpleAppendState, event: TaskEventView): boolean {
+  const action = actionKey(event);
+  const existingRow = action === undefined ? undefined : state.actionRows.get(action);
+  if (existingRow !== undefined) {
+    return settleProjectedAction(state, event, existingRow);
+  }
+
+  const signature = simpleSignature(event);
+  const firstEvent = state.rows[0]?.type === "work" ? state.rows[0].event : undefined;
+  const repeatsLast = state.rows.length > 0 && simpleSignature(state.lastEvent) === signature;
   if (
-    !isSimpleEvent(event) ||
+    !isProjectableEvent(event) ||
     runKey(event) !== state.key ||
     event.turnId !== state.turnId ||
-    sameShape(state.lastEvent, event) ||
-    exceedsGap(state.lastEvent, event, RUN_GAP_SECONDS)
-  ) {
-    return false;
-  }
-  if (!state.signatures.add(simpleSignature(event))) return false;
+    (state.rows.length > 0 && sameShape(state.lastEvent, event)) ||
+    exceedsGap(state.lastEvent, event, RUN_GAP_SECONDS) ||
+    (state.repeatSignature !== undefined && state.repeatSignature !== signature) ||
+    (repeatsLast && firstEvent !== undefined && simpleSignature(firstEvent) !== signature)
+  ) return false;
+
+  if (repeatsLast) state.repeatSignature = signature;
   state.rows.push({ type: "work", event });
   state.hidden.push(event);
+  if (action !== undefined) state.actionRows.set(action, state.rows.length - 1);
   const checkName = CHECK_NAMES.get(eventTitleKey(event));
   if (checkName !== undefined && !state.checkNames.includes(checkName)) state.checkNames.push(checkName);
   state.titles.add(eventTitleKey(event));
-  state.count += 1;
+  state.count = state.rows.length;
   state.lastEvent = event;
   return true;
 }
 
-function isSimpleEvent(event: TaskEventView): boolean {
+function settleProjectedAction(state: SimpleAppendState, event: TaskEventView, rowIndex: number): boolean {
+  if (!isActionUpdate(event) || rowIndex !== state.rows.length - 1) return false;
+  const row = state.rows[rowIndex];
+  if (row.type !== "work" || replays(row.event, event) || reopens(row.event, event)) return false;
+  const merged = settleAction(row.event, event);
+  const previous = state.rows[rowIndex - 1];
+  if (
+    runKey(merged) !== state.key ||
+    merged.turnId !== state.turnId ||
+    eventTitleKey(merged) !== eventTitleKey(row.event) ||
+    eventSubject(merged) !== eventSubject(row.event) ||
+    (previous?.type === "work" && sameShape(previous.event, merged))
+  ) return false;
+  state.rows[rowIndex] = { type: "work", event: merged };
+  state.hidden[rowIndex] = merged;
+  state.lastEvent = merged;
+  return true;
+}
+
+function isProjectableEvent(event: TaskEventView): boolean {
   return (
     (event.kind === "tool" || event.kind === "command" || event.kind === "file") &&
     event.title !== "API retry" &&
     !event.title.startsWith("Auto Retry ") &&
     event.title !== "Turn Failed" &&
-    event.actionId === undefined &&
-    event.rawText === undefined &&
-    event.presentation === undefined &&
     event.minor !== true &&
     !isSignal(event) &&
-    !isTechnical(event)
+    !isTechnical(event) &&
+    !hasUnsupportedProviderStructure(event)
   );
+}
+
+function isActionUpdate(event: TaskEventView): boolean {
+  return actionKey(event) !== undefined && !event.title.includes("Tool progress") && !hasUnsupportedProviderStructure(event);
+}
+
+function hasUnsupportedProviderStructure(event: TaskEventView): boolean {
+  return (
+    event.source === "antigravity" ||
+    parentActionId(event) !== undefined ||
+    turnSignal(event) !== undefined ||
+    isLifecycleUpdate(event)
+  );
+}
+
+function actionKey(event: TaskEventView): string | undefined {
+  return event.actionId === undefined || event.actionId === "" ? undefined : event.actionId;
 }
 
 function simpleSignature(event: TaskEventView): string {
@@ -375,13 +423,14 @@ function simpleSignature(event: TaskEventView): string {
 function simpleComposition(state: SimpleAppendState): ActivityComposition {
   const first = state.events[0];
   if (first === undefined) return { blocks: [], technical: [] };
-  const floor = runFloor(first);
-  const grouped = state.count >= floor
+  const anchor = state.rows[0]?.type === "work" ? state.rows[0].event : first;
+  const floor = runFloor(anchor);
+  const grouped = state.count >= floor || state.repeatSignature !== undefined
     ? [{
         type: "group" as const,
         group: {
           kind: "run" as const,
-          anchor: first,
+          anchor,
           children: state.rows,
           members: [],
           runLabel: simpleRunLabel(state),
@@ -394,8 +443,12 @@ function simpleComposition(state: SimpleAppendState): ActivityComposition {
 }
 
 function simpleRunLabel(state: SimpleAppendState): string {
-  const first = state.events[0];
+  const first = state.rows[0]?.type === "work" ? state.rows[0].event : state.events[0];
   if (first === undefined) return "";
+  if (state.repeatSignature !== undefined && state.count < runFloor(first)) {
+    const subject = first.kind === "file" ? fileName(eventSubject(first)) : eventSubject(first);
+    return `${first.verb ?? "Ran"} ${clip(subject, 48)} ×${state.count}`;
+  }
   if (state.key === "check") {
     return state.checkNames.length > 0 ? `Checked ${state.checkNames.join(", ")}` : `Ran ${state.count} checks`;
   }

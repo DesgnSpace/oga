@@ -3051,6 +3051,14 @@ h1 {
     color: var(--color-text-muted);
 }
 
+/* Mono sets wider than the surrounding text at the same size, so the code
+   card drops a step to sit quieter than the prose around it. */
+.code-card {
+    font-family: var(--font-mono);
+    font-size: var(--text-md);
+    line-height: 1.6;
+}
+
 .trace-expansion-content small {
     display: block;
     margin-top: var(--space-2);

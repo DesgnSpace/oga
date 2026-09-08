@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setTransport, tauriTransport, type Transport } from "@/bridge/transport";
 import type { TaskEventView } from "@/bridge/types";
 import type { FileChange } from "@/domain/changes";
@@ -44,31 +44,93 @@ function proseRow(text: string, kind: "message" | "reasoning" = "message"): Trac
   });
 }
 
-class TestIntersectionObserver implements IntersectionObserver {
-  readonly root = null;
-  readonly rootMargin = "";
-  readonly thresholds: readonly number[] = [];
+class TestResizeObserver implements ResizeObserver {
+  static current: TestResizeObserver | undefined;
+  readonly callback: ResizeObserverCallback;
 
-  constructor(_callback: IntersectionObserverCallback, _options?: IntersectionObserverInit) {}
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    TestResizeObserver.current = this;
+  }
 
   observe(_target: Element) {}
   disconnect() {}
   unobserve(_target: Element) {}
-  takeRecords(): IntersectionObserverEntry[] {
-    return [];
+  trigger(target: HTMLElement, height: number) {
+    target.getBoundingClientRect = () => ({ height } as DOMRect);
+    this.callback([{ target, contentRect: { height } } as unknown as ResizeObserverEntry], this);
   }
 }
 
 describe("TraceRows", () => {
-  it("mounts only the newest window of a long trace", () => {
-    const previous = globalThis.IntersectionObserver;
-    globalThis.IntersectionObserver = TestIntersectionObserver;
+  it("keeps a long trace bounded to the measured viewport", async () => {
+    const rows = Array.from({ length: 1_000 }, (_, index) => row({ id: index + 1, target: `step ${index + 1}` }));
+    const root = document.createElement("div");
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 280 });
+    Object.defineProperty(root, "scrollTop", { configurable: true, writable: true, value: 0 });
+    root.getBoundingClientRect = () => new DOMRect();
+    const scrollRoot = { current: root };
+    const { container } = render(<TraceRows rows={rows} scrollRoot={scrollRoot} />);
+    const panel = container.querySelector(".trace-panel") as HTMLElement;
+    panel.getBoundingClientRect = () => ({ top: -root.scrollTop } as DOMRect);
+    const mounted = () => container.querySelectorAll(".trace-list-static > .trace-row").length;
+    expect(mounted()).toBeGreaterThan(0);
+    expect(mounted()).toBeLessThan(rows.length);
+
+    Object.defineProperty(root, "scrollTop", { configurable: true, writable: true, value: rows.length * 28 });
+    fireEvent.scroll(root);
+    await waitFor(() => expect(container.querySelector('[data-trace-index="999"]')).not.toBeNull());
+    expect(mounted()).toBeLessThan(rows.length);
+
+    Object.defineProperty(root, "scrollTop", { configurable: true, writable: true, value: 0 });
+    fireEvent.scroll(root);
+    await waitFor(() => expect(container.querySelector('[data-trace-index="0"]')).not.toBeNull());
+    expect(mounted()).toBeLessThan(rows.length);
+  });
+
+  it("moves keyboard focus through rows that are not currently mounted", async () => {
+    const root = document.createElement("div");
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 280 });
+    Object.defineProperty(root, "scrollTop", { configurable: true, writable: true, value: 0 });
+    root.getBoundingClientRect = () => new DOMRect();
+    const scrollRoot = { current: root };
+    const rows = Array.from({ length: 200 }, (_, index) => row({ id: index + 1, target: `step ${index + 1}` }));
+    const { container } = render(<TraceRows rows={rows} scrollRoot={scrollRoot} />);
+    const panel = container.querySelector(".trace-panel") as HTMLElement;
+    panel.getBoundingClientRect = () => ({ top: -root.scrollTop } as DOMRect);
+    panel.focus();
+
+    fireEvent.keyDown(panel, { key: "End" });
+    await waitFor(() => expect(document.activeElement?.getAttribute("data-trace-index")).toBe("199"));
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowUp" });
+    await waitFor(() => expect(document.activeElement?.getAttribute("data-trace-index")).toBe("198"));
+    expect(container.querySelectorAll(".trace-list-static > .trace-row").length).toBeLessThan(rows.length);
+  });
+
+  it("keeps the reader anchored when a row above expands", async () => {
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = TestResizeObserver;
     try {
-      const rows = Array.from({ length: 1_000 }, (_, index) => row({ id: index + 1, target: `step ${index + 1}` }));
-      const { container } = render(<TraceRows rows={rows} />);
-      expect(container.querySelectorAll(".trace-list-static > .trace-row")).toHaveLength(60);
+      const root = document.createElement("div");
+      Object.defineProperty(root, "clientHeight", { configurable: true, value: 280 });
+      Object.defineProperty(root, "scrollTop", { configurable: true, writable: true, value: 0 });
+      root.getBoundingClientRect = () => new DOMRect();
+      const scrollRoot = { current: root };
+      const rows = Array.from({ length: 200 }, (_, index) => row({ id: index + 1, target: `step ${index + 1}` }));
+      const { container } = render(<TraceRows rows={rows} scrollRoot={scrollRoot} />);
+      const panel = container.querySelector(".trace-panel") as HTMLElement;
+      panel.getBoundingClientRect = () => ({ top: -root.scrollTop } as DOMRect);
+      Object.defineProperty(root, "scrollTop", { configurable: true, writable: true, value: 1_400 });
+      fireEvent.scroll(root);
+      await waitFor(() => expect(container.querySelector('[data-trace-index="35"]')).not.toBeNull());
+      const target = container.querySelector('[data-trace-index="35"]');
+      if (!(target instanceof HTMLElement)) throw new Error("expected an anchored trace row");
+
+      act(() => TestResizeObserver.current?.trigger(target, 180));
+      expect(root.scrollTop).toBe(1_552);
     } finally {
-      globalThis.IntersectionObserver = previous;
+      globalThis.ResizeObserver = previous;
+      TestResizeObserver.current = undefined;
     }
   });
 

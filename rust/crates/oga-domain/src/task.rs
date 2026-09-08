@@ -374,6 +374,10 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grant_id: Option<String>,
     pub allow_questions: bool,
+    /// Whether this task may hand work onward. Off means the broker never
+    /// serves it the delegate tool, so the work stays where it was sent.
+    #[serde(default)]
+    pub can_delegate: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
     /// Reasoning effort requested for this run; resume reuses it.

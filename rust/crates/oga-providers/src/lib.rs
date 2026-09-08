@@ -11,7 +11,6 @@ use serde_json::Value;
 
 pub const NO_FINAL_MESSAGE: &str =
     "(no final message: the provider stream carried no assistant text)";
-const WORKER_TOOLS: &str = "Bash,mcp__oga__query";
 const WRITE_TOOLS: &[&str] = &[
     "write",
     "write_file",
@@ -36,8 +35,17 @@ pub struct ProviderCommand {
 pub struct CommandOptions<'a> {
     pub hook_url: Option<&'a str>,
     pub effort: Option<&'a str>,
-    pub allowed_tools: Option<&'a str>,
-    pub mcp_config: Option<&'a str>,
+    pub oga_server: Option<OgaServer<'a>>,
+}
+
+/// Where a worker reaches its own broker. The task id rides on a header so
+/// the broker answers as that task rather than trusting whatever id the
+/// worker names. Each provider is told about it the way that provider takes
+/// one, added to the servers the user already configured.
+#[derive(Debug, Clone, Copy)]
+pub struct OgaServer<'a> {
+    pub base_url: &'a str,
+    pub task_id: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -78,7 +86,7 @@ pub fn command_for(
     cwd: &str,
     model: Option<&str>,
     effort: Option<&str>,
-    mcp_config: Option<&str>,
+    oga_server: Option<OgaServer<'_>>,
 ) -> ProviderCommand {
     command_for_with_options(
         profile,
@@ -87,7 +95,7 @@ pub fn command_for(
         model,
         CommandOptions {
             effort,
-            mcp_config,
+            oga_server,
             ..CommandOptions::default()
         },
     )
@@ -103,8 +111,7 @@ pub fn command_for_with_options(
     let CommandOptions {
         hook_url,
         effort,
-        allowed_tools,
-        mcp_config,
+        oga_server,
     } = options;
     let model = model.unwrap_or(&profile.default_model);
     let argv = if let Some(command) = &profile.command {
@@ -122,6 +129,7 @@ pub fn command_for_with_options(
             Provider::Claude => {
                 let skills = skills_dir(profile);
                 let hook_settings = hook_url.map(claude_hook_settings);
+                let mcp_config = oga_server.map(claude_mcp_config);
                 let mut a = vec![
                     "claude",
                     "-p",
@@ -136,17 +144,15 @@ pub fn command_for_with_options(
                 }
                 a.extend([
                     "--permission-mode",
-                    "acceptEdits",
-                    "--allowedTools",
-                    allowed_tools.unwrap_or(WORKER_TOOLS),
+                    "bypassPermissions",
                     "--add-dir",
                     skills.as_str(),
                 ]);
                 if let Some(settings) = hook_settings.as_deref() {
                     a.extend(["--settings", settings]);
                 }
-                if let Some(c) = mcp_config {
-                    a.extend(["--mcp-config", c, "--strict-mcp-config"]);
+                if let Some(c) = mcp_config.as_deref() {
+                    a.extend(["--mcp-config", c]);
                 }
                 a.extend(["--", prompt]);
                 a.into_iter().map(String::from).collect()
@@ -157,6 +163,10 @@ pub fn command_for_with_options(
                     effort.map(|value| format!("model_reasoning_effort=\"{value}\""));
                 if let Some(e) = effort {
                     a.extend(["-c", effort_config.as_deref().unwrap_or(e)]);
+                }
+                let oga_config = oga_server.map(codex_mcp_config);
+                if let Some([url, header]) = &oga_config {
+                    a.extend(["-c", url.as_str(), "-c", header.as_str()]);
                 }
                 a.extend([
                     "--dangerously-bypass-approvals-and-sandbox",
@@ -230,7 +240,7 @@ pub fn resume_command_for(
     session: &str,
     model: Option<&str>,
     effort: Option<&str>,
-    mcp_config: Option<&str>,
+    oga_server: Option<OgaServer<'_>>,
 ) -> Result<ProviderCommand, ProviderError> {
     resume_command_for_with_options(
         profile,
@@ -240,7 +250,7 @@ pub fn resume_command_for(
         model,
         CommandOptions {
             effort,
-            mcp_config,
+            oga_server,
             ..CommandOptions::default()
         },
     )
@@ -257,8 +267,7 @@ pub fn resume_command_for_with_options(
     let CommandOptions {
         hook_url,
         effort,
-        allowed_tools,
-        mcp_config,
+        oga_server,
     } = options;
     if profile.command.is_some() {
         return Err(ProviderError::CannotResume(profile.id.clone()));
@@ -268,6 +277,7 @@ pub fn resume_command_for_with_options(
         Provider::Claude => {
             let skills = skills_dir(profile);
             let hook_settings = hook_url.map(claude_hook_settings);
+            let mcp_config = oga_server.map(claude_mcp_config);
             let mut a = vec![
                 "claude",
                 "-p",
@@ -282,9 +292,7 @@ pub fn resume_command_for_with_options(
             }
             a.extend([
                 "--permission-mode",
-                "acceptEdits",
-                "--allowedTools",
-                allowed_tools.unwrap_or(WORKER_TOOLS),
+                "bypassPermissions",
                 "--resume",
                 session,
                 "--add-dir",
@@ -293,8 +301,8 @@ pub fn resume_command_for_with_options(
             if let Some(settings) = hook_settings.as_deref() {
                 a.extend(["--settings", settings]);
             }
-            if let Some(c) = mcp_config {
-                a.extend(["--mcp-config", c, "--strict-mcp-config"]);
+            if let Some(c) = mcp_config.as_deref() {
+                a.extend(["--mcp-config", c]);
             }
             a.extend(["--", prompt]);
             a.into_iter().map(String::from).collect()
@@ -306,6 +314,10 @@ pub fn resume_command_for_with_options(
             let effort_config = effort.map(|value| format!("model_reasoning_effort=\"{value}\""));
             if let Some(e) = effort {
                 a.extend(["-c", effort_config.as_deref().unwrap_or(e)]);
+            }
+            let oga_config = oga_server.map(codex_mcp_config);
+            if let Some([url, header]) = &oga_config {
+                a.extend(["-c", url.as_str(), "-c", header.as_str()]);
             }
             a.extend([
                 "--dangerously-bypass-approvals-and-sandbox",
@@ -372,20 +384,32 @@ pub fn resume_command_for_with_options(
     })
 }
 
-/// The oga MCP server a worker reaches its own broker through. The task id
-/// rides on a header so the broker answers as that task rather than trusting
-/// whatever id the worker names.
-pub fn worker_mcp_config(base_url: &str, task_id: &str) -> String {
+/// Claude takes extra servers as JSON on the command line. Without
+/// `--strict-mcp-config` it reads this one alongside everything the user has
+/// configured for the project.
+fn claude_mcp_config(server: OgaServer<'_>) -> String {
     serde_json::json!({
         "mcpServers": {
             "oga": {
                 "type": "http",
-                "url": format!("{base_url}/mcp"),
-                "headers": { "x-oga-task-id": task_id },
+                "url": format!("{}/mcp", server.base_url),
+                "headers": { "x-oga-task-id": server.task_id },
             }
         }
     })
     .to_string()
+}
+
+/// Codex takes one setting per `-c`, each merged into the config file it
+/// already loads, so the user's own servers stay where they are.
+fn codex_mcp_config(server: OgaServer<'_>) -> [String; 2] {
+    [
+        format!("mcp_servers.oga.url=\"{}/mcp\"", server.base_url),
+        format!(
+            "mcp_servers.oga.http_headers.x-oga-task-id=\"{}\"",
+            server.task_id
+        ),
+    ]
 }
 
 fn claude_hook_settings(url: &str) -> String {

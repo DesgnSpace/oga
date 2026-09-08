@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
-use crate::AppState;
+use crate::{AppState, notifications::Notifier};
 
 const POINTER_QUEUE_CAPACITY: usize = 1_024;
 const MAX_BATCH: usize = 100;
@@ -65,7 +65,12 @@ pub async fn broker_unwatch_task(
 
 /// Starts the shell's single consumer of the broker event stream, and the
 /// reader that turns its frames into updates for the task on screen.
-pub fn start<R: Runtime>(app: AppHandle<R>, pump: StreamPump, follower: TaskFollower) {
+pub fn start<R: Runtime>(
+    app: AppHandle<R>,
+    pump: StreamPump,
+    follower: TaskFollower,
+    notifier: Notifier<R>,
+) {
     let delta_app = app.clone();
     let deltas = follower.clone();
     tauri::async_runtime::spawn(async move {
@@ -133,6 +138,7 @@ pub fn start<R: Runtime>(app: AppHandle<R>, pump: StreamPump, follower: TaskFoll
             move |frame| {
                 if let EventFrame::Task(pointer) = frame {
                     follower.note(pointer);
+                    notifier.note(pointer);
                     let cursor = pointer.cursor;
                     if matches!(
                         sender.try_send((pointer.clone(), cursor)),

@@ -91,6 +91,18 @@ impl McpServer {
         &self.state
     }
 
+    /// Whether the task on the other end may hand work onward. A caller that
+    /// names no task is a person's own session and always may.
+    fn caller_may_delegate(&self) -> bool {
+        let Some(caller_id) = self.orchestrator_id.as_deref() else {
+            return true;
+        };
+        self.state.dispatcher.task(caller_id).is_ok_and(|caller| {
+            caller.archived_at.is_none()
+                && (caller.kind == Some(TaskKind::Orchestrator) || caller.can_delegate)
+        })
+    }
+
     pub async fn handle_value(&self, value: Value) -> Option<Value> {
         let request = match serde_json::from_value::<protocol::JsonRpcRequest>(value) {
             Ok(request) => request,
@@ -174,7 +186,7 @@ impl McpServer {
                 Ok(protocol::initialize_result(version, oga_domain::VERSION))
             }
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(protocol::tool_list()),
+            "tools/list" => Ok(protocol::tool_list(self.caller_may_delegate())),
             "tools/call" => self.tool_call(&request.params).await,
             "notifications/initialized" | "notifications/cancelled" => Ok(json!({})),
             method => Err(McpError::MethodNotFound(method.into())),
@@ -222,6 +234,11 @@ impl McpServer {
     }
 
     async fn delegate(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
+        if !self.caller_may_delegate() {
+            return Err(McpError::Message(
+                "this task cannot hand work onward; finish the brief here".into(),
+            ));
+        }
         let prompt = required_string(args, "prompt")?;
         let cwd = required_string(args, "cwd")?;
         let tldr = required_string(args, "tldr")?;
@@ -263,6 +280,7 @@ impl McpServer {
         request.model = Some(model);
         request.scope = scope(args.get("scope"))?;
         request.allow_questions = optional_bool(args, "allowQuestions").unwrap_or(true);
+        request.can_delegate = optional_bool(args, "canDelegate").unwrap_or(false);
         request.timeout = optional_u64(args, "timeoutMs")?.map(Duration::from_millis);
         request.parent_task_id = optional_string(args, "parent");
         request.effort = effort_arg.or(route_effort);
@@ -287,20 +305,14 @@ impl McpServer {
                 )));
             }
         };
-        if let Some(orchestrator_id) = &self.orchestrator_id {
-            let orchestrator = self
+        if let Some(caller_id) = &self.orchestrator_id
+            && self
                 .state
                 .dispatcher
-                .task(orchestrator_id)
-                .map_err(McpError::from)?;
-            if orchestrator.kind != Some(TaskKind::Orchestrator)
-                || orchestrator.archived_at.is_some()
-            {
-                return Err(McpError::Message(format!(
-                    "unknown orchestrator: {orchestrator_id}"
-                )));
-            }
-            request.orchestrator_id = Some(orchestrator_id.clone());
+                .task(caller_id)
+                .is_ok_and(|caller| caller.kind == Some(TaskKind::Orchestrator))
+        {
+            request.orchestrator_id = Some(caller_id.clone());
         }
         let task = self.state.dispatcher.dispatch(request).await?.task;
         let task = self.enrich_task(task)?;

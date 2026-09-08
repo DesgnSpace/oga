@@ -58,6 +58,7 @@ import {
   projectionFromState,
   projectionRows,
   sidebarRowKey,
+  taskProjectLabel,
   VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT,
   VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT,
   virtualListOffsetFor,
@@ -101,7 +102,7 @@ const SETTLED_STATES = new Set(["completed", "failed", "cancelled"]);
 function taskSubtitle(task: TaskSummary, state: SidebarState): string {
   const profile = state.profiles.find((p) => p.id === task.profileId);
   const worker = profile?.label ?? "Unknown worker";
-  const parts = [worker];
+  const parts = [worker, taskProjectLabel(task)];
   // A task nobody stopped is waiting for something; the row says what, because
   // otherwise it reads as stalled.
   if (isExplainedWait(task.hold)) parts.push(waitLabel(task.hold));
