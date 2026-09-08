@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::router::{HttpError, HttpState};
 
-const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at";
+const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate";
 
 #[derive(Debug, Deserialize, Default)]
 pub struct StateQuery {
@@ -642,6 +642,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         scope,
         grant_id: row.get(20)?,
         allow_questions: row.get::<_, i64>(21)? != 0,
+        can_delegate: row.get::<_, i64>(36)? != 0,
         timeout_ms: row.get(22)?,
         effort: row.get(23)?,
         effort_actual: row.get(24)?,

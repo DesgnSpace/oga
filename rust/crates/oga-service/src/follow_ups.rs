@@ -383,6 +383,7 @@ mod tests {
             scope: TaskScope::default(),
             grant_id: None,
             allow_questions: true,
+            can_delegate: false,
             timeout_ms: None,
             effort: None,
             effort_actual: None,
