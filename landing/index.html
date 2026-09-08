@@ -189,20 +189,25 @@
         <h2 id="handoff-title">Send it away from your files.</h2>
       </div>
       <div class="handoff-grid">
-        <div class="handoff-copy">
-          <p>Every agent that's ever scribbled over your working folder mid-edit taught you to hold your breath. Ask for a task's own checkout, and the work happens in its own copy of your repository, on its own branch, away from the files you're looking at.</p>
-          <ul>
-            <li>Nothing changes in your working folder until you say so.</li>
-            <li>Two pieces of work never fight over the same files.</li>
-            <li>It comes back as a branch, and, when it can, a pull request open and ready to review.</li>
-          </ul>
-        </div>
-        <div class="handoff-panel command-block">
-          <div class="command-heading">
-            <span>Ask for it from your shell</span>
-          </div>
-          <code>oga delegate "port the CSV importer" --worktree</code>
-        </div>
+        <p class="handoff-lede">Give the work its own branch. It runs in a separate copy of your repository, so nothing changes in your working folder until you merge.</p>
+        <ol class="handoff-steps">
+          <li>
+            <span class="handoff-step" aria-hidden="true">01</span>
+            <h3>You ask</h3>
+            <p>Tell your agent to run it on a branch of its own:</p>
+            <span class="handoff-say">Take the CSV importer, work on a branch of its own, open a pull request.</span>
+          </li>
+          <li>
+            <span class="handoff-step" aria-hidden="true">02</span>
+            <h3>It works apart</h3>
+            <p>It gets a copy of the repo on its own <code>oga/</code> branch. Two jobs never fight over the same files.</p>
+          </li>
+          <li>
+            <span class="handoff-step" aria-hidden="true">03</span>
+            <h3>You review</h3>
+            <p>It comes back as a branch you merge, with the pull request link when it opens one.</p>
+          </li>
+        </ol>
       </div>
     </section>
 

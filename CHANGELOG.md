@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The landing page's "For bigger jobs" section now leads with what you get — work on a branch of its own, reviewed as a branch or pull request — in three steps, with no jargon and no shell command.
 - The site now explains how Oga differs from the other agent tools, naming and linking them: you keep the coding agent you already use and hand work out from inside it.
 - The landing page now explains what you get in plain terms up front, and shows how to send a task to its own checkout so it never touches your working folder until you're ready to merge.
 - Every task in the list now names the project it runs in, right after the worker. Work with a copy of its own shows the branch too, so two copies of one project never look alike.

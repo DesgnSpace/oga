@@ -543,10 +543,6 @@ h1 {
 }
 
 .handoff-grid {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 28px;
-  align-items: stretch;
   padding: 32px;
   border: var(--border);
   color: #000000;
@@ -554,25 +550,67 @@ h1 {
   box-shadow: var(--shadow);
 }
 
-.handoff-copy p {
+.handoff-lede {
+  max-width: 60ch;
+  margin-bottom: 0;
+  color: #333333;
+  font-size: 19px;
+}
+
+.handoff-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.handoff-steps li {
+  padding: 20px 22px 24px;
+  border: var(--border);
+  color: #000000;
+  background: var(--sunken);
+  box-shadow: var(--shadow-small);
+}
+
+.handoff-step {
+  display: block;
   margin-bottom: 16px;
-  color: #333333;
+  color: #4d4d4d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
 }
 
-.handoff-copy ul {
-  margin: 0;
-  padding-left: 20px;
-  color: #333333;
-}
-
-.handoff-copy li {
+.handoff-steps h3 {
   margin-bottom: 8px;
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: -0.025em;
 }
 
-.handoff-panel {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+.handoff-steps p {
+  margin-bottom: 0;
+  color: #333333;
+  font-size: 16px;
+}
+
+.handoff-steps p code {
+  display: inline;
+  font-size: 14px;
+}
+
+.handoff-say {
+  display: block;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 2px solid #000000;
+  background: var(--panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .closing-cta {
@@ -845,8 +883,11 @@ footer {
   }
 
   .handoff-grid {
-    grid-template-columns: 1fr;
     padding: 24px;
+  }
+
+  .handoff-steps {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -949,6 +990,7 @@ footer {
 
   .command-block,
   .contrast-grid article,
+  .handoff-steps li,
   .outcome-grid article {
     color: #000000;
   }
