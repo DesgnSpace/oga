@@ -157,6 +157,11 @@ export function openAttachment(path: string): Promise<BridgeResult<void>> {
   return command<void>("open_attachment", { path });
 }
 
+/** Tells the shell whether to raise a notification when a task stops. */
+export function setTaskNotifications(enabled: boolean): Promise<BridgeResult<void>> {
+  return command<void>("set_task_notifications", { enabled });
+}
+
 /** Grays out or re-enables a native menu item by its `oga-menu-command` id. */
 export function setMenuItemEnabled(id: string, enabled: boolean): Promise<BridgeResult<void>> {
   return command<void>("set_menu_item_enabled", { id, enabled });

@@ -3,7 +3,10 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SidebarController } from "@/state";
+import { onOpenTask } from "@/bridge/events";
+import { setTaskNotifications } from "@/bridge/client";
 import type { ConnectionState } from "@/state/sidebar-state";
+import { loadTaskNotifications } from "@/state/notification-preferences";
 import { readStorage, writeStorage } from "@/state/storage";
 import { Sidebar } from "@/screens/sidebar";
 import { LoadingState } from "@/components/atoms/ListState";
@@ -263,6 +266,13 @@ function Shell() {
       cancel();
     };
   }, [route]);
+
+  // A notification is raised by the shell, which starts every session
+  // notifying; a user who turned it off says so once here.
+  useEffect(() => {
+    if (!loadTaskNotifications()) void setTaskNotifications(false);
+    return onOpenTask((id) => navigate({ kind: "task", id }));
+  }, [navigate]);
 
   const connection = useSyncExternalStore(
     sidebarController.subscribe.bind(sidebarController),
