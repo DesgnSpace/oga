@@ -20,9 +20,24 @@ import type {
   WorkerSettings,
 } from "@/bridge/types";
 
-export type SettingsTab = "workers" | "connections" | "memories" | "prompts" | "storage" | "about";
+export type SettingsTab =
+  | "workers"
+  | "connections"
+  | "notifications"
+  | "memories"
+  | "prompts"
+  | "storage"
+  | "about";
 
-export const SETTINGS_TABS: SettingsTab[] = ["workers", "connections", "memories", "prompts", "storage", "about"];
+export const SETTINGS_TABS: SettingsTab[] = [
+  "workers",
+  "connections",
+  "notifications",
+  "memories",
+  "prompts",
+  "storage",
+  "about",
+];
 
 export function tabLabel(tab: SettingsTab): string {
   switch (tab) {
@@ -30,6 +45,8 @@ export function tabLabel(tab: SettingsTab): string {
       return "Workers";
     case "connections":
       return "Connections";
+    case "notifications":
+      return "Notifications";
     case "memories":
       return "Memories";
     case "prompts":

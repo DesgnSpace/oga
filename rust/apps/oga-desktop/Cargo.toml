@@ -17,6 +17,15 @@ tauri-plugin-window-state = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "time"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSBundle",
+    "NSDictionary",
+    "NSString",
+    "NSUserNotification",
+] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

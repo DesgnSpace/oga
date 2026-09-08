@@ -61,6 +61,7 @@ function task(overrides: Partial<Task> = {}): Task {
     output: "",
     scope: { read: [], write: [] },
     allowQuestions: true,
+  canDelegate: false,
     ...overrides,
   };
 }

@@ -16,8 +16,7 @@ pub const MCP_INSTRUCTIONS: &str = concat!(
     "After delegate, resume, or reply returns a task id, background `oga watch <taskId>` in the caller's terminal; it holds no chat turn, so several tasks run at once. ",
     "That settle line, or the alert block a later Oga result carries, is the required trigger to call inspect before you report a task's state, decide what to do next, or end a turn that tracks it — inspect's answer is the record and a line is not. ",
     "Act on the settled report: the worker already verified its own work. ",
-    "Every task response carries `next`, the moves that fit the state the task is now in; take one from there rather than guessing. ",
-    "Worker mode: execute the assigned brief here; never delegate it onward or open a child task for the same work."
+    "Every task response carries `next`, the moves that fit the state the task is now in; take one from there rather than guessing."
 );
 
 const DELEGATE_DESCRIPTION: &str = concat!(
@@ -99,6 +98,7 @@ const KIND_DESCRIPTION: &str = "What this work is, in the caller's own words, wh
 const EFFORT_DESCRIPTION: &str = "How hard the model thinks, when you want to set it yourself — the lever for that, separate from kind. Left out, a loved model's own configured effort applies if it has one, else the model's own default. Honoured by claude, codex, opencode, opencode-2 and pi; antigravity bakes its level into the model id.";
 const ALLOW_QUESTIONS_DESCRIPTION: &str =
     "Whether the worker may pause in needs_input to ask. False makes it guess or stop.";
+const CAN_DELEGATE_DESCRIPTION: &str = "Whether this worker may hand work onward to tasks of its own. Off by default: it gets no delegate tool at all, so the work stays where you sent it. Turn it on for a task that has to fan out.";
 const TIMEOUT_DESCRIPTION: &str = "Hard runtime limit. The task lands in failed with code timeout.";
 const DEPENDS_ON_DESCRIPTION: &str =
     "Prerequisite task ids: this task waits until every one completes, then starts on its own.";
@@ -277,9 +277,19 @@ fn tool(name: &str, description: &str, input_schema: Value) -> Value {
     json!({ "name": name, "description": description, "inputSchema": input_schema })
 }
 
-pub fn tool_list() -> Value {
-    let mut tools = Vec::new();
+/// The tools this caller is served. A task that may not hand work onward
+/// never sees `delegate`, so no prompt can talk it into one.
+pub fn tool_list(can_delegate: bool) -> Value {
+    let mut tools = if can_delegate {
+        vec![delegate_tool()]
+    } else {
+        Vec::new()
+    };
+    tools.extend(shared_tools());
+    json!({ "tools": tools })
+}
 
+fn delegate_tool() -> Value {
     let mut delegate = Map::from_iter([
         (
             "profile".into(),
@@ -329,6 +339,13 @@ pub fn tool_list() -> Value {
             described(
                 json!({ "type": "boolean", "default": true }),
                 ALLOW_QUESTIONS_DESCRIPTION,
+            ),
+        ),
+        (
+            "canDelegate".into(),
+            described(
+                json!({ "type": "boolean", "default": false }),
+                CAN_DELEGATE_DESCRIPTION,
             ),
         ),
         (
@@ -400,12 +417,16 @@ pub fn tool_list() -> Value {
         ),
     ]);
     field_property(&mut delegate);
-    tools.push(tool(
+    tool(
         "delegate",
         DELEGATE_DESCRIPTION,
         object_schema(delegate, &["prompt", "cwd", "tldr", "title"]),
-    ));
+    )
+}
 
+/// Everything every caller gets, delegating or not.
+fn shared_tools() -> Vec<Value> {
+    let mut tools = Vec::new();
     tools.push(tool(
         "models",
         MODELS_DESCRIPTION,
@@ -841,7 +862,7 @@ pub fn tool_list() -> Value {
         ),
     ));
 
-    json!({ "tools": tools })
+    tools
 }
 
 pub fn text_content(value: impl Into<String>) -> Value {

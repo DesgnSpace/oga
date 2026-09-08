@@ -8,6 +8,7 @@ import { getTransport } from "./transport";
 import {
   EVENT_BATCH_EVENT,
   MENU_EVENT,
+  OPEN_TASK_EVENT,
   STATUS_EVENT,
   TASK_DELTA_EVENT,
   type MenuCommand,
@@ -59,6 +60,7 @@ const batches = new Feed<EventBatch>(EVENT_BATCH_EVENT);
 const statuses = new Feed<StreamStatus>(STATUS_EVENT);
 const deltas = new Feed<TaskDelta>(TASK_DELTA_EVENT);
 const menuCommands = new Feed<MenuCommand>(MENU_EVENT);
+const openedTasks = new Feed<string>(OPEN_TASK_EVENT);
 
 /** Runs `handle` for each paced set of broker changes. */
 export function onEventBatch(handle: (batch: EventBatch) => void): Unsubscribe {
@@ -81,9 +83,14 @@ export function onMenuCommand(handle: (command: MenuCommand) => void): Unsubscri
   return menuCommands.subscribe(handle);
 }
 
+/** Runs `handle` with the task a clicked notification asked to see. */
+export function onOpenTask(handle: (taskId: string) => void): Unsubscribe {
+  return openedTasks.subscribe(handle);
+}
+
 /** How many subscribers a pushed event currently reaches. Test seam only. */
 export function liveSubscriptions(): number {
-  return batches.size + statuses.size + deltas.size + menuCommands.size;
+  return batches.size + statuses.size + deltas.size + menuCommands.size + openedTasks.size;
 }
 
 /** Clears feed state between tests that replace the active transport. */
@@ -92,4 +99,5 @@ export function resetFeedsForTests(): void {
   statuses.reset();
   deltas.reset();
   menuCommands.reset();
+  openedTasks.reset();
 }

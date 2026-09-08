@@ -2772,6 +2772,8 @@ dependencies = [
 name = "oga-desktop"
 version = "0.0.10"
 dependencies = [
+ "objc2",
+ "objc2-foundation",
  "oga-client",
  "oga-domain",
  "serde",

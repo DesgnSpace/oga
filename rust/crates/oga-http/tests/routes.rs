@@ -84,6 +84,7 @@ impl Fixture {
                     write: vec!["**".into()],
                 },
                 allow_questions: true,
+                can_delegate: false,
                 tldr: Some("fixture task".into()),
                 title: Some("Fixture task".into()),
                 session_id: Some("session".into()),

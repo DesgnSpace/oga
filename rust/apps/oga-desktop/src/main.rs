@@ -3,6 +3,7 @@ mod broker;
 mod commands;
 mod integrations;
 mod lifecycle;
+mod notifications;
 mod tray;
 
 use std::{error::Error, sync::Arc};
@@ -11,6 +12,7 @@ use broker::{BrokerSnapshot, BrokerSupervisor};
 
 const BROKER_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 use integrations::install_mcp_configs;
+use notifications::Notifier;
 use oga_client::{
     EventStreamOptions, LoopbackClient,
     bridge::{StreamPump, TaskFollower},
@@ -172,10 +174,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             app.manage(state.clone());
             tray::setup(app.handle())?;
             tray::spawn_activity_poll(app.handle().clone(), client);
+            let notifier = Notifier::new(app.handle().clone(), state.follower.clone());
+            notifier.start();
+            app.manage(notifier.clone());
             bridge::start(
                 app.handle().clone(),
                 state.stream.clone(),
                 state.follower.clone(),
+                notifier,
             );
 
             // connect_or_start both reconnects and respawns, but nothing
@@ -202,6 +208,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             bridge::broker_unwatch_task,
             read_image_preview,
             open_attachment,
+            notifications::set_task_notifications,
             commands::set_menu_item_enabled,
             open_external_link
         ])

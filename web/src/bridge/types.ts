@@ -107,6 +107,7 @@ export interface Task {
   scope: TaskScope;
   grantId?: string;
   allowQuestions: boolean;
+  canDelegate: boolean;
   timeoutMs?: number;
   effort?: string;
   effortActual?: string;
@@ -631,6 +632,7 @@ export const EVENT_BATCH_EVENT = "oga-broker-batch";
 export const STATUS_EVENT = "oga-broker-status";
 export const TASK_DELTA_EVENT = "oga-task-delta";
 export const MENU_EVENT = "oga-menu-command";
+export const OPEN_TASK_EVENT = "oga-open-task";
 
 /** Only the menu items the shell hands to the page: opening the window,
  * quitting, and the help links are answered natively and never arrive here. */

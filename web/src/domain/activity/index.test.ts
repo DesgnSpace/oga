@@ -714,6 +714,96 @@ describe("ActivityStoryProjection", () => {
 
     expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
   });
+
+  it("appends rich provider rows with raw payloads, presentations, and action ids", () => {
+    const rich = (id: number, actionId: string, path: string): TaskEventView => ({
+      ...event(id, "file", "Read file"),
+      detail: path,
+      target: path,
+      rawText: JSON.stringify({ tool_name: "Read", tool_input: { file_path: path } }),
+      presentation: { type: "file", path },
+      actionId,
+      turnId: 1,
+    });
+    const events = [rich(1, "read-1", "/repo/one.ts")];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push(rich(2, "read-2", "/repo/two.ts"));
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+    expect(projection.incrementalCount).toBe(1);
+    expect(projection.fallbackCount).toBe(0);
+  });
+
+  it("settles a rich action incrementally when its provider update is adjacent", () => {
+    const rich = (id: number, phase: "started" | "completed"): TaskEventView => ({
+      ...event(id, "command", "Run command"),
+      phase,
+      detail: "bun test",
+      target: "bun test",
+      rawText: JSON.stringify({ tool_input: { command: "bun test" } }),
+      presentation: { type: "command", command: "bun test" },
+      actionId: "command-1",
+      turnId: 1,
+    });
+    const events = [rich(1, "started")];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push(rich(2, "completed"));
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+    expect(projection.incrementalCount).toBe(1);
+    expect(projection.fallbackCount).toBe(0);
+  });
+
+  it("keeps repeated rich Codex actions equivalent while appending", () => {
+    const codex = (id: number): TaskEventView => {
+      const item = Math.floor((id - 1) / 2) + 1;
+      const started = id % 2 === 1;
+      return {
+        ...event(id, "command", "Run command"),
+        source: "codex",
+        type: started ? "agent.item.started" : "agent.item.completed",
+        phase: started ? "started" : "completed",
+        detail: "bun test",
+        target: "bun test",
+        rawText: JSON.stringify({ type: started ? "item.started" : "item.completed", item: { id: `item-${item}` } }),
+        presentation: { type: "command", command: "bun test" },
+        actionId: `item-${item}`,
+        turnId: 1,
+      };
+    };
+    const events = [codex(1), codex(2)];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push(codex(3), codex(4));
+
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+    expect(projection.incrementalCount).toBe(1);
+    expect(projection.fallbackCount).toBe(0);
+  });
+
+  it("falls back when a rich action reopens or changes turns", () => {
+    const rich = (id: number, phase: "started" | "completed", turnId: number): TaskEventView => ({
+      ...event(id, "command", "Run command"),
+      phase,
+      detail: "bun test",
+      target: "bun test",
+      rawText: JSON.stringify({ tool_input: { command: "bun test" } }),
+      presentation: { type: "command", command: "bun test" },
+      actionId: "command-1",
+      turnId,
+    });
+    const events = [rich(1, "started", 1), rich(2, "completed", 1)];
+    const projection = new ActivityStoryProjection();
+    projection.update(events, false, undefined);
+    events.push(rich(3, "started", 1));
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+
+    events.push({ ...rich(4, "completed", 2), actionId: "command-2" });
+    expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
+    expect(projection.fallbackCount).toBe(2);
+  });
 });
 
 /**
