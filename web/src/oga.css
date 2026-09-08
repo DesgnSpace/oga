@@ -18,6 +18,7 @@
     --color-accent: #1c1c1c;
     --color-text-inverse: #ffffff;
     --color-danger: #b42318;
+    --color-info: #2563eb;
     --color-success: #087f5b;
     --color-warning: #a15c05;
     --color-scrim: rgba(0, 0, 0, 0.4);
@@ -66,6 +67,7 @@
         --color-accent: #f2f2f2;
         --color-text-inverse: #1c1c1c;
         --color-danger: #ffb4ab;
+        --color-info: #60a5fa;
         --color-success: #6ee7b7;
         --color-warning: #f5c27a;
         --color-scrim: rgba(0, 0, 0, 0.55);
@@ -961,9 +963,9 @@ a {
     font-size: var(--text-sm);
 }
 
-/* Colour and fill together: no two states share both, so the marker survives
-   colour-blind vision. Terminal states swap fill for read state. */
+/* State colour and fill are paired with the accessible status text in each row. */
 .task-dot {
+    --task-dot-color: var(--color-text-muted);
     width: 8px;
     height: 8px;
     flex: 0 0 8px;
@@ -977,6 +979,10 @@ a {
     border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
 }
 
+.task-dot-pending {
+    border-color: var(--color-warning);
+}
+
 .task-dot-completed {
     border-color: var(--color-success);
 }
@@ -987,7 +993,7 @@ a {
 }
 
 .task-dot-blocked {
-    border-color: var(--color-danger);
+    border-color: var(--color-warning);
 }
 
 .task-dot-needs_input {
@@ -1016,6 +1022,63 @@ a {
 
     50% {
         opacity: 0.25;
+    }
+}
+
+.task-sidebar .task-dot-tone-success {
+    --task-dot-color: var(--color-success);
+    border-color: var(--task-dot-color);
+}
+
+.task-sidebar .task-dot-tone-danger {
+    --task-dot-color: var(--color-danger);
+    border-color: var(--task-dot-color);
+}
+
+.task-sidebar .task-dot-tone-info {
+    --task-dot-color: var(--color-info);
+    border-color: var(--task-dot-color);
+}
+
+.task-sidebar .task-dot-tone-warning {
+    --task-dot-color: var(--color-warning);
+    border-color: var(--task-dot-color);
+}
+
+.task-sidebar .task-dot-tone-muted {
+    --task-dot-color: var(--color-text-muted);
+    border-color: var(--task-dot-color);
+}
+
+.task-sidebar .task-dot-queued {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+}
+
+.task-sidebar .task-dot-answered {
+    --task-dot-color: var(--color-accent);
+    border-color: var(--color-accent);
+}
+
+.task-sidebar .task-dot-cancelled {
+    opacity: 0.65;
+}
+
+.task-sidebar .task-dot-unread {
+    background: var(--task-dot-color);
+}
+
+.task-sidebar .task-dot-viewed {
+    background: transparent;
+}
+
+.task-sidebar .task-dot-viewed.task-dot-running {
+    animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .task-sidebar .task-dot-running {
+        animation: none;
     }
 }
 
