@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Work you hand off now carries a brief the size of the job. A one-line request stays one line, instead of being padded out with headings and numbered steps it doesn't need.
+
 ## 0.0.11 - 2026-09-08
 
 - The landing page's "For bigger jobs" section now leads with what you get — work on a branch of its own, reviewed as a branch or pull request — in three steps, with no jargon and no shell command.
