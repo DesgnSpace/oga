@@ -454,6 +454,90 @@ h1 {
   color: #4d4d4d;
 }
 
+.difference {
+  padding: 120px 0;
+  text-align: center;
+}
+
+.section-lede {
+  max-width: 60ch;
+  margin: 24px auto 0;
+  color: var(--muted);
+  font-size: 19px;
+}
+
+.contrast-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  text-align: left;
+}
+
+.contrast-grid article {
+  padding: 28px 32px 32px;
+  border: var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: #000000;
+}
+
+.contrast-grid h3 {
+  margin-bottom: 20px;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+}
+
+.contrast-them,
+.contrast-us {
+  margin-bottom: 0;
+  padding-left: 16px;
+  border-left: 4px solid currentColor;
+  color: #4d4d4d;
+}
+
+.contrast-them {
+  margin-bottom: 16px;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.contrast-us {
+  color: #000000;
+  font-weight: 500;
+}
+
+.rival-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 24px;
+  margin: 48px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.rival-list li {
+  padding: 4px 0 4px 20px;
+  border-left: 8px solid var(--rival);
+}
+
+.rival-list a {
+  font-weight: 700;
+}
+
+.rival-list p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .contrast-grid,
+  .rival-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .install {
   display: grid;
   justify-items: center;
@@ -808,8 +892,13 @@ footer {
   }
 
   .command-block,
+  .contrast-grid article,
   .outcome-grid article {
     color: #000000;
+  }
+
+  .rival-list li {
+    border-left-color: var(--rival-dark, var(--rival));
   }
 }
 
