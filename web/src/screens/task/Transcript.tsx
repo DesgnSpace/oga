@@ -189,11 +189,13 @@ const TranscriptWork = React.memo(function TranscriptWork({
   open,
   showThinking,
   onToggle,
+  scrollRoot,
 }: {
   segment: WorkSegment;
   open: boolean;
   showThinking: boolean;
   onToggle: (id: number, startsExpanded: boolean) => void;
+  scrollRoot?: React.RefObject<HTMLElement | null>;
 }) {
   const rows = React.useMemo(() => {
     const all = TraceVisibility.interleavedRows(segment.composition, segment.cwd, segment.live).filter(
@@ -219,7 +221,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
       </button>
       {open && (
         <div className="transcript-work-body">
-          <TraceRows rows={rows} cwd={segment.cwd} />
+          <TraceRows rows={rows} cwd={segment.cwd} scrollRoot={scrollRoot} />
         </div>
       )}
     </div>
@@ -267,19 +269,29 @@ export function Transcript({
   items,
   cwd,
   showThinking = false,
+  scrollRoot,
+  expansionState,
+  onExpansionChange,
 }: {
   items: TranscriptItem[];
   cwd?: string;
   showThinking?: boolean;
+  scrollRoot?: React.RefObject<HTMLElement | null>;
+  expansionState?: ReadonlyMap<number, boolean>;
+  onExpansionChange?: (id: number, expanded: boolean) => void;
 }) {
-  const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(new Map());
+  const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(
+    () => new Map(expansionState),
+  );
   const toggleWork = React.useCallback((id: number, startsExpanded: boolean) => {
     setManualExpansion((current) => {
       const next = new Map(current);
-      next.set(id, !(current.get(id) ?? startsExpanded));
+      const expanded = !(current.get(id) ?? startsExpanded);
+      next.set(id, expanded);
+      onExpansionChange?.(id, expanded);
       return next;
     });
-  }, []);
+  }, [onExpansionChange]);
 
   return (
     <div className="transcript">
@@ -290,6 +302,7 @@ export function Transcript({
             showThinking={showThinking}
             open={manualExpansion.get(item.segment.id) ?? item.segment.startsExpanded}
             onToggle={toggleWork}
+            scrollRoot={scrollRoot}
             key={itemKey(item)}
           />
         ) : (

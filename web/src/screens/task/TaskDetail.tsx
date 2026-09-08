@@ -199,18 +199,21 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   const state = watched.controller.snapshot;
   const task = state.task;
   const eventRevision = state.revision;
+  const viewState = watched.controller.viewState;
 
   // The newest activity is what a reader opens the task for, so the view sits
   // at the end and stays there as activity arrives — until they scroll away,
   // after which it holds their place.
   const contentRef = React.useRef<HTMLDivElement>(null);
   const stickToEnd = React.useRef(true);
-  React.useEffect(() => {
-    stickToEnd.current = true;
-  }, [taskId]);
+  React.useLayoutEffect(() => {
+    stickToEnd.current = viewState.stickToEnd;
+  }, [taskId, viewState]);
   const trackScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const content = event.currentTarget;
-    stickToEnd.current = content.scrollHeight - content.scrollTop - content.clientHeight < 24;
+    const atEnd = content.scrollHeight - content.scrollTop - content.clientHeight < 24;
+    stickToEnd.current = atEnd;
+    watched.controller.setScrollPosition(content.scrollTop, atEnd);
   };
 
   // The sentinel sits above the transcript; entering view triggers the next
@@ -227,6 +230,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
       requestAnimationFrame(() => {
         if (!content) return;
         content.scrollTop = previousScrollTop + (content.scrollHeight - previousScrollHeight);
+        watched.controller.setScrollPosition(content.scrollTop, stickToEnd.current);
       });
     });
   }, [watched, forceUpdate]);
@@ -257,8 +261,14 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   const hasThinking = React.useMemo(() => transcriptHasThinking(transcriptItems), [transcriptItems]);
   React.useLayoutEffect(() => {
     const content = contentRef.current;
-    if (content && stickToEnd.current) content.scrollTop = content.scrollHeight;
-  }, [transcriptItems]);
+    if (!content) return;
+    if (stickToEnd.current) {
+      content.scrollTop = content.scrollHeight;
+      return;
+    }
+    const maximum = Math.max(0, content.scrollHeight - content.clientHeight);
+    content.scrollTop = Math.min(viewState.scrollTop, maximum);
+  }, [taskId, transcriptItems, viewState]);
 
   const retry = React.useCallback(() => {
     void watched.controller.loadInitial().then(forceUpdate);
@@ -299,7 +309,11 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
       return;
     }
     const title = task.title ?? task.tldr ?? task.prompt.split("\n").find((line) => line.trim() !== "") ?? "Untitled task";
-    const statusLabel = taskStatusLabel(task);
+    const statusLabel = state.loading
+      ? "Updating activity"
+      : state.error !== undefined
+        ? "Activity update unavailable"
+        : taskStatusLabel(task);
     onHeader({
       title,
       diffAdded: runChangeSetAdded(reportedChanges),
@@ -316,7 +330,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
       secondary: <TaskDetailSecondary task={task} events={events} onChanged={refreshDetail} />,
     });
     return () => onHeader(undefined);
-  }, [task, reportedChanges, showingChanges, events, eventRevision, onHeader]);
+  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, onHeader]);
 
   React.useEffect(() => {
     const listener = () => refreshDetail();
@@ -352,13 +366,24 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
                 </button>
               </div>
             )}
+            {state.loading && state.error === undefined && (
+              <p className="detail-message" role="status">Updating activity…</p>
+            )}
             <div className="task-detail-content-main" ref={contentRef} onScroll={trackScroll}>
               {state.hasEarlier && (
                 <div ref={topSentinelRef} className="transcript-load-earlier" aria-hidden={!state.loadingEarlier}>
                   {state.loadingEarlier && <span className="transcript-load-earlier-spinner" />}
                 </div>
               )}
-              <Transcript items={transcriptItems} cwd={task.cwd} showThinking={showThinking} />
+              <Transcript
+                key={taskId}
+                items={transcriptItems}
+                cwd={task.cwd}
+                showThinking={showThinking}
+                scrollRoot={contentRef}
+                expansionState={viewState.workExpansion}
+                onExpansionChange={(id, expanded) => watched.controller.setWorkExpansion(id, expanded)}
+              />
             </div>
           </>
         )}

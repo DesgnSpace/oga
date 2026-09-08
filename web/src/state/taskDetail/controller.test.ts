@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { Transport } from "@/bridge/transport";
-import type { StreamStatus, Task, TaskDelta, TaskEventPage, TaskSnapshot } from "@/bridge/types";
+import type { StreamStatus, Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -21,6 +21,19 @@ function task(overrides: Partial<Task> = {}): Task {
     allowQuestions: true,
   canDelegate: false,
     ...overrides,
+  };
+}
+
+function event(id: number): TaskEventView {
+  return {
+    id,
+    taskId: "task",
+    source: "claude",
+    type: "agent.file",
+    kind: "file",
+    phase: "completed",
+    title: `Read file ${id}`,
+    createdAt: "2026-07-30T15:00:00Z",
   };
 }
 
@@ -77,7 +90,9 @@ async function freshController(transport: Transport) {
   resetFeedsForTests();
   const { setTransport } = await import("@/bridge/transport");
   setTransport(transport);
-  return import("./controller");
+  const controller = await import("./controller");
+  controller.clearTaskDetailCacheForTests();
+  return controller;
 }
 
 describe("watch lifecycle", () => {
@@ -166,9 +181,173 @@ describe("watch lifecycle", () => {
     expect(controller.snapshot.task?.id).toBe("task");
     expect(controller.snapshot.loading).toBe(false);
   });
+
+  it("shares one active watcher and keeps the cached snapshot between views", async () => {
+    const watched = fakeTransport({
+      broker_watch_task: mock().mockResolvedValue(snapshot({ cursor: 5 })),
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(watched);
+
+    const first = watchTaskDetail("task");
+    const second = watchTaskDetail("task");
+    await flush();
+    await flush();
+
+    expect(watched.invoke.mock.calls.filter(([command]) => command === "broker_watch_task")).toHaveLength(1);
+    first.dispose();
+    await flush();
+    expect(watched.invoke.mock.calls.filter(([command]) => command === "broker_unwatch_task")).toHaveLength(0);
+
+    second.dispose();
+    await flush();
+    expect(watched.invoke.mock.calls.filter(([command]) => command === "broker_unwatch_task")).toHaveLength(1);
+
+    const reopened = watchTaskDetail("task");
+    expect(reopened.controller.snapshot.task?.id).toBe("task");
+    expect(reopened.controller.snapshot.loading).toBe(true);
+    await flush();
+    await flush();
+    expect(reopened.controller.snapshot.loading).toBe(false);
+    expect(watched.invoke.mock.calls.filter(([command]) => command === "broker_watch_task")).toHaveLength(2);
+    reopened.dispose();
+  });
+
+  it("drops a cached task when resync confirms it was deleted", async () => {
+    const watch = mock()
+      .mockResolvedValueOnce(snapshot({ cursor: 5 }))
+      .mockImplementationOnce(() => {
+        throw { message: "missing", status: 404 };
+      });
+    const watched = fakeTransport({
+      broker_watch_task: watch,
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+      broker_call: (args) => {
+        const call = (args?.call as { call?: string } | undefined)?.call;
+        if (call === "task") throw { message: "missing", status: 404 };
+        if (call === "taskEvents") return { events: [], cursor: 0, hasEarlier: false };
+        throw new Error(`unexpected broker call ${String(call)}`);
+      },
+    });
+    const { watchTaskDetail, taskDetailCacheStats } = await freshController(watched);
+
+    const first = watchTaskDetail("task");
+    await flush();
+    await flush();
+    first.dispose();
+    await flush();
+    await flush();
+
+    const reopened = watchTaskDetail("task");
+    await flush();
+    await flush();
+    await flush();
+
+    expect(reopened.controller.snapshot.task).toBeUndefined();
+    reopened.controller.withEvents((events) => expect(events).toHaveLength(0));
+    expect(taskDetailCacheStats().entries).toBe(0);
+    reopened.dispose();
+  });
+
+  it("ignores an evicted request response before the replacement watch", async () => {
+    let resolveFirst: (value: TaskSnapshot) => void = () => {};
+    const watch = mock()
+      .mockImplementationOnce(
+        () => new Promise<TaskSnapshot>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(snapshot({ cursor: 7 }));
+    const watched = fakeTransport({
+      broker_watch_task: watch,
+      broker_stream_status: () => ({ connected: true, cursor: 0, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(watched);
+
+    const first = watchTaskDetail("task");
+    await flush();
+    first.dispose();
+    const reopened = watchTaskDetail("task");
+    resolveFirst(snapshot({ cursor: 1 }));
+    await flush();
+    await flush();
+    await flush();
+
+    expect(reopened.controller.snapshot.cursor).toBe(7);
+    expect(watched.invoke.mock.calls.filter(([command]) => command === "broker_unwatch_task")).toHaveLength(1);
+    reopened.dispose();
+  });
+
+  it("bounds retained payload bytes as well as retained task count", async () => {
+    const largeEvents = Array.from({ length: 300 }, (_, index) => ({
+      ...event(index + 1),
+      detail: "x".repeat(20_000),
+    }));
+    const watched = fakeTransport({
+      broker_watch_task: (args) => {
+        const id = String(args?.taskId);
+        if (id === "large") return snapshot({ task: task({ id }), events: largeEvents, cursor: largeEvents.length });
+        return snapshot({ task: task({ id }), events: [event(1)], cursor: 1 });
+      },
+      broker_stream_status: () => ({ connected: true, cursor: 0, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail, taskDetailCacheStats, TASK_DETAIL_CACHE_MAX_BYTES, TASK_DETAIL_CACHE_MAX_ENTRIES } = await freshController(watched);
+
+    const large = watchTaskDetail("large");
+    await flush();
+    await flush();
+    large.dispose();
+    await flush();
+    await flush();
+    expect(taskDetailCacheStats().bytes).toBe(0);
+
+    for (let index = 0; index < TASK_DETAIL_CACHE_MAX_ENTRIES + 3; index += 1) {
+      const item = watchTaskDetail(`small-${index}`);
+      await flush();
+      await flush();
+      item.dispose();
+      await flush();
+    }
+    const stats = taskDetailCacheStats();
+    expect(stats.entries).toBeLessThanOrEqual(TASK_DETAIL_CACHE_MAX_ENTRIES);
+    expect(stats.bytes).toBeLessThanOrEqual(TASK_DETAIL_CACHE_MAX_BYTES);
+  });
 });
 
 describe("delta and reconnect wiring", () => {
+  it("keeps a newer delta when a resync snapshot returns behind it", async () => {
+    let resolveResync: (value: TaskSnapshot) => void = () => {};
+    const watched = fakeTransport({
+      broker_watch_task: mock()
+        .mockResolvedValueOnce(snapshot({ cursor: 5, events: [event(1), event(2), event(3), event(4), event(5)] }))
+        .mockImplementationOnce(
+          () => new Promise<TaskSnapshot>((resolve) => {
+            resolveResync = resolve;
+          }),
+        ),
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(watched);
+
+    const open = watchTaskDetail("task");
+    await flush();
+    await flush();
+    const syncing = open.controller.resync();
+    await flush();
+    open.controller.applyDelta({ taskId: "task", fromCursor: 5, cursor: 6, events: [event(6)] });
+    resolveResync(snapshot({ cursor: 5, events: [event(1), event(2), event(3), event(4), event(5)] }));
+    await syncing;
+
+    expect(open.controller.snapshot.cursor).toBe(6);
+    open.controller.withEvents((events) => expect(events.map((item) => item.id)).toEqual([1, 2, 3, 4, 5, 6]));
+    open.dispose();
+  });
+
   it("resyncs when a pushed delta reports a gap", async () => {
     const transport = fakeTransport({
       broker_watch_task: mock()

@@ -127,7 +127,8 @@ export function absorbPage(events: TaskEventView[], state: TaskDetailState, page
 export function adopt(events: TaskEventView[], state: TaskDetailState, snapshot: TaskSnapshot): FoldedEvents {
   const newest = events.length > 0 ? events[events.length - 1] : undefined;
   const joinsUp = newest === undefined || snapshot.oldestId === undefined || snapshot.oldestId <= newest.id + 1;
-  const restarted = events.length > 0 && !joinsUp;
+  const snapshotIsBehind = snapshot.cursor < state.cursor;
+  const restarted = events.length > 0 && !joinsUp && !snapshotIsBehind;
   const held = restarted ? [] : events;
   const starting = held.length === 0;
   const nextEvents = mergeEvents(held, snapshot.events);
@@ -136,7 +137,7 @@ export function adopt(events: TaskEventView[], state: TaskDetailState, snapshot:
     state: {
       ...state,
       task: snapshot.task,
-      cursor: snapshot.cursor,
+      cursor: Math.max(state.cursor, snapshot.cursor),
       oldestId: starting ? snapshot.oldestId : state.oldestId,
       hasEarlier: starting ? snapshot.hasEarlier : state.hasEarlier,
       loading: false,

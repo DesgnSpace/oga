@@ -207,6 +207,21 @@ describe("reading the task again after a gap or resync", () => {
     expect(heldIds(result.events)).toEqual([400, 401]);
     expect(result.state.hasEarlier).toBe(true);
   });
+
+  it("does not move the cursor backward when an older snapshot returns late", () => {
+    const { state, events } = loaded([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+    const result = adopt(events, state, {
+      task: task(),
+      events: [event(1)],
+      cursor: 9,
+      oldestId: 1,
+      hasEarlier: false,
+    });
+
+    expect(result.state.cursor).toBe(10);
+    expect(heldIds(result.events)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
 });
 
 describe("connection state", () => {
