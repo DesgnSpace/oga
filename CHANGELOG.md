@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Activity rows now name work done through Oga in plain language and show concise results when you expand them, instead of exposing technical tool names or raw response data.
 - Work you hand off now carries a brief the size of the job. A one-line request stays one line, instead of being padded out with headings and numbered steps it doesn't need.
 
 ## 0.0.11 - 2026-09-08

@@ -771,6 +771,9 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
         })
         .or_else(|| hook_lifecycle_detail(&event.payload))
         .or_else(|| event_detail(&event.kind, &event.payload));
+    let hook_result = hook_view_presentation
+        .as_ref()
+        .and_then(|presentation| presentation.outcome.clone());
     TaskEventView {
         id: event.id,
         task_id: event.task_id.clone(),
@@ -786,7 +789,7 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
         .flatten(),
         verb: action_fields.as_ref().and_then(|fields| fields.0.clone()),
         target: action_fields.as_ref().and_then(|fields| fields.1.clone()),
-        result: None,
+        result: hook_result,
         presentation: hook_view_presentation,
         raw_text,
         created_at: event.created_at.clone(),
@@ -1778,15 +1781,37 @@ fn item_event_view(
         "mcp_tool_call" => {
             let tool = text_value(item.get("tool"))?;
             let server = string_value(item, &["server"]);
-            let mut presentation = usage_presentation();
-            presentation.kind = PresentationType::Tool;
-            presentation.text = Some(match &server {
-                Some(server) => format!("{server}/{tool}"),
-                None => tool.to_owned(),
-            });
-            presentation.outcome = mcp_result_summary(item);
-            let verb = if complete { "Called" } else { "Calling" }.to_owned();
-            (tool_title(tool), verb, Some(presentation))
+            let input = item.get("arguments").and_then(Value::as_object);
+            let oga = oga_call(tool, input, server.as_deref());
+            let mut presentation = oga
+                .as_ref()
+                .map(|call| oga_presentation(&call.operation, call.input, None))
+                .unwrap_or_else(usage_presentation);
+            if oga.is_none() {
+                presentation.kind = PresentationType::Tool;
+                presentation.text = Some(match &server {
+                    Some(server) => format!("{server}/{tool}"),
+                    None => tool.to_owned(),
+                });
+            }
+            let output = item.get("result").and_then(mcp_result_text);
+            presentation.outcome = oga
+                .as_ref()
+                .and_then(|call| {
+                    output
+                        .as_deref()
+                        .and_then(|text| oga_result_summary(&call.operation, text))
+                })
+                .or_else(|| mcp_result_summary(item));
+            let title = oga
+                .as_ref()
+                .map(|call| oga_tool_title(&call.operation, call.input))
+                .unwrap_or_else(|| tool_title(tool));
+            let verb = oga
+                .as_ref()
+                .map(|call| oga_tool_verb(&call.operation, call.input, complete))
+                .unwrap_or_else(|| if complete { "Called" } else { "Calling" }.into());
+            (title, verb, Some(presentation))
         }
         other => (
             tool_title(other),
@@ -1839,18 +1864,10 @@ fn error_target(message: &str) -> String {
 }
 
 /// An MCP tool's result is opaque JSON/YAML/markdown/plain text nested under
-/// `result.content[0].text`; the row shows only its first line, capped.
+/// `result.content[0].text`; the row shows a compact, bounded summary.
 fn mcp_result_summary(item: &Map<String, Value>) -> Option<String> {
-    let content = item
-        .get("result")
-        .and_then(Value::as_object)?
-        .get("content")
-        .and_then(Value::as_array)?;
-    let text = content
-        .iter()
-        .find_map(|value| text_value(value.get("text")))?;
-    let first_line = text.lines().find(|line| !line.trim().is_empty())?;
-    Some(cap(first_line.trim(), 120).0)
+    let text = mcp_result_text(item.get("result")?)?;
+    compact_output(&text)
 }
 
 fn opencode_tool_view(
@@ -2076,9 +2093,14 @@ fn antigravity_tool_step_view(
         EventPhase::Started
     };
     let complete = matches!(phase, EventPhase::Completed | EventPhase::Failed);
+    let oga = oga_call(name, Some(&input), None);
     let mut presentation = tool_presentation(name, &input, None);
     if let Some(value) = presentation.as_mut() {
-        if matches!(tool_family(name), ToolFamily::Search) {
+        if let Some(call) = &oga {
+            value.outcome = output
+                .and_then(|text| oga_result_summary(&call.operation, text))
+                .or(value.outcome.clone());
+        } else if matches!(tool_family(name), ToolFamily::Search) {
             value.outcome = output.and_then(search_outcome_from_text);
         }
     }
@@ -2211,12 +2233,17 @@ fn pi_tool_view(
         EventPhase::Started
     };
     let complete = matches!(phase, EventPhase::Completed | EventPhase::Failed);
+    let oga = oga_call(name, Some(&input), None);
     let mut presentation = tool_presentation(name, &input, None);
     let output_outcome = output.and_then(search_outcome_from_text);
     let command_search =
         matches!(tool_family(name), ToolFamily::Command) && search_command(&input).is_some();
     if let Some(value) = presentation.as_mut() {
-        if matches!(tool_family(name), ToolFamily::Search) || command_search {
+        if let Some(call) = &oga {
+            value.outcome = output
+                .and_then(|text| oga_result_summary(&call.operation, text))
+                .or(value.outcome.clone());
+        } else if matches!(tool_family(name), ToolFamily::Search) || command_search {
             value.outcome = output_outcome.clone();
         }
     } else if output_outcome.is_some() {
@@ -2564,6 +2591,224 @@ enum ToolFamily {
     Other,
 }
 
+struct OgaToolCall<'a> {
+    operation: String,
+    input: Option<&'a Map<String, Value>>,
+}
+
+fn oga_call<'a>(
+    tool: &str,
+    input: Option<&'a Map<String, Value>>,
+    server: Option<&str>,
+) -> Option<OgaToolCall<'a>> {
+    let wrapper = is_mcp_wrapper(tool);
+    let nested_server = input
+        .and_then(|value| string_value(value, &["ServerName", "serverName", "server", "Server"]));
+    let operation = oga_operation(tool).or_else(|| {
+        server
+            .or(nested_server.as_deref())
+            .filter(|value| is_oga_server(value))
+            .and_then(|_| {
+                (!wrapper)
+                    .then(|| canonical_oga_operation(tool))
+                    .flatten()
+                    .or_else(|| {
+                        input.and_then(|value| {
+                            string_value(value, &["ToolName", "toolName", "tool"])
+                                .and_then(|name| canonical_oga_operation(&name))
+                        })
+                    })
+            })
+    })?;
+    let input = if wrapper {
+        input
+            .and_then(|value| {
+                ["Arguments", "arguments", "args"]
+                    .into_iter()
+                    .find_map(|key| value.get(key).and_then(Value::as_object))
+            })
+            .or(input)
+    } else {
+        input
+    };
+    Some(OgaToolCall { operation, input })
+}
+
+fn is_mcp_wrapper(tool: &str) -> bool {
+    matches!(
+        tool.to_ascii_lowercase().as_str(),
+        "call_mcp_tool" | "call_mcp" | "mcp_tool"
+    )
+}
+
+fn is_oga_server(server: &str) -> bool {
+    matches!(
+        server.trim().to_ascii_lowercase().as_str(),
+        "oga" | "oga-mcp"
+    )
+}
+
+fn oga_operation(tool: &str) -> Option<String> {
+    let normalized = tool.trim().to_ascii_lowercase();
+    if let Some(rest) = normalized.strip_prefix("oga_") {
+        return canonical_oga_operation(rest);
+    }
+    if let Some(rest) = normalized.strip_prefix("oga-") {
+        return canonical_oga_operation(rest);
+    }
+    let mut segments = normalized.strip_prefix("mcp__")?.split("__");
+    let server = segments.next()?;
+    if !is_oga_server(server) {
+        return None;
+    }
+    canonical_oga_operation(segments.last()?)
+}
+
+fn canonical_oga_operation(operation: &str) -> Option<String> {
+    let operation = operation
+        .trim()
+        .trim_start_matches("oga_")
+        .trim_start_matches("oga-")
+        .replace('_', "-");
+    (!operation.is_empty()).then_some(operation)
+}
+
+fn oga_tool_title(operation: &str, input: Option<&Map<String, Value>>) -> String {
+    match operation {
+        "tasks" => "List tasks".into(),
+        "query" => "Find code".into(),
+        "delegate" => "Send work".into(),
+        "inspect" => "View task".into(),
+        "memory" => match oga_action(input).as_deref() {
+            Some("set") => "Save project note".into(),
+            Some("remove") => "Remove project note".into(),
+            _ => "Read project notes".into(),
+        },
+        "health" => "Check connection".into(),
+        "models" => "Check available models".into(),
+        "reply" => "Answer question".into(),
+        "resume" => "Continue task".into(),
+        "steer" => "Guide task".into(),
+        "handoff" => "Move task".into(),
+        "cancel" => "Stop task".into(),
+        "complete" => "Confirm task complete".into(),
+        "archive" => {
+            let archived = input
+                .and_then(|value| value.get("archived"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            if archived {
+                "Archive task".into()
+            } else {
+                "Restore task".into()
+            }
+        }
+        "worktree-remove" => "Remove task copy".into(),
+        _ => humanize(operation),
+    }
+}
+
+fn oga_tool_verb(operation: &str, input: Option<&Map<String, Value>>, complete: bool) -> String {
+    let completed = |done: &'static str, open: &'static str| if complete { done } else { open };
+    match operation {
+        "tasks" => completed("Listed", "Listing"),
+        "query" => completed("Searched", "Searching"),
+        "delegate" => completed("Sent", "Sending"),
+        "inspect" => completed("Viewed", "Viewing"),
+        "memory" => match oga_action(input).as_deref() {
+            Some("set") => completed("Saved", "Saving"),
+            Some("remove") => completed("Removed", "Removing"),
+            _ => completed("Read", "Reading"),
+        },
+        "health" | "models" => completed("Checked", "Checking"),
+        "reply" => completed("Answered", "Answering"),
+        "resume" => completed("Continued", "Continuing"),
+        "steer" => completed("Guided", "Guiding"),
+        "handoff" => completed("Moved", "Moving"),
+        "cancel" => completed("Stopped", "Stopping"),
+        "complete" => completed("Confirmed", "Confirming"),
+        "archive" => {
+            let archived = input
+                .and_then(|value| value.get("archived"))
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            if archived {
+                completed("Archived", "Archiving")
+            } else {
+                completed("Restored", "Restoring")
+            }
+        }
+        "worktree-remove" => completed("Removed", "Removing"),
+        _ => completed("Ran", "Running"),
+    }
+    .into()
+}
+
+fn oga_subject(operation: &str, input: Option<&Map<String, Value>>) -> Option<String> {
+    let input = input?;
+    let subject = match operation {
+        "tasks" => string_value(input, &["query", "q"])
+            .or_else(|| {
+                string_value(input, &["state"])
+                    .map(|state| format!("{} tasks", oga_state_label(&state)))
+            })
+            .or_else(|| {
+                input
+                    .get("archived")
+                    .and_then(Value::as_bool)
+                    .map(|archived| {
+                        if archived {
+                            "archived tasks"
+                        } else {
+                            "active tasks"
+                        }
+                        .into()
+                    })
+            }),
+        "query" => string_value(input, &["q", "query"]),
+        "delegate" => string_value(input, &["title", "tldr", "description", "prompt"]),
+        "memory" => string_value(input, &["key", "cwd"]),
+        "health" => Some("broker".into()),
+        "models" => string_value(input, &["query", "profile", "provider"])
+            .or_else(|| Some("available models".into())),
+        "worktree-remove" => string_value(input, &["project"]).or_else(|| task_id_subject(input)),
+        "inspect" | "reply" | "resume" | "steer" | "handoff" | "cancel" | "complete"
+        | "archive" => task_id_subject(input),
+        _ => ["query", "pattern", "description", "name", "path", "project"]
+            .into_iter()
+            .find_map(|key| string_value(input, &[key])),
+    }?;
+    Some(cap(&subject, 120).0)
+}
+
+fn oga_action(input: Option<&Map<String, Value>>) -> Option<String> {
+    input.and_then(|value| string_value(value, &["action"]))
+}
+
+fn task_id_subject(input: &Map<String, Value>) -> Option<String> {
+    let value = input.get("taskId")?;
+    if let Some(tasks) = value.as_array() {
+        return Some(format_counted(tasks.len(), "task"));
+    }
+    text_value(Some(value)).map(|_| "selected task".into())
+}
+
+fn oga_presentation(
+    operation: &str,
+    input: Option<&Map<String, Value>>,
+    state: Option<&Map<String, Value>>,
+) -> TaskEventPresentation {
+    let mut presentation = usage_presentation();
+    presentation.kind = PresentationType::Tool;
+    presentation.status =
+        state.and_then(|value| text_value(value.get("status")).map(str::to_owned));
+    presentation.text = oga_subject(operation, input);
+    presentation.outcome = state
+        .and_then(tool_state_output)
+        .and_then(|output| oga_result_summary(operation, &output));
+    presentation
+}
+
 /// What a tool call shows on its row, derived per tool rather than from one
 /// shared key: a search is named by its pattern, a shell call by its command, a
 /// skill by its name, a file operation by its path.
@@ -2572,6 +2817,9 @@ fn tool_presentation(
     input: &Map<String, Value>,
     state: Option<&Map<String, Value>>,
 ) -> Option<TaskEventPresentation> {
+    if let Some(call) = oga_call(tool, Some(input), None) {
+        return Some(oga_presentation(&call.operation, call.input, state));
+    }
     let normalized = tool.to_ascii_lowercase();
     let status = state.and_then(|value| text_value(value.get("status")).map(str::to_owned));
     let mut presentation = usage_presentation();
@@ -2768,7 +3016,7 @@ impl PatchSummary {
 }
 
 fn input_patch(tool: &str, input: Option<&Map<String, Value>>) -> Option<PatchSummary> {
-    if tool.to_ascii_lowercase() != "apply_patch" {
+    if !tool.eq_ignore_ascii_case("apply_patch") {
         return None;
     }
     let text = string_value(
@@ -3359,33 +3607,238 @@ fn compact_output(output: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    if trimmed.starts_with('{') || trimmed.starts_with('[') {
-        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-            return Some(match value {
-                Value::Array(items) => format!(
-                    "{} item{}",
-                    items.len(),
-                    if items.len() == 1 { "" } else { "s" }
-                ),
-                Value::Object(items) => format!(
-                    "{} field{}",
-                    items.len(),
-                    if items.len() == 1 { "" } else { "s" }
-                ),
-                _ => trimmed.to_owned(),
-            });
-        }
+    if (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && let Ok(value) = serde_json::from_str::<Value>(trimmed)
+    {
+        return Some(match value {
+            Value::Array(items) => format!(
+                "{} item{}",
+                items.len(),
+                if items.len() == 1 { "" } else { "s" }
+            ),
+            Value::Object(items) => format!(
+                "{} field{}",
+                items.len(),
+                if items.len() == 1 { "" } else { "s" }
+            ),
+            _ => trimmed.to_owned(),
+        });
     }
     let compact = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
     Some(cap(&compact, 160).0)
+}
+
+fn tool_state_output(state: &Map<String, Value>) -> Option<String> {
+    ["output", "result", "stdout", "text"]
+        .into_iter()
+        .find_map(|key| state.get(key).and_then(mcp_result_text))
+}
+
+/// MCP servers put text in content blocks, while provider wrappers may expose
+/// the same value as `output`, `stdout`, or `result`. Only the text is useful
+/// to the row and its expansion; transport objects are not.
+fn mcp_result_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(_) => text_value(Some(value)).map(str::to_owned),
+        Value::Array(values) => values.iter().find_map(mcp_result_text),
+        Value::Object(values) => [
+            "content", "text", "stdout", "output", "result", "response", "message",
+        ]
+        .into_iter()
+        .find_map(|key| values.get(key).and_then(mcp_result_text)),
+        _ => None,
+    }
+}
+
+fn oga_result_summary(operation: &str, output: &str) -> Option<String> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(trimmed)
+        .ok()
+        .map(|value| match value {
+            Value::String(text) => {
+                serde_json::from_str::<Value>(&text).unwrap_or(Value::String(text))
+            }
+            value => value,
+        });
+    let Some(value) = value else {
+        if operation == "query" {
+            return query_result_summary(trimmed);
+        }
+        return first_output_line(trimmed);
+    };
+    if let Some(error) = result_error(&value) {
+        return Some(error);
+    }
+    match operation {
+        "tasks" => {
+            count_result(&value, "tasks", "task").or_else(|| first_output_line_value(&value))
+        }
+        "models" => {
+            count_result(&value, "models", "model").or_else(|| first_output_line_value(&value))
+        }
+        "query" => match &value {
+            Value::String(text) => query_result_summary(text),
+            _ => first_output_line_value(&value),
+        },
+        "memory" => memory_result_summary(&value),
+        "health" => value.get("ok").and_then(Value::as_bool).map(|ok| {
+            if ok {
+                "Connected".into()
+            } else {
+                "Unavailable".into()
+            }
+        }),
+        "delegate" => task_state_result(&value, "Work").or_else(|| Some("Work sent".into())),
+        "inspect" => task_state_result(&value, "Task"),
+        "reply" => Some("Answer sent".into()),
+        "resume" => Some("Task continued".into()),
+        "steer" => Some("Instruction sent".into()),
+        "handoff" => Some("Task moved".into()),
+        "cancel" => action_result_summary(&value, "Task stopped", "tasks", "task"),
+        "complete" => Some("Task marked complete".into()),
+        "archive" => action_result_summary(&value, "Task archived", "tasks", "task"),
+        "worktree-remove" => {
+            action_result_summary(&value, "Task copy removed", "removed", "task copy")
+        }
+        _ => first_output_line_value(&value),
+    }
+}
+
+fn count_result(value: &Value, key: &str, noun: &str) -> Option<String> {
+    let count = value
+        .as_array()
+        .map(Vec::len)
+        .or_else(|| value.get(key).and_then(Value::as_array).map(Vec::len))?;
+    Some(format_counted(count, noun))
+}
+
+fn format_counted(count: usize, noun: &str) -> String {
+    let plural = match noun {
+        "match" => "matches".to_owned(),
+        "task copy" => "task copies".to_owned(),
+        _ => format!("{noun}s"),
+    };
+    format!("{count} {}", if count == 1 { noun } else { &plural })
+}
+
+fn first_output_line(output: &str) -> Option<String> {
+    output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| cap(line.trim(), 120).0)
+}
+
+fn first_output_line_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => first_output_line(text),
+        Value::Null => None,
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Array(_) => count_result(value, "items", "item"),
+        Value::Object(_) => Some(compact_output(&serde_json::to_string(value).ok()?)?),
+    }
+}
+
+fn query_result_summary(text: &str) -> Option<String> {
+    let first = text.lines().find(|line| !line.trim().is_empty())?;
+    if first.to_ascii_lowercase().contains("no confident match") {
+        return Some("No matching code".into());
+    }
+    let count = text.lines().filter(|line| query_anchor_line(line)).count();
+    if count > 0 {
+        return Some(format_counted(count, "match"));
+    }
+    first_output_line(text)
+}
+
+fn query_anchor_line(line: &str) -> bool {
+    let line = line.trim();
+    if line.contains("(matched:") {
+        return true;
+    }
+    let Some((path, rest)) = line.split_once(':') else {
+        return false;
+    };
+    if !path.contains('/') && !path.contains('.') {
+        return false;
+    }
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    digits > 0
+}
+
+fn memory_result_summary(value: &Value) -> Option<String> {
+    match value {
+        Value::Array(entries) => Some(format_counted(entries.len(), "note")),
+        Value::Null => Some("No note found".into()),
+        Value::Object(object) => {
+            if let Some(removed) = object.get("removed").and_then(Value::as_bool) {
+                return Some(if removed {
+                    "Note removed".into()
+                } else {
+                    "No note removed".into()
+                });
+            }
+            if object.contains_key("key") && object.contains_key("value") {
+                return Some("Note found".into());
+            }
+            object
+                .get("version")
+                .and_then(Value::as_u64)
+                .map(|_| "Note saved".into())
+        }
+        _ => first_output_line_value(value),
+    }
+}
+
+fn task_state_result(value: &Value, subject: &str) -> Option<String> {
+    let state = value
+        .get("state")
+        .and_then(|value| text_value(Some(value)))?;
+    Some(format!("{subject} is {}", oga_state_label(state)))
+}
+
+fn oga_state_label(state: &str) -> &'static str {
+    match state.to_ascii_lowercase().as_str() {
+        "queued" => "waiting to start",
+        "pending" => "waiting to start",
+        "running" | "answered" => "in progress",
+        "needs_input" => "waiting for an answer",
+        "completed" => "complete",
+        "failed" => "failed",
+        "blocked" => "blocked",
+        "cancelled" => "stopped",
+        _ => "status unavailable",
+    }
+}
+
+fn action_result_summary(value: &Value, fallback: &str, key: &str, noun: &str) -> Option<String> {
+    count_result(value, key, noun)
+        .or_else(|| result_error(value))
+        .or_else(|| Some(fallback.into()))
+}
+
+fn result_error(value: &Value) -> Option<String> {
+    value
+        .get("error")
+        .and_then(mcp_result_text)
+        .map(|error| format!("Error: {}", cap(&error, 120).0))
 }
 
 fn hook_presentation(payload: &BTreeMap<String, Value>) -> Option<TaskEventPresentation> {
     let tool = tree_value(payload, &["tool_name", "toolName"])?;
     let input = hook_tool_input(payload)?;
     let mut presentation = tool_presentation(&tool, input, None)?;
-    if matches!(tool_family(&tool), ToolFamily::Search) {
+    if let Some(call) = oga_call(&tool, Some(input), None) {
         presentation.outcome = hook_output(payload)
+            .as_deref()
+            .and_then(|output| oga_result_summary(&call.operation, output))
+            .or(presentation.outcome);
+    } else if matches!(tool_family(&tool), ToolFamily::Search) {
+        presentation.outcome = hook_output(payload)
+            .as_deref()
             .and_then(search_outcome_from_text)
             .or(presentation.outcome);
     }
@@ -3441,25 +3894,15 @@ fn hook_lifecycle_detail(payload: &BTreeMap<String, Value>) -> Option<String> {
     }
 }
 
-fn hook_output(payload: &BTreeMap<String, Value>) -> Option<&str> {
+fn hook_output(payload: &BTreeMap<String, Value>) -> Option<String> {
     let response = payload
         .get("tool_response")
         .or_else(|| payload.get("toolResponse"));
-    response
-        .and_then(|value| {
-            text_value(Some(value)).or_else(|| {
-                value.as_object().and_then(|object| {
-                    ["stdout", "output", "text", "content", "result"]
-                        .into_iter()
-                        .find_map(|key| text_value(object.get(key)))
-                })
-            })
-        })
-        .or_else(|| {
-            ["stdout", "output", "result"]
-                .into_iter()
-                .find_map(|key| text_value(payload.get(key)))
-        })
+    response.and_then(mcp_result_text).or_else(|| {
+        ["stdout", "output", "result"]
+            .into_iter()
+            .find_map(|key| payload.get(key).and_then(mcp_result_text))
+    })
 }
 
 fn number_f64(value: Option<&Value>) -> Option<f64> {
@@ -3760,6 +4203,9 @@ fn hook_phase(event_type: &str, state: TaskState) -> EventPhase {
 }
 
 fn tool_title(tool: &str) -> String {
+    if let Some(operation) = oga_operation(tool) {
+        return oga_tool_title(&operation, None);
+    }
     // A connected tool arrives wired as `mcp__server__tool`; only its last
     // segment is something a reader recognises.
     let tool = tool
@@ -3788,6 +4234,9 @@ fn tool_title(tool: &str) -> String {
 }
 
 fn tool_title_with_input(tool: &str, input: Option<&Map<String, Value>>) -> String {
+    if let Some(call) = oga_call(tool, input, None) {
+        return oga_tool_title(&call.operation, call.input);
+    }
     if let Some(role) = input_command_role(tool, input) {
         return role.title().into();
     }
@@ -3811,6 +4260,9 @@ fn input_command_role(tool: &str, input: Option<&Map<String, Value>>) -> Option<
 /// A file row names the change, not the act, so it reads the same whether or
 /// not the call has landed. Everything else takes its tense from the call.
 fn tool_verb(tool: &str, complete: bool) -> String {
+    if let Some(operation) = oga_operation(tool) {
+        return oga_tool_verb(&operation, None, complete);
+    }
     match (tool.to_ascii_lowercase().as_str(), complete) {
         ("read" | "read_file" | "view_file", _) => "Read".into(),
         ("edit" | "multiedit" | "replace_file_content", _) => "Edited".into(),
@@ -3844,6 +4296,9 @@ fn tool_verb(tool: &str, complete: bool) -> String {
 }
 
 fn tool_verb_with_input(tool: &str, input: Option<&Map<String, Value>>, complete: bool) -> String {
+    if let Some(call) = oga_call(tool, input, None) {
+        return oga_tool_verb(&call.operation, call.input, complete);
+    }
     if let Some(role) = input_command_role(tool, input) {
         return role.verb(complete).into();
     }
@@ -5724,6 +6179,134 @@ mod tests {
         assert_eq!(completed.verb.as_deref(), Some("Called"));
     }
 
+    #[test]
+    fn oga_mcp_hooks_name_the_action_and_summarize_task_results() {
+        let completed = event_view(
+            &provider_event(
+                1,
+                "agent.hook",
+                serde_json::json!({
+                    "hook_event_name": "PostToolUse",
+                    "tool_name": "oga_tasks",
+                    "title": "",
+                    "tool_use_id": "toolu_tasks",
+                    "tool_input": {
+                        "query": "trace presentation",
+                        "archived": "active",
+                        "fields": ["label"],
+                        "limit": 5
+                    },
+                    "tool_response": {
+                        "content": [{
+                            "type": "text",
+                            "text": "[{\"id\":\"task-1\",\"state\":\"running\"},{\"id\":\"task-2\",\"state\":\"completed\"}]"
+                        }]
+                    }
+                }),
+            ),
+            Provider::Claude,
+        );
+
+        assert_eq!(completed.title, "List tasks");
+        assert_eq!(completed.verb.as_deref(), Some("Listed"));
+        assert_eq!(completed.target.as_deref(), Some("trace presentation"));
+        assert_eq!(completed.result.as_deref(), Some("2 tasks"));
+        assert_eq!(
+            completed
+                .presentation
+                .as_ref()
+                .and_then(|presentation| presentation.outcome.as_deref()),
+            Some("2 tasks")
+        );
+    }
+
+    #[test]
+    fn oga_mcp_codex_calls_use_the_operation_and_result_count() {
+        let completed = event_view(
+            &provider_event(
+                1,
+                "agent.item.completed",
+                serde_json::json!({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_oga",
+                        "type": "mcp_tool_call",
+                        "server": "oga",
+                        "tool": "query",
+                        "arguments": {"q": "trace rows", "cwd": "/repo"},
+                        "result": {
+                            "content": [{"type": "text", "text": "src/trace.ts:12#TraceRow\nsrc/trace.test.ts:4#trace"}]
+                        },
+                        "status": "completed"
+                    }
+                }),
+            ),
+            Provider::Codex,
+        );
+
+        assert_eq!(completed.title, "Find code");
+        assert_eq!(completed.verb.as_deref(), Some("Searched"));
+        assert_eq!(completed.target.as_deref(), Some("trace rows"));
+        assert_eq!(completed.result.as_deref(), Some("2 matches"));
+    }
+
+    #[test]
+    fn oga_task_actions_hide_ids_and_report_result_errors() {
+        let removed = event_view(
+            &provider_event(
+                1,
+                "agent.item.completed",
+                serde_json::json!({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_remove",
+                        "type": "mcp_tool_call",
+                        "server": "oga",
+                        "tool": "worktree-remove",
+                        "arguments": {"taskId": "secret-task-id"},
+                        "result": {"content": [{"type": "text", "text": "{\"removed\":true}"}]},
+                        "status": "completed"
+                    }
+                }),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(removed.title, "Remove task copy");
+        assert_eq!(removed.target.as_deref(), Some("selected task"));
+        assert_eq!(removed.result.as_deref(), Some("Task copy removed"));
+        assert!(
+            !removed
+                .target
+                .as_deref()
+                .unwrap_or_default()
+                .contains("secret-task-id")
+        );
+
+        let failed = event_view(
+            &provider_event(
+                2,
+                "agent.item.completed",
+                serde_json::json!({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_complete",
+                        "type": "mcp_tool_call",
+                        "server": "oga",
+                        "tool": "complete",
+                        "arguments": {"taskId": "task-1"},
+                        "result": {"content": [{"type": "text", "text": "{\"error\":{\"message\":\"task is already complete\"}}"}]},
+                        "status": "completed"
+                    }
+                }),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(
+            failed.result.as_deref(),
+            Some("Error: task is already complete")
+        );
+    }
+
     /// A todo list's verb tracks which phase produced it — planned, checked,
     /// or completed — and the detail names the next incomplete step, or says
     /// so once every step is done.
@@ -5905,6 +6488,38 @@ mod tests {
         assert_eq!(empty.target.as_deref(), Some("Rust release"));
         assert_eq!(empty.result.as_deref(), Some("0 files"));
         assert_eq!(empty.phase, EventPhase::Started);
+    }
+
+    #[test]
+    fn antigravity_oga_mcp_wrapper_uses_nested_arguments() {
+        let query = event_view(
+            &provider_event(
+                1,
+                "agent.event",
+                serde_json::json!({
+                    "event": "step_update",
+                    "step_update": {
+                        "state": "DONE",
+                        "step_type": "tool",
+                        "tool_name": "call_mcp_tool",
+                        "tool_info": {
+                            "parameters": {
+                                "ServerName": "oga",
+                                "ToolName": "query",
+                                "Arguments": {"query": "trace rows"}
+                            },
+                            "output": "src/trace.ts:12#TraceRow"
+                        }
+                    }
+                }),
+            ),
+            Provider::Antigravity,
+        );
+
+        assert_eq!(query.title, "Find code");
+        assert_eq!(query.verb.as_deref(), Some("Searched"));
+        assert_eq!(query.target.as_deref(), Some("trace rows"));
+        assert_eq!(query.result.as_deref(), Some("1 match"));
     }
 
     #[test]
@@ -6624,7 +7239,7 @@ mod tests {
             Provider::Pi,
         ] {
             for (kind, payload) in &payloads {
-                let view = event_view(&provider_event(1, *kind, payload.clone()), provider);
+                let view = event_view(&provider_event(1, kind, payload.clone()), provider);
                 assert!(
                     !view.title.trim().is_empty(),
                     "{provider:?} {kind} rendered a row with no title"

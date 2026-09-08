@@ -2,6 +2,14 @@
 // Ported from rust/crates/oga-ui/src/activity/mod.rs — keep behavior identical.
 
 import type { EventKind, TaskEventPresentation, TaskEventView, TaskState } from "@/bridge/types";
+import {
+  ogaCall,
+  ogaResultSummary,
+  ogaSubject,
+  ogaTitle,
+  ogaVerb,
+  type OgaObject,
+} from "@/domain/oga";
 import { absoluteTime } from "@/ui/time";
 
 export interface ActivityComposition {
@@ -537,19 +545,37 @@ export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventVi
         const info = step.tool_info;
         const name = stringValue(step.tool_name) ?? stringValue(step.toolName) ?? event.title;
         const parameters = info?.parameters ?? {};
-        const label = name === "call_mcp_tool"
-          ? [stringValue(parameters.ServerName), stringValue(parameters.ToolName)].filter(Boolean).join("/") || name
-          : name;
         const output = stringValue(info?.output);
         const error = info?.error ?? step.error;
         const state = stringValue(step.state)?.toLowerCase();
-        const mapped = antigravityToolPresentation(name, parameters, output);
+        // SAFETY: Antigravity parameters are the parsed JSON object passed to the Oga call.
+        const oga = ogaCall(name, parameters as OgaObject);
+        const mapped = oga
+          ? {
+              kind: "tool" as const,
+              detail: ogaSubject(oga.operation, oga.input),
+              presentation: {
+                type: "tool" as const,
+                text: ogaSubject(oga.operation, oga.input),
+                outcome: ogaResultSummary(oga.operation, output) ?? event.presentation?.outcome,
+              },
+            }
+          : antigravityToolPresentation(name, parameters, output);
+        const label = oga
+          ? ogaTitle(oga.operation, oga.input)
+          : name === "call_mcp_tool"
+            ? [stringValue(parameters.ServerName), stringValue(parameters.ToolName)].filter(Boolean).join("/") || name
+            : name;
+        const result = stringValue(error?.message)
+          ?? event.result
+          ?? (oga ? ogaResultSummary(oga.operation, output) : output);
         normalized.push({
           ...event,
           kind: mapped?.kind ?? event.kind,
           title: label,
-          detail: mapped?.detail ?? (Object.keys(parameters).length > 0 ? JSON.stringify(parameters) : event.detail),
-          result: stringValue(error?.message) ?? output ?? event.result,
+          verb: event.verb ?? (oga ? ogaVerb(oga.operation, oga.input, state !== "active") : event.verb),
+          detail: mapped?.detail ?? (oga ? undefined : Object.keys(parameters).length > 0 ? JSON.stringify(parameters) : event.detail),
+          result,
           presentation: mapped?.presentation ?? event.presentation,
           phase: state === "error" || state === "failed" ? "failed" : state === "done" || state === "completed" ? "completed" : "started",
           actionId: `antigravity:step:${String(step.step_index ?? event.id)}`,
@@ -602,7 +628,7 @@ interface AntigravityParameters {
   CommandLine?: string;
   ServerName?: string;
   ToolName?: string;
-  Arguments?: unknown;
+  Arguments?: OgaObject;
 }
 
 interface AntigravityStep {
