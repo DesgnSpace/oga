@@ -9,6 +9,7 @@
 - Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
 - Live task updates stay responsive during busy periods, and the app catches up if it falls behind.
 - Task durations now count only time spent running, not scheduled or interrupted waiting time.
+- Expanding a search step in the activity view now shows what it found, or says plainly that nothing matched, instead of an empty panel.
 
 ## 0.0.10 - 2026-09-07
 

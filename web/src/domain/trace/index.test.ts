@@ -127,6 +127,87 @@ describe("trace rows", () => {
     expect(rows[0].result).toBe("4 matches");
   });
 
+  // Real shape from `~/.oga/oga.db`: the worker ran `oga query` through Bash,
+  // and the hook nests the tool's stdout under `tool_response`.
+  it("shows an oga query search's matches on expansion", () => {
+    const searchEvent: TaskEventView = {
+      ...event(1, "tool", "Search code"),
+      verb: "Searched",
+      presentation: { type: "tool", text: 'oga query "tool description strings"' },
+      rawText: JSON.stringify({
+        hook_event_name: "PostToolUse",
+        tool_name: "Bash",
+        tool_input: { command: 'oga query "tool description strings"' },
+        tool_response: { stdout: "web/src/ui/icons.tsx:12#IconTitle (matched: title)", stderr: "" },
+      }),
+    };
+    const expansion = expansionFromEvent(searchEvent);
+    expect(expansion).toEqual({
+      type: "content",
+      hiddenLines: 0,
+      language: "plain",
+      text: "web/src/ui/icons.tsx:12#IconTitle (matched: title)",
+      preview: undefined,
+    });
+  });
+
+  // Claude's own Grep tool reports the same way, without the Bash wrapper.
+  it("shows a built-in grep search's matches on expansion", () => {
+    const searchEvent: TaskEventView = {
+      ...event(1, "tool", "Search code"),
+      verb: "Searched",
+      presentation: { type: "tool", text: "TaskEventView in rust", outcome: "2 matches" },
+      rawText: JSON.stringify({
+        hook_event_name: "PostToolUse",
+        tool_name: "Grep",
+        tool_input: { pattern: "TaskEventView", path: "rust" },
+        tool_response: { stdout: "rust/crates/oga-events/src/lib.rs\nrust/crates/oga-http/src/state.rs" },
+      }),
+    };
+    const expansion = expansionFromEvent(searchEvent);
+    expect(expansion).toEqual({
+      type: "content",
+      hiddenLines: 0,
+      language: "plain",
+      text: "rust/crates/oga-events/src/lib.rs\nrust/crates/oga-http/src/state.rs",
+      preview: undefined,
+    });
+  });
+
+  it("reads a search that matched nothing as a plain empty result, not a blank panel", () => {
+    const searchEvent: TaskEventView = {
+      ...event(1, "tool", "Search code"),
+      verb: "Searched",
+      presentation: { type: "tool", text: "nonexistent_symbol" },
+      rawText: JSON.stringify({
+        hook_event_name: "PostToolUse",
+        tool_name: "Bash",
+        tool_input: { command: 'rg "nonexistent_symbol"' },
+        tool_response: { stdout: "", stderr: "" },
+      }),
+    };
+    const expansion = expansionFromEvent(searchEvent);
+    expect(expansion?.type).toBe("content");
+    if (expansion?.type === "content") expect(expansion.text).toBe("No matches found.");
+  });
+
+  it("reads a file-finding search that found nothing as a plain empty result", () => {
+    const findEvent: TaskEventView = {
+      ...event(1, "tool", "Find files"),
+      verb: "Found",
+      presentation: { type: "tool", text: "*.missing" },
+      rawText: JSON.stringify({
+        hook_event_name: "PostToolUse",
+        tool_name: "Glob",
+        tool_input: { pattern: "*.missing" },
+        tool_response: { stdout: "" },
+      }),
+    };
+    const expansion = expansionFromEvent(findEvent);
+    expect(expansion?.type).toBe("content");
+    if (expansion?.type === "content") expect(expansion.text).toBe("No files found.");
+  });
+
   it("shows loaded skill instructions as prose without the wrapper", () => {
     const skillEvent: TaskEventView = {
       ...event(1, "tool", "Load skill"),
