@@ -70,7 +70,7 @@ import {
   type SidebarRow,
 } from "@/state/sidebar-projection";
 import { BackArrowIcon, FilterIcon, ForwardArrowIcon, RefreshIcon, SettingsIcon, SidebarIcon, UsageIcon } from "@/ui/icons";
-import { formatCost, taskWallTime } from "@/lib/format";
+import { formatCost, taskDuration } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
@@ -106,8 +106,8 @@ function taskSubtitle(task: TaskSummary, state: SidebarState): string {
   // A task nobody stopped is waiting for something; the row says what, because
   // otherwise it reads as stalled.
   if (isExplainedWait(task.hold)) parts.push(waitLabel(task.hold));
-  const wallTime = taskWallTime(task.createdAt, task.updatedAt, !SETTLED_STATES.has(task.state));
-  if (wallTime) parts.push(wallTime);
+  const duration = taskDuration(task.durationMs, task.runningSince, !SETTLED_STATES.has(task.state));
+  if (duration) parts.push(duration);
   const cost = formatCost(task.costUsd, task.costUsdEstimated);
   if (cost) parts.push(cost);
   return parts.join(" · ");
@@ -218,6 +218,13 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   const searchFieldRef = useRef<HTMLInputElement>(null);
   const taskRowRefs = useRef(new Map<string, HTMLAnchorElement>());
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(initialTask);
+  const [, setClock] = useState(0);
+
+  useEffect(() => {
+    if (!sidebar.tasks.some((task) => task.state === "running")) return;
+    const timer = setInterval(() => setClock((clock) => clock + 1), 1_000);
+    return () => clearInterval(timer);
+  }, [sidebar.tasks]);
 
   const projection = useMemo(
     () => projectionFromState(sidebar),

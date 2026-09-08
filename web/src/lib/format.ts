@@ -26,10 +26,12 @@ export function formatDuration(milliseconds: number): string {
   return `${hours}h ${minutes % 60}m`;
 }
 
-/** Wall time from start to end (now, while running; updatedAt, once settled). Empty string when timestamps don't parse. */
-export function taskWallTime(createdAt: string, updatedAt: string, running: boolean): string {
-  const start = new Date(createdAt).getTime();
-  const end = running ? Date.now() : new Date(updatedAt).getTime();
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "";
-  return formatDuration(end - start);
+/** Time spent in worker runs, with the active run ticking from its start. */
+export function taskDuration(durationMs: number | undefined, runningSince: string | undefined, running: boolean): string {
+  let total = durationMs ?? 0;
+  if (running && runningSince !== undefined) {
+    const started = new Date(runningSince).getTime();
+    if (!Number.isNaN(started)) total += Math.max(0, Date.now() - started);
+  }
+  return formatDuration(total);
 }

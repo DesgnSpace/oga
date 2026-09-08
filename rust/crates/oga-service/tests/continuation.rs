@@ -48,6 +48,8 @@ fn task(id: &str, cwd: &str, state: TaskState) -> Task {
         state,
         created_at: "2026-01-01T00:00:00.000Z".into(),
         updated_at: "2026-01-01T00:00:00.000Z".into(),
+        duration_ms: 0,
+        running_since: None,
         output: String::new(),
         error: None,
         question: (state == TaskState::NeedsInput).then(|| "which path?".into()),

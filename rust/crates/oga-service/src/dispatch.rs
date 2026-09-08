@@ -424,6 +424,8 @@ impl Dispatcher {
             state,
             created_at: now.clone(),
             updated_at: now,
+            duration_ms: 0,
+            running_since: None,
             output: String::new(),
             error: completion.as_ref().and_then(|value| value.reason.clone()),
             question: None,

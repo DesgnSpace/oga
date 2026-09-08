@@ -646,6 +646,7 @@ pub fn task_to_batch(task: &Task) -> BatchTask {
         code: outcome.as_ref().and_then(|value| value.code),
         truncated: truncated.then_some(true),
         more: outcome.and_then(|value| value.more.then_some(true)),
+        duration_ms: task.duration_ms,
     }
 }
 

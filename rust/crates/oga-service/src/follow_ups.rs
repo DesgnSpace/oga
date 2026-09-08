@@ -375,6 +375,8 @@ mod tests {
             state: TaskState::Completed,
             created_at: "2026-01-01T00:00:00.000Z".into(),
             updated_at: "2026-01-01T00:00:00.000Z".into(),
+            duration_ms: 0,
+            running_since: None,
             output: String::new(),
             error: None,
             question: None,
