@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Activity rows now name work done through Oga in plain language and show concise results when you expand them, instead of exposing technical tool names or raw response data.
+
 ## 0.0.11 - 2026-09-08
 
 - The landing page's "For bigger jobs" section now leads with what you get — work on a branch of its own, reviewed as a branch or pull request — in three steps, with no jargon and no shell command.

@@ -151,6 +151,83 @@ describe("trace rows", () => {
     });
   });
 
+  it("shows an Oga task list as readable bounded content", () => {
+    const taskEvent: TaskEventView = {
+      ...event(1, "tool", "List tasks"),
+      verb: "Listed",
+      presentation: { type: "tool", text: "trace presentation", outcome: "2 tasks" },
+      rawText: JSON.stringify({
+        hook_event_name: "PostToolUse",
+        tool_name: "oga_tasks",
+        tool_input: { query: "trace presentation" },
+        tool_response: {
+          content: [{
+            type: "text",
+            text: JSON.stringify([
+              { id: "task-1", title: "Review the trace", state: "running" },
+              { id: "task-2", title: "Run the checks", state: "completed" },
+            ]),
+          }],
+        },
+      }),
+    };
+
+    expect(expansionFromEvent(taskEvent)).toEqual({
+      type: "content",
+      hiddenLines: 0,
+      language: "plain",
+      text: "2 tasks\n- Review the trace · in progress\n- Run the checks · complete",
+      preview: undefined,
+    });
+  });
+
+  it("does not expose task IDs in an Oga action result", () => {
+    const taskEvent: TaskEventView = {
+      ...event(1, "tool", "View task"),
+      verb: "Viewed",
+      presentation: { type: "tool", text: "selected task" },
+      rawText: JSON.stringify({
+        tool_name: "oga_inspect",
+        tool_input: { taskId: "secret-task-id" },
+        tool_response: {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ id: "secret-task-id", state: "completed", output: "finished" }),
+          }],
+        },
+      }),
+    };
+
+    const expansion = expansionFromEvent(taskEvent);
+    expect(expansion?.type).toBe("content");
+    if (expansion?.type !== "content") throw new Error("expected content expansion");
+    expect(expansion.text).toBe("Status: complete\nResult: finished");
+    expect(expansion.text).not.toContain("secret-task-id");
+  });
+
+  it("shows an Oga action error instead of a success message", () => {
+    const taskEvent: TaskEventView = {
+      ...event(1, "tool", "Confirm task complete"),
+      verb: "Confirmed",
+      presentation: { type: "tool", text: "selected task" },
+      rawText: JSON.stringify({
+        tool_name: "oga_complete",
+        tool_input: { taskId: "task-1" },
+        tool_response: {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ error: { message: "task is already complete" } }),
+          }],
+        },
+      }),
+    };
+
+    const expansion = expansionFromEvent(taskEvent);
+    expect(expansion?.type).toBe("content");
+    if (expansion?.type !== "content") throw new Error("expected content expansion");
+    expect(expansion.text).toBe("Error: task is already complete");
+  });
+
   // Claude's own Grep tool reports the same way, without the Bash wrapper.
   it("shows a built-in grep search's matches on expansion", () => {
     const searchEvent: TaskEventView = {
