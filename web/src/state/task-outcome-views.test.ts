@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { TaskState, TaskSummary } from "@/bridge/types";
-import { MAX_TASK_OUTCOME_VIEWS, TaskOutcomeViewStore, taskDotTone } from "./task-outcome-views";
+import type { TaskHoldView, TaskState, TaskSummary } from "@/bridge/types";
+import { isTaskWaiting, MAX_TASK_OUTCOME_VIEWS, TaskOutcomeViewStore, taskDotTone } from "./task-outcome-views";
 
 function task(id: string, state: TaskState, extra: Partial<TaskSummary> = {}): TaskSummary {
   return {
@@ -103,5 +103,24 @@ describe("task outcome views", () => {
     expect(taskDotTone("running")).toBe("muted");
     expect(taskDotTone("queued")).toBe("muted");
     expect(taskDotTone("cancelled")).toBe("muted");
+  });
+
+  it("marks only held or dependency-blocked tasks as waiting", () => {
+    const hold: TaskHoldView = {
+      kind: "dependency",
+      waitingOn: "blocker",
+      note: "Waiting for another task",
+      expiresAt: "2026-09-09T10:00:00Z",
+    };
+
+    expect(isTaskWaiting(task("held", "pending", { hold }))).toBe(true);
+    expect(isTaskWaiting(task("pending", "pending"))).toBe(false);
+    expect(isTaskWaiting(task("dependency", "blocked", {
+      completion: { blocked: true, code: "cancelled", dependencyBlocked: true },
+    }))).toBe(true);
+    expect(isTaskWaiting(task("worker-error", "blocked", {
+      completion: { blocked: true, code: "worker_error" },
+    }))).toBe(false);
+    expect(isTaskWaiting(task("question", "needs_input", { hold }))).toBe(false);
   });
 });

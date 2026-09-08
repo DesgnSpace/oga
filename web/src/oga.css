@@ -1076,6 +1076,13 @@ a {
     animation: none;
 }
 
+.task-sidebar .task-dot-waiting {
+    --task-dot-color: var(--color-warning);
+    border: 1.5px dashed var(--task-dot-color);
+    background: transparent;
+    animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .task-sidebar .task-dot-running {
         animation: none;

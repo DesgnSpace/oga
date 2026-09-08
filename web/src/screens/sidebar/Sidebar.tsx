@@ -74,7 +74,7 @@ import { formatCost, taskDuration } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
-import { taskDotTone, taskOutcomeViews } from "@/state/task-outcome-views";
+import { isTaskWaiting, taskDotTone, taskOutcomeViews } from "@/state/task-outcome-views";
 
 const FILTERS_LABEL = "Filter and sort tasks";
 
@@ -965,6 +965,7 @@ function SidebarRowView({
   const label = displayLabel(task);
   const isSelected = sidebar.selectedTask === task.id;
   const outcomeViewed = taskOutcomeViews.isViewed(task);
+  const waiting = isTaskWaiting(task);
   const status = taskStatusLabel(task);
   const viewLabel = outcomeViewed ? "Viewed" : "New update";
   const dotClassName = [
@@ -972,7 +973,8 @@ function SidebarRowView({
     `task-dot-${task.state}`,
     `task-dot-tone-${taskDotTone(task.state)}`,
     `task-dot-${outcomeViewed ? "viewed" : "unread"}`,
-  ].join(" ");
+    waiting && "task-dot-waiting",
+  ].filter(Boolean).join(" ");
   const href = `/tasks/${task.id}`;
   const className = [
     "sidebar-task",
@@ -1001,7 +1003,7 @@ function SidebarRowView({
         }}
         onContextMenu={(event) => onContextMenu(event, task)}
       >
-        <span className={dotClassName} aria-hidden="true" />
+        <span className={dotClassName} aria-hidden="true" title={status} />
         <span className="visually-hidden">
           {`${status} · ${viewLabel}`}
         </span>

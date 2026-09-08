@@ -4,7 +4,7 @@ import { readStorage, writeStorage } from "./storage";
 const TASK_OUTCOME_VIEWS_KEY = "taskOutcomeViews";
 export const MAX_TASK_OUTCOME_VIEWS = 512;
 
-type TaskOutcomeSource = Pick<TaskSummary, "id" | "state" | "question" | "error" | "completion">;
+type TaskOutcomeSource = Pick<TaskSummary, "id" | "state" | "question" | "error" | "completion" | "hold">;
 
 interface StoredTaskOutcomeView {
   outcome: string;
@@ -53,6 +53,11 @@ export function taskDotTone(state: TaskState): TaskDotTone {
     case "cancelled":
       return "muted";
   }
+}
+
+export function isTaskWaiting(task: TaskOutcomeSource): boolean {
+  if (task.state === "pending") return task.hold !== undefined;
+  return task.state === "blocked" && task.completion?.dependencyBlocked === true;
 }
 
 function isSerializedTaskOutcomeView(value: unknown): value is SerializedTaskOutcomeView { // oxlint-disable-line anti-slop/no-unknown-parameters -- localStorage JSON is untrusted input

@@ -15,7 +15,7 @@ mock.module("@/state/sidebar-projection", () => ({
   projectionFromState,
 }));
 
-function task(id: string, preview: string): TaskSummary {
+function task(id: string, preview: string, extra: Partial<TaskSummary> = {}): TaskSummary {
   return {
     id,
     profileId: "worker",
@@ -25,11 +25,12 @@ function task(id: string, preview: string): TaskSummary {
     promptPreview: preview,
     createdAt: "2026-08-31T10:00:00Z",
     updatedAt: "2026-08-31T10:00:00Z",
+    ...extra,
   };
 }
 
 function transport(
-  options: { profiles?: Array<{ id: string; label: string }> } = {},
+  options: { profiles?: Array<{ id: string; label: string }>; tasks?: TaskSummary[] } = {},
 ): Transport {
   return {
     invoke: async (command: string, args?: Record<string, unknown>) => {
@@ -38,7 +39,7 @@ function transport(
       if (call === "summary") {
         return {
           profiles: options.profiles ?? [],
-          tasks: [task("one", "first task"), task("two", "second task")],
+          tasks: options.tasks ?? [task("one", "first task"), task("two", "second task")],
           tasksHasMore: false,
           profileFailures: [],
           grants: [],
@@ -99,6 +100,28 @@ describe("the sidebar", () => {
     await act(async () => row.closest("a")!.click());
 
     expect(taskOutcomeViews.isViewed(task("two", "second task"))).toBe(false);
+  });
+
+  it("shows a held task as an amber waiting ring with its reason", async () => {
+    const waiting = task("waiting", "waiting task", {
+      state: "pending",
+      hold: {
+        kind: "dependency",
+        waitingOn: "blocker",
+        note: "Waiting for another task",
+        expiresAt: "2026-09-09T10:00:00Z",
+      },
+    });
+    setTransport(transport({ tasks: [waiting] }));
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    const row = await screen.findByText("waiting task");
+    const dot = row.closest("a")!.querySelector(".task-dot")!;
+    expect(dot.className).toContain("task-dot-waiting");
+    expect(dot.getAttribute("title")).toBe("Waiting for another task");
+    expect(row.closest("a")!.textContent).toContain("Waiting for another task");
   });
 
   it("names the worker that ran the task in the subtitle", async () => {
