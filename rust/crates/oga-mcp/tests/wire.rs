@@ -105,11 +105,8 @@ async fn initialize_advertises_protocol_and_instructions() {
         .as_str()
         .expect("instructions");
     assert!(instructions.contains("oga watch <taskId>"));
-    assert!(instructions.contains("oga query \"<what you need>\"`"));
-    assert!(
-        instructions
-            .contains("add `--code` when you want the code back instead of just the location")
-    );
+    assert!(instructions.contains("`query` locates code in a project"));
+    assert!(instructions.contains("Every task response carries `next`"));
 }
 
 #[tokio::test]
@@ -252,7 +249,7 @@ async fn tasks_schema_exposes_text_search() {
         task_tool["description"]
             .as_str()
             .expect("description")
-            .contains("ranks title matches first")
+            .contains("title matches rank first")
     );
 }
 
