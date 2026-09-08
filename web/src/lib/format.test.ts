@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatCost, formatDuration, formatTokenCount, taskWallTime } from "./format";
+import { formatCost, formatDuration, formatTokenCount, taskDuration } from "./format";
 
 describe("formatCost", () => {
   test("hides free and unknown cost", () => {
@@ -55,19 +55,18 @@ describe("formatDuration", () => {
   });
 });
 
-describe("taskWallTime", () => {
-  test("measures settled tasks against updatedAt", () => {
-    const result = taskWallTime("2026-01-01T00:00:00.000Z", "2026-01-01T00:01:30.000Z", false);
-    expect(result).toBe("1m 30s");
+describe("taskDuration", () => {
+  test("keeps only time already spent in worker runs", () => {
+    expect(taskDuration(30_000, undefined, false)).toBe("30s");
   });
 
-  test("measures running tasks against now", () => {
+  test("adds the active run to completed run time", () => {
     const start = new Date(Date.now() - 5_000).toISOString();
-    const result = taskWallTime(start, start, true);
+    const result = taskDuration(0, start, true);
     expect(result).toBe("5s");
   });
 
-  test("returns empty string for unparsable timestamps", () => {
-    expect(taskWallTime("not-a-date", "2026-01-01T00:00:00.000Z", false)).toBe("");
+  test("ignores an invalid active run timestamp", () => {
+    expect(taskDuration(30_000, "not-a-date", true)).toBe("30s");
   });
 });

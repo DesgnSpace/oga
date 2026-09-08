@@ -6,7 +6,7 @@ import { broker } from "@/bridge/client";
 import type { TaskDiff, TaskEventView } from "@/bridge/types";
 import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
-import { formatCost, formatTokenCount, taskWallTime } from "@/lib/format";
+import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
 import type { TaskTitleBarInfo } from "@/shell/TitleBar";
 import {
@@ -106,12 +106,12 @@ interface StatItem {
 function taskDetailStatItems(task: NonNullable<TaskDetailState["task"]>, events: TaskEventView[]): StatItem[] {
   const cost = formatCost(task.costUsd, task.costUsdEstimated);
   const { tokensIn, tokensOut, tokensCached } = usageTotals(events);
-  const wallTime = taskWallTime(task.createdAt, task.updatedAt, !activityIsSettled(task.state));
+  const duration = taskDuration(task.durationMs, task.runningSince, !activityIsSettled(task.state));
 
   const items: StatItem[] = [];
   if (cost) items.push({ text: cost, title: task.costUsdEstimated ? "Estimated from public pricing" : undefined });
   if (task.turns !== undefined && task.turns > 0) items.push({ text: `${task.turns} turn${task.turns === 1 ? "" : "s"}` });
-  if (wallTime) items.push({ text: wallTime });
+  if (duration) items.push({ text: duration });
   if (tokensIn > 0) items.push({ text: `${formatTokenCount(tokensIn)} in` });
   if (tokensOut > 0) items.push({ text: `${formatTokenCount(tokensOut)} out` });
   if (tokensCached > 0) items.push({ text: `${formatTokenCount(tokensCached)} cached` });
@@ -199,6 +199,12 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   const state = watched.controller.snapshot;
   const task = state.task;
   const eventRevision = state.revision;
+
+  React.useEffect(() => {
+    if (task?.state !== "running") return;
+    const timer = setInterval(forceUpdate, 1_000);
+    return () => clearInterval(timer);
+  }, [task?.state, forceUpdate]);
 
   // The newest activity is what a reader opens the task for, so the view sits
   // at the end and stays there as activity arrives — until they scroll away,

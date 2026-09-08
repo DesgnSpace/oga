@@ -14,6 +14,37 @@ use serde_json::json;
 
 use crate::{Store, StoreError};
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskTiming {
+    pub duration_ms: u64,
+    pub running_since: Option<String>,
+}
+
+/// Sums completed worker turns and identifies the currently active turn.
+pub fn task_timing(
+    connection: &rusqlite::Connection,
+    task_id: &str,
+) -> rusqlite::Result<TaskTiming> {
+    connection.query_row(
+        "SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN 0 ELSE CAST(MAX(0, ROUND((julianday(ended_at)-julianday(started_at))*86400000.0)) AS INTEGER) END),0), MAX(CASE WHEN status='running' THEN started_at END) FROM task_turns WHERE task_id=?",
+        [task_id],
+        |row| Ok(TaskTiming {
+            duration_ms: row.get::<_, i64>(0)?.max(0) as u64,
+            running_since: row.get(1)?,
+        }),
+    )
+}
+
+pub fn attach_task_timing(
+    connection: &rusqlite::Connection,
+    task: &mut Task,
+) -> rusqlite::Result<()> {
+    let timing = task_timing(connection, &task.id)?;
+    task.duration_ms = timing.duration_ms;
+    task.running_since = timing.running_since;
+    Ok(())
+}
+
 pub struct Repositories<'a> {
     store: &'a Store,
 }
@@ -254,6 +285,8 @@ pub struct TaskSearchResult {
     pub created_at: String,
     pub updated_at: String,
     pub archived_at: Option<String>,
+    pub duration_ms: u64,
+    pub running_since: Option<String>,
 }
 
 impl Tasks<'_> {
@@ -265,7 +298,13 @@ impl Tasks<'_> {
         self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,bool_value(task.allow_questions),task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at])?; Ok(()) })
     }
     pub fn get(&self, id: &str) -> Result<Option<Task>, StoreError> {
-        self.store.with_connection(|c| c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at FROM tasks WHERE id=?", [id], task_from_row).optional().map_err(Into::into))
+        self.store.with_connection(|c| {
+            let mut task = c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at FROM tasks WHERE id=?", [id], task_from_row).optional()?;
+            if let Some(task) = &mut task {
+                attach_task_timing(c, task)?;
+            }
+            Ok(task)
+        })
     }
     pub fn search(&self, query: &TaskListQuery) -> Result<Vec<TaskSearchResult>, StoreError> {
         let text = query
@@ -325,7 +364,7 @@ impl Tasks<'_> {
             "DESC"
         };
         let sql = format!(
-            "SELECT id, state, title, tldr, cwd, created_at, updated_at, archived_at, CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'title' WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'tldr' ELSE 'prompt' END FROM tasks WHERE {} ORDER BY CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, updated_at {order}, id {order}",
+            "SELECT id, state, title, tldr, cwd, created_at, updated_at, archived_at, CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'title' WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'tldr' ELSE 'prompt' END, COALESCE((SELECT SUM(CASE WHEN ended_at IS NULL THEN 0 ELSE CAST(MAX(0, ROUND((julianday(ended_at)-julianday(started_at))*86400000.0)) AS INTEGER) END) FROM task_turns WHERE task_id=tasks.id),0), (SELECT started_at FROM task_turns WHERE task_id=tasks.id AND status='running' LIMIT 1) FROM tasks WHERE {} ORDER BY CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, updated_at {order}, id {order}",
             clauses.join(" AND ")
         );
         self.store.with_connection(|connection| {
@@ -349,6 +388,8 @@ impl Tasks<'_> {
                         created_at: row.get(5)?,
                         updated_at: row.get(6)?,
                         archived_at: row.get(7)?,
+                        duration_ms: row.get::<_, i64>(9)?.max(0) as u64,
+                        running_since: row.get(10)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -408,6 +449,8 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
         state,
         created_at: r.get(25)?,
         updated_at: r.get(26)?,
+        duration_ms: 0,
+        running_since: None,
         output: r.get(8)?,
         error: r.get(9)?,
         question: r.get(10)?,

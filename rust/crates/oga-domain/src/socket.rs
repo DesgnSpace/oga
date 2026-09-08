@@ -125,6 +125,8 @@ pub struct BatchTask {
     pub truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub more: Option<bool>,
+    /// Milliseconds spent in worker runs, excluding waits between runs.
+    pub duration_ms: u64,
 }
 
 /// server→client: events and tasks changed since the last batch.

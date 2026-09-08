@@ -13,7 +13,7 @@ use oga_domain::{
     TaskHoldView, TaskKind, TaskState, TaskSummary, TaskWorktree,
 };
 use oga_events::{event_view, mark_repeated_retries};
-use oga_store::Store;
+use oga_store::{Store, attach_task_timing};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -499,6 +499,7 @@ fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Res
         .optional()?;
     if let Some(task) = &mut task {
         attach_task_read_fields(connection, std::slice::from_mut(task))?;
+        attach_task_timing(connection, task)?;
     }
     Ok(task)
 }
@@ -538,6 +539,7 @@ fn attach_task_read_fields(
     for task in tasks {
         task.queued_follow_ups = counts.get(&task.id).copied().filter(|count| *count > 0);
         task.hold = holds.get(&task.id).cloned();
+        attach_task_timing(connection, task)?;
     }
     Ok(())
 }
@@ -656,6 +658,8 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         archived_at: row.get(33)?,
         created_at: row.get(34)?,
         updated_at: row.get(35)?,
+        duration_ms: 0,
+        running_since: None,
         ..Task::default()
     })
 }
@@ -695,6 +699,8 @@ fn task_summary(task: &Task) -> TaskSummary {
         title: task.title.clone(),
         created_at: task.created_at.clone(),
         updated_at: task.updated_at.clone(),
+        duration_ms: task.duration_ms,
+        running_since: task.running_since.clone(),
         error: task
             .error
             .as_ref()

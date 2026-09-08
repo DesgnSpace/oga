@@ -99,6 +99,8 @@ export interface Task {
   state: TaskState;
   createdAt: string;
   updatedAt: string;
+  durationMs?: number;
+  runningSince?: string;
   output: string;
   error?: string;
   question?: string;
@@ -151,6 +153,8 @@ export interface TaskSummary {
   title?: string;
   createdAt: string;
   updatedAt: string;
+  durationMs?: number;
+  runningSince?: string;
   error?: string;
   question?: string;
   parentTaskId?: string;

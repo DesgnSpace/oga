@@ -150,6 +150,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
             .optional()
             .map_err(StoreError::from)?;
         if let Some(task) = &mut task {
+            oga_store::attach_task_timing(connection, task)?;
             task.hold = connection
                 .query_row(
                     "SELECT verb,start_at,note,expires_at,args_json FROM task_holds WHERE task_id=?",
@@ -231,6 +232,8 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         state,
         created_at: row.get(34)?,
         updated_at: row.get(35)?,
+        duration_ms: 0,
+        running_since: None,
         output: row.get(13)?,
         error: row.get(14)?,
         question: row.get(15)?,

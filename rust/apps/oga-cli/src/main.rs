@@ -877,6 +877,7 @@ fn short_task_row(task: &TaskSummary) -> Value {
         "state": state_name(task.state),
         "title": task_title(task),
         "cwd": Path::new(&task.cwd).file_name().and_then(|name| name.to_str()).unwrap_or(&task.cwd),
+        "durationMs": task.duration_ms,
     })
 }
 
@@ -1106,6 +1107,8 @@ async fn run_tasks(args: &[String]) -> CliResult<i32> {
                 created_at: task.created_at,
                 updated_at: task.updated_at,
                 archived_at: task.archived_at,
+                duration_ms: task.duration_ms,
+                running_since: task.running_since,
                 ..TaskSummary::default()
             })
             .collect()
@@ -1856,6 +1859,7 @@ fn watch_line(task: &BatchTask) -> String {
     if task.archived_at.is_some() {
         line.insert("archived".into(), json!(true));
     }
+    line.insert("durationMs".into(), json!(task.duration_ms));
     Value::Object(line).to_string()
 }
 
@@ -1920,11 +1924,13 @@ fn load_watch_tasks(store: &Store, task_ids: &HashSet<String>) -> CliResult<Vec<
             let values = task_ids.iter().map(String::as_str).collect::<Vec<_>>();
             let mut statement = connection.prepare(&sql)?;
             let rows = statement.query_map(rusqlite::params_from_iter(values), |row| {
+                let id: String = row.get(0)?;
+                let timing = oga_store::task_timing(connection, &id)?;
                 let completion = row
                     .get::<_, Option<String>>(7)?
                     .and_then(|value| serde_json::from_str::<oga_domain::TaskCompletion>(&value).ok());
                 Ok(BatchTask {
-                    id: row.get(0)?,
+                    id,
                     state: parse_task_state(&row.get::<_, String>(1)?)?,
                     question: row.get(3)?,
                     error: row.get(2)?,
@@ -1934,6 +1940,7 @@ fn load_watch_tasks(store: &Store, task_ids: &HashSet<String>) -> CliResult<Vec<
                     code: completion.map(|completion| completion.code),
                     truncated: None,
                     more: None,
+                    duration_ms: timing.duration_ms,
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -4478,11 +4485,13 @@ mod tests {
             code: None,
             truncated: None,
             more: None,
+            duration_ms: 30_000,
         };
         let line: Value = serde_json::from_str(&watch_line(&task)).unwrap();
         assert_eq!(line["type"], "settled");
         assert_eq!(line["tldr"], "finished");
         assert_eq!(line["title"], "Ship it");
+        assert_eq!(line["durationMs"], 30_000);
     }
 
     #[test]
@@ -4498,6 +4507,7 @@ mod tests {
             code: None,
             truncated: None,
             more: None,
+            duration_ms: 0,
         };
         let mut pending = HashSet::from([String::from("task-a")]);
 

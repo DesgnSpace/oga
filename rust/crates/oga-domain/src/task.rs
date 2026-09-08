@@ -353,6 +353,11 @@ pub struct Task {
     pub state: TaskState,
     pub created_at: String,
     pub updated_at: String,
+    /// Derived from worker turns; legacy tasks without turns report zero.
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running_since: Option<String>,
     #[serde(default)]
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -448,6 +453,10 @@ pub struct TaskSummary {
     pub title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running_since: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

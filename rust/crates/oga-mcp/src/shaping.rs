@@ -16,6 +16,7 @@ const GROUPS: &[(&str, &[&str])] = &[
             "worktreeLabel",
             "createdAt",
             "updatedAt",
+            "durationMs",
             "title",
             "tldr",
             "parentTaskId",
@@ -103,6 +104,9 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
     }
     if want.contains("updatedAt") {
         view.insert("updatedAt".into(), json!(task.updated_at));
+    }
+    if want.contains("durationMs") {
+        view.insert("durationMs".into(), json!(task.duration_ms));
     }
     if want.contains("title")
         && let Some(title) = &task.title
@@ -249,6 +253,9 @@ pub fn summary_view(
     if want.contains("updatedAt") {
         view.insert("updatedAt".into(), json!(summary.updated_at));
     }
+    if want.contains("durationMs") {
+        view.insert("durationMs".into(), json!(summary.duration_ms));
+    }
     if want.contains("title")
         && let Some(title) = &summary.title
     {
@@ -314,6 +321,8 @@ pub fn task_summary(task: &Task) -> TaskSummary {
         title: task.title.clone(),
         created_at: task.created_at.clone(),
         updated_at: task.updated_at.clone(),
+        duration_ms: task.duration_ms,
+        running_since: task.running_since.clone(),
         error: task.error.clone(),
         question: task.question.clone(),
         parent_task_id: task.parent_task_id.clone(),
