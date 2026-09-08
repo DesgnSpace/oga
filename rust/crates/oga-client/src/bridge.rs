@@ -530,6 +530,15 @@ mod native {
             });
         }
 
+        /// The task the web view has open, if any.
+        pub fn watching(&self) -> Option<String> {
+            self.watched
+                .lock()
+                .expect("watched task lock")
+                .as_ref()
+                .map(|watched| watched.task_id.clone())
+        }
+
         /// Wakes the follower when this pointer is for the task being watched.
         pub fn note(&self, pointer: &EventPointer) {
             let watching = self

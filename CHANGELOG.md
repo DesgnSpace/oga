@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Oga now tells you when a task finishes, stops short, or needs an answer, even with the window closed. Click the notification to open that task. The task you are already reading stays quiet, tasks landing together arrive as one notification, and you can turn all of it off under Settings ▸ Notifications.
 - Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
 - Live task updates stay responsive during busy periods, and the app catches up if it falls behind.
 

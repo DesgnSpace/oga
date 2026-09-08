@@ -7,6 +7,7 @@ import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
 import { MarkdownContent } from "@/domain/markdown";
+import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
 import { workerToastName } from "@/lib/toast-subject";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
@@ -313,6 +314,16 @@ export default function SettingsPage({
           <McpIntegrationPanel state={state} setState={setState} offline={offline} />
         </div>
         <div
+          id="settings-panel-notifications"
+          role="tabpanel"
+          tabIndex={0}
+          aria-labelledby="settings-tab-notifications"
+          hidden={activeTab !== "notifications"}
+          className={activeTab !== "notifications" ? "settings-tab-panel-hidden" : undefined}
+        >
+          <NotificationsPanel />
+        </div>
+        <div
           id="settings-panel-memories"
           role="tabpanel"
           tabIndex={0}
@@ -475,6 +486,33 @@ function WaitingPanel() {
           </label>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function NotificationsPanel() {
+  const [enabled, setEnabled] = useTaskNotifications();
+
+  return (
+    <section className="settings-section">
+      <div className="settings-section-heading">
+        <div>
+          <p className="eyebrow">Notifications</p>
+          <h2>When a task stops</h2>
+        </div>
+      </div>
+      <p className="settings-helper">
+        Oga can tell you a task finished, stopped short, or is waiting on your answer, even with the window closed.
+      </p>
+      <div className="settings-option-list">
+        <label className="settings-option">
+          <span>
+            <strong>Tell me when a task stops</strong>
+            <small>Click the notification to open that task.</small>
+          </span>
+          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+        </label>
+      </div>
     </section>
   );
 }
