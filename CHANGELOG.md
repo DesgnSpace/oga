@@ -6,14 +6,10 @@
 
 ## 0.0.11 - 2026-09-08
 
-- The landing page's "For bigger jobs" section now leads with what you get — work on a branch of its own, reviewed as a branch or pull request — in three steps, with no jargon and no shell command.
-- The site now explains how Oga differs from the other agent tools, naming and linking them: you keep the coding agent you already use and hand work out from inside it.
-- The landing page now explains what you get in plain terms up front, and shows how to send a task to its own checkout so it never touches your working folder until you're ready to merge.
 - Every task in the list now names the project it runs in, right after the worker. Work with a copy of its own shows the branch too, so two copies of one project never look alike.
 - Oga now tells you when a task finishes, stops short, or needs an answer, even with the window closed. Click the notification to open that task. The task you are already reading stays quiet, tasks landing together arrive as one notification, and you can turn all of it off under Settings ▸ Notifications.
 - Work you hand off now reaches the tools you already connected for that project, instead of only Oga's own.
 - Work you hand off stays where you sent it. Ask for it to hand work onward and it can split the job up itself; otherwise it never can.
-- Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
 - Live task updates stay responsive during busy periods, and the app catches up if it falls behind.
 - Task durations now count only time spent running, not scheduled or interrupted waiting time.
 - Expanding a search step in the activity view now shows what it found, or says plainly that nothing matched, instead of an empty panel.
@@ -29,7 +25,6 @@
 - `oga query` now returns up to 10 candidates by default. Delegated workers can add `--code` when they want code lookups to include the matching source without opening another file.
 - Pi runs now show thinking, replies, tool calls, and their results in the activity view.
 - Update notes now show headings, lists, code, and links correctly in the desktop app.
-- Docs and changelog sections now have shareable links you can copy directly.
 - Pi runs now include token counts and estimated cost in usage summaries.
 - Models switched off in Settings can no longer receive delegated work.
 
@@ -41,7 +36,6 @@
 
 ### Changed
 
-- The docs and the site now say what Oga is in one consistent way: an orchestrator for coding agents — the layer above the AI coding tools you already use, deciding which one takes each piece of work and carrying it there and back. Pages that called it something else have been corrected.
 - Which model a delegated task lands on is decided by `kind` and a loved rule, never a hardness score. `kind` gains a `ux` subject alongside the existing ones.
 - Reasoning effort now comes from `effort` when you set it, else a loved model's own configured effort, else that model's own default — never guessed from how hard the work sounds.
 
@@ -117,11 +111,6 @@
 - Added task-specific next-step guidance to MCP responses.
 - Added queued follow-up instructions when a running worker cannot accept them.
 - Showed the files and images handed to a worker beside the request that sent them.
-- Added public documentation for installation, setup, delegation, task follow-up, worktrees, local data, and release notes.
-
-### Changed
-
-- Consolidated the maintained reference docs.
 
 ### Fixed
 
