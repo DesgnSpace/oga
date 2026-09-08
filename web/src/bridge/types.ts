@@ -107,6 +107,7 @@ export interface Task {
   scope: TaskScope;
   grantId?: string;
   allowQuestions: boolean;
+  canDelegate: boolean;
   timeoutMs?: number;
   effort?: string;
   effortActual?: string;

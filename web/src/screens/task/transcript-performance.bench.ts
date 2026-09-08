@@ -25,6 +25,7 @@ const task: Task = {
   output: "",
   scope: { read: [], write: [] },
   allowQuestions: true,
+  canDelegate: false,
 };
 
 function action(id: number): TaskEventView {

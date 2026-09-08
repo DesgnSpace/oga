@@ -37,7 +37,7 @@ pub const PROMPTS_KEY: &str = "prompts";
 /// the task slot itself, first, when it is missing.
 pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "Worker mode: you are executing an assigned Oga task.\n",
-    "Continue the assigned brief directly. Do not use Oga to delegate, resume, or manage another task, and do not create a child task for the same work.\n",
+    "Continue the assigned brief directly.\n",
     "\n",
     "{{brief}}\n",
     "\n",
@@ -2458,7 +2458,7 @@ mod tests {
         );
         assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
         assert!(DEFAULT_WORKER_PROMPT.contains("oga relearn"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("Do not use Oga to delegate")); // default text, deletable
+        assert!(DEFAULT_WORKER_PROMPT.contains("Continue the assigned brief directly")); // default text, deletable
     }
 
     #[test]

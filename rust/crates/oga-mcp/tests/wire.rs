@@ -2,13 +2,15 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use http_body_util::BodyExt;
-use oga_domain::{Profile, Provider};
+use oga_domain::{Profile, Provider, Task, TaskKind, TaskState};
 use oga_http::HttpState;
 use oga_mcp::{MCP_PROTOCOL_VERSION, McpServer, router};
 use oga_store::Store;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
+
+const TIMESTAMP: &str = "2026-08-26T00:00:00.000Z";
 
 fn test_server() -> (TempDir, McpServer) {
     let directory = tempfile::tempdir().expect("temporary directory");
@@ -17,11 +19,19 @@ fn test_server() -> (TempDir, McpServer) {
 }
 
 async fn post(server: &McpServer, request: Value) -> Value {
+    post_as(server, None, request).await
+}
+
+async fn post_as(server: &McpServer, task_id: Option<&str>, request: Value) -> Value {
+    let mut builder = axum::http::Request::post("/mcp")
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream");
+    if let Some(task_id) = task_id {
+        builder = builder.header("x-oga-task-id", task_id);
+    }
     let response = router(server.state().clone())
         .oneshot(
-            axum::http::Request::post("/mcp")
-                .header("content-type", "application/json")
-                .header("accept", "application/json, text/event-stream")
+            builder
                 .body(Body::from(request.to_string()))
                 .expect("request"),
         )
@@ -100,7 +110,6 @@ async fn initialize_advertises_protocol_and_instructions() {
         instructions
             .contains("add `--code` when you want the code back instead of just the location")
     );
-    assert!(instructions.contains("Worker mode"));
 }
 
 #[tokio::test]
@@ -137,6 +146,87 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
     ] {
         assert!(names.contains(&name), "missing tool {name}");
     }
+}
+
+#[tokio::test]
+async fn a_worker_only_sees_delegate_when_its_task_may_hand_work_onward() {
+    let (_directory, server) = test_server();
+    let profile = insert_profile(&server);
+    insert_worker(&server, &profile, "kept", false);
+    insert_worker(&server, &profile, "fanning-out", true);
+
+    for (task_id, expected) in [("kept", false), ("fanning-out", true)] {
+        let response = post_as(
+            &server,
+            Some(task_id),
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+        )
+        .await;
+        let served = response["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .any(|tool| tool["name"] == "delegate");
+        assert_eq!(served, expected, "{task_id}");
+    }
+
+    let refused = post_as(
+        &server,
+        Some("kept"),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": { "name": "delegate", "arguments": {
+                "prompt": "do more", "cwd": "/repo", "tldr": "more work", "title": "More"
+            }}
+        }),
+    )
+    .await;
+    assert_eq!(refused["result"]["isError"], true);
+}
+
+fn insert_profile(server: &McpServer) -> Profile {
+    let profile = Profile {
+        id: "main".into(),
+        label: "Main".into(),
+        provider: Provider::Claude,
+        default_model: "sonnet".into(),
+        enabled: true,
+        env: std::collections::BTreeMap::new(),
+        capabilities: Vec::new(),
+        command: None,
+    };
+    server
+        .state()
+        .store
+        .repositories()
+        .profiles()
+        .insert(&profile, TIMESTAMP)
+        .expect("profile insert");
+    profile
+}
+
+fn insert_worker(server: &McpServer, profile: &Profile, id: &str, can_delegate: bool) {
+    server
+        .state()
+        .store
+        .repositories()
+        .tasks()
+        .insert(&Task {
+            id: id.into(),
+            kind: Some(TaskKind::Delegated),
+            profile_id: profile.id.clone(),
+            model: profile.default_model.clone(),
+            prompt: "work".into(),
+            cwd: "/repo".into(),
+            state: TaskState::Running,
+            created_at: TIMESTAMP.into(),
+            updated_at: TIMESTAMP.into(),
+            can_delegate,
+            ..Task::default()
+        })
+        .expect("task insert");
 }
 
 #[tokio::test]
