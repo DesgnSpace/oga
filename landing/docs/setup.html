@@ -3,12 +3,43 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Add the accounts Oga may hand work to, and connect the coding agent you already use.">
+  <title>Connect Coding Agents & Configure Accounts — Oga Documentation</title>
+  <meta name="description" content="Connect your AI coding tool to Oga via MCP. Configure workers, pin preferred models with oga love, and direct tasks based on the kind of work.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Set up accounts</title>
+  <link rel="canonical" href="https://oga.desgn.space/docs/setup.html">
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Connect Coding Agents & Configure Accounts — Oga Documentation">
+  <meta property="og:description" content="Connect your AI coding tool to Oga via MCP. Configure workers, pin preferred models with oga love, and direct tasks based on the kind of work.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/setup.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Connect Coding Agents & Configure Accounts — Oga Documentation">
+  <meta name="twitter:description" content="Connect your AI coding tool to Oga via MCP. Configure workers, pin preferred models with oga love, and direct tasks based on the kind of work.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Set up the accounts that do the work",
+    "description": "Connect your AI coding tool to Oga via MCP. Configure workers, pin preferred models with oga love, and direct tasks based on the kind of work.",
+    "url": "https://oga.desgn.space/docs/setup.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -58,11 +89,11 @@
         <h1 id="set-up-the-accounts-that-do-the-work">Set up the accounts that do the work<a class="heading-anchor" href="#set-up-the-accounts-that-do-the-work" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
         <p class="docs-intro">Two things, once: tell Oga which accounts it may hand work to, then point the coding agent you already use at Oga.</p>
 
-        <h2 id="connect">Let your coding agent reach Oga<a class="heading-anchor" href="#connect" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <h2 id="connect">Let your coding agent reach Oga<a class="heading-anchor" href="#connect" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Oga's <strong>Install MCP</strong> button connects the coding agents it finds on your Mac. Existing connections are backed up first.</p>
         <p>Setting one up by hand instead? Point it at <code>http://127.0.0.1:7331/mcp</code>. Your agent can then hand work to Oga like any other connected tool.</p>
 
-        <h2 id="accounts">Add an account<a class="heading-anchor" href="#accounts" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <h2 id="accounts">Add an account<a class="heading-anchor" href="#accounts" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>On first open, Oga directs you to connect your AI before you delegate. You can also open <strong>Settings → Workers</strong> to add an account you already use. Every worker holds:</p>
         <ul>
           <li>Which provider tool it runs.</li>
@@ -75,7 +106,7 @@
         <p>Settings controls which workers and models can receive work. A model has to be turned on before Oga can select it.</p>
         <p><code>oga love</code> pins the worker and model that runs work nobody named an account for. Set it once, and every piece of work that leaves worker and model blank lands there instead of wherever Oga would otherwise guess.</p>
 
-         <h3 id="pin-a-default">Pin a default<a class="heading-anchor" href="#pin-a-default" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <h3 id="pin-a-default">Pin a default<a class="heading-anchor" href="#pin-a-default" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
         <p>Mark one account and model as <strong>loved</strong> to make it the default for work that names nothing. From the terminal:</p>
         <pre><code>oga love claude:opus</code></pre>
         <p>Give it a reasoning effort too, as a third part of the name:</p>
@@ -83,7 +114,7 @@
         <p>Name more than one destination and Oga tries them in order, moving on the moment one can't take the work — out of quota, unreachable, or not offering that model:</p>
         <pre><code>oga love opencode:muse claude:opus</code></pre>
 
-         <h3 id="pin-a-kind-of-work">Pin a kind of work<a class="heading-anchor" href="#pin-a-kind-of-work" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <h3 id="pin-a-kind-of-work">Pin a kind of work<a class="heading-anchor" href="#pin-a-kind-of-work" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
         <p>Send one kind of work somewhere else with <code>--when</code>, leaving everything else on the default:</p>
         <pre><code>oga love opencode:muse --when ui
 oga love codex:beast --when backend,database</code></pre>
@@ -92,13 +123,13 @@ oga love codex:beast --when backend,database</code></pre>
         <pre><code>oga love opencode:muse --when ui
 oga love claude:opus --when general</code></pre>
 
-         <h3 id="see-whats-set-and-clear-it">See what's set, and clear it<a class="heading-anchor" href="#see-whats-set-and-clear-it" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <h3 id="see-whats-set-and-clear-it">See what's set, and clear it<a class="heading-anchor" href="#see-whats-set-and-clear-it" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
         <p>Run <code>oga love</code> on its own to see what this project sends where today, listed in the order the rules take work:</p>
         <pre><code>oga love</code></pre>
         <p><code>oga love --clear</code> drops every rule and goes back to choosing per piece of work. Add <code>--when</code> to drop only the rule for those kinds:</p>
         <pre><code>oga love --clear --when ui</code></pre>
 
-         <h3 id="project-or-every-project">Project or every project<a class="heading-anchor" href="#project-or-every-project" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <h3 id="project-or-every-project">Project or every project<a class="heading-anchor" href="#project-or-every-project" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
         <p>Every command above applies to the project you're standing in. Add <code>--global</code> to set it for every project instead. That's the fallback: a project's own rules, once it has any, replace the global list whole rather than add to it.</p>
         <pre><code>oga love claude:opus --global</code></pre>
 

@@ -3,12 +3,43 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Run work on a branch of its own, away from your working folder, and end up with a pull request.">
+  <title>Branches & Pull Requests — Oga Documentation</title>
+  <meta name="description" content="Isolate delegated coding agent work in dedicated git worktrees. Review commits, create pull requests, archive tasks, and manage disk space cleanly.">
   <meta name="color-scheme" content="light dark">
-  <title>Oga docs - Branches &amp; pull requests</title>
+  <link rel="canonical" href="https://oga.desgn.space/docs/worktrees.html">
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Branches & Pull Requests — Oga Documentation">
+  <meta property="og:description" content="Isolate delegated coding agent work in dedicated git worktrees. Review commits, create pull requests, archive tasks, and manage disk space cleanly.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/worktrees.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Branches & Pull Requests — Oga Documentation">
+  <meta name="twitter:description" content="Isolate delegated coding agent work in dedicated git worktrees. Review commits, create pull requests, archive tasks, and manage disk space cleanly.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Give the work its own branch",
+    "description": "Isolate delegated coding agent work in dedicated git worktrees. Review commits, create pull requests, archive tasks, and manage disk space cleanly.",
+    "url": "https://oga.desgn.space/docs/worktrees.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -55,7 +86,7 @@
 
       <article class="docs-content">
         <p class="docs-eyebrow">Docs / Branches &amp; pull requests</p>
-        <h1 id="give-the-work-its-own-branch">Give the work its own branch<a class="heading-anchor" href="#give-the-work-its-own-branch" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
+        <h1 id="give-the-work-its-own-branch">Give the work its own branch<a class="heading-anchor" href="#give-the-work-its-own-branch" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
         <p class="docs-intro">Work can run in a copy of your repository instead of the folder you're editing in. Nothing it does shows up in your working tree until you merge it.</p>
 
         <h2 id="when">When you want this<a class="heading-anchor" href="#when" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
@@ -76,7 +107,7 @@
         </ul>
         <p>Everything else — the files it may touch, what it knows about the project, who does the work — stays tied to your original repository, so this is approved exactly like any other work on that project.</p>
 
-        <h2 id="after">After it finishes<a class="heading-anchor" href="#after" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <h2 id="after">After it finishes<a class="heading-anchor" href="#after" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>The copy stays put. Review the branch from your own repository and merge it, or archive the task when you are finished:</p>
         <pre><code>git log oga/&lt;branch-name&gt;
 git merge oga/&lt;branch-name&gt;</code></pre>
@@ -92,7 +123,7 @@ git merge oga/&lt;branch-name&gt;</code></pre>
         <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. To delete, use <code>oga cleanup --older-than 30d --delete</code>. Only finished, archived work is eligible. Cleanup can remove a clean task copy, but the branch remains.</p>
 
         <div class="docs-next">
-          <a href="/docs/data.html">Next: Your data &rarr;</a>
+          <a href="/docs/data.html">Next: Everything Oga keeps stays on your Mac &rarr;</a>
         </div>
       </article>
 
