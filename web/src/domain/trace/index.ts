@@ -234,11 +234,18 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
   }
 
   if (raw) {
+    const isSearch = event.verb === "Searched" || event.verb === "Found";
     const keys =
       event.kind === "file"
         ? ["content", "text", "file_text", "fileText", "output", "result"]
-        : ["tool_response", "result", "output", "matches", "content"];
-    const text = findText(raw, keys);
+        : ["stdout", "result", "output", "matches", "content"];
+    // A hook-driven tool call nests its output one level down, under
+    // `tool_response`; only fall back to that wrapper itself once none of the
+    // keys above turned up anywhere inside it.
+    let text = findText(raw, keys) ?? (event.kind === "file" ? undefined : findText(raw, ["tool_response"]));
+    if (isSearch && (text === undefined || text.trim() === "")) {
+      text = event.verb === "Found" ? "No files found." : "No matches found.";
+    }
     const path = event.presentation?.path;
     const previewKind = event.kind === "file" ? previewKindFromPath(path) : undefined;
     const imageDataUrl = previewKind === "image" ? imageDataUrlFromRaw(raw) : undefined;
