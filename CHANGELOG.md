@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The site now explains how Oga differs from the other agent tools, naming and linking them: you keep the coding agent you already use and hand work out from inside it.
+- The landing page now explains what you get in plain terms up front, and shows how to send a task to its own checkout so it never touches your working folder until you're ready to merge.
 - Every task in the list now names the project it runs in, right after the worker. Work with a copy of its own shows the branch too, so two copies of one project never look alike.
 - Oga now tells you when a task finishes, stops short, or needs an answer, even with the window closed. Click the notification to open that task. The task you are already reading stays quiet, tasks landing together arrive as one notification, and you can turn all of it off under Settings ▸ Notifications.
 - Work you hand off now reaches the tools you already connected for that project, instead of only Oga's own.
@@ -10,6 +11,7 @@
 - Dark mode on the landing page now uses light outlines and shadows, so buttons and cards stand out against the dark background instead of smearing into it.
 - Live task updates stay responsive during busy periods, and the app catches up if it falls behind.
 - Task durations now count only time spent running, not scheduled or interrupted waiting time.
+- Expanding a search step in the activity view now shows what it found, or says plainly that nothing matched, instead of an empty panel.
 
 ## 0.0.10 - 2026-09-07
 
