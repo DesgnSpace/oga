@@ -109,7 +109,7 @@ describe("collectRunChangesByTurn", () => {
 });
 
 describe("gitChangeSet", () => {
-  it("reads each file's hunks out of its patch", () => {
+  it("names the file its patch belongs to", () => {
     const diff: TaskDiff = {
       basis: "branch",
       files: [
@@ -128,14 +128,9 @@ describe("gitChangeSet", () => {
 
     const set = gitChangeSet(diff);
 
-    expect(set.files[0].change.blocks[0].map((line) => line.kind)).toEqual([
-      "context",
-      "removed",
-      "added",
-      "context",
-    ]);
+    expect(set.files[0].patch).toBe("--- app.ts\n+++ app.ts\n@@ -1,3 +1,3 @@\n one\n-two\n+three\n four");
     expect(set.files[0].status).toBe("modified");
-    expect(set.files[1].change.blocks).toEqual([]);
+    expect(set.files[1].patch).toBeUndefined();
     expect(set.files[1].tooLarge).toBe(true);
     expect(set.unmatched).toBe(0);
   });

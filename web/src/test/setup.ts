@@ -5,7 +5,15 @@ const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", 
 });
 const window = dom.window;
 
+/** jsdom has no resize observation; the code viewer measures its own columns. */
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
 Object.assign(globalThis, {
+  ResizeObserver: ResizeObserverStub,
   window,
   document: window.document,
   navigator: window.navigator,

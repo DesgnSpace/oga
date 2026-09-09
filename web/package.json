@@ -11,6 +11,7 @@
     "test": "bun test --timeout 15000"
   },
   "dependencies": {
+    "@pierre/diffs": "^1.3.6",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "react": "^19.2.8",

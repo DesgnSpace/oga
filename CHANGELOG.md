@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Changes now read the way they do in your editor: full colour in every language, the exact words that changed picked out inside a line, and line numbers on what came from the checkout. Both the changed files panel and the diffs inside activity get it, and the Unified and Split choice still holds.
 - Work you hand off now carries a brief the size of the job. A one-line request stays one line, instead of being padded out with headings and numbered steps it doesn't need.
 
 ## 0.0.11 - 2026-09-08

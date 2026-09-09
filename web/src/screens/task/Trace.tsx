@@ -5,7 +5,7 @@
 import * as React from "react";
 import type { TaskEventView } from "@/bridge/types";
 import { readImagePreview } from "@/bridge";
-import type { DiffKind, FileChange } from "@/domain/changes";
+import type { FileChange } from "@/domain/changes";
 import { MarkdownContent } from "@/domain/markdown";
 import { parseBlocks, parseInline } from "@/domain/markdown/parse";
 import {
@@ -22,7 +22,6 @@ import { readStorage, writeStorage } from "@/state/storage";
 import { Modal } from "@/components/primitives/Modal";
 import { EmptyState } from "@/components/atoms/ListState";
 import {
-  DiffMarkIcon,
   DisclosureIcon,
   FollowUpIcon,
   HandoffIcon,
@@ -32,10 +31,10 @@ import {
   SteerIcon,
 } from "@/ui/icons";
 import { SyntaxCode } from "@/components/SyntaxCode";
+import { CodeDiff } from "@/components/CodeDiff";
 import { ReviewContent } from "./CodeReview";
 import { DiffHeader } from "@/components/DiffHeader";
-import { buildInlineDiffRanges, splitDiffBlock } from "@/lib/inline-diff";
-import { useDiffView } from "@/state/diff-preferences";
+import { patchFromBlocks } from "@/lib/unified-patch";
 
 type ContentExpansion = Extract<EventExpansion, { type: "content" }>;
 
@@ -51,49 +50,12 @@ export function resolvePreviewPath(path: string, cwd?: string): string {
   return `${cwd.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-function diffMark(kind: Exclude<DiffKind, "skipped">): React.ReactNode {
-  return kind === "context" ? null : <DiffMarkIcon kind={kind} />;
-}
-
-/** An edit reads as one diff, not as a before block above an after block. */
 function FileChangeBody({ change }: { change: FileChange }) {
-  const [view] = useDiffView();
-  const ranges = React.useMemo(() => buildInlineDiffRanges(change.blocks), [change.blocks]);
+  const patch = React.useMemo(() => patchFromBlocks(change.path, change.blocks), [change.path, change.blocks]);
   return (
     <div className="trace-diff">
       <DiffHeader />
-      {change.blocks.map((block, blockIndex) => (
-        <React.Fragment key={blockIndex}>
-          {view === "split" ? splitDiffBlock(block).map((row, rowIndex) => (
-            <div className="diff-split-row" key={rowIndex}>
-              {[row.before, row.after].map((line, side) => {
-                const lineIndex = line ? block.indexOf(line) : -1;
-                return <div className={`trace-diff-line trace-diff-${line?.kind ?? "empty"}`} key={side}>
-                  {line && <SyntaxCode source={line.text} path={change.path} diffKind={line.kind === "added" || line.kind === "removed" ? line.kind : undefined} changedRange={lineIndex >= 0 && ranges[blockIndex][lineIndex] ? side === 0 ? ranges[blockIndex][lineIndex]?.before : ranges[blockIndex][lineIndex]?.after : undefined} />}
-                </div>;
-              })}
-            </div>
-          )) : block.map((line, lineIndex) =>
-            line.kind === "skipped" ? (
-              <div className="trace-diff-line trace-diff-skipped" key={lineIndex}>
-                {line.text}
-              </div>
-            ) : (
-              <div className={`trace-diff-line trace-diff-${line.kind}`} key={lineIndex}>
-                <span className="trace-diff-mark" aria-hidden="true">
-                  {diffMark(line.kind)}
-                </span>
-                <SyntaxCode
-                  source={line.text}
-                   path={change.path}
-                   diffKind={line.kind === "context" ? undefined : line.kind}
-                   changedRange={ranges[blockIndex][lineIndex] && line.kind === "removed" ? ranges[blockIndex][lineIndex]?.before : ranges[blockIndex][lineIndex]?.after}
-                />
-              </div>
-            ),
-          )}
-        </React.Fragment>
-      ))}
+      {patch !== undefined && <CodeDiff patch={patch} />}
     </div>
   );
 }

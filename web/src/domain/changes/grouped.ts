@@ -4,13 +4,13 @@
 
 import type { TaskDiff, TaskEventView } from "@/bridge/types";
 import {
-  fileChangeFromPatch,
   RunChangeProjection,
   type ChangedFileSet,
   type ChangedFileView,
   type RunFileChanges,
 } from ".";
 import { deriveTurnIds } from "@/domain/activity";
+import { patchFromBody } from "@/lib/unified-patch";
 
 /** One round of work and the files it changed. */
 export interface ChangeTurn {
@@ -169,7 +169,8 @@ export function gitChangeSet(diff: TaskDiff): ChangedFileSet {
 function gitFile(file: TaskDiff["files"][number]): ChangedFileView {
   return {
     path: file.path,
-    change: file.patch === undefined ? { path: file.path, blocks: [] } : fileChangeFromPatch(file.patch, file.path),
+    change: { path: file.path, blocks: [] },
+    patch: file.patch === undefined ? undefined : patchFromBody(file.path, file.patch),
     added: file.added,
     removed: file.removed,
     hiddenLines: 0,
