@@ -21,6 +21,15 @@ export type ListItem = {
 
 export type NestedList = { ordered: boolean; items: ListItem[] };
 
+/** Link destinations by normalised label, collected from `[label]: url` lines. */
+export type ReferenceMap = ReadonlyMap<string, string>;
+
+export type ParsedMarkdown = {
+  blocks: Block[];
+  truncated: boolean;
+  refs: ReferenceMap;
+};
+
 export type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
@@ -68,6 +77,96 @@ export function sanitizeHref(raw: string): string | null {
     return null;
   }
   return trimmed;
+}
+
+const ESCAPABLE = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+/**
+ * The entities worth resolving in model and repository prose: the five that
+ * markup reserves, plus the typography and symbols that actually turn up.
+ * Anything else stays literal rather than guessing.
+ */
+const NAMED_ENTITIES = new Map([
+  ["amp", "&"],
+  ["lt", "<"],
+  ["gt", ">"],
+  ["quot", '"'],
+  ["apos", "'"],
+  ["nbsp", "\u00a0"],
+  ["mdash", "\u2014"],
+  ["ndash", "\u2013"],
+  ["hellip", "\u2026"],
+  ["lsquo", "\u2018"],
+  ["rsquo", "\u2019"],
+  ["ldquo", "\u201c"],
+  ["rdquo", "\u201d"],
+  ["copy", "\u00a9"],
+  ["reg", "\u00ae"],
+  ["trade", "\u2122"],
+  ["deg", "\u00b0"],
+  ["times", "\u00d7"],
+  ["rarr", "\u2192"],
+  ["larr", "\u2190"],
+  ["le", "\u2264"],
+  ["ge", "\u2265"],
+  ["ne", "\u2260"],
+]);
+
+const ENTITY = /^&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31});/;
+
+function codePointText(code: number): string | null {
+  if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return null;
+  if (code >= 0xd800 && code <= 0xdfff) return null;
+  return String.fromCodePoint(code);
+}
+
+function entityAt(text: string, start: number): { text: string; end: number } | null {
+  const match = ENTITY.exec(text.slice(start));
+  if (!match) return null;
+  const body = match[1];
+  const decoded =
+    body[0] === "#"
+      ? codePointText(
+          body[1] === "x" || body[1] === "X"
+            ? Number.parseInt(body.slice(2), 16)
+            : Number.parseInt(body.slice(1), 10),
+        )
+      : (NAMED_ENTITIES.get(body) ?? null);
+  if (decoded === null) return null;
+  return { text: decoded, end: start + match[0].length };
+}
+
+/**
+ * Resolves backslash escapes and character entities into the literal text they
+ * stand for. The result is never markup: it reaches the DOM as a text node, so
+ * a decoded `<` stays a `<` the reader sees.
+ */
+function decodeText(raw: string): string {
+  if (!raw.includes("\\") && !raw.includes("&")) return raw;
+  let out = "";
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === "\\" && i + 1 < raw.length && ESCAPABLE.includes(raw[i + 1])) {
+      out += raw[i + 1];
+      i += 2;
+      continue;
+    }
+    if (raw[i] === "&") {
+      const entity = entityAt(raw, i);
+      if (entity) {
+        out += entity.text;
+        i = entity.end;
+        continue;
+      }
+    }
+    out += raw[i];
+    i += 1;
+  }
+  return out;
+}
+
+function normalizeLabel(label: string): string {
+  return label.trim().toLowerCase().split(/\s+/).join(" ");
 }
 
 export function languageFromFence(info: string): CodeLanguage {
@@ -148,10 +247,17 @@ export function languageFromFence(info: string): CodeLanguage {
   }
 }
 
-export function parseInline(text: string): Inline[] {
+export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
   const chars = [...text];
   const out: Inline[] = [];
   let i = 0;
+
+  function pushText(plain: string) {
+    if (plain.length === 0) return;
+    const last = out[out.length - 1];
+    if (last && last.type === "text") last.text += plain;
+    else out.push({ type: "text", text: plain });
+  }
 
   function autolinkAt(index: number): { href: string; end: number } | null {
     const match = chars.slice(index).join("").match(/^https?:\/\/[^\s<]+/i);
@@ -164,6 +270,17 @@ export function parseInline(text: string): Inline[] {
   }
 
   while (i < chars.length) {
+    // backslash escape \*
+    if (
+      i + 1 < chars.length &&
+      chars[i] === "\\" &&
+      ESCAPABLE.includes(chars[i + 1])
+    ) {
+      pushText(chars[i + 1]);
+      i += 2;
+      continue;
+    }
+
     // inline code `code`
     if (chars[i] === "`") {
       const rest = chars.slice(i + 1);
@@ -197,10 +314,33 @@ export function parseInline(text: string): Inline[] {
             const hrefRaw = chars
               .slice(textEnd + 2, textEnd + 2 + closeParen)
               .join("");
-            const href = sanitizeHref(hrefRaw);
+            const href = sanitizeHref(decodeText(hrefRaw));
             if (href !== null) {
-              out.push({ type: "link", text: linkText, href });
+              out.push({ type: "link", text: decodeText(linkText), href });
               i = textEnd + 2 + closeParen + 1;
+              continue;
+            }
+          }
+        }
+
+        // reference link [text][label], or [text][] reusing the text as label
+        if (textEnd + 1 < chars.length && chars[textEnd + 1] === "[") {
+          const afterRef = chars.slice(textEnd + 2);
+          const closeRef = afterRef.indexOf("]");
+          if (closeRef !== -1) {
+            const linkText = chars.slice(i + 1, textEnd).join("");
+            const labelRaw = chars
+              .slice(textEnd + 2, textEnd + 2 + closeRef)
+              .join("");
+            const label = normalizeLabel(
+              labelRaw.length === 0 ? linkText : labelRaw,
+            );
+            const target = refs?.get(label);
+            const href =
+              target === undefined ? null : sanitizeHref(decodeText(target));
+            if (href !== null) {
+              out.push({ type: "link", text: decodeText(linkText), href });
+              i = textEnd + 2 + closeRef + 1;
               continue;
             }
           }
@@ -218,6 +358,10 @@ export function parseInline(text: string): Inline[] {
       let j = i + 2;
       let found: number | null = null;
       while (j + 1 < chars.length) {
+        if (chars[j] === "\\") {
+          j += 2;
+          continue;
+        }
         if (chars[j] === delim && chars[j + 1] === delim) {
           found = j;
           break;
@@ -227,7 +371,7 @@ export function parseInline(text: string): Inline[] {
       if (found !== null) {
         const inner = chars.slice(i + 2, found).join("");
         if (inner.length !== 0 && !inner.includes("\n")) {
-          out.push({ type: "bold", text: inner });
+          out.push({ type: "bold", text: decodeText(inner) });
           i = found + 2;
           continue;
         }
@@ -239,6 +383,10 @@ export function parseInline(text: string): Inline[] {
       let j = i + 2;
       let found: number | null = null;
       while (j + 1 < chars.length) {
+        if (chars[j] === "\\") {
+          j += 2;
+          continue;
+        }
         if (chars[j] === "~" && chars[j + 1] === "~") {
           found = j;
           break;
@@ -248,7 +396,7 @@ export function parseInline(text: string): Inline[] {
       if (found !== null) {
         const inner = chars.slice(i + 2, found).join("");
         if (inner.length !== 0 && !inner.includes("\n")) {
-          out.push({ type: "strike", text: inner });
+          out.push({ type: "strike", text: decodeText(inner) });
           i = found + 2;
           continue;
         }
@@ -261,6 +409,10 @@ export function parseInline(text: string): Inline[] {
       let j = i + 1;
       let found: number | null = null;
       while (j < chars.length) {
+        if (chars[j] === "\\") {
+          j += 2;
+          continue;
+        }
         if (chars[j] === delim) {
           const prevIsSame = j > 0 && chars[j - 1] === delim;
           const nextIsSame =
@@ -276,7 +428,7 @@ export function parseInline(text: string): Inline[] {
       if (found !== null) {
         const inner = chars.slice(i + 1, found).join("");
         if (inner.length !== 0 && !inner.includes("\n")) {
-          out.push({ type: "italic", text: inner });
+          out.push({ type: "italic", text: decodeText(inner) });
           i = found + 1;
           continue;
         }
@@ -293,17 +445,12 @@ export function parseInline(text: string): Inline[] {
       chars[i] !== "*" &&
       chars[i] !== "_" &&
       chars[i] !== "~" &&
+      chars[i] !== "\\" &&
       !autolinkAt(i)
     ) {
       i += 1;
     }
-    const plain = chars.slice(start, i).join("");
-    const last = out[out.length - 1];
-    if (last && last.type === "text") {
-      last.text += plain;
-    } else {
-      out.push({ type: "text", text: plain });
-    }
+    pushText(decodeText(chars.slice(start, i).join("")));
   }
 
   return out;
@@ -325,6 +472,21 @@ function headingLevel(line: string): { level: number; text: string } | null {
     return { level: count, text: "" };
   }
   return null;
+}
+
+/**
+ * A run of `=` or `-` under a paragraph underlines it into a heading. Only a
+ * bare run counts, so `- - -` stays the thematic break it looks like.
+ */
+function setextLevel(line: string): number | null {
+  const t = line.trim();
+  if (t.length === 0) return null;
+  const marker = t[0];
+  if (marker !== "=" && marker !== "-") return null;
+  for (const c of t) {
+    if (c !== marker) return null;
+  }
+  return marker === "=" ? 1 : 2;
 }
 
 function isThematicBreak(line: string): boolean {
@@ -514,10 +676,35 @@ function tableAt(
   return { block: { type: "table", align, header, rows }, next: i };
 }
 
-export function parseBlocks(source: string): {
-  blocks: Block[];
-  truncated: boolean;
-} {
+const REFERENCE_DEFINITION = /^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*(?:["'(].*)?$/;
+
+/**
+ * Lifts `[label]: url` lines out of the source into a lookup, blanking them so
+ * they never render as prose of their own.
+ */
+function takeReferences(lines: string[]): ReferenceMap {
+  const refs = new Map<string, string>();
+  let fenced = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].trim().startsWith("```")) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const match = REFERENCE_DEFINITION.exec(lines[i]);
+    if (!match) continue;
+    const label = normalizeLabel(match[1]);
+    let target = match[2];
+    if (target.startsWith("<") && target.endsWith(">")) {
+      target = target.slice(1, -1);
+    }
+    if (label.length !== 0 && !refs.has(label)) refs.set(label, target);
+    lines[i] = "";
+  }
+  return refs;
+}
+
+export function parseBlocks(source: string): ParsedMarkdown {
   const chars = [...source];
   const truncated = chars.length > MAX_MARKDOWN_CHARS;
   const limited = chars.slice(0, MAX_MARKDOWN_CHARS).join("");
@@ -527,6 +714,7 @@ export function parseBlocks(source: string): {
     lines.pop();
   }
 
+  const refs = takeReferences(lines);
   const blocks: Block[] = [];
   let i = 0;
   while (i < lines.length && blocks.length < MAX_BLOCKS) {
@@ -605,8 +793,15 @@ export function parseBlocks(source: string): {
     // paragraph: collect consecutive non-block lines
     const para: string[] = [line.trim()];
     i += 1;
+    let underlined: number | null = null;
     while (i < lines.length) {
       const nxt = lines[i];
+      const level = setextLevel(nxt);
+      if (level !== null) {
+        underlined = level;
+        i += 1;
+        break;
+      }
       if (
         nxt.trim().length === 0 ||
         headingLevel(nxt) !== null ||
@@ -621,8 +816,13 @@ export function parseBlocks(source: string): {
       para.push(nxt.trim());
       i += 1;
     }
-    blocks.push({ type: "paragraph", text: para.join(" ") });
+    const text = para.join(" ");
+    blocks.push(
+      underlined === null
+        ? { type: "paragraph", text }
+        : { type: "heading", level: underlined, text },
+    );
   }
 
-  return { blocks, truncated };
+  return { blocks, truncated, refs };
 }

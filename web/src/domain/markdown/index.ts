@@ -14,4 +14,6 @@ export type {
   ColumnAlign,
   ListItem,
   NestedList,
+  ReferenceMap,
+  ParsedMarkdown,
 } from "./parse";

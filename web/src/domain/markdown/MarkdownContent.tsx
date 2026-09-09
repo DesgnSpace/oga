@@ -8,6 +8,7 @@ import {
   type Inline,
   type ListItem,
   type NestedList,
+  type ReferenceMap,
 } from "./parse";
 
 function InlineNodes({ inlines }: { inlines: Inline[] }) {
@@ -37,7 +38,7 @@ function InlineNodes({ inlines }: { inlines: Inline[] }) {
   );
 }
 
-function ListItems({ items }: { items: ListItem[] }) {
+function ListItems({ items, refs }: { items: ListItem[]; refs: ReferenceMap }) {
   return (
     <>
       {items.map((item, idx) => (
@@ -45,33 +46,37 @@ function ListItems({ items }: { items: ListItem[] }) {
           {item.checked === null ? null : (
             <input type="checkbox" defaultChecked={item.checked} disabled />
           )}
-          <InlineNodes inlines={parseInline(item.text)} />
-          {item.children ? <SubList list={item.children} /> : null}
+          <InlineNodes inlines={parseInline(item.text, refs)} />
+          {item.children ? <SubList list={item.children} refs={refs} /> : null}
         </li>
       ))}
     </>
   );
 }
 
-function SubList({ list }: { list: NestedList }) {
+function SubList({ list, refs }: { list: NestedList; refs: ReferenceMap }) {
   if (list.ordered) {
     return (
       <ol>
-        <ListItems items={list.items} />
+        <ListItems items={list.items} refs={refs} />
       </ol>
     );
   }
   return (
     <ul>
-      <ListItems items={list.items} />
+      <ListItems items={list.items} refs={refs} />
     </ul>
   );
 }
 
-function renderBlock(block: Block, index: number): React.ReactNode {
+function renderBlock(
+  block: Block,
+  index: number,
+  refs: ReferenceMap,
+): React.ReactNode {
   switch (block.type) {
     case "heading": {
-      const inlines = parseInline(block.text);
+      const inlines = parseInline(block.text, refs);
       const children = <InlineNodes inlines={inlines} />;
       switch (block.level) {
         case 1:
@@ -89,7 +94,7 @@ function renderBlock(block: Block, index: number): React.ReactNode {
       }
     }
     case "paragraph": {
-      const inlines = parseInline(block.text);
+      const inlines = parseInline(block.text, refs);
       return (
         <p key={index}>
           <InlineNodes inlines={inlines} />
@@ -99,17 +104,17 @@ function renderBlock(block: Block, index: number): React.ReactNode {
     case "bulletList":
       return (
         <ul key={index}>
-          <ListItems items={block.items} />
+          <ListItems items={block.items} refs={refs} />
         </ul>
       );
     case "orderedList":
       return (
         <ol key={index}>
-          <ListItems items={block.items} />
+          <ListItems items={block.items} refs={refs} />
         </ol>
       );
     case "blockquote": {
-      const inlines = parseInline(block.text);
+      const inlines = parseInline(block.text, refs);
       return (
         <blockquote key={index}>
           <InlineNodes inlines={inlines} />
@@ -138,7 +143,7 @@ function renderBlock(block: Block, index: number): React.ReactNode {
               <tr>
                 {block.header.map((cell, cellIdx) => (
                   <th key={cellIdx} data-align={block.align[cellIdx] ?? undefined}>
-                    <InlineNodes inlines={parseInline(cell)} />
+                    <InlineNodes inlines={parseInline(cell, refs)} />
                   </th>
                 ))}
               </tr>
@@ -148,7 +153,7 @@ function renderBlock(block: Block, index: number): React.ReactNode {
                 <tr key={rowIdx}>
                   {row.map((cell, cellIdx) => (
                     <td key={cellIdx} data-align={block.align[cellIdx] ?? undefined}>
-                      <InlineNodes inlines={parseInline(cell)} />
+                      <InlineNodes inlines={parseInline(cell, refs)} />
                     </td>
                   ))}
                 </tr>
@@ -161,18 +166,18 @@ function renderBlock(block: Block, index: number): React.ReactNode {
 }
 
 export const MarkdownContent = React.memo(function MarkdownContent({ source }: { source: string }) {
-  const { blocks, truncated } = parseBlocks(source);
+  const { blocks, truncated, refs } = parseBlocks(source);
   return (
     <div className="markdown-content">
-      {blocks.map((b, idx) => renderBlock(b, idx))}
+      {blocks.map((b, idx) => renderBlock(b, idx, refs))}
       {truncated ? <p className="review-token-comment">… truncated</p> : null}
     </div>
   );
 });
 
 export function renderMarkdownToNodes(source: string): React.ReactNode {
-  const { blocks, truncated } = parseBlocks(source);
-  const nodes = blocks.map((b, idx) => renderBlock(b, idx));
+  const { blocks, truncated, refs } = parseBlocks(source);
+  const nodes = blocks.map((b, idx) => renderBlock(b, idx, refs));
   if (truncated) {
     nodes.push(
       <p key="truncated" className="review-token-comment">

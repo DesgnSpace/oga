@@ -409,9 +409,14 @@ describe("thematic breaks", () => {
     expect(parseBlocks("--").blocks[0].type).toBe("paragraph");
     expect(parseBlocks("--- text").blocks[0].type).toBe("paragraph");
   });
-  it("breaks a paragraph", () => {
-    const { blocks } = parseBlocks("para\n---\nafter");
+  it("breaks a paragraph when it stands on its own", () => {
+    const { blocks } = parseBlocks("para\n\n---\n\nafter");
     expect(blocks.map((b) => b.type)).toEqual(["paragraph", "thematicBreak", "paragraph"]);
+  });
+  it("underlines the paragraph above it instead", () => {
+    const { blocks } = parseBlocks("para\n---\nafter");
+    expect(blocks[0]).toEqual({ type: "heading", level: 2, text: "para" });
+    expect(blocks[1].type).toBe("paragraph");
   });
 });
 
@@ -521,5 +526,144 @@ describe("new blocks stay safe", () => {
     expect(out).not.toContain("<img");
     expect(out).not.toContain("onerror");
     expect(out).toContain('data-language="plain"');
+  });
+});
+
+// ---- escapes, entities, setext, references ----
+describe("backslash escapes", () => {
+  it("keeps escaped punctuation literal", () => {
+    expect(parseInline("\\*not italic\\*")).toEqual([
+      { type: "text", text: "*not italic*" },
+    ]);
+    expect(parseInline("\\[not a link\\]")).toEqual([
+      { type: "text", text: "[not a link]" },
+    ]);
+  });
+  it("leaves a backslash before anything else alone", () => {
+    expect(parseInline("C:\\path and \\d+")).toEqual([
+      { type: "text", text: "C:\\path and \\d+" },
+    ]);
+  });
+  it("does not let an escaped delimiter close emphasis", () => {
+    expect(parseInline("*5 \\* 3*")).toEqual([{ type: "italic", text: "5 * 3" }]);
+    expect(parseInline("**a \\** b**")).toEqual([{ type: "bold", text: "a ** b" }]);
+  });
+});
+
+describe("character entities", () => {
+  it("resolves named and numeric entities", () => {
+    expect(parseInline("AT&amp;T")).toEqual([{ type: "text", text: "AT&T" }]);
+    expect(parseInline("&#65;&#x42;")).toEqual([{ type: "text", text: "AB" }]);
+    expect(parseInline("&mdash;")).toEqual([{ type: "text", text: "\u2014" }]);
+  });
+  it("leaves anything it does not know literal", () => {
+    expect(parseInline("&notreal; &amp &#;")).toEqual([
+      { type: "text", text: "&notreal; &amp &#;" },
+    ]);
+  });
+  it("rejects out-of-range and surrogate code points", () => {
+    expect(parseInline("&#999999999; &#xD800;")).toEqual([
+      { type: "text", text: "&#999999999; &#xD800;" },
+    ]);
+  });
+  it("leaves entities inside code spans alone", () => {
+    expect(parseInline("`a &amp; b`")).toEqual([{ type: "code", text: "a &amp; b" }]);
+  });
+  it("an escaped ampersand stops the entity resolving", () => {
+    expect(parseInline("\\&amp;")).toEqual([{ type: "text", text: "&amp;" }]);
+  });
+  it("a decoded angle bracket reaches the page as text", () => {
+    const out = html("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(out).not.toContain("<script>");
+    expect(out).toContain("&lt;script&gt;");
+  });
+});
+
+describe("setext headings", () => {
+  it("underlines a paragraph with = or -", () => {
+    expect(parseBlocks("Title\n=====").blocks[0]).toEqual({
+      type: "heading",
+      level: 1,
+      text: "Title",
+    });
+    expect(parseBlocks("Sub\n---").blocks[0]).toEqual({
+      type: "heading",
+      level: 2,
+      text: "Sub",
+    });
+    expect(html("Title\n===")).toContain("<h1>");
+  });
+  it("takes the whole paragraph above it", () => {
+    expect(parseBlocks("one\ntwo\n===").blocks[0]).toEqual({
+      type: "heading",
+      level: 1,
+      text: "one two",
+    });
+  });
+  it("needs a bare run, so a spaced break stays a break", () => {
+    const { blocks } = parseBlocks("para\n- - -");
+    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "thematicBreak"]);
+  });
+  it("does not fire on a list or text under a paragraph", () => {
+    expect(parseBlocks("para\n- item").blocks.map((b) => b.type)).toEqual([
+      "paragraph",
+      "bulletList",
+    ]);
+    expect(parseBlocks("para\n--- text").blocks[0].type).toBe("paragraph");
+  });
+});
+
+describe("reference links", () => {
+  it("resolves [text][label] and lifts the definition out", () => {
+    const { blocks, refs } = parseBlocks("see [the docs][d]\n\n[d]: https://example.com");
+    expect(blocks.length).toBe(1);
+    expect(refs.get("d")).toBe("https://example.com");
+    expect(html("see [the docs][d]\n\n[d]: https://example.com")).toContain(
+      '<a href="https://example.com" target="_blank" rel="noopener noreferrer">the docs</a>',
+    );
+  });
+  it("resolves the collapsed form and matches labels case-insensitively", () => {
+    expect(html("[Example][]\n\n[example]: https://example.com")).toContain(
+      'href="https://example.com"',
+    );
+  });
+  it("accepts a title and an angle-bracketed destination", () => {
+    expect(parseBlocks('[a][1]\n\n[1]: https://example.com "A title"').refs.get("1")).toBe(
+      "https://example.com",
+    );
+    expect(parseBlocks("[a][1]\n\n[1]: <https://example.com>").refs.get("1")).toBe(
+      "https://example.com",
+    );
+  });
+  it("works from a definition placed above its use", () => {
+    expect(html("[1]: https://example.com\n\nsee [a][1]")).toContain(
+      'href="https://example.com"',
+    );
+  });
+  it("leaves an undefined label as text", () => {
+    expect(html("[a][nope] stays text")).not.toContain("<a");
+  });
+  it("rejects an unsafe destination", () => {
+    const out = html("[x][a]\n\n[a]: javascript:alert(1)");
+    expect(out).not.toContain("<a");
+    expect(out).toContain("[x][a]");
+  });
+  it("leaves a definition inside a fence in the code", () => {
+    const { blocks } = parseBlocks("```\n[1]: https://example.com\n```");
+    expect(blocks[0].type).toBe("codeBlock");
+    if (blocks[0].type === "codeBlock") {
+      expect(blocks[0].code).toBe("[1]: https://example.com");
+    }
+  });
+});
+
+describe("decoded destinations are still sanitized", () => {
+  it("rejects an entity-encoded scheme in an inline link", () => {
+    const out = html("[x](&#106;avascript:alert&#40;1&#41;)");
+    expect(out).not.toContain("<a");
+  });
+  it("rejects an entity-encoded scheme in a definition", () => {
+    const out = html("[x][a]\n\n[a]: &#106;avascript:alert(1)");
+    expect(out).not.toContain("<a");
   });
 });

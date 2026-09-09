@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Replies, briefs and update notes now show tables, checklists, crossed-out words, dividers, and lists inside lists, instead of the raw symbols they were written with.
+- Underlined titles now read as titles, links written as references resolve, spelled-out punctuation shows the real character, and a star or bracket meant literally stays on the page instead of formatting the words around it.
 - Changes now read the way they do in your editor: full colour in every language, the exact words that changed picked out inside a line, and line numbers on what came from the checkout. Both the changed files panel and the diffs inside activity get it, and the Unified and Split choice still holds.
 - Activity rows now name work done through Oga in plain language and show concise results when you expand them, instead of exposing technical tool names or raw response data.
 - Work you hand off now carries a brief the size of the job. A one-line request stays one line, instead of being padded out with headings and numbered steps it doesn't need.
