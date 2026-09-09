@@ -7,6 +7,12 @@
       "skillPath": "skills/apple-design/SKILL.md",
       "computedHash": "8b94db67cb9edaad5f1501010804caa610131f1d2dfda0a27664b2e858deade3"
     },
+    "diffs": {
+      "source": "pierrecomputer/pierre",
+      "sourceType": "github",
+      "skillPath": "skills/diffs/SKILL.md",
+      "computedHash": "a71296d891eb7a598fdc77d1cf8b92dcdd5bac30a9c6bfbc32a046f0d496c85e"
+    },
     "rust-best-practices": {
       "source": "apollographql/skills",
       "sourceType": "github",

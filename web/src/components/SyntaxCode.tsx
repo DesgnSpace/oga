@@ -5,9 +5,6 @@ import {
   type CodeLanguage,
   type CodeToken,
 } from "@/domain/review/core";
-import type { DiffRange } from "@/lib/inline-diff";
-
-type DiffKind = "added" | "removed";
 
 interface HighlightedSource {
   source: string;
@@ -54,35 +51,14 @@ function TokenList({ tokens }: { tokens: CodeToken[] }) {
   );
 }
 
-function markTokens(tokens: CodeToken[], range: DiffRange): CodeToken[] {
-  const marked: CodeToken[] = [];
-  let offset = 0;
-  for (const token of tokens) {
-    const start = offset;
-    const end = start + token.text.length;
-    if (end <= range.start || start >= range.end) marked.push(token);
-    else {
-      if (start < range.start) marked.push({ ...token, text: token.text.slice(0, range.start - start) });
-      marked.push({ ...token, text: token.text.slice(Math.max(0, range.start - start), range.end - start), changed: true });
-      if (end > range.end) marked.push({ ...token, text: token.text.slice(range.end - start) });
-    }
-    offset = end;
-  }
-  return marked;
-}
-
 export function SyntaxTokens({
   source,
   language,
   path,
-  diffKind,
-  changedRange,
 }: {
   source: string;
   language?: CodeLanguage;
   path?: string;
-  diffKind?: DiffKind;
-  changedRange?: DiffRange;
 }) {
   const resolvedLanguage = resolveCodeLanguage(language, path);
   const [highlighted, setHighlighted] = React.useState<HighlightedSource | null>(null);
@@ -106,11 +82,7 @@ export function SyntaxTokens({
   }, [path, resolvedLanguage, source]);
 
   const ready = highlighted?.source === source && highlighted.language === resolvedLanguage;
-  const children = ready && highlighted
-    ? <TokenList tokens={changedRange ? markTokens(highlighted.tokens, changedRange) : highlighted.tokens} />
-    : limitHighlightedSource(source);
-  if (!diffKind) return children;
-  return <span className={`syntax-piece syntax-piece-${diffKind}`}>{children}</span>;
+  return ready && highlighted ? <TokenList tokens={highlighted.tokens} /> : limitHighlightedSource(source);
 }
 
 export function SyntaxCode({
@@ -118,24 +90,19 @@ export function SyntaxCode({
   language,
   path,
   className,
-  diffKind,
-  changedRange,
   inline = false,
 }: {
   source: string;
   language?: CodeLanguage;
   path?: string;
   className?: string;
-  diffKind?: DiffKind;
-  changedRange?: DiffRange;
   inline?: boolean;
 }) {
   const resolvedLanguage = resolveCodeLanguage(language, path);
-  const hasAttributes = !inline || resolvedLanguage !== "plain" || className !== undefined || diffKind !== undefined;
+  const hasAttributes = !inline || resolvedLanguage !== "plain" || className !== undefined;
   const classes = [
     hasAttributes ? "syntax-code" : undefined,
     inline && hasAttributes ? "syntax-code-inline" : undefined,
-    diffKind ? `syntax-code-${diffKind}` : undefined,
     className,
   ]
     .filter(Boolean)
@@ -145,7 +112,7 @@ export function SyntaxCode({
       className={classes || undefined}
       data-language={!inline ? resolvedLanguage : undefined}
     >
-      <SyntaxTokens source={source} language={resolvedLanguage} path={path} diffKind={diffKind} changedRange={changedRange} />
+      <SyntaxTokens source={source} language={resolvedLanguage} path={path} />
     </code>
   );
 }

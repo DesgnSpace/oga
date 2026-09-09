@@ -1,10 +1,29 @@
+/* One code palette, read both by the highlighter that draws inline code and
+   by the diff viewer's theme. Every value is mixed from the app's own colours,
+   so light and dark follow the window with no second set of definitions. */
+:root {
+  --syntax-text: var(--color-text);
+  --syntax-bg: var(--color-surface);
+  --syntax-comment: var(--color-text-muted);
+  --syntax-string: color-mix(in srgb, var(--color-warning) 78%, var(--color-text));
+  --syntax-constant: color-mix(in srgb, var(--color-success) 78%, var(--color-text));
+  --syntax-keyword: var(--color-accent);
+  --syntax-function: var(--color-text);
+  --syntax-type: color-mix(in srgb, var(--color-accent) 58%, var(--color-text));
+  --syntax-punctuation: var(--color-text-muted);
+  --syntax-tag: color-mix(in srgb, var(--color-danger) 72%, var(--color-text));
+  --syntax-added: var(--color-success);
+  --syntax-removed: var(--color-danger);
+  --syntax-changed: var(--color-info);
+}
+
 .syntax-code {
   color: inherit;
   font: inherit;
 }
 
 .review-token-comment {
-  color: var(--color-text-muted);
+  color: var(--syntax-comment);
   font-style: italic;
 }
 
@@ -12,25 +31,25 @@
 .review-token-char,
 .review-token-regex,
 .review-token-attr-value {
-  color: color-mix(in srgb, var(--color-warning) 78%, var(--color-text));
+  color: var(--syntax-string);
 }
 
 .review-token-number,
 .review-token-boolean,
 .review-token-constant {
-  color: color-mix(in srgb, var(--color-success) 78%, var(--color-text));
+  color: var(--syntax-constant);
 }
 
 .review-token-keyword,
 .review-token-operator,
 .review-token-important {
-  color: var(--color-accent);
+  color: var(--syntax-keyword);
   font-weight: 600;
 }
 
 .review-token-function,
 .review-token-function-definition {
-  color: var(--color-text);
+  color: var(--syntax-function);
   font-weight: 600;
 }
 
@@ -39,36 +58,19 @@
 .review-token-builtin,
 .review-token-property,
 .review-token-attr-name {
-  color: color-mix(in srgb, var(--color-accent) 58%, var(--color-text));
+  color: var(--syntax-type);
 }
 
 .review-token-punctuation {
-  color: var(--color-text-muted);
+  color: var(--syntax-punctuation);
 }
 
 .review-token-tag,
 .review-token-selector {
-  color: color-mix(in srgb, var(--color-danger) 72%, var(--color-text));
+  color: var(--syntax-tag);
 }
 
 .review-token-changed {
   border-radius: 2px;
    background: color-mix(in srgb, var(--color-warning) 34%, transparent);
-}
-
-.syntax-piece-added,
-.syntax-code-added {
-  color: var(--color-success);
-}
-
-.syntax-piece-removed,
-.syntax-code-removed {
-  color: var(--color-danger);
-}
-
-.syntax-piece-added .review-token,
-.syntax-piece-removed .review-token,
-.syntax-code-added .review-token,
-.syntax-code-removed .review-token {
-  color: currentColor;
 }

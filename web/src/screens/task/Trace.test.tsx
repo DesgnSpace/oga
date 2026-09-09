@@ -331,7 +331,7 @@ describe("TraceRows", () => {
     fireEvent.click(screen.getByText("src/file.ts"));
 
     expect(container.querySelector(".trace-diff ul")).toBeNull();
-    expect(screen.getByText("- **old**")).toBeDefined();
+    expect(container.querySelector(".trace-diff .code-diff")).not.toBeNull();
   });
 
   it("leaves a plain worker note as the existing trace text", () => {

@@ -56,14 +56,6 @@ export function fileChangeFromRaw(raw: string): FileChange | undefined {
   return search(value, undefined, false);
 }
 
-/**
- * Reads one file's unified diff into the same blocks an event-derived change
- * carries, so both sources render through one viewer.
- */
-export function fileChangeFromPatch(patch: string, path: string): FileChange {
-  return unified(patch, path) ?? { path, blocks: [] };
-}
-
 export function countDiffLines(change: FileChange, kind: DiffKind): number {
   let count = 0;
   for (const block of change.blocks) {
@@ -403,6 +395,8 @@ function capped(lines: DiffLine[]): DiffLine[] {
 export interface ChangedFileView {
   path: string;
   change: FileChange;
+  /** The file's ready-to-render unified patch, when git reported one. */
+  patch?: string;
   added: number;
   removed: number;
   hiddenLines: number;

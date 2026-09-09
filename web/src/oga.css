@@ -1924,9 +1924,23 @@ h1 {
 
 .changed-file-diff {
     max-width: 100%;
-    overflow: auto;
-    padding: 0 var(--space-2) var(--space-2) calc(18px + var(--space-2));
+    padding: 0 0 var(--space-2);
     background: var(--color-surface);
+}
+
+/* The diff paints into a shadow root, so its type and the right to select text
+   reach it by inheritance rather than through our own selectors. */
+.code-diff {
+    --diffs-font-family: var(--font-mono);
+    --diffs-header-font-family: var(--font-sans);
+    cursor: auto;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.changed-file-diff .code-diff {
+    --diffs-font-size: var(--text-sm);
+    --diffs-line-height: 18px;
 }
 
 .diff-view-toggle {
@@ -1951,71 +1965,12 @@ h1 {
     background: var(--color-surface);
 }
 
-.diff-split-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-
-.diff-split-row > * + * {
-    border-left: 1px solid var(--color-border);
-}
-
-/* Split sides carry no marker column, so the code takes the whole cell. */
-.diff-split .diff-line {
-    grid-template-columns: minmax(0, 1fr);
-}
-
-.diff-line-empty {
-    min-height: 1.4em;
-}
-
-.changed-file-block + .changed-file-block {
-    margin-top: var(--space-2);
-    border-top: 1px solid var(--color-border);
-    padding-top: var(--space-2);
-}
-
 .changed-file-note {
     margin: var(--space-2) 0 0;
     color: var(--color-text-muted);
     font-size: var(--text-sm);
 }
 
-.diff-line {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: var(--space-1);
-    padding: 2px var(--space-1);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.diff-line-marker {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-text-muted);
-}
-
-.diff-line-added {
-    background: color-mix(in srgb, var(--color-success) 10%, transparent);
-}
-
-.diff-line-added .diff-line-marker {
-    color: var(--color-success);
-}
-
-.diff-line-removed {
-    background: color-mix(in srgb, var(--color-danger) 10%, transparent);
-}
-
-.diff-line-removed .diff-line-marker {
-    color: var(--color-danger);
-}
-
-.diff-line-skipped,
 .changed-files-message,
 .changed-files-note,
 .changed-files-earlier {
@@ -3066,65 +3021,15 @@ h1 {
     font-weight: 600;
 }
 
-/* Removed and added lines carry their own band, edge to edge in the expansion,
-   so the shape of the change reads before any of the text does. */
+/* The diff runs edge to edge in the expansion, so the shape of the change
+   reads before any of the text does. */
 .trace-diff {
     margin: calc(var(--space-3) * -1);
-    overflow-x: auto;
-    font-family: var(--font-mono);
-    font-size: var(--text-md);
-    line-height: 1.6;
 }
 
-.trace-diff-line {
-    display: flex;
-    gap: var(--space-2);
-    padding: 0 var(--space-3);
-}
-
-.trace-diff-mark {
-    display: flex;
-    flex: 0 0 auto;
-    width: 11px;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-text-muted);
-    user-select: none;
-}
-
-.trace-diff-line code {
-    white-space: pre;
-}
-
-.diff-split-row > .trace-diff-line {
-    min-width: 0;
-}
-
-.diff-split-row > .trace-diff-line code {
-    min-width: 0;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.trace-diff-removed {
-    background: color-mix(in srgb, var(--color-danger) 12%, transparent);
-}
-
-.trace-diff-removed .trace-diff-mark {
-    color: var(--color-danger);
-}
-
-.trace-diff-added {
-    background: color-mix(in srgb, var(--color-success) 14%, transparent);
-}
-
-.trace-diff-added .trace-diff-mark {
-    color: var(--color-success);
-}
-
-.trace-diff-skipped {
-    padding: 0 var(--space-3);
-    color: var(--color-text-muted);
+.trace-diff .code-diff {
+    --diffs-font-size: var(--text-md);
+    --diffs-line-height: 19px;
 }
 
 /* Mono sets wider than the surrounding text at the same size, so the code

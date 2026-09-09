@@ -4,18 +4,17 @@
 
 import * as React from "react";
 import type { TaskDiffFileStatus } from "@/bridge/types";
-import type { ChangedFileSet, ChangedFileView, DiffKind, DiffLine } from "@/domain/changes";
+import type { ChangedFileSet, ChangedFileView } from "@/domain/changes";
 import { runChangeSetAdded, runChangeSetRemoved } from "@/domain/changes";
 import type { ChangeTurn, ChangeTurnSet } from "@/domain/changes/grouped";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
-import { CloseIcon, DiffMarkIcon, DisclosureIcon, RefreshIcon } from "@/ui/icons";
+import { CloseIcon, DisclosureIcon, RefreshIcon } from "@/ui/icons";
 import { EmptyState } from "@/components/atoms/ListState";
-import { SyntaxCode } from "@/components/SyntaxCode";
+import { CodeDiff } from "@/components/CodeDiff";
 import { CHANGED_FILES_MAX_WIDTH, CHANGED_FILES_MIN_WIDTH } from "@/state/changed-files-preferences";
-import { buildInlineDiffRanges, splitDiffBlock, type InlineDiffRanges } from "@/lib/inline-diff";
+import { patchFromBlocks } from "@/lib/unified-patch";
 import { DiffHeader } from "@/components/DiffHeader";
-import { useDiffView } from "@/state/diff-preferences";
 
 /** Arrow-key resize increment, in pixels. */
 const RESIZE_KEYBOARD_STEP = 16;
@@ -61,57 +60,6 @@ function fileCount(files: number): string {
   return `${files} file${files === 1 ? "" : "s"}`;
 }
 
-function diffMarker(kind: DiffKind): React.ReactNode {
-  switch (kind) {
-    case "context":
-      return null;
-    case "added":
-    case "removed":
-      return <DiffMarkIcon kind={kind} />;
-    case "skipped":
-      return "...";
-  }
-}
-
-function ChangedFileBlock({ block, path, ranges }: { block: DiffLine[]; path: string; ranges: (InlineDiffRanges | undefined)[] }) {
-  const [view] = useDiffView();
-  if (view === "split") {
-    return <SplitChangedFileBlock block={block} path={path} ranges={ranges} />;
-  }
-  return (
-    <div className="changed-file-block">
-      {block.map((line, index) => (
-        <div className={`diff-line diff-line-${line.kind}`} key={index}>
-          <span className="diff-line-marker">{diffMarker(line.kind)}</span>
-          <SyntaxCode
-            source={line.text}
-            path={path}
-            diffKind={line.kind === "added" || line.kind === "removed" ? line.kind : undefined}
-            changedRange={ranges[index] && line.kind === "removed" ? ranges[index].before : ranges[index]?.after}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SplitChangedFileBlock({ block, path, ranges }: { block: DiffLine[]; path: string; ranges: (InlineDiffRanges | undefined)[] }) {
-  const rows = splitDiffBlock(block);
-  return (
-    <div className="changed-file-block diff-split">
-      {rows.map((row, index) => (
-        <div className="diff-split-row" key={index}>
-          {[row.before, row.after].map((line, side) => (
-            <div className={`diff-line diff-line-${line?.kind ?? "empty"}`} key={side}>
-              {line && <SyntaxCode source={line.text} path={path} diffKind={line.kind === "added" || line.kind === "removed" ? line.kind : undefined} changedRange={ranges[block.indexOf(line)] && side === 0 ? ranges[block.indexOf(line)]?.before : ranges[block.indexOf(line)]?.after} />}
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ChangedFileRow({
   file,
   expanded,
@@ -125,7 +73,10 @@ function ChangedFileRow({
   active: boolean;
   registerRow: (path: string, element: HTMLElement | null) => void;
 }) {
-  const inlineRanges = React.useMemo(() => buildInlineDiffRanges(file.change.blocks), [file.change.blocks]);
+  const patch = React.useMemo(
+    () => file.patch ?? patchFromBlocks(file.path, file.change.blocks),
+    [file.patch, file.path, file.change.blocks],
+  );
   const status = file.status === undefined || file.status === "modified" ? undefined : STATUS_LABELS[file.status];
   return (
     <section
@@ -151,13 +102,11 @@ function ChangedFileRow({
       {expanded && (
         <div className="changed-file-diff">
           <DiffHeader />
-          {file.change.blocks.map((block, index) => (
-            <ChangedFileBlock block={block} path={file.path} ranges={inlineRanges[index]} key={index} />
-          ))}
+          {patch !== undefined && <CodeDiff patch={patch} numbered={file.patch !== undefined} wrap />}
           {file.tooLarge ? (
             <p className="changed-file-note">This file's diff is too big to show here. Open it in your editor.</p>
           ) : (
-            file.change.blocks.length === 0 && <p className="changed-file-note">No text changes to show.</p>
+            patch === undefined && <p className="changed-file-note">No text changes to show.</p>
           )}
           {file.hiddenLines > 0 && (
             <p className="changed-file-note">{`${file.hiddenLines} more line${file.hiddenLines === 1 ? "" : "s"} not shown`}</p>
