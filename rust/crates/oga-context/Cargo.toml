@@ -1,0 +1,39 @@
+[package]
+name = "oga-context"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oga-domain = { path = "../oga-domain" }
+oga-store = { path = "../oga-store" }
+rayon = "1.12.0"
+regex = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+streaming-iterator = "0.1.9"
+thiserror = "2"
+tree-sitter = "0.27"
+tree-sitter-c = "0.24.2"
+tree-sitter-c-sharp = "0.23.5"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-go = "0.25.0"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-java = "0.23.5"
+tree-sitter-md = "0.5.3"
+tree-sitter-php = "0.24.2"
+tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-rust = "0.24.2"
+tree-sitter-swift = "0.7.3"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-yaml = "0.7.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+[package]
+name = "oga-service"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+oga-config = { path = "../oga-config" }
+oga-domain = { path = "../oga-domain" }
+oga-events = { path = "../oga-events" }
+oga-pricing = { path = "../oga-pricing" }
+oga-providers = { path = "../oga-providers" }
+oga-routing = { path = "../oga-routing" }
+oga-runner = { path = "../oga-runner" }
+oga-store = { path = "../oga-store" }
+oga-worktree = { path = "../oga-worktree" }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+uuid = { version = "1", default-features = false, features = ["v4", "fast-rng"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

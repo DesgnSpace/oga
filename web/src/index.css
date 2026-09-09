@@ -1,0 +1,56 @@
+@import "tailwindcss";
+@import "./syntax.css";
+
+@font-face {
+    font-family: "IBM Plex Sans";
+    src: url("./assets/fonts/ibm-plex-sans-400.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "IBM Plex Sans";
+    src: url("./assets/fonts/ibm-plex-sans-600.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "IBM Plex Sans";
+    src: url("./assets/fonts/ibm-plex-sans-700.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    src: url("./assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    src: url("./assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    src: url("./assets/fonts/ibm-plex-mono-600.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+}
+
+/* The shell measures itself against the window, so its mount point has to
+   carry the document's height rather than collapse to its content. */
+#root {
+    height: 100%;
+}

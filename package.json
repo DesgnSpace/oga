@@ -1,0 +1,17 @@
+{
+  "name": "oga",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "author": "Desmond Yong <yong@malico.me>",
+  "type": "module",
+  "scripts": {
+    "start": "cargo run --manifest-path rust/Cargo.toml --package oga-cli -- serve",
+    "lint": "oxlint"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.78.0",
+    "oxlint": "1.78.0",
+    "typescript": "^5.9.3"
+  }
+}

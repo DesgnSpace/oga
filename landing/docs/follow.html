@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Track delegated tasks & Inspect results — Oga Documentation</title>
+  <meta name="description" content="Track background agent work with oga watch and native macOS notifications. Inspect run details, answer clarifying questions, resume tasks, or hand off across models.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/docs/follow.html">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Track delegated tasks & Inspect results — Oga Documentation">
+  <meta property="og:description" content="Track background agent work with oga watch and native macOS notifications. Inspect run details, answer clarifying questions, resume tasks, or hand off across models.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/follow.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Track delegated tasks & Inspect results — Oga Documentation">
+  <meta name="twitter:description" content="Track background agent work with oga watch and native macOS notifications. Inspect run details, answer clarifying questions, resume tasks, or hand off across models.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Get told, instead of watching",
+    "description": "Track background agent work with oga watch and native macOS notifications. Inspect run details, answer clarifying questions, resume tasks, or hand off across models.",
+    "url": "https://oga.desgn.space/docs/follow.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html" aria-current="page">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html" aria-current="page">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Check on the work</p>
+        <h1 id="get-told-instead-of-watching">Get told, instead of watching<a class="heading-anchor" href="#get-told-instead-of-watching" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
+        <p class="docs-intro">Work you handed off runs on its own. Waiting for it should cost you nothing — so the point isn't to keep looking, it's to be told the moment something happens.</p>
+
+        <h2 id="be-told">Be told when it's done<a class="heading-anchor" href="#be-told" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p><code>oga watch</code> waits quietly and writes an event when the work asks a question, fails, is cancelled, or finishes. Run it in the background and forget it:</p>
+        <pre><code>oga watch 8f2c1a94-... --timeout 30m &amp;</code></pre>
+        <p>Wait on several tasks by naming several IDs: <code>oga watch &lt;id&gt; &lt;id&gt; &lt;id&gt;</code>. Add <code>--all</code> when you also need tool, command, file, and error events.</p>
+        <p>The Oga app shows the same thing on screen: what's running, what's waiting on you, and everything that happened inside a run. The duration counts only time spent running, so a task scheduled for later or waiting for your answer does not look like it was working. Updates stay responsive during busy periods, and the app catches up if it falls behind. Every task in the list names the project it runs in, and work with a copy of its own shows the branch beside it, so a list spanning several projects still reads at a glance. Any files or images you handed off with the request show up right beside it, so you can open them again without hunting for the originals. Under the follow-up box, the task footer shows how full the worker's context is and how far it has grown, so a long run filling its window never surprises you. Expand a lookup or task action to read its result in a short, readable view. Long results are capped so one response never takes over the activity record.</p>
+        <p>The Oga app tells you even when you are somewhere else: a task that finishes, stops short, or needs an answer raises a notification, and clicking it opens that task. Several tasks landing at once arrive together instead of one banner each, and the task you already have open stays quiet. Turn this off under Settings &#9656; Notifications.</p>
+
+        <h2 id="read-it">Read the whole thing<a class="heading-anchor" href="#read-it" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>When you want the full picture — what came back, what the work was allowed to touch, and what it cost:</p>
+        <pre><code>oga inspect &lt;task-id&gt;</code></pre>
+        <p><code>oga tasks</code> lists today's. Search active history by feature, file, or command with <code>oga tasks --query "text"</code>.</p>
+
+        <h2 id="answer">Answer a question it asked<a class="heading-anchor" href="#answer" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Work can stop partway and ask you something it can't decide on its own. Ask your coding agent to answer it — the reply goes back into the same session, and the work picks up exactly where it stopped rather than starting over.</p>
+
+        <h2 id="pick-up">Pick it back up<a class="heading-anchor" href="#pick-up" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Work that failed, was cancelled, or got stuck can be resumed:</p>
+        <pre><code>oga resume &lt;task-id&gt;
+oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code></pre>
+        <p>When you need a completed task to do more, give it a new instruction:</p>
+        <pre><code>oga resume &lt;task-id&gt; -m "move the status dot to the end of the title"</code></pre>
+
+        <h2 id="move">Move it to another worker<a class="heading-anchor" href="#move" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>When the account behind a task is out of usage, or the work belongs on a stronger model, move it without losing the task:</p>
+        <pre><code>oga handoff &lt;task-id&gt; --worker claude
+oga handoff &lt;task-id&gt; --model opus</code></pre>
+        <p>It keeps its id, its request, and its place in line. A task waiting on other work, or on a start time you set, keeps waiting — it just runs somewhere else when its turn comes.</p>
+
+        <div class="docs-callout">
+          <p>Search <code>oga tasks --query "feature, file, or command"</code> before you start something new. If it finds related work, pick that task back up instead of running two against each other.</p>
+        </div>
+
+        <div class="docs-next">
+          <a href="/docs/worktrees.html">Next: Branches &amp; pull requests &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#be-told">Be told when it's done</a></li>
+          <li><a href="#read-it">Read the whole thing</a></li>
+          <li><a href="#answer">Answer a question</a></li>
+          <li><a href="#pick-up">Pick it back up</a></li>
+          <li><a href="#move">Move it to another worker</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script src="/docs-links.js"></script>
+</body>
+</html>

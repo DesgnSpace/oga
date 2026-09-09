@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy, Local Storage & Settings — Oga Documentation</title>
+  <meta name="description" content="Oga stores SQLite databases, task worktrees, and logs locally on macOS under ~/.oga. Learn what data stays local and how configuration resolves.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/docs/data.html">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Privacy, Local Storage & Settings — Oga Documentation">
+  <meta property="og:description" content="Oga stores SQLite databases, task worktrees, and logs locally on macOS under ~/.oga. Learn what data stays local and how configuration resolves.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/data.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Privacy, Local Storage & Settings — Oga Documentation">
+  <meta name="twitter:description" content="Oga stores SQLite databases, task worktrees, and logs locally on macOS under ~/.oga. Learn what data stays local and how configuration resolves.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Everything Oga keeps stays on your Mac",
+    "description": "Oga stores SQLite databases, task worktrees, and logs locally on macOS under ~/.oga. Learn what data stays local and how configuration resolves.",
+    "url": "https://oga.desgn.space/docs/data.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html" aria-current="page">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html" aria-current="page">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Your data</p>
+        <h1 id="everything-oga-keeps-stays-on-your-mac">Everything Oga keeps stays on your Mac<a class="heading-anchor" href="#everything-oga-keeps-stays-on-your-mac" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
+        <p class="docs-intro">Oga runs entirely on your machine. The only thing that ever leaves it is the work itself — the brief and the files you allowed — sent to the account you picked for it.</p>
+
+        <h2 id="where">What Oga keeps, and where<a class="heading-anchor" href="#where" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Task records and task copies live under <code>~/.oga</code>:</p>
+        <table>
+          <thead>
+            <tr><th>What</th><th>Where</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>The work you've handed off, your workers, and project memories</td><td><code>~/.oga/oga.db</code></td></tr>
+            <tr><td>One copy of your repository for each piece of work <a href="/docs/worktrees.html">given its own branch</a></td><td><code>~/.oga/worktrees/</code></td></tr>
+            <tr><td>Other local working state</td><td><code>~/.oga/</code></td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="settings">Where a setting comes from<a class="heading-anchor" href="#settings" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Settings come from three places. The first one that has an answer wins:</p>
+        <ol>
+          <li><code>.oga.yaml</code> in the project itself.</li>
+          <li><code>~/.oga.yaml</code>, your own settings for every project.</li>
+          <li>Oga's own defaults — the accounts it found and the rules it ships with.</li>
+        </ol>
+        <p>Not having either file is normal. To see what a folder actually resolves to, and which file each setting came from:</p>
+        <pre><code>oga config</code></pre>
+
+        <h2 id="space">Freeing disk space<a class="heading-anchor" href="#space" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p><code>oga cleanup</code> shows what old work is holding and deletes nothing until you say so:</p>
+        <pre><code>oga cleanup
+oga cleanup --older-than 30d --delete</code></pre>
+        <p>Only finished, archived work is eligible. Anything still running, anything waiting on you, and project memories are never touched. Cleanup can remove a clean task copy, but the branch remains.</p>
+
+        <div class="docs-callout">
+          <p>None of this follows you between machines. On a new Mac, sign back into each provider tool and add your accounts again in Oga's Settings.</p>
+        </div>
+
+        <div class="docs-next">
+          <a href="/docs/changelog.html">Next: Read release notes in the Changelog &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#where">What Oga keeps</a></li>
+          <li><a href="#settings">Where settings come from</a></li>
+          <li><a href="#space">Freeing disk space</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script src="/docs-links.js"></script>
+</body>
+</html>

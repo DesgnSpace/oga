@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install Oga on macOS — Oga Documentation</title>
+  <meta name="description" content="Download and install Oga on macOS 14+ via curl, Homebrew cask, or source build. Verify the background daemon and CLI in minutes.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/docs/install.html">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Install Oga on macOS — Oga Documentation">
+  <meta property="og:description" content="Download and install Oga on macOS 14+ via curl, Homebrew cask, or source build. Verify the background daemon and CLI in minutes.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/install.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Install Oga on macOS — Oga Documentation">
+  <meta name="twitter:description" content="Download and install Oga on macOS 14+ via curl, Homebrew cask, or source build. Verify the background daemon and CLI in minutes.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Get Oga onto your Mac",
+    "description": "Download and install Oga on macOS 14+ via curl, Homebrew cask, or source build. Verify the background daemon and CLI in minutes.",
+    "url": "https://oga.desgn.space/docs/install.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html" aria-current="page">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html" aria-current="page">Install</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Install</p>
+        <h1 id="get-oga-onto-your-mac">Get Oga onto your Mac<a class="heading-anchor" href="#get-oga-onto-your-mac" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
+        <p class="docs-intro">Oga needs macOS 14 or later. Windows and Linux aren't ready yet.</p>
+
+        <h2 id="curl">Install in one command<a class="heading-anchor" href="#curl" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Downloads Oga and puts it in your Applications folder:</p>
+        <pre><code>curl -fsSL https://downloads.desgn.space/oga/install.sh | sh</code></pre>
+
+        <h2 id="homebrew">Install with Homebrew<a class="heading-anchor" href="#homebrew" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>If you already use Homebrew:</p>
+        <pre><code>brew install --cask DesgnSpace/tap/oga</code></pre>
+
+        <h2 id="source">Build it yourself<a class="heading-anchor" href="#source" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>For contributors, or to run something ahead of a release:</p>
+        <pre><code>git clone https://github.com/yondifon/oga.git
+cd oga
+bun install
+make install</code></pre>
+        <p>A build of your own installs as <strong>Oga (local)</strong>, alongside a released Oga rather than replacing it. Only one can run at a time — they share the same port and the same folder — so quit one before opening the other. <code>make install</code> quits whichever is open, starts the one it just built, and points the <code>oga</code> command at it.</p>
+
+        <h2 id="updates">Get new versions<a class="heading-anchor" href="#updates" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Oga checks quietly when it opens. You can also choose <strong>Check for Updates</strong> from the Oga menu or the About section in Settings, then download and install a new version without leaving the app.</p>
+
+        <h2 id="confirm">Check that it's running<a class="heading-anchor" href="#confirm" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Opening the app starts everything Oga needs. To confirm it answered:</p>
+        <pre><code>curl http://127.0.0.1:7331/health</code></pre>
+
+        <h2 id="cli">Use Oga from the terminal<a class="heading-anchor" href="#cli" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Oga also gives you an <code>oga</code> command. It carries everything it needs, so it works without a checkout or any other tooling. Run <code>oga</code> on its own to see what it can do and how to start.</p>
+
+        <div class="docs-next">
+          <a href="/docs/setup.html">Next: Set up the accounts that do the work &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#curl">One command</a></li>
+          <li><a href="#homebrew">Homebrew</a></li>
+          <li><a href="#source">Build it yourself</a></li>
+          <li><a href="#updates">New versions</a></li>
+          <li><a href="#confirm">Check it's running</a></li>
+          <li><a href="#cli">From the terminal</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script src="/docs-links.js"></script>
+</body>
+</html>

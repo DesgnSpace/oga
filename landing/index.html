@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oga — Desktop Orchestrator for Coding Agents</title>
+  <meta name="description" content="Oga is a macOS orchestrator for coding agents. Hand work out from Claude Code, Codex, OpenCode, Pi, or Antigravity across your accounts in parallel.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Oga">
+  <meta property="og:title" content="Oga — Desktop Orchestrator for Coding Agents">
+  <meta property="og:description" content="Run coding agents in parallel across the accounts you already pay for, right from inside the AI coding tool you already use.">
+  <meta property="og:url" content="https://oga.desgn.space/">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Oga — Desktop Orchestrator for Coding Agents">
+  <meta name="twitter:description" content="Run coding agents in parallel across the accounts you already pay for, right from inside the AI coding tool you already use.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Oga",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS 14+",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "Desktop orchestrator for coding agents. Connects to Claude Code, Codex, OpenCode, Pi, or Antigravity over MCP to run delegated tasks in parallel across accounts.",
+    "url": "https://oga.desgn.space/",
+    "downloadUrl": "https://downloads.desgn.space/oga/Oga-latest.dmg",
+    "image": "https://oga.desgn.space/og-image.png",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="#main">
+      <img src="logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <nav class="header-nav">
+      <a class="header-link" href="/docs/">Docs</a>
+      <a class="header-link" href="#install">Install</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Give your coding agent more hands.</h1>
+        <p class="hero-intro">You can only watch one AI coding session at a time. Oga hands the rest of the job to the other coding tools and accounts you already use, runs them in parallel, and tells you the moment one needs you.</p>
+      </div>
+
+      <section class="install" id="install" aria-label="Install Oga">
+        <a class="primary-action" href="https://downloads.desgn.space/oga/Oga-latest.dmg">Download for macOS</a>
+        <p class="install-note">Requires macOS 14 or later.</p>
+        <ul class="platform-list" aria-label="Platform availability">
+          <li class="platform platform-available">
+            <img class="platform-mark" src="logos/macos.svg" alt="macOS logo" width="24" height="24">
+            <span>macOS</span>
+            <strong>Available</strong>
+          </li>
+          <li class="platform platform-soon">
+            <img class="platform-mark" src="logos/windows.svg" alt="Windows logo" width="24" height="24">
+            <span>Windows</span>
+            <strong>Coming soon</strong>
+          </li>
+          <li class="platform platform-soon">
+            <img class="platform-mark" src="logos/linux.svg" alt="Linux logo" width="24" height="24">
+            <span>Linux</span>
+            <strong>Coming soon</strong>
+          </li>
+        </ul>
+        <div class="install-options">
+          <div class="command-block">
+            <div class="command-heading">
+              <span>Install with curl</span>
+              <button class="copy-button" type="button" data-copy-target="curl-command" data-copy-label="Curl" aria-label="Copy curl command">Copy</button>
+            </div>
+            <code id="curl-command">curl -fsSL https://downloads.desgn.space/oga/install.sh | sh</code>
+          </div>
+          <div class="command-block">
+            <div class="command-heading">
+              <span>Install with Homebrew</span>
+              <button class="copy-button" type="button" data-copy-target="brew-command" data-copy-label="Homebrew" aria-label="Copy Homebrew command">Copy</button>
+            </div>
+            <code id="brew-command">brew install --cask DesgnSpace/tap/oga</code>
+          </div>
+        </div>
+      </section>
+
+      <div class="hero-board">
+        <p class="eyebrow board-label">Works with</p>
+        <div class="goal-card">
+          <span class="goal-label">Your goal</span>
+          <strong>Ship the release</strong>
+        </div>
+        <ul class="agent-row">
+          <li class="agent">
+            <img class="agent-mark" src="logos/codex.svg" alt="Codex logo" width="28" height="28">
+            <span class="agent-name">Codex</span>
+            <span class="agent-task">Builds the feature</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/claude-code.svg" alt="Claude Code logo" width="28" height="28">
+            <span class="agent-name">Claude Code</span>
+            <span class="agent-task">Writes the tests</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/pi.svg" alt="Pi logo" width="28" height="28">
+            <span class="agent-name">Pi</span>
+            <span class="agent-task">Reviews the change</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/opencode.svg" alt="OpenCode logo" width="28" height="28">
+            <span class="agent-name">OpenCode</span>
+            <span class="agent-task">Updates the docs</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+          <li class="agent">
+            <img class="agent-mark" src="logos/antigravity.svg" alt="Antigravity logo" width="28" height="28">
+            <span class="agent-name">Antigravity</span>
+            <span class="agent-task">Checks the build</span>
+            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="product-shot" aria-label="Oga desktop app">
+      <picture>
+        <source srcset="app-dark.png" media="(prefers-color-scheme: dark)">
+        <img src="app-light.png" alt="Oga desktop app showing a task list on the left and a task brief on the right, in a dark-themed macOS window" width="2000" height="1360" loading="lazy">
+      </picture>
+    </section>
+
+    <section class="difference" aria-labelledby="difference-title">
+      <div class="section-heading">
+        <p class="eyebrow">Why Oga is different</p>
+        <h2 id="difference-title">You keep the agent you already use.</h2>
+        <p class="section-lede">Other tools ask you to move in: a new window, a new chat, a new place to keep your work. Oga adds one server to the agent you already have open, and the delegating starts there.</p>
+      </div>
+      <div class="contrast-grid">
+        <article>
+          <h3>Nothing to move into</h3>
+          <p class="contrast-them">Elsewhere: open their app, start the conversation again, learn where everything lives.</p>
+          <p class="contrast-us">Here: add Oga to your agent, keep the conversation you are in, and hand work out from inside it.</p>
+        </article>
+        <article>
+          <h3>Every account you pay for</h3>
+          <p class="contrast-them">Elsewhere: one tool at a time, and its limit is your limit.</p>
+          <p class="contrast-us">Here: work goes to whichever of your accounts has room, so hitting a limit stops one task, not your day.</p>
+        </article>
+        <article>
+          <h3>Sent, not supervised</h3>
+          <p class="contrast-them">Elsewhere: panes to watch, each one waiting on you.</p>
+          <p class="contrast-us">Here: a task carries its own brief, the files it may touch, and its own copy of the project. You get told when it lands.</p>
+        </article>
+      </div>
+      <ul class="rival-list">
+        <li style="--rival: #319cfc;">
+          <a href="https://t3.codes/" rel="nofollow noopener" target="_blank">T3 Code</a>
+          <p>A control app for the agents already on your machine. Oga skips the extra app: you stay in the agent you already have open.</p>
+        </li>
+        <li style="--rival: #155dfc;">
+          <a href="https://soloterm.com/" rel="nofollow noopener" target="_blank">Solo</a>
+          <p>A workspace your agents share. Oga needs no shared room: each task carries what it needs.</p>
+        </li>
+        <li style="--rival: #2c2826; --rival-dark: #eae8e6;">
+          <a href="https://www.conductor.build/" rel="nofollow noopener" target="_blank">Conductor</a>
+          <p>Cloud sandboxes that keep coding agents running after you close your laptop. Oga needs no sandbox: work goes out through the agent you already have and comes back to it.</p>
+        </li>
+        <li style="--rival: #4fd8c4;">
+          <a href="https://runbloom.app/" rel="nofollow noopener" target="_blank">Bloom</a>
+          <p>One machine, one set of agents. Oga spreads the work across every account you already pay for.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="outcomes" aria-labelledby="outcomes-title">
+      <div class="section-heading">
+        <p class="eyebrow">Built for focused work</p>
+        <h2 id="outcomes-title">Keep your attention where it matters.</h2>
+      </div>
+      <div class="outcome-grid">
+        <article>
+          <span class="outcome-number">01</span>
+          <h3>Move more work at once</h3>
+          <p>Send implementation, research, and review ahead without leaving your current conversation.</p>
+        </article>
+        <article>
+          <span class="outcome-number">02</span>
+          <h3>Use the right model</h3>
+          <p>Match quick edits to fast models and difficult decisions to deeper reasoning.</p>
+        </article>
+        <article>
+          <span class="outcome-number">03</span>
+          <h3>Stay in control</h3>
+          <p>Set what each task can read, what it can change, and how it proves the work is done.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="handoff" aria-labelledby="handoff-title">
+      <div class="section-heading">
+        <p class="eyebrow">For bigger jobs</p>
+        <h2 id="handoff-title">Send it away from your files.</h2>
+      </div>
+      <div class="handoff-grid">
+        <p class="handoff-lede">Give the work its own branch. It runs in a separate copy of your repository, so nothing changes in your working folder until you merge.</p>
+        <ol class="handoff-steps">
+          <li>
+            <span class="handoff-step" aria-hidden="true">01</span>
+            <h3>You ask</h3>
+            <p>Tell your agent to run it on a branch of its own:</p>
+            <span class="handoff-say">Take the CSV importer, work on a branch of its own, open a pull request.</span>
+          </li>
+          <li>
+            <span class="handoff-step" aria-hidden="true">02</span>
+            <h3>It works apart</h3>
+            <p>It gets a copy of the repo on its own <code>oga/</code> branch. Two jobs never fight over the same files.</p>
+          </li>
+          <li>
+            <span class="handoff-step" aria-hidden="true">03</span>
+            <h3>You review</h3>
+            <p>It comes back as a branch you merge, with the pull request link when it opens one.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="closing-cta" aria-labelledby="closing-cta-title">
+      <div class="section-heading">
+        <p class="eyebrow">Get started</p>
+        <h2 id="closing-cta-title">Give it more hands.</h2>
+      </div>
+      <a class="primary-action" href="#install">Download for macOS</a>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <span>Available for macOS.</span>
+      <a href="/docs/">Docs</a>
+      <a href="/docs/changelog.html">Changelog <!-- LATEST_VERSION --></a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script src="/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Overview — Oga Documentation</title>
+  <meta name="description" content="An introduction to Oga: how desktop orchestration coordinates coding agents across models and accounts, runs tasks in the background, and reports when done.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/docs/">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Overview — Oga Documentation">
+  <meta property="og:description" content="How desktop orchestration coordinates coding agents across models and accounts, runs tasks in the background, and reports when done.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Overview — Oga Documentation">
+  <meta name="twitter:description" content="How desktop orchestration coordinates coding agents across models and accounts, runs tasks in the background, and reports when done.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Keep working while something else gets done",
+    "description": "An introduction to Oga: how desktop orchestration coordinates coding agents across models and accounts, runs tasks in the background, and reports when done.",
+    "url": "https://oga.desgn.space/docs/",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/" aria-current="page">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/" aria-current="page">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Oga docs</p>
+        <h1 id="keep-working-while-something-else-gets-done">Keep working while something else gets done<a class="heading-anchor" href="#keep-working-while-something-else-gets-done" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
+        <p class="docs-intro">Oga is an orchestrator for coding agents — the layer above the AI coding tools you already use.</p>
+        <p>You describe a piece of work. Oga decides which tool and which of your accounts should run it, hands it the brief along with what your project has already taught Oga, runs it in the background on only the files you allow, and tells you the moment it finishes or needs an answer.</p>
+        <p>Oga writes no code itself. It decides who does, and carries the work there and back.</p>
+
+        <h2 id="why">Why hand work off<a class="heading-anchor" href="#why" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <ul>
+          <li><strong>Your accounts don't share a limit.</strong> Running into a cap on one doesn't stop the rest.</li>
+          <li><strong>It doesn't crowd out your own conversation.</strong> The brief and the answer live on the other account, not in the chat you're having.</li>
+          <li><strong>Cheap work can go to a cheap model.</strong> A mechanical rename and a hard rewrite don't need the same one. Pick per piece of work, or let Oga pick.</li>
+        </ul>
+
+        <h2 id="what-happens">What happens after you hand something off<a class="heading-anchor" href="#what-happens" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0 4h-3v2h3a4 4 0 1 0 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <ol>
+          <li>You describe the work and the folder it happens in.</li>
+          <li>Oga picks an account and a model, unless you name one.</li>
+          <li>You get an ID back straight away, and the work starts.</li>
+          <li>You carry on with your own work.</li>
+          <li>When it finishes, asks a question, or fails, you hear about it.</li>
+        </ol>
+        <p>Oga sits in your menu bar on macOS. The coding agent you already use — Claude Code, Codex, OpenCode, Antigravity, or Pi — can hand work to it once the two are connected.</p>
+
+        <h2 id="first-task">Get your first piece of work running<a class="heading-anchor" href="#first-task" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <ol>
+          <li><strong><a href="/docs/install.html">Install Oga</a></strong> and open it.</li>
+          <li><strong><a href="/docs/setup.html">Add the accounts</a></strong> you want to hand work to, and connect your coding agent.</li>
+          <li><strong><a href="/docs/delegate.html">Ask for the work</a></strong> in plain language.</li>
+          <li><strong><a href="/docs/follow.html">Get told when it's done</a></strong>, instead of watching it.</li>
+        </ol>
+
+        <div class="docs-callout">
+          <p>New to the command line? Type <code>oga</code> on its own to see the available commands and first-run steps.</p>
+        </div>
+
+        <h2 id="where-to-next">Where to go next<a class="heading-anchor" href="#where-to-next" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <ul>
+          <li><a href="/docs/install.html">Install</a> - three ways to get Oga onto your Mac.</li>
+          <li><a href="/docs/setup.html">Set up accounts</a> - who does the work, and on which model.</li>
+          <li><a href="/docs/delegate.html">Hand off work</a> - what to send out, and what it may touch.</li>
+          <li><a href="/docs/follow.html">Check on the work</a> - be told, read the record, answer a question, pick it back up.</li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a> - work that ends in commits.</li>
+          <li><a href="/docs/data.html">Your data</a> - what stays on your Mac and what leaves it.</li>
+          <li><a href="/docs/changelog.html">Changelog</a> - release notes and upcoming changes.</li>
+        </ul>
+
+        <div class="docs-next">
+          <a href="/docs/install.html">Next: Get Oga onto your Mac &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#why">Why hand work off</a></li>
+          <li><a href="#what-happens">What happens</a></li>
+          <li><a href="#first-task">Your first piece of work</a></li>
+          <li><a href="#where-to-next">Where to go next</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script src="/docs-links.js"></script>
+</body>
+</html>

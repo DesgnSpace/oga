@@ -1,0 +1,56 @@
+node_modules/
+.build/
+dist/
+.env
+.env.*
+!.env.example
+!.env.1password
+
+*.db
+*.db-*
+*.log
+
+# Local machine config. These carry per-machine URLs and tokens.
+oga.config.json
+.mcp.json
+opencode.json
+# The compatibility fixture of the same name is a recorded contract, not config.
+!rust/compat/fixtures/providers/opencode.json
+.cursor/
+.wrangler/
+.DS_Store
+
+# Icon staging, rebuilt by `make bundle`
+*.iconset/
+*.icns
+
+# Rust build output
+target
+
+# Generated Tauri capability schemas
+rust/apps/oga-desktop/gen/
+
+# Target-specific Tauri sidecars staged by the packaging hook
+rust/apps/oga-desktop/binaries/
+
+# Output of delegated field-test runs, not part of the product
+examples/
+.oga-test/
+.oga-analysis/
+
+# Generated at deploy time from CHANGELOG.md; `make changelog` rebuilds it locally.
+landing/docs/changelog.html
+
+# Scratch and planning
+.plans/
+scratchpad/
+*.original.md
+
+# Reference repos cloned for research. Not part of the project.
+.research/
+
+.agents/
+.claude/
+web/tsconfig.app.tsbuildinfo
+rust/apps/oga-desktop/binaries
+*.bun-build

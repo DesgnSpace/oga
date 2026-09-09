@@ -1,0 +1,16 @@
+[package]
+name = "oga-worktree"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oga-domain = { path = "../oga-domain" }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "process", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+
+[lints]
+workspace = true

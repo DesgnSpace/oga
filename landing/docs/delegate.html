@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hand Off Work to Coding Agents — Oga Documentation</title>
+  <meta name="description" content="How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/docs/delegate.html">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/docs.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga Docs">
+  <meta property="og:title" content="Hand Off Work to Coding Agents — Oga Documentation">
+  <meta property="og:description" content="How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.">
+  <meta property="og:url" content="https://oga.desgn.space/docs/delegate.html">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Hand Off Work to Coding Agents — Oga Documentation">
+  <meta name="twitter:description" content="How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Hand off your first piece of work",
+    "description": "How to delegate tasks in plain language from your coding agent or terminal with oga delegate, limit folder permissions, and choose models.",
+    "url": "https://oga.desgn.space/docs/delegate.html",
+    "author": {
+      "@type": "Organization",
+      "name": "Desgn",
+      "url": "https://desgn.space"
+    }
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <a class="header-link" href="/#install">Install</a>
+  </header>
+
+  <main id="main">
+    <div class="docs-shell">
+      <details class="docs-sidebar-mobile">
+        <summary>Docs menu</summary>
+        <nav aria-label="Docs pages">
+          <ul class="docs-nav-list">
+            <li><a href="/docs/">Overview</a></li>
+            <li><a href="/docs/install.html">Install</a></li>
+            <li><a href="/docs/setup.html">Set up accounts</a></li>
+            <li><a href="/docs/delegate.html" aria-current="page">Hand off work</a></li>
+            <li><a href="/docs/follow.html">Check on the work</a></li>
+            <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+            <li><a href="/docs/data.html">Your data</a></li>
+            <li><a href="/docs/changelog.html">Changelog</a></li>
+          </ul>
+        </nav>
+      </details>
+
+      <nav class="docs-sidebar-desktop" aria-label="Docs pages">
+        <p class="docs-nav-label">Docs</p>
+        <ul class="docs-nav-list">
+          <li><a href="/docs/">Overview</a></li>
+          <li><a href="/docs/install.html">Install</a></li>
+          <li><a href="/docs/setup.html">Set up accounts</a></li>
+          <li><a href="/docs/delegate.html" aria-current="page">Hand off work</a></li>
+          <li><a href="/docs/follow.html">Check on the work</a></li>
+          <li><a href="/docs/worktrees.html">Branches &amp; pull requests</a></li>
+          <li><a href="/docs/data.html">Your data</a></li>
+          <li><a href="/docs/changelog.html">Changelog</a></li>
+        </ul>
+      </nav>
+
+      <article class="docs-content">
+        <p class="docs-eyebrow">Docs / Hand off work</p>
+        <h1 id="hand-off-your-first-piece-of-work">Hand off your first piece of work<a class="heading-anchor" href="#hand-off-your-first-piece-of-work" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h1>
+        <p class="docs-intro">You don't fill in a form. You ask the coding agent you already use, in plain language, and it sets the work up for you.</p>
+
+        <h2 id="ask">Ask for it in plain language<a class="heading-anchor" href="#ask" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Once your agent is connected, ask for the work the way you'd ask a colleague:</p>
+        <div class="docs-callout">
+          <p>"Send the failing test suite off to a fast model."</p>
+          <p>"Have someone else write the changelog while I keep going on the API."</p>
+        </div>
+        <p>Your agent writes the brief, names the folder the work happens in, and either lets Oga choose the account and model or names one itself. The brief goes out as written, at whatever length the job needs — a sentence for a small job, more when there is more to say. You get an ID back as soon as the work starts. From there it runs on its own account, unattended.</p>
+
+        <h2 id="from-the-terminal">Or straight from your shell<a class="heading-anchor" href="#from-the-terminal" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>When you already know what you want done, you don't need to go through an agent. <code>oga delegate</code> starts the work and hands you its ID:</p>
+        <pre><code>oga delegate "Port the CSV importer to the new parser and keep its tests green."</code></pre>
+        <p>It runs in the folder you're standing in, on the account and model Oga picks. Name one yourself with <code>--worker</code> and <code>--model</code>, give it its own branch with <code>--worktree</code>, or point it at another folder with <code>--cwd</code>. Already know what kind of work this is? Say so with <code>--kind</code>, so a <a href="/docs/setup.html#default-model">loved model</a> for that kind isn't missed. Want a say in how hard the model thinks? Set <code>--effort</code> directly.</p>
+        <p>Pass <code>-</code> to take the brief from standard input, for when you've already written it down:</p>
+        <pre><code>oga delegate - &lt; brief.md</code></pre>
+
+        <h2 id="worth-it">What's worth handing off<a class="heading-anchor" href="#worth-it" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Handing off costs you a brief and a wait. It pays for itself on work with its own finish line — build this screen, port this module, review this branch, research this question. It doesn't pay for a rename, a typo, or a one-line change: by the time you've described those, you could have done them.</p>
+        <p>The same goes for anything you're standing over. Work you'd interrupt every two minutes belongs in your own session.</p>
+
+        <h2 id="briefs">How the work gets written up<a class="heading-anchor" href="#briefs" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Whoever picks the work up can't see the conversation you had. Everything it needs — what to build, why, what you already worked out, what to leave alone — has to be in the write-up, and the write-up is all it gets.</p>
+        <p>Settings keeps the house rules for that under <strong>Brief Rules</strong>, so your agent reads the same guidance every time before it writes anything up. Rewrite them for a project, or for every project, the same way you would the worker prompt. Keep Oga's own wording and add to it with <code>{{default}}</code>, or replace it outright by leaving that out.</p>
+
+        <h2 id="files">What it's allowed to touch<a class="heading-anchor" href="#files" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Every piece of work carries the area you approved: what it may read, and what it may change. Reading the whole folder and writing to one part of it is the usual shape.</p>
+        <ul>
+          <li>Naming a folder covers everything inside it.</li>
+          <li><code>**</code> means the whole folder you're working in.</li>
+          <li>A path that doesn't exist yet means only itself. If the work will create files under a new folder, write <code>out/**</code>, not <code>out</code>.</li>
+        </ul>
+        <p>Approving an area once is enough — later work in the same project reuses it without asking again. The area is a permission, not a reading list; which files actually get opened is up to whoever does the work.</p>
+
+        <h2 id="tools">What it works with<a class="heading-anchor" href="#tools" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Whoever does the work gets the tools you already connected for that project, alongside Oga's own. A database, a browser, an issue tracker — if your coding agent can reach it in that folder, so can the work you hand off.</p>
+        <p>Work stays where you send it: it can report back and ask, but it can't hand the job on to someone else. When a piece of work is big enough to need help, say so as you send it — ask your agent to let it hand work onward, and it gets to split the job up itself.</p>
+
+        <h2 id="who">Who ends up doing it<a class="heading-anchor" href="#who" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Name nothing, and the work uses your <a href="/docs/setup.html#default-model">default model</a> when you set one. Otherwise Oga chooses from the workers and models you turned on. Name a worker and model when the work needs a specific destination.</p>
+        <p>Naming a model, you can use the short name Settings shows instead of typing it in full, as long as it names only one model on that worker. A short name that could mean more than one is refused, listing the models it could mean, and a model you haven't switched on in Settings is always refused, however you asked for it.</p>
+        <p>Workers arrive with default habits — clearing small holdups themselves, looking code up before searching blindly, and ending branch work in a pull request. The lookup understands Rust, Python, Go, PHP, Ruby, Java, Swift, C#, C, and C++ source. Those defaults live in Settings as a worker prompt you own top to bottom: reorder it, rewrite it, or delete it, and nothing is added behind your back.</p>
+
+        <div class="docs-next">
+          <a href="/docs/follow.html">Next: Check on the work &rarr;</a>
+        </div>
+      </article>
+
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-nav-label">On this page</p>
+        <ul>
+          <li><a href="#ask">Ask in plain language</a></li>
+          <li><a href="#from-the-terminal">Straight from your shell</a></li>
+          <li><a href="#worth-it">What's worth handing off</a></li>
+          <li><a href="#briefs">How work gets written up</a></li>
+          <li><a href="#files">What it can touch</a></li>
+          <li><a href="#tools">What it works with</a></li>
+          <li><a href="#who">Who does it</a></li>
+        </ul>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="https://desgn.space">Desgn</a>
+    </div>
+  </footer>
+  <script src="/docs-links.js"></script>
+</body>
+</html>
