@@ -5,16 +5,31 @@ export type Inline =
   | { type: "text"; text: string }
   | { type: "bold"; text: string }
   | { type: "italic"; text: string }
+  | { type: "strike"; text: string }
   | { type: "code"; text: string }
   | { type: "link"; text: string; href: string };
+
+/** `null` means the column carries no explicit alignment. */
+export type ColumnAlign = "left" | "center" | "right" | null;
+
+export type ListItem = {
+  text: string;
+  /** `null` outside a task list; otherwise the checkbox state. */
+  checked: boolean | null;
+  children: NestedList | null;
+};
+
+export type NestedList = { ordered: boolean; items: ListItem[] };
 
 export type Block =
   | { type: "heading"; level: number; text: string }
   | { type: "paragraph"; text: string }
-  | { type: "bulletList"; items: string[] }
-  | { type: "orderedList"; items: string[] }
+  | { type: "bulletList"; items: ListItem[] }
+  | { type: "orderedList"; items: ListItem[] }
   | { type: "blockquote"; text: string }
-  | { type: "codeBlock"; language: string | null; code: string };
+  | { type: "codeBlock"; language: string | null; code: string }
+  | { type: "thematicBreak" }
+  | { type: "table"; align: ColumnAlign[]; header: string[]; rows: string[][] };
 
 export type CodeLanguage =
   | "plain"
@@ -219,6 +234,27 @@ export function parseInline(text: string): Inline[] {
       }
     }
 
+    // strikethrough ~~
+    if (i + 1 < chars.length && chars[i] === "~" && chars[i + 1] === "~") {
+      let j = i + 2;
+      let found: number | null = null;
+      while (j + 1 < chars.length) {
+        if (chars[j] === "~" && chars[j + 1] === "~") {
+          found = j;
+          break;
+        }
+        j += 1;
+      }
+      if (found !== null) {
+        const inner = chars.slice(i + 2, found).join("");
+        if (inner.length !== 0 && !inner.includes("\n")) {
+          out.push({ type: "strike", text: inner });
+          i = found + 2;
+          continue;
+        }
+      }
+    }
+
     // italic * or _
     if (chars[i] === "*" || chars[i] === "_") {
       const delim = chars[i];
@@ -256,6 +292,7 @@ export function parseInline(text: string): Inline[] {
       chars[i] !== "[" &&
       chars[i] !== "*" &&
       chars[i] !== "_" &&
+      chars[i] !== "~" &&
       !autolinkAt(i)
     ) {
       i += 1;
@@ -290,24 +327,151 @@ function headingLevel(line: string): { level: number; text: string } | null {
   return null;
 }
 
-function isBullet(line: string): string | null {
-  const t = line.trimStart();
-  if (t.startsWith("- ")) return t.slice(2);
-  if (t.startsWith("* ")) return t.slice(2);
-  return null;
+function isThematicBreak(line: string): boolean {
+  const t = line.trim();
+  if (t.length < 3) return false;
+  const marker = t[0];
+  if (marker !== "-" && marker !== "*" && marker !== "_") return false;
+  let count = 0;
+  for (const c of t) {
+    if (c === marker) count += 1;
+    else if (c !== " " && c !== "\t") return false;
+  }
+  return count >= 3;
 }
 
-function orderedItem(line: string): string | null {
-  const t = line.trimStart();
-  let idx = 0;
-  for (const c of t) {
-    if (c >= "0" && c <= "9") idx += 1;
+type ListMarker = {
+  indent: number;
+  ordered: boolean;
+  text: string;
+  checked: boolean | null;
+};
+
+function listMarker(line: string): ListMarker | null {
+  let indent = 0;
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === " ") indent += 1;
+    else if (line[i] === "\t") indent += 4;
     else break;
+    i += 1;
   }
-  if (idx === 0 || idx > 9) return null;
-  const rest = t.slice(idx);
-  if (rest.startsWith(". ")) return rest.slice(2);
-  return null;
+  const rest = line.slice(i);
+
+  let body: string | null = null;
+  let ordered = false;
+  if (rest.startsWith("- ") || rest.startsWith("* ") || rest.startsWith("+ ")) {
+    body = rest.slice(2);
+  } else {
+    let digits = 0;
+    for (const c of rest) {
+      if (c >= "0" && c <= "9") digits += 1;
+      else break;
+    }
+    if (digits !== 0 && digits <= 9 && rest.slice(digits).startsWith(". ")) {
+      ordered = true;
+      body = rest.slice(digits + 2);
+    }
+  }
+  if (body === null) return null;
+
+  const task = taskMarker(body);
+  if (task) return { indent, ordered, text: task.text, checked: task.checked };
+  return { indent, ordered, text: body, checked: null };
+}
+
+function taskMarker(body: string): { checked: boolean; text: string } | null {
+  const match = /^\[([ xX])\](?:\s+|$)/.exec(body);
+  if (!match) return null;
+  return { checked: match[1] !== " ", text: body.slice(match[0].length) };
+}
+
+/**
+ * Reads one run of list lines into a tree, nesting a line under the item above
+ * it when it is indented further. A run ends at the first line that is not a
+ * list item, or where a marker of the other kind starts a sibling list.
+ */
+function parseList(lines: string[], start: number, first: ListMarker) {
+  const root: NestedList = { ordered: first.ordered, items: [] };
+  const openLists: { indent: number; list: NestedList }[] = [
+    { indent: first.indent, list: root },
+  ];
+  let i = start;
+  let count = 0;
+
+  while (i < lines.length && count < MAX_BLOCKS) {
+    const marker = listMarker(lines[i]);
+    if (marker === null) break;
+
+    while (
+      openLists.length > 1 &&
+      marker.indent < openLists[openLists.length - 1].indent
+    ) {
+      openLists.pop();
+    }
+    const top = openLists[openLists.length - 1];
+    const item: ListItem = {
+      text: marker.text,
+      checked: marker.checked,
+      children: null,
+    };
+    const parent = top.list.items[top.list.items.length - 1];
+
+    if (marker.indent > top.indent && parent !== undefined) {
+      const child: NestedList = { ordered: marker.ordered, items: [item] };
+      parent.children = child;
+      openLists.push({ indent: marker.indent, list: child });
+    } else {
+      if (marker.ordered !== top.list.ordered) break;
+      top.list.items.push(item);
+    }
+
+    count += 1;
+    i += 1;
+  }
+
+  return { list: root, next: i };
+}
+
+function tableCells(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+
+  const cells: string[] = [];
+  let cell = "";
+  for (let i = 0; i < s.length; i += 1) {
+    if (s[i] === "\\" && s[i + 1] === "|") {
+      cell += "|";
+      i += 1;
+    } else if (s[i] === "|") {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += s[i];
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function delimiterRow(line: string): ColumnAlign[] | null {
+  if (!line.includes("-")) return null;
+  const align: ColumnAlign[] = [];
+  for (const cell of tableCells(line)) {
+    const left = cell.startsWith(":");
+    const right = cell.length > 1 && cell.endsWith(":");
+    const dashes = cell.slice(left ? 1 : 0, right ? cell.length - 1 : cell.length);
+    if (dashes.length === 0) return null;
+    for (const c of dashes) {
+      if (c !== "-") return null;
+    }
+    if (left && right) align.push("center");
+    else if (right) align.push("right");
+    else if (left) align.push("left");
+    else align.push(null);
+  }
+  return align;
 }
 
 function isBlockquote(line: string): string | null {
@@ -315,6 +479,39 @@ function isBlockquote(line: string): string | null {
   if (t.startsWith("> ")) return t.slice(2);
   if (t === ">") return "";
   return null;
+}
+
+/**
+ * A pipe table is only a table once the row under the header is a delimiter
+ * row with the same number of columns, so a lone line of prose containing a
+ * pipe stays prose.
+ */
+function tableAt(
+  lines: string[],
+  start: number,
+): { block: Block; next: number } | null {
+  const headerLine = lines[start];
+  if (headerLine === undefined || !headerLine.includes("|")) return null;
+  const delimiterLine = lines[start + 1];
+  if (delimiterLine === undefined || !delimiterLine.includes("|")) return null;
+
+  const align = delimiterRow(delimiterLine);
+  if (align === null) return null;
+  const header = tableCells(headerLine);
+  if (header.length !== align.length) return null;
+
+  const rows: string[][] = [];
+  let i = start + 2;
+  while (i < lines.length && rows.length < MAX_BLOCKS) {
+    const line = lines[i];
+    if (line.trim().length === 0 || !line.includes("|")) break;
+    const cells = tableCells(line);
+    while (cells.length < header.length) cells.push("");
+    rows.push(cells.slice(0, header.length));
+    i += 1;
+  }
+
+  return { block: { type: "table", align, header, rows }, next: i };
 }
 
 export function parseBlocks(source: string): {
@@ -366,6 +563,12 @@ export function parseBlocks(source: string): {
       continue;
     }
 
+    if (isThematicBreak(line)) {
+      blocks.push({ type: "thematicBreak" });
+      i += 1;
+      continue;
+    }
+
     const bq = isBlockquote(line);
     if (bq !== null) {
       const parts: string[] = [bq];
@@ -381,31 +584,21 @@ export function parseBlocks(source: string): {
       continue;
     }
 
-    if (isBullet(line) !== null) {
-      const items: string[] = [];
-      while (i < lines.length) {
-        const item = isBullet(lines[i]);
-        if (item !== null) {
-          items.push(item);
-          i += 1;
-        } else break;
-        if (items.length >= MAX_BLOCKS) break;
-      }
-      blocks.push({ type: "bulletList", items });
+    const marker = listMarker(line);
+    if (marker !== null) {
+      const { list, next } = parseList(lines, i, marker);
+      blocks.push({
+        type: list.ordered ? "orderedList" : "bulletList",
+        items: list.items,
+      });
+      i = next;
       continue;
     }
 
-    if (orderedItem(line) !== null) {
-      const items: string[] = [];
-      while (i < lines.length) {
-        const item = orderedItem(lines[i]);
-        if (item !== null) {
-          items.push(item);
-          i += 1;
-        } else break;
-        if (items.length >= MAX_BLOCKS) break;
-      }
-      blocks.push({ type: "orderedList", items });
+    const table = tableAt(lines, i);
+    if (table) {
+      blocks.push(table.block);
+      i = table.next;
       continue;
     }
 
@@ -418,9 +611,10 @@ export function parseBlocks(source: string): {
         nxt.trim().length === 0 ||
         headingLevel(nxt) !== null ||
         nxt.trim().startsWith("```") ||
+        isThematicBreak(nxt) ||
         isBlockquote(nxt) !== null ||
-        isBullet(nxt) !== null ||
-        orderedItem(nxt) !== null
+        listMarker(nxt) !== null ||
+        tableAt(lines, i) !== null
       ) {
         break;
       }

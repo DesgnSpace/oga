@@ -6,6 +6,8 @@ import {
   parseInline,
   type Block,
   type Inline,
+  type ListItem,
+  type NestedList,
 } from "./parse";
 
 function InlineNodes({ inlines }: { inlines: Inline[] }) {
@@ -19,6 +21,8 @@ function InlineNodes({ inlines }: { inlines: Inline[] }) {
             return <strong key={idx}>{node.text}</strong>;
           case "italic":
             return <em key={idx}>{node.text}</em>;
+          case "strike":
+            return <del key={idx}>{node.text}</del>;
           case "code":
             return <SyntaxCode key={idx} source={node.text} language="plain" inline />;
           case "link":
@@ -30,6 +34,37 @@ function InlineNodes({ inlines }: { inlines: Inline[] }) {
         }
       })}
     </>
+  );
+}
+
+function ListItems({ items }: { items: ListItem[] }) {
+  return (
+    <>
+      {items.map((item, idx) => (
+        <li key={idx} data-task={item.checked === null ? undefined : "true"}>
+          {item.checked === null ? null : (
+            <input type="checkbox" defaultChecked={item.checked} disabled />
+          )}
+          <InlineNodes inlines={parseInline(item.text)} />
+          {item.children ? <SubList list={item.children} /> : null}
+        </li>
+      ))}
+    </>
+  );
+}
+
+function SubList({ list }: { list: NestedList }) {
+  if (list.ordered) {
+    return (
+      <ol>
+        <ListItems items={list.items} />
+      </ol>
+    );
+  }
+  return (
+    <ul>
+      <ListItems items={list.items} />
+    </ul>
   );
 }
 
@@ -64,21 +99,13 @@ function renderBlock(block: Block, index: number): React.ReactNode {
     case "bulletList":
       return (
         <ul key={index}>
-          {block.items.map((item, liIdx) => (
-            <li key={liIdx}>
-              <InlineNodes inlines={parseInline(item)} />
-            </li>
-          ))}
+          <ListItems items={block.items} />
         </ul>
       );
     case "orderedList":
       return (
         <ol key={index}>
-          {block.items.map((item, liIdx) => (
-            <li key={liIdx}>
-              <InlineNodes inlines={parseInline(item)} />
-            </li>
-          ))}
+          <ListItems items={block.items} />
         </ol>
       );
     case "blockquote": {
@@ -101,6 +128,35 @@ function renderBlock(block: Block, index: number): React.ReactNode {
         </div>
       );
     }
+    case "thematicBreak":
+      return <hr key={index} />;
+    case "table":
+      return (
+        <div key={index} className="markdown-table">
+          <table>
+            <thead>
+              <tr>
+                {block.header.map((cell, cellIdx) => (
+                  <th key={cellIdx} data-align={block.align[cellIdx] ?? undefined}>
+                    <InlineNodes inlines={parseInline(cell)} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIdx) => (
+                <tr key={rowIdx}>
+                  {row.map((cell, cellIdx) => (
+                    <td key={cellIdx} data-align={block.align[cellIdx] ?? undefined}>
+                      <InlineNodes inlines={parseInline(cell)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
   }
 }
 

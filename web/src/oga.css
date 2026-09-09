@@ -2534,6 +2534,101 @@ h1 {
     text-underline-offset: 2px;
 }
 
+.markdown-content li > ul,
+.markdown-content li > ol {
+    margin-top: var(--space-1);
+}
+
+/* The checkbox stands in for the bullet: the marker is dropped and the item
+   pulled back by the checkbox's own width so its text still lines up with
+   the bulleted items around it, wrapped lines included. */
+.markdown-content li[data-task] {
+    --task-box: 12px;
+    --task-indent: calc(var(--task-box) + var(--space-2));
+    list-style: none;
+    margin-left: calc(var(--task-indent) * -1);
+    padding-left: var(--task-indent);
+    text-indent: calc(var(--task-indent) * -1);
+}
+
+/* Drawn rather than left to the platform, because a disabled native checkbox
+   greys its own tick away and the state stops being readable. */
+.markdown-content li[data-task] > input {
+    appearance: none;
+    position: relative;
+    width: var(--task-box);
+    height: var(--task-box);
+    margin: 0 var(--space-2) 0 0;
+    border: 1px solid var(--color-text-muted);
+    border-radius: 3px;
+    background: var(--color-surface);
+    vertical-align: baseline;
+}
+
+.markdown-content li[data-task] > input:checked {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+}
+
+.markdown-content li[data-task] > input:checked::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 3px;
+    width: 4px;
+    height: 7px;
+    border: solid var(--color-text-inverse);
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+}
+
+.markdown-content del {
+    color: var(--color-text-muted);
+}
+
+.markdown-content hr {
+    width: 100%;
+    height: 0;
+    margin: 0;
+    border: 0;
+    border-top: 1px solid var(--color-border);
+}
+
+.markdown-table {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.markdown-content table {
+    border-collapse: collapse;
+    line-height: 1.6;
+}
+
+.markdown-content th,
+.markdown-content td {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--color-border);
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.markdown-content th {
+    background: var(--color-hover);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.markdown-content th[data-align="center"],
+.markdown-content td[data-align="center"] {
+    text-align: center;
+}
+
+.markdown-content th[data-align="right"],
+.markdown-content td[data-align="right"] {
+    text-align: right;
+}
+
 .transcript {
     display: flex;
     flex-direction: column;

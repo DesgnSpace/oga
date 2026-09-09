@@ -382,3 +382,144 @@ describe("MarkdownContent renderer", () => {
     expect(out).toContain("<strong>Bold</strong>");
   });
 });
+
+// ---- GFM additions ----
+describe("strikethrough", () => {
+  it("parses ~~text~~", () => {
+    expect(parseInline("~~gone~~")).toEqual([{ type: "strike", text: "gone" }]);
+    expect(html("~~gone~~")).toContain("<del>gone</del>");
+  });
+  it("unclosed and empty stay text", () => {
+    expect(hasInline(parseInline("a ~~b"), "strike")).toBe(false);
+    expect(hasInline(parseInline("~~~~"), "strike")).toBe(false);
+  });
+  it("code wins over strikethrough", () => {
+    expect(parseInline("`~~x~~`")).toEqual([{ type: "code", text: "~~x~~" }]);
+  });
+});
+
+describe("thematic breaks", () => {
+  it("parses ---, *** and ___ with spaces", () => {
+    for (const source of ["---", "***", "___", "- - -", "  ***  "]) {
+      expect(parseBlocks(source).blocks[0]).toEqual({ type: "thematicBreak" });
+    }
+    expect(html("a\n\n---\n\nb")).toContain("<hr/>");
+  });
+  it("needs three markers and nothing else", () => {
+    expect(parseBlocks("--").blocks[0].type).toBe("paragraph");
+    expect(parseBlocks("--- text").blocks[0].type).toBe("paragraph");
+  });
+  it("breaks a paragraph", () => {
+    const { blocks } = parseBlocks("para\n---\nafter");
+    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "thematicBreak", "paragraph"]);
+  });
+});
+
+describe("nested lists", () => {
+  it("nests a deeper item under the item above it", () => {
+    const { blocks } = parseBlocks("- a\n  - b\n    - c\n- d");
+    expect(blocks.length).toBe(1);
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items.length).toBe(2);
+    expect(blocks[0].items[0].children?.items[0].text).toBe("b");
+    expect(blocks[0].items[0].children?.items[0].children?.items[0].text).toBe("c");
+    expect(blocks[0].items[1].text).toBe("d");
+  });
+  it("keeps the nested list's own kind", () => {
+    const { blocks } = parseBlocks("- a\n  1. one\n  2. two");
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items[0].children?.ordered).toBe(true);
+    expect(blocks[0].items[0].children?.items.length).toBe(2);
+    expect(html("- a\n  1. one")).toContain("<ol>");
+  });
+  it("a sibling of the other kind starts a new list", () => {
+    const { blocks } = parseBlocks("- a\n1. b");
+    expect(blocks.map((b) => b.type)).toEqual(["bulletList", "orderedList"]);
+  });
+  it("accepts + as a bullet marker", () => {
+    expect(parseBlocks("+ a\n+ b").blocks[0].type).toBe("bulletList");
+  });
+});
+
+describe("task lists", () => {
+  it("reads the checkbox state and strips the marker", () => {
+    const { blocks } = parseBlocks("- [x] done\n- [ ] todo\n- plain");
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items.map((i) => [i.text, i.checked])).toEqual([
+      ["done", true],
+      ["todo", false],
+      ["plain", null],
+    ]);
+  });
+  it("renders a disabled checkbox only for task items", () => {
+    const out = html("- [x] done\n- plain");
+    expect(out).toContain('<li data-task="true">');
+    expect(out).toContain('type="checkbox"');
+    expect(out).toContain("disabled");
+    expect(out).toContain("<li><span>plain</span></li>");
+  });
+  it("uppercase X counts as checked and [y] does not", () => {
+    const { blocks } = parseBlocks("- [X] a\n- [y] b");
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items[0].checked).toBe(true);
+    expect(blocks[0].items[1].checked).toBeNull();
+  });
+});
+
+describe("tables", () => {
+  it("parses header, alignment and body", () => {
+    const { blocks } = parseBlocks("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |");
+    expect(blocks[0]).toEqual({
+      type: "table",
+      align: ["left", "center", "right"],
+      header: ["a", "b", "c"],
+      rows: [["1", "2", "3"]],
+    });
+  });
+  it("needs a delimiter row matching the header width", () => {
+    expect(parseBlocks("cost | benefit").blocks[0].type).toBe("paragraph");
+    expect(parseBlocks("| a | b |\n|---|\n| 1 | 2 |").blocks[0].type).toBe("paragraph");
+    expect(parseBlocks("| a |\n| b |\n| c |").blocks[0].type).toBe("paragraph");
+  });
+  it("pads short rows and drops extra cells", () => {
+    const { blocks } = parseBlocks("| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |");
+    if (blocks[0].type !== "table") throw new Error("expected table");
+    expect(blocks[0].rows).toEqual([["1", ""], ["1", "2"]]);
+  });
+  it("treats an escaped pipe as cell text", () => {
+    const { blocks } = parseBlocks("| a | b |\n|---|---|\n| x \\| y | z |");
+    if (blocks[0].type !== "table") throw new Error("expected table");
+    expect(blocks[0].rows).toEqual([["x | y", "z"]]);
+  });
+  it("renders inline formatting and alignment in cells", () => {
+    const out = html("| a | b |\n|---|--:|\n| `x` | **y** |");
+    expect(out).toContain('class="markdown-table"');
+    expect(out).toContain("<thead>");
+    expect(out).toContain('<th data-align="right">');
+    expect(out).toContain("<code>x</code>");
+    expect(out).toContain("<strong>y</strong>");
+  });
+  it("ends at a blank line", () => {
+    const { blocks } = parseBlocks("| a |\n|---|\n| 1 |\n\nafter");
+    expect(blocks.map((b) => b.type)).toEqual(["table", "paragraph"]);
+  });
+});
+
+describe("new blocks stay safe", () => {
+  it("escapes html in table cells", () => {
+    const out = html("| a |\n|---|\n| <img src=x onerror=alert(1)> |");
+    expect(out).not.toContain("<img");
+    expect(out).toContain("&lt;img");
+  });
+  it("rejects unsafe hrefs in table cells", () => {
+    const out = html("| a |\n|---|\n| [x](javascript:alert(1)) |");
+    expect(out).not.toContain("<a");
+    expect(out).toContain("javascript:alert(1)");
+  });
+  it("never puts a fence info string in the markup", () => {
+    const out = html('```a"><img src=x onerror=alert(1)>\ncode\n```');
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("onerror");
+    expect(out).toContain('data-language="plain"');
+  });
+});
