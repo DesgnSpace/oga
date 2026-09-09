@@ -20,6 +20,7 @@ import {
   type ActivityComposition,
   type HandoffBoundary,
 } from "@/domain/activity";
+import { ogaResultText } from "@/domain/oga";
 
 export type TraceStyle = "work" | "message" | "notice";
 export type TraceState = "running" | "needs-input" | "failed" | "done";
@@ -206,6 +207,17 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
   }
 
   if (raw) {
+    const ogaResult = ogaResultText(raw);
+    if (ogaResult) {
+      return {
+        type: "content",
+        hiddenLines: ogaResult.hiddenLines,
+        language: "plain",
+        text: ogaResult.text,
+        preview: undefined,
+      };
+    }
+
     if (event.kind === "tool" && event.title === "Load skill") {
       const instructions = findText(raw, ["output"]);
       if (instructions !== undefined) return { type: "skill", text: instructions };

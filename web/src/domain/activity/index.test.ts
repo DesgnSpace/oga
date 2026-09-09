@@ -199,10 +199,10 @@ describe("ActivityStory.compose", () => {
     const errors = normalized.filter((event) => event.phase === "failed");
 
     expect(tools.map((event) => [event.title, event.phase])).toEqual([
-      ["oga/query", "started"],
-      ["oga/query", "failed"],
-      ["oga/query", "started"],
-      ["oga/query", "failed"],
+      ["Find code", "started"],
+      ["Find code", "failed"],
+      ["Find code", "started"],
+      ["Find code", "failed"],
       ["view_file", "completed"],
       ["list_dir", "completed"],
       ["grep_search", "completed"],
@@ -210,6 +210,7 @@ describe("ActivityStory.compose", () => {
       ["replace_file_content", "completed"],
       ["run_command", "completed"],
     ]);
+    expect(tools[0]?.presentation).toEqual({ type: "tool", text: "tray icon loading code in oga-desktop" });
     expect(tools[1]?.result).toBe("invalid params: cwd is required");
     expect(tools[4]?.kind).toBe("file");
     expect(tools[4]?.presentation).toEqual({ type: "file", path: "/abs/path/file.ts" });
