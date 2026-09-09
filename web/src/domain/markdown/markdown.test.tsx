@@ -382,3 +382,301 @@ describe("MarkdownContent renderer", () => {
     expect(out).toContain("<strong>Bold</strong>");
   });
 });
+
+// ---- GFM additions ----
+describe("strikethrough", () => {
+  it("parses ~~text~~", () => {
+    expect(parseInline("~~gone~~")).toEqual([{ type: "strike", text: "gone" }]);
+    expect(html("~~gone~~")).toContain("<del>gone</del>");
+  });
+  it("unclosed and empty stay text", () => {
+    expect(hasInline(parseInline("a ~~b"), "strike")).toBe(false);
+    expect(hasInline(parseInline("~~~~"), "strike")).toBe(false);
+  });
+  it("code wins over strikethrough", () => {
+    expect(parseInline("`~~x~~`")).toEqual([{ type: "code", text: "~~x~~" }]);
+  });
+});
+
+describe("thematic breaks", () => {
+  it("parses ---, *** and ___ with spaces", () => {
+    for (const source of ["---", "***", "___", "- - -", "  ***  "]) {
+      expect(parseBlocks(source).blocks[0]).toEqual({ type: "thematicBreak" });
+    }
+    expect(html("a\n\n---\n\nb")).toContain("<hr/>");
+  });
+  it("needs three markers and nothing else", () => {
+    expect(parseBlocks("--").blocks[0].type).toBe("paragraph");
+    expect(parseBlocks("--- text").blocks[0].type).toBe("paragraph");
+  });
+  it("breaks a paragraph when it stands on its own", () => {
+    const { blocks } = parseBlocks("para\n\n---\n\nafter");
+    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "thematicBreak", "paragraph"]);
+  });
+  it("underlines the paragraph above it instead", () => {
+    const { blocks } = parseBlocks("para\n---\nafter");
+    expect(blocks[0]).toEqual({ type: "heading", level: 2, text: "para" });
+    expect(blocks[1].type).toBe("paragraph");
+  });
+});
+
+describe("nested lists", () => {
+  it("nests a deeper item under the item above it", () => {
+    const { blocks } = parseBlocks("- a\n  - b\n    - c\n- d");
+    expect(blocks.length).toBe(1);
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items.length).toBe(2);
+    expect(blocks[0].items[0].children?.items[0].text).toBe("b");
+    expect(blocks[0].items[0].children?.items[0].children?.items[0].text).toBe("c");
+    expect(blocks[0].items[1].text).toBe("d");
+  });
+  it("keeps the nested list's own kind", () => {
+    const { blocks } = parseBlocks("- a\n  1. one\n  2. two");
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items[0].children?.ordered).toBe(true);
+    expect(blocks[0].items[0].children?.items.length).toBe(2);
+    expect(html("- a\n  1. one")).toContain("<ol>");
+  });
+  it("a sibling of the other kind starts a new list", () => {
+    const { blocks } = parseBlocks("- a\n1. b");
+    expect(blocks.map((b) => b.type)).toEqual(["bulletList", "orderedList"]);
+  });
+  it("accepts + as a bullet marker", () => {
+    expect(parseBlocks("+ a\n+ b").blocks[0].type).toBe("bulletList");
+  });
+});
+
+describe("task lists", () => {
+  it("reads the checkbox state and strips the marker", () => {
+    const { blocks } = parseBlocks("- [x] done\n- [ ] todo\n- plain");
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items.map((i) => [i.text, i.checked])).toEqual([
+      ["done", true],
+      ["todo", false],
+      ["plain", null],
+    ]);
+  });
+  it("renders a disabled checkbox only for task items", () => {
+    const out = html("- [x] done\n- plain");
+    expect(out).toContain('<li data-task="true">');
+    expect(out).toContain('type="checkbox"');
+    expect(out).toContain("disabled");
+    expect(out).toContain("<li><span>plain</span></li>");
+  });
+  it("uppercase X counts as checked and [y] does not", () => {
+    const { blocks } = parseBlocks("- [X] a\n- [y] b");
+    if (blocks[0].type !== "bulletList") throw new Error("expected bulletList");
+    expect(blocks[0].items[0].checked).toBe(true);
+    expect(blocks[0].items[1].checked).toBeNull();
+  });
+});
+
+describe("tables", () => {
+  it("parses header, alignment and body", () => {
+    const { blocks } = parseBlocks("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |");
+    expect(blocks[0]).toEqual({
+      type: "table",
+      align: ["left", "center", "right"],
+      header: ["a", "b", "c"],
+      rows: [["1", "2", "3"]],
+    });
+  });
+  it("needs a delimiter row matching the header width", () => {
+    expect(parseBlocks("cost | benefit").blocks[0].type).toBe("paragraph");
+    expect(parseBlocks("| a | b |\n|---|\n| 1 | 2 |").blocks[0].type).toBe("paragraph");
+    expect(parseBlocks("| a |\n| b |\n| c |").blocks[0].type).toBe("paragraph");
+  });
+  it("pads short rows and drops extra cells", () => {
+    const { blocks } = parseBlocks("| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |");
+    if (blocks[0].type !== "table") throw new Error("expected table");
+    expect(blocks[0].rows).toEqual([["1", ""], ["1", "2"]]);
+  });
+  it("treats an escaped pipe as cell text", () => {
+    const { blocks } = parseBlocks("| a | b |\n|---|---|\n| x \\| y | z |");
+    if (blocks[0].type !== "table") throw new Error("expected table");
+    expect(blocks[0].rows).toEqual([["x | y", "z"]]);
+  });
+  it("renders inline formatting and alignment in cells", () => {
+    const out = html("| a | b |\n|---|--:|\n| `x` | **y** |");
+    expect(out).toContain('class="markdown-table"');
+    expect(out).toContain("<thead>");
+    expect(out).toContain('<th data-align="right">');
+    expect(out).toContain("<code>x</code>");
+    expect(out).toContain("<strong>y</strong>");
+  });
+  it("ends at a blank line", () => {
+    const { blocks } = parseBlocks("| a |\n|---|\n| 1 |\n\nafter");
+    expect(blocks.map((b) => b.type)).toEqual(["table", "paragraph"]);
+  });
+});
+
+describe("new blocks stay safe", () => {
+  it("escapes html in table cells", () => {
+    const out = html("| a |\n|---|\n| <img src=x onerror=alert(1)> |");
+    expect(out).not.toContain("<img");
+    expect(out).toContain("&lt;img");
+  });
+  it("rejects unsafe hrefs in table cells", () => {
+    const out = html("| a |\n|---|\n| [x](javascript:alert(1)) |");
+    expect(out).not.toContain("<a");
+    expect(out).toContain("javascript:alert(1)");
+  });
+  it("never puts a fence info string in the markup", () => {
+    const out = html('```a"><img src=x onerror=alert(1)>\ncode\n```');
+    expect(out).not.toContain("<img");
+    expect(out).not.toContain("onerror");
+    expect(out).toContain('data-language="plain"');
+  });
+});
+
+// ---- escapes, entities, setext, references ----
+describe("backslash escapes", () => {
+  it("keeps escaped punctuation literal", () => {
+    expect(parseInline("\\*not italic\\*")).toEqual([
+      { type: "text", text: "*not italic*" },
+    ]);
+    expect(parseInline("\\[not a link\\]")).toEqual([
+      { type: "text", text: "[not a link]" },
+    ]);
+  });
+  it("leaves a backslash before anything else alone", () => {
+    expect(parseInline("C:\\path and \\d+")).toEqual([
+      { type: "text", text: "C:\\path and \\d+" },
+    ]);
+  });
+  it("does not let an escaped delimiter close emphasis", () => {
+    expect(parseInline("*5 \\* 3*")).toEqual([{ type: "italic", text: "5 * 3" }]);
+    expect(parseInline("**a \\** b**")).toEqual([{ type: "bold", text: "a ** b" }]);
+  });
+});
+
+describe("character entities", () => {
+  it("resolves named and numeric entities", () => {
+    expect(parseInline("AT&amp;T")).toEqual([{ type: "text", text: "AT&T" }]);
+    expect(parseInline("&#65;&#x42;")).toEqual([{ type: "text", text: "AB" }]);
+    expect(parseInline("&mdash;")).toEqual([{ type: "text", text: "\u2014" }]);
+  });
+  it("leaves anything it does not know literal", () => {
+    expect(parseInline("&notreal; &amp &#;")).toEqual([
+      { type: "text", text: "&notreal; &amp &#;" },
+    ]);
+  });
+  it("rejects out-of-range and surrogate code points", () => {
+    expect(parseInline("&#999999999; &#xD800;")).toEqual([
+      { type: "text", text: "&#999999999; &#xD800;" },
+    ]);
+  });
+  it("leaves entities inside code spans alone", () => {
+    expect(parseInline("`a &amp; b`")).toEqual([{ type: "code", text: "a &amp; b" }]);
+  });
+  it("an escaped ampersand stops the entity resolving", () => {
+    expect(parseInline("\\&amp;")).toEqual([{ type: "text", text: "&amp;" }]);
+  });
+  it("a decoded angle bracket reaches the page as text", () => {
+    const out = html("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(out).not.toContain("<script>");
+    expect(out).toContain("&lt;script&gt;");
+  });
+});
+
+describe("setext headings", () => {
+  it("underlines a paragraph with = or -", () => {
+    expect(parseBlocks("Title\n=====").blocks[0]).toEqual({
+      type: "heading",
+      level: 1,
+      text: "Title",
+    });
+    expect(parseBlocks("Sub\n---").blocks[0]).toEqual({
+      type: "heading",
+      level: 2,
+      text: "Sub",
+    });
+    expect(html("Title\n===")).toContain("<h1>");
+  });
+  it("takes the whole paragraph above it", () => {
+    expect(parseBlocks("one\ntwo\n===").blocks[0]).toEqual({
+      type: "heading",
+      level: 1,
+      text: "one two",
+    });
+  });
+  it("needs a bare run, so a spaced break stays a break", () => {
+    const { blocks } = parseBlocks("para\n- - -");
+    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "thematicBreak"]);
+  });
+  it("does not fire on a list or text under a paragraph", () => {
+    expect(parseBlocks("para\n- item").blocks.map((b) => b.type)).toEqual([
+      "paragraph",
+      "bulletList",
+    ]);
+    expect(parseBlocks("para\n--- text").blocks[0].type).toBe("paragraph");
+  });
+});
+
+describe("reference links", () => {
+  it("resolves [text][label] and lifts the definition out", () => {
+    const { blocks, refs } = parseBlocks("see [the docs][d]\n\n[d]: https://example.com");
+    expect(blocks.length).toBe(1);
+    expect(refs.get("d")).toBe("https://example.com");
+    expect(html("see [the docs][d]\n\n[d]: https://example.com")).toContain(
+      '<a href="https://example.com" target="_blank" rel="noopener noreferrer">the docs</a>',
+    );
+  });
+  it("resolves the collapsed form and matches labels case-insensitively", () => {
+    expect(html("[Example][]\n\n[example]: https://example.com")).toContain(
+      'href="https://example.com"',
+    );
+  });
+  it("accepts a title and an angle-bracketed destination", () => {
+    expect(parseBlocks('[a][1]\n\n[1]: https://example.com "A title"').refs.get("1")).toBe(
+      "https://example.com",
+    );
+    expect(parseBlocks("[a][1]\n\n[1]: <https://example.com>").refs.get("1")).toBe(
+      "https://example.com",
+    );
+  });
+  it("works from a definition placed above its use", () => {
+    expect(html("[1]: https://example.com\n\nsee [a][1]")).toContain(
+      'href="https://example.com"',
+    );
+  });
+  it("leaves an undefined label as text", () => {
+    expect(html("[a][nope] stays text")).not.toContain("<a");
+  });
+  it("rejects an unsafe destination", () => {
+    const out = html("[x][a]\n\n[a]: javascript:alert(1)");
+    expect(out).not.toContain("<a");
+    expect(out).toContain("[x][a]");
+  });
+  it("leaves a definition inside a fence in the code", () => {
+    const { blocks } = parseBlocks("```\n[1]: https://example.com\n```");
+    expect(blocks[0].type).toBe("codeBlock");
+    if (blocks[0].type === "codeBlock") {
+      expect(blocks[0].code).toBe("[1]: https://example.com");
+    }
+  });
+});
+
+describe("decoded destinations are still sanitized", () => {
+  it("rejects an entity-encoded scheme in an inline link", () => {
+    const out = html("[x](&#106;avascript:alert&#40;1&#41;)");
+    expect(out).not.toContain("<a");
+  });
+  it("rejects an entity-encoded scheme in a definition", () => {
+    const out = html("[x][a]\n\n[a]: &#106;avascript:alert(1)");
+    expect(out).not.toContain("<a");
+  });
+});
+
+describe("inline scanning stays linear", () => {
+  it("parses a long formatting-free paragraph in well under a frame", () => {
+    // Guards the scanner against going quadratic again: probing for a token at
+    // every position instead of searching forward for the next one took this
+    // input tens of milliseconds.
+    const line = "word ".repeat(1600);
+    const started = performance.now();
+    const inlines = parseInline(line);
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(inlines).toEqual([{ type: "text", text: line }]);
+  });
+});
