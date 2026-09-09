@@ -379,16 +379,22 @@ function bucket(tasks: TaskSummary[], key: (task: TaskSummary) => [string, strin
   return order.map((id) => ({ id, title: titles.get(id), tasks: buckets.get(id) ?? [] }));
 }
 
-const STATUS_GROUP_ORDER: TaskState[] = [
+/**
+ * How much each state needs the user, most first: needs_input blocks on a
+ * reply; failed, cancelled, and blocked all stopped short of finishing and
+ * need a decision; the rest are progressing or already done and need
+ * nothing right now.
+ */
+const PRIORITY_ORDER: TaskState[] = [
   "needs_input",
+  "failed",
+  "cancelled",
   "blocked",
   "running",
   "queued",
   "pending",
   "answered",
   "completed",
-  "failed",
-  "cancelled",
 ];
 
 function statusGroups(tasks: TaskSummary[]): TaskGroup[] {
@@ -399,7 +405,7 @@ function statusGroups(tasks: TaskSummary[]): TaskGroup[] {
     buckets.set(task.state, bucketTasks);
   }
   const groups: TaskGroup[] = [];
-  for (const state of STATUS_GROUP_ORDER) {
+  for (const state of PRIORITY_ORDER) {
     const bucketTasks = buckets.get(state);
     if (bucketTasks) groups.push({ id: state, title: taskStateLabel(state), tasks: bucketTasks });
   }
@@ -443,26 +449,7 @@ function parentDirectory(path: string): string {
 }
 
 function priorityRank(state: TaskState): number {
-  switch (state) {
-    case "needs_input":
-      return 0;
-    case "blocked":
-      return 1;
-    case "failed":
-      return 2;
-    case "running":
-      return 3;
-    case "answered":
-      return 4;
-    case "queued":
-      return 5;
-    case "pending":
-      return 6;
-    case "completed":
-      return 7;
-    case "cancelled":
-      return 8;
-  }
+  return PRIORITY_ORDER.indexOf(state);
 }
 
 /** Unreadable timestamps sort as the oldest, so a bad row cannot claim the top. */

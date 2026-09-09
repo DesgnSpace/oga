@@ -8,6 +8,7 @@
 - Changes now read the way they do in your editor: full colour in every language, the exact words that changed picked out inside a line, and line numbers on what came from the checkout. Both the changed files panel and the diffs inside activity get it, and the Unified and Split choice still holds.
 - Activity rows now name work done through Oga in plain language and show concise results when you expand them, instead of exposing technical tool names or raw response data.
 - Work you hand off now carries a brief the size of the job. A one-line request stays one line, instead of being padded out with headings and numbered steps it doesn't need.
+- Sorting the task list by priority now puts failed, cancelled, and blocked tasks near the top, where they need you, instead of burying them at the bottom with the finished ones.
 
 ## 0.0.11 - 2026-09-08
 

@@ -77,7 +77,7 @@ describe("organize", () => {
       task("blocked", "/work/oga", "blocked"),
     ];
     const groups = organize(tasks, undefined, "status", "recent");
-    expect(groups.map((group) => group.id)).toEqual(["needs_input", "blocked", "running", "failed"]);
+    expect(groups.map((group) => group.id)).toEqual(["needs_input", "failed", "blocked", "running"]);
   });
 
   it("includes children and stops cycles for parent grouping", () => {
@@ -109,7 +109,7 @@ describe("organize", () => {
       task("blocked", "/work/oga", "blocked"),
     ];
     const groups = organize(tasks, undefined, "none", "priority");
-    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["needs", "blocked", "failed", "running", "done"]);
+    expect(groups[0].tasks.map((entry) => entry.id)).toEqual(["needs", "failed", "blocked", "running", "done"]);
   });
 
   it("sorts by when work started under newest-first", () => {
