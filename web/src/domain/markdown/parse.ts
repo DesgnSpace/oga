@@ -247,9 +247,18 @@ export function languageFromFence(info: string): CodeLanguage {
   }
 }
 
+/**
+ * The characters that can open an inline token, plus a bare URL. The scanner
+ * jumps straight to the next one instead of asking at every position, which is
+ * what keeps a formatting-free paragraph a single pass.
+ */
+const INLINE_CANDIDATE = /[`[*_~\\]|https?:\/\//gi;
+const AUTOLINK = /https?:\/\/[^\s<]+/iy;
+const AUTOLINK_TRAILING = ".,)>";
+
 export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
-  const chars = [...text];
   const out: Inline[] = [];
+  const length = text.length;
   let i = 0;
 
   function pushText(plain: string) {
@@ -260,35 +269,30 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
   }
 
   function autolinkAt(index: number): { href: string; end: number } | null {
-    const match = chars.slice(index).join("").match(/^https?:\/\/[^\s<]+/i);
-    if (!match) return null;
+    AUTOLINK.lastIndex = index;
+    const match = AUTOLINK.exec(text);
+    if (match === null) return null;
 
-    let href = match[0];
-    while (/[.,)>]$/.test(href)) href = href.slice(0, -1);
-    if (href.length === 0) return null;
-    return { href, end: index + [...href].length };
+    let end = index + match[0].length;
+    while (end > index && AUTOLINK_TRAILING.includes(text[end - 1])) end -= 1;
+    if (end === index) return null;
+    return { href: text.slice(index, end), end };
   }
 
-  while (i < chars.length) {
+  while (i < length) {
     // backslash escape \*
-    if (
-      i + 1 < chars.length &&
-      chars[i] === "\\" &&
-      ESCAPABLE.includes(chars[i + 1])
-    ) {
-      pushText(chars[i + 1]);
+    if (i + 1 < length && text[i] === "\\" && ESCAPABLE.includes(text[i + 1])) {
+      pushText(text[i + 1]);
       i += 2;
       continue;
     }
 
     // inline code `code`
-    if (chars[i] === "`") {
-      const rest = chars.slice(i + 1);
-      const pos = rest.indexOf("`");
-      if (pos !== -1) {
-        const inner = chars.slice(i + 1, i + 1 + pos).join("");
-        out.push({ type: "code", text: inner });
-        i += pos + 2;
+    if (text[i] === "`") {
+      const close = text.indexOf("`", i + 1);
+      if (close !== -1) {
+        out.push({ type: "code", text: text.slice(i + 1, close) });
+        i = close + 1;
         continue;
       }
     }
@@ -301,37 +305,29 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
     }
 
     // link [text](url)
-    if (chars[i] === "[") {
-      const afterOpen = chars.slice(i + 1);
-      const closeBracket = afterOpen.indexOf("]");
-      if (closeBracket !== -1) {
-        const textEnd = i + 1 + closeBracket;
-        if (textEnd + 1 < chars.length && chars[textEnd + 1] === "(") {
-          const afterParen = chars.slice(textEnd + 2);
-          const closeParen = afterParen.indexOf(")");
+    if (text[i] === "[") {
+      const textEnd = text.indexOf("]", i + 1);
+      if (textEnd !== -1) {
+        if (textEnd + 1 < length && text[textEnd + 1] === "(") {
+          const closeParen = text.indexOf(")", textEnd + 2);
           if (closeParen !== -1) {
-            const linkText = chars.slice(i + 1, textEnd).join("");
-            const hrefRaw = chars
-              .slice(textEnd + 2, textEnd + 2 + closeParen)
-              .join("");
+            const linkText = text.slice(i + 1, textEnd);
+            const hrefRaw = text.slice(textEnd + 2, closeParen);
             const href = sanitizeHref(decodeText(hrefRaw));
             if (href !== null) {
               out.push({ type: "link", text: decodeText(linkText), href });
-              i = textEnd + 2 + closeParen + 1;
+              i = closeParen + 1;
               continue;
             }
           }
         }
 
         // reference link [text][label], or [text][] reusing the text as label
-        if (textEnd + 1 < chars.length && chars[textEnd + 1] === "[") {
-          const afterRef = chars.slice(textEnd + 2);
-          const closeRef = afterRef.indexOf("]");
+        if (textEnd + 1 < length && text[textEnd + 1] === "[") {
+          const closeRef = text.indexOf("]", textEnd + 2);
           if (closeRef !== -1) {
-            const linkText = chars.slice(i + 1, textEnd).join("");
-            const labelRaw = chars
-              .slice(textEnd + 2, textEnd + 2 + closeRef)
-              .join("");
+            const linkText = text.slice(i + 1, textEnd);
+            const labelRaw = text.slice(textEnd + 2, closeRef);
             const label = normalizeLabel(
               labelRaw.length === 0 ? linkText : labelRaw,
             );
@@ -340,7 +336,7 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
               target === undefined ? null : sanitizeHref(decodeText(target));
             if (href !== null) {
               out.push({ type: "link", text: decodeText(linkText), href });
-              i = textEnd + 2 + closeRef + 1;
+              i = closeRef + 1;
               continue;
             }
           }
@@ -350,26 +346,14 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
 
     // bold ** or __
     if (
-      i + 1 < chars.length &&
-      ((chars[i] === "*" && chars[i + 1] === "*") ||
-        (chars[i] === "_" && chars[i + 1] === "_"))
+      i + 1 < length &&
+      ((text[i] === "*" && text[i + 1] === "*") ||
+        (text[i] === "_" && text[i + 1] === "_"))
     ) {
-      const delim = chars[i];
-      let j = i + 2;
-      let found: number | null = null;
-      while (j + 1 < chars.length) {
-        if (chars[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (chars[j] === delim && chars[j + 1] === delim) {
-          found = j;
-          break;
-        }
-        j += 1;
-      }
-      if (found !== null) {
-        const inner = chars.slice(i + 2, found).join("");
+      const delim = text[i];
+      const found = findDoubled(text, i + 2, delim);
+      if (found !== -1) {
+        const inner = text.slice(i + 2, found);
         if (inner.length !== 0 && !inner.includes("\n")) {
           out.push({ type: "bold", text: decodeText(inner) });
           i = found + 2;
@@ -379,22 +363,10 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
     }
 
     // strikethrough ~~
-    if (i + 1 < chars.length && chars[i] === "~" && chars[i + 1] === "~") {
-      let j = i + 2;
-      let found: number | null = null;
-      while (j + 1 < chars.length) {
-        if (chars[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (chars[j] === "~" && chars[j + 1] === "~") {
-          found = j;
-          break;
-        }
-        j += 1;
-      }
-      if (found !== null) {
-        const inner = chars.slice(i + 2, found).join("");
+    if (i + 1 < length && text[i] === "~" && text[i + 1] === "~") {
+      const found = findDoubled(text, i + 2, "~");
+      if (found !== -1) {
+        const inner = text.slice(i + 2, found);
         if (inner.length !== 0 && !inner.includes("\n")) {
           out.push({ type: "strike", text: decodeText(inner) });
           i = found + 2;
@@ -404,29 +376,11 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
     }
 
     // italic * or _
-    if (chars[i] === "*" || chars[i] === "_") {
-      const delim = chars[i];
-      let j = i + 1;
-      let found: number | null = null;
-      while (j < chars.length) {
-        if (chars[j] === "\\") {
-          j += 2;
-          continue;
-        }
-        if (chars[j] === delim) {
-          const prevIsSame = j > 0 && chars[j - 1] === delim;
-          const nextIsSame =
-            j + 1 < chars.length && chars[j + 1] === delim;
-          if (!prevIsSame && !nextIsSame) {
-            found = j;
-            break;
-          }
-        }
-        if (chars[j] === "\n") break;
-        j += 1;
-      }
-      if (found !== null) {
-        const inner = chars.slice(i + 1, found).join("");
+    if (text[i] === "*" || text[i] === "_") {
+      const delim = text[i];
+      const found = findSingle(text, i + 1, delim);
+      if (found !== -1) {
+        const inner = text.slice(i + 1, found);
         if (inner.length !== 0 && !inner.includes("\n")) {
           out.push({ type: "italic", text: decodeText(inner) });
           i = found + 1;
@@ -435,25 +389,62 @@ export function parseInline(text: string, refs?: ReferenceMap): Inline[] {
       }
     }
 
-    // plain text until next special
+    // plain text: keep the character that opened nothing, then run to the
+    // next candidate in one search
     const start = i;
     i += 1;
-    while (
-      i < chars.length &&
-      chars[i] !== "`" &&
-      chars[i] !== "[" &&
-      chars[i] !== "*" &&
-      chars[i] !== "_" &&
-      chars[i] !== "~" &&
-      chars[i] !== "\\" &&
-      !autolinkAt(i)
-    ) {
-      i += 1;
-    }
-    pushText(decodeText(chars.slice(start, i).join("")));
+    INLINE_CANDIDATE.lastIndex = i;
+    const next = INLINE_CANDIDATE.exec(text);
+    i = next === null ? length : next.index;
+    pushText(decodeText(text.slice(start, i)));
   }
 
   return out;
+}
+
+/**
+ * Finds where a doubled delimiter closes, as `**` and `~~` are written.
+ * A backslash escapes the delimiter that follows it.
+ */
+function findDoubled(text: string, from: number, delim: string): number {
+  const limit = text.length - 1;
+  let j = from;
+  while (j < limit) {
+    const c = text[j];
+    if (c === "\\") {
+      j += 2;
+      continue;
+    }
+    if (c === delim && text[j + 1] === delim) return j;
+    j += 1;
+  }
+  return -1;
+}
+
+/**
+ * Finds where a single delimiter closes. It refuses one that is half of a
+ * doubled pair, so `**bold**` never reads as emphasis, and gives up at a
+ * newline, so a stray `*` cannot reach across a line.
+ */
+function findSingle(text: string, from: number, delim: string): number {
+  const length = text.length;
+  let j = from;
+  while (j < length) {
+    const c = text[j];
+    if (c === "\\") {
+      j += 2;
+      continue;
+    }
+    if (c === delim) {
+      const prevIsSame = j > 0 && text[j - 1] === delim;
+      const nextIsSame = j + 1 < length && text[j + 1] === delim;
+      if (!prevIsSame && !nextIsSame) return j;
+    } else if (c === "\n") {
+      return -1;
+    }
+    j += 1;
+  }
+  return -1;
 }
 
 function headingLevel(line: string): { level: number; text: string } | null {
@@ -676,6 +667,27 @@ function tableAt(
   return { block: { type: "table", align, header, rows }, next: i };
 }
 
+/**
+ * The offset just past the first `limit` code points, so a long source can be
+ * cut without expanding the whole string into an array of characters first.
+ */
+function codePointLimit(text: string, limit: number): number {
+  let at = 0;
+  let seen = 0;
+  while (at < text.length && seen < limit) {
+    const unit = text.charCodeAt(at);
+    const paired =
+      unit >= 0xd800 &&
+      unit <= 0xdbff &&
+      at + 1 < text.length &&
+      text.charCodeAt(at + 1) >= 0xdc00 &&
+      text.charCodeAt(at + 1) <= 0xdfff;
+    at += paired ? 2 : 1;
+    seen += 1;
+  }
+  return at;
+}
+
 const REFERENCE_DEFINITION = /^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*(?:["'(].*)?$/;
 
 /**
@@ -705,11 +717,17 @@ function takeReferences(lines: string[]): ReferenceMap {
 }
 
 export function parseBlocks(source: string): ParsedMarkdown {
-  const chars = [...source];
-  const truncated = chars.length > MAX_MARKDOWN_CHARS;
-  const limited = chars.slice(0, MAX_MARKDOWN_CHARS).join("");
-  const lines = limited.split(/\r?\n/);
-  // Rust `lines()` drops a trailing empty after a final newline; `split` keeps it. Drop one trailing "".
+  let truncated = false;
+  let limited = source;
+  if (source.length > MAX_MARKDOWN_CHARS) {
+    const cut = codePointLimit(source, MAX_MARKDOWN_CHARS);
+    truncated = cut < source.length;
+    if (truncated) limited = source.slice(0, cut);
+  }
+  const lines = limited.includes("\r")
+    ? limited.split(/\r?\n/)
+    : limited.split("\n");
+  // A trailing newline would otherwise leave an empty final line to parse.
   if (limited.endsWith("\n") && lines[lines.length - 1] === "") {
     lines.pop();
   }

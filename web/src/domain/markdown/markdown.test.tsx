@@ -667,3 +667,16 @@ describe("decoded destinations are still sanitized", () => {
     expect(out).not.toContain("<a");
   });
 });
+
+describe("inline scanning stays linear", () => {
+  it("parses a long formatting-free paragraph in well under a frame", () => {
+    // Guards the scanner against going quadratic again: probing for a token at
+    // every position instead of searching forward for the next one took this
+    // input tens of milliseconds.
+    const line = "word ".repeat(1600);
+    const started = performance.now();
+    const inlines = parseInline(line);
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(inlines).toEqual([{ type: "text", text: line }]);
+  });
+});
