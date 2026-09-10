@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-09-10
+
 - Replies, briefs and update notes now show tables, checklists, crossed-out words, dividers, and lists inside lists, instead of the raw symbols they were written with.
 - Underlined titles now read as titles, links written as references resolve, spelled-out punctuation shows the real character, and a star or bracket meant literally stays on the page instead of formatting the words around it.
 - Long replies now appear the moment you open them. A reply with several paragraphs of plain prose used to take a visible pause to draw.
