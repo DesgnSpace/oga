@@ -3,7 +3,7 @@
 
 import * as React from "react";
 import { broker } from "@/bridge/client";
-import type { TaskDiff, TaskEventView } from "@/bridge/types";
+import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
@@ -21,6 +21,7 @@ import {
   storeChangedFilesWidth,
 } from "@/state/changed-files-preferences";
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
+import { terminalResumeCommand } from "./terminalResume";
 import { ChangedFilesPanel, type ChangesSource } from "./ChangedFiles";
 import { effortDisplay, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
@@ -163,6 +164,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   const [groupByTurn, setGroupByTurn] = React.useState(loadChangesGrouped);
   const [changedFilesWidth, setChangedFilesWidth] = React.useState(loadChangedFilesWidth);
   const [resizeStart, setResizeStart] = React.useState<{ x: number; width: number } | null>(null);
+  const [profiles, setProfiles] = React.useState<ProfileView[] | undefined>(undefined);
 
   const applyChangedFilesWidth = React.useCallback((width: number) => {
     const clamped = clampChangedFilesWidth(width);
@@ -319,6 +321,27 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
     [git.diff],
   );
 
+  // Profiles carry each worker's provider and environment, which the
+  // terminal resume command is built from. Only read when the task holds a
+  // session worth continuing.
+  React.useEffect(() => {
+    if (!task?.sessionId) return;
+    let disposed = false;
+    setProfiles(undefined);
+    void broker.summary({ compact: true, limit: 1 }).then((result) => {
+      if (disposed || !result.ok) return;
+      setProfiles(result.value.profiles);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [taskId, task?.profileId, task?.sessionId]);
+
+  const terminalCommand = React.useMemo(
+    () => (task ? (terminalResumeCommand(task, profiles?.find((profile) => profile.id === task.profileId)) ?? undefined) : undefined),
+    [task, profiles],
+  );
+
   React.useEffect(() => {
     if (!task) {
       onHeader(undefined);
@@ -335,6 +358,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
       diffAdded: runChangeSetAdded(reportedChanges),
       showingChanges,
       onToggleChanges: () => setShowingChanges((value) => !value),
+      terminalCommand,
       status: (
         <span
           className={`task-dot task-dot-${task.state}`}
@@ -346,7 +370,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
       secondary: <TaskDetailSecondary task={task} events={events} onChanged={refreshDetail} />,
     });
     return () => onHeader(undefined);
-  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, onHeader]);
+  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, terminalCommand, onHeader]);
 
   React.useEffect(() => {
     const listener = () => refreshDetail();

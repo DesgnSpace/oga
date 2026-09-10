@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
 import type { Route } from "@/router";
-import { BackArrowIcon, ChangedFilesIcon, ForwardArrowIcon, SidebarIcon } from "@/ui/icons";
+import { BackArrowIcon, ChangedFilesIcon, ForwardArrowIcon, SidebarIcon, TerminalIcon } from "@/ui/icons";
+import { copyText } from "@/lib/identifiers";
+import { toast } from "@/state/toast";
 
 export const CHANGED_FILES_LABEL = "Changed files";
+export const TERMINAL_RESUME_LABEL = "Continue in terminal";
 
 export interface TaskTitleBarInfo {
   title: string;
@@ -11,10 +14,35 @@ export interface TaskTitleBarInfo {
   onToggleChanges: () => void;
   status: ReactNode;
   secondary: ReactNode;
+  /** Shell command that continues this task's session elsewhere. Absent when the task holds no resumable session. */
+  terminalCommand?: string;
 }
 
 function sidebarToggleLabel(collapsed: boolean): string {
   return collapsed ? "Show task list" : "Hide task list";
+}
+
+async function copyTerminalCommand(command: string): Promise<void> {
+  try {
+    await copyText(command);
+    toast.success("Command copied");
+  } catch {
+    toast.error("Couldn't copy the command");
+  }
+}
+
+function TerminalResumeButton({ command }: { command: string }) {
+  return (
+    <button
+      className="icon-button"
+      type="button"
+      aria-label={TERMINAL_RESUME_LABEL}
+      title={TERMINAL_RESUME_LABEL}
+      onClick={() => void copyTerminalCommand(command)}
+    >
+      <TerminalIcon />
+    </button>
+  );
 }
 
 function fallbackTitle(route: Route): string {
@@ -109,6 +137,9 @@ export function TitleBar({
             >
               <ChangedFilesIcon />
             </button>
+            {task.terminalCommand !== undefined && (
+              <TerminalResumeButton command={task.terminalCommand} />
+            )}
           </div>
         )}
       </div>
