@@ -6,7 +6,7 @@
 import * as React from "react";
 import { openAttachment, readImagePreview } from "@/bridge";
 import { Modal } from "@/components/primitives/Modal";
-import { AttachmentIcon } from "@/ui/icons";
+import { AttachmentIcon, ExclamationIcon } from "@/ui/icons";
 import { resolvePreviewPath } from "./Trace";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
@@ -51,15 +51,15 @@ function AttachmentImage({ path }: { path: string }) {
   const { src, error } = useDiskImage(path);
   return (
     <>
-      <button type="button" className="attachment-chip attachment-chip-image" title={fileName(path)} onClick={() => setOpen(true)}>
-        {src ? <img src={src} alt={fileName(path)} /> : <span className="attachment-chip-status" aria-hidden="true" />}
+      <button type="button" className="attachment-chip attachment-chip-image" aria-label={fileName(path)} title={error ? "Couldn't load preview" : fileName(path)} onClick={() => setOpen(true)}>
+        {src ? <img src={src} alt={fileName(path)} /> : error ? <ExclamationIcon size={16} /> : <span className="attachment-chip-status" aria-hidden="true" />}
       </button>
       <Modal open={open} onClose={() => setOpen(false)} labelledBy="attachment-preview-title" className="modal-dialog-file-preview">
         <h2 id="attachment-preview-title" className="trace-file-preview-modal-title">
           {fileName(path)}
         </h2>
         {error ? (
-          <p className="trace-file-preview-error" role="status">{error}</p>
+          <p className="trace-file-preview-error" role="alert">{error}</p>
         ) : src ? (
           <img className="trace-file-preview-modal-image" src={src} alt={fileName(path)} />
         ) : (
@@ -89,12 +89,12 @@ export function AttachmentsRow({ paths, cwd }: { paths: string[] | undefined; cw
   if (!paths || paths.length === 0) return null;
   return (
     <div className="attachments-row" aria-label={paths.length === 1 ? "1 file attached" : `${paths.length} files attached`}>
-      {paths.map((path) => {
+      {paths.map((path, index) => {
         const resolved = resolvePreviewPath(path, cwd);
         return isImagePath(path) ? (
-          <AttachmentImage path={resolved} key={path} />
+          <AttachmentImage path={resolved} key={`${index}:${path}`} />
         ) : (
-          <AttachmentFile path={resolved} key={path} />
+          <AttachmentFile path={resolved} key={`${index}:${path}`} />
         );
       })}
     </div>

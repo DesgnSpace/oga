@@ -2182,6 +2182,14 @@ h1 {
     cursor: pointer;
 }
 
+.composer-send-now:not(:disabled):hover {
+    background: var(--color-hover);
+}
+
+.composer-send-now:not(:disabled):active {
+    background: var(--color-bg);
+}
+
 .composer-submit {
     display: inline-flex;
     flex: 0 0 auto;
@@ -2197,6 +2205,14 @@ h1 {
     font-size: var(--text-md);
     font-weight: 600;
     cursor: pointer;
+}
+
+.composer-submit:not(:disabled):hover {
+    background: color-mix(in srgb, var(--color-accent) 85%, var(--color-bg));
+}
+
+.composer-submit:not(:disabled):active {
+    background: color-mix(in srgb, var(--color-accent) 75%, var(--color-bg));
 }
 
 .task-metadata {
@@ -2694,6 +2710,7 @@ h1 {
     display: block;
     width: 100%;
     height: 100%;
+    background: var(--color-elevated);
 }
 
 .attachment-chip-file {

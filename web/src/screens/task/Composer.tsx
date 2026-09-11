@@ -43,14 +43,14 @@ export function routingForState(
 function placeholder(routing: ConversationInputRouting): string {
   switch (routing.type) {
     case "reply":
-      return "Type your answer...";
+      return "Type your answer…";
     case "steer":
-      return "Send a message...";
+      return "Send a message…";
     case "steer-and-queue":
     case "queue":
-      return "Add a follow-up...";
+      return "Add a follow-up…";
     case "resume":
-      return routing.textRequired ? "What should happen next?" : "Send a message to continue...";
+      return routing.textRequired ? "What should happen next?" : "Send a message to continue…";
     case "none":
       return "";
   }
@@ -76,6 +76,11 @@ function routingsEqual(a: ConversationInputRouting, b: ConversationInputRouting)
   if (a.type !== b.type) return false;
   if (a.type === "resume" && b.type === "resume") return a.textRequired === b.textRequired;
   return true;
+}
+
+function submitShortcut(): string {
+  const platform = typeof navigator === "undefined" ? "" : `${navigator.platform} ${navigator.userAgent}`;
+  return /Mac/.test(platform) ? "⌘↵" : "Ctrl+↵";
 }
 
 export function isSendDisabled(routing: ConversationInputRouting, draft: string): boolean {
@@ -123,6 +128,7 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
   const disabled = isSendDisabled(routing, draft) || sending;
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const label = actionLabel(routing);
+  const shortcut = submitShortcut();
 
   const submit = async (mode: ComposerSendMode) => {
     if (isSendDisabled(routing, draft) || sending) return;
@@ -167,7 +173,7 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
               <button
                 className="text-button queued-follow-up-remove"
                 type="button"
-                aria-label="Remove queued follow-up"
+                aria-label={`Remove follow-up ${index + 1}`}
                 onClick={() => onRemoveQueued(index)}
               >
                 Remove
@@ -189,7 +195,8 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
           rows={1}
           placeholder={placeholder(routing)}
           value={draft}
-          disabled={sending}
+          readOnly={sending}
+          aria-busy={sending}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
@@ -203,6 +210,7 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
             }
           }}
           aria-label={placeholder(routing)}
+          aria-describedby="composer-shortcut-hint"
         />
         <div className="composer-footer">
           <div className="composer-footer-left">
@@ -224,8 +232,8 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
             )}
           </div>
           <div className="composer-footer-right">
-            <span className="composer-hint" aria-hidden="true">
-              {draft !== "" ? "Esc to clear · " : ""}⌘↵ to {label.toLowerCase()}
+            <span className="composer-hint" id="composer-shortcut-hint">
+              {draft !== "" ? "Esc to clear · " : ""}{shortcut} to {label.toLowerCase()}
             </span>
             {routing.type === "steer-and-queue" && (
               <button
@@ -239,16 +247,13 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
                 Send now
               </button>
             )}
-            <button className="composer-submit" type="submit" disabled={disabled} title={`${label} — ⌘/Ctrl+Enter`}>
+            <button className="composer-submit" type="submit" disabled={disabled} title={`${label} — ${shortcut}`}>
               <SendIcon />
               {sending ? "Sending…" : label}
             </button>
           </div>
         </div>
       </form>
-      {routing.type === "steer-and-queue" && (
-        <p className="composer-note">Send now interrupts the worker right away, instead of waiting its turn.</p>
-      )}
       {routingsEqual(routing, { type: "resume", textRequired: false }) && (
         <p className="composer-note">Leave the message empty to continue the run.</p>
       )}
