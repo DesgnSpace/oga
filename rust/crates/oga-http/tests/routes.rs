@@ -374,40 +374,6 @@ async fn read_routes() {
     assert_eq!(missing, json!({ "error": "unknown task" }));
 }
 
-#[tokio::test]
-async fn task_branch_route_falls_back_when_checkout_is_gone() {
-    let fixture = Fixture::new();
-    fixture.insert_task(&Task {
-        id: "gone-checkout".into(),
-        kind: Some(TaskKind::Delegated),
-        profile_id: "profile".into(),
-        model: "fake".into(),
-        prompt: "read branch".into(),
-        cwd: fixture._directory.path().join("gone").display().to_string(),
-        branch: Some("worker/recorded".into()),
-        state: TaskState::Completed,
-        created_at: "2026-01-01T00:00:00.000Z".into(),
-        updated_at: "2026-01-01T00:00:00.000Z".into(),
-        ..Task::default()
-    });
-
-    let (status, body) = json_response(
-        request(
-            &fixture.router,
-            Method::GET,
-            "/api/tasks/gone-checkout/branch",
-            Body::empty(),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        body,
-        json!({ "branch": "worker/recorded", "source": "recorded" })
-    );
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn archive_returns_while_a_worktree_copy_is_preparing() {
     let fixture = Fixture::new();
@@ -527,6 +493,40 @@ async fn archive_returns_while_a_worktree_copy_is_preparing() {
             None => std::env::remove_var("OGA_DB"),
         }
     }
+}
+
+#[tokio::test]
+async fn task_branch_route_falls_back_when_checkout_is_gone() {
+    let fixture = Fixture::new();
+    fixture.insert_task(&Task {
+        id: "gone-checkout".into(),
+        kind: Some(TaskKind::Delegated),
+        profile_id: "profile".into(),
+        model: "fake".into(),
+        prompt: "read branch".into(),
+        cwd: fixture._directory.path().join("gone").display().to_string(),
+        branch: Some("worker/recorded".into()),
+        state: TaskState::Completed,
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: "2026-01-01T00:00:00.000Z".into(),
+        ..Task::default()
+    });
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/tasks/gone-checkout/branch",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        json!({ "branch": "worker/recorded", "source": "recorded" })
+    );
 }
 
 #[tokio::test]
