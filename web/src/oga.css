@@ -1065,8 +1065,11 @@ a {
 }
 
 .task-sidebar .task-dot-queued {
-    border-style: dashed;
-    border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+    --task-dot-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+    border-color: transparent;
+    background: repeating-conic-gradient(var(--task-dot-color) 0 30deg, transparent 30deg 60deg);
+    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
+    mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
 }
 
 .task-sidebar .task-dot-answered {
@@ -1088,8 +1091,10 @@ a {
 
 .task-sidebar .task-dot-waiting {
     --task-dot-color: var(--color-warning);
-    border: 1.5px dashed var(--task-dot-color);
-    background: transparent;
+    border-color: transparent;
+    background: repeating-conic-gradient(var(--task-dot-color) 0 30deg, transparent 30deg 60deg);
+    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
+    mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
     animation: none;
 }
 
