@@ -205,7 +205,7 @@ export function ChevronIcon({ size = 16, className }: IconProps) {
   );
 }
 
-export function DisclosureIcon({ open, size = 16, className }: IconProps & { open: boolean }) {
+export function DisclosureIcon({ open = false, size = 16, className }: IconProps & { open?: boolean }) {
   return (
     <Svg size={size} className={className}>
       <path d={open ? "M3.8 8h8.4" : "M3.8 8h8.4M8 3.8v8.4"} />
@@ -213,7 +213,7 @@ export function DisclosureIcon({ open, size = 16, className }: IconProps & { ope
   );
 }
 
-export function DiffMarkIcon({ kind, size = 16, className }: IconProps & { kind: "added" | "removed" }) {
+export function DiffMarkIcon({ kind = "added", size = 16, className }: IconProps & { kind?: "added" | "removed" }) {
   return (
     <Svg size={size} className={className}>
       <path d={kind === "added" ? "M8 3.8v8.4M3.8 8h8.4" : "M3.8 8h8.4"} />
@@ -369,9 +369,6 @@ export function OpenExternalIcon({ size = 16, className }: IconProps) {
   );
 }
 
-// Keep alias for CodeGlyph compatibility
-export const CodeGlyph = CodeIcon;
-
 // Toast-semantic aliases — same strokes, callers pick by intent.
 export const ToastPendingIcon = RefreshIcon;
 export const ToastSuccessIcon = CheckIcon;
@@ -414,4 +411,8 @@ export const iconRegistry: Array<{ name: string; Component: React.ComponentType<
   { name: "OpenExternalIcon", Component: OpenExternalIcon },
   { name: "QuestionMarkIcon", Component: QuestionMarkIcon },
   { name: "ExclamationIcon", Component: ExclamationIcon },
+  { name: "UsageIcon", Component: UsageIcon },
+  { name: "AttachmentIcon", Component: AttachmentIcon },
+  { name: "DisclosureIcon", Component: DisclosureIcon },
+  { name: "DiffMarkIcon", Component: DiffMarkIcon },
 ];

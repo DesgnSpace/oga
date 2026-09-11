@@ -2241,8 +2241,9 @@ function AboutPanel({
             <p>Version {updateStatus.version} is ready to install.</p>
             {updateStatus.notes ? <MarkdownContent source={updateStatus.notes} /> : null}
             <button className="settings-button settings-button-primary" type="button" onClick={onInstallUpdate}>
-              Download and install
+              Install and restart Oga
             </button>
+            <p className="settings-muted">Oga restarts when the update finishes.</p>
           </>
         ) : updateStatus.kind === "checking" ? (
           <p className="settings-status">Checking for a new version…</p>
@@ -2261,8 +2262,10 @@ function AboutPanel({
           </>
         ) : updateStatus.kind === "failed" ? (
           <>
-            <p className="settings-form-error">We couldn&apos;t check for a new version. Try again in a moment.</p>
-            <button className="settings-button" type="button" onClick={onCheckForUpdates}>
+            <p className="settings-form-error">
+              {updateStatus.reason === "check" ? "We couldn't check for a new version. Try again in a moment." : "We couldn't install the update. Try again."}
+            </p>
+            <button className="settings-button" type="button" onClick={updateStatus.reason === "check" ? onCheckForUpdates : onInstallUpdate}>
               Try again
             </button>
           </>

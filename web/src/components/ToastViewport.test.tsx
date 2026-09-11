@@ -45,4 +45,15 @@ describe("ToastViewport", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Settings saved");
   });
+
+  it("dismisses a toast when swiped left", () => {
+    render(<ToastViewport />);
+    act(() => toast.success("Saved"));
+
+    const card = screen.getByRole("status");
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: -20 });
+
+    expect(card.classList.contains("toast-card-exiting")).toBe(true);
+  });
 });

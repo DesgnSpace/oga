@@ -11,7 +11,7 @@ export type AppUpdateStatus =
   | { kind: "available"; version: string; notes?: string }
   | { kind: "downloading"; version: string; progress?: number }
   | { kind: "installing"; version: string }
-  | { kind: "failed" };
+  | { kind: "failed"; reason: "check" | "install" };
 
 function isDesktopApp(): boolean {
   return "__TAURI__" in window;
@@ -42,7 +42,7 @@ export function useAppUpdates() {
 
       setUpdateStatus({ kind: "available", version: update.version, notes: update.body });
     } catch {
-      setUpdateStatus({ kind: "failed" });
+      setUpdateStatus({ kind: "failed", reason: "check" });
       if (announce) toast.error("Couldn't check for updates", { description: "Try again in a moment." });
     }
   }, []);
@@ -68,7 +68,7 @@ export function useAppUpdates() {
       });
       await relaunch();
     } catch {
-      setUpdateStatus({ kind: "failed" });
+      setUpdateStatus({ kind: "failed", reason: "install" });
       toast.error("Couldn't install the update", { description: "Try again in a moment." });
     }
   }, []);

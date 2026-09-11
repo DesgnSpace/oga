@@ -1,8 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { toast, type ToastRecord } from "@/state/toast";
-import { CloseIcon } from "@/ui/icons";
+import {
+  CloseIcon,
+  ToastErrorIcon,
+  ToastInfoIcon,
+  ToastPendingIcon,
+  ToastSuccessIcon,
+} from "@/ui/icons";
 
 const EMPTY_TOASTS: ToastRecord[] = [];
+const DISMISS_DISTANCE = 100;
+const DISMISS_VELOCITY = 0.35;
 
 function toastRole(kind: ToastRecord["kind"]): "alert" | "status" {
   return kind === "error" ? "alert" : "status";
@@ -10,44 +18,15 @@ function toastRole(kind: ToastRecord["kind"]): "alert" | "status" {
 
 function ToastIcon({ kind }: { kind: ToastRecord["kind"] }) {
   if (kind === "pending") {
-    return (
-      <span className="toast-icon toast-icon-pending" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="16" height="16" fill="none">
-          <circle cx={8} cy={8} r={6} stroke="currentColor" strokeWidth={1.5} opacity={0.25} />
-          <path d="M14 8 A6 6 0 0 0 8 2" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
-        </svg>
-      </span>
-    );
+    return <span className="toast-icon toast-icon-pending" aria-hidden="true"><ToastPendingIcon /></span>;
   }
   if (kind === "success") {
-    return (
-      <span className="toast-icon toast-icon-success" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 8.2 6 11 13 4.5" />
-        </svg>
-      </span>
-    );
+    return <span className="toast-icon toast-icon-success" aria-hidden="true"><ToastSuccessIcon /></span>;
   }
   if (kind === "error") {
-    return (
-      <span className="toast-icon toast-icon-error" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-          <circle cx={8} cy={8} r={5.2} />
-          <path d="M8 4.5V9.5" />
-          <circle cx={8} cy={12.2} r={0.9} fill="currentColor" stroke="none" />
-        </svg>
-      </span>
-    );
+    return <span className="toast-icon toast-icon-error" aria-hidden="true"><ToastErrorIcon /></span>;
   }
-  return (
-    <span className="toast-icon toast-icon-info" aria-hidden="true">
-      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-        <circle cx={8} cy={8} r={5.2} />
-        <path d="M8 7.2v3.8" />
-        <circle cx={8} cy={5} r={0.9} fill="currentColor" stroke="none" />
-      </svg>
-    </span>
-  );
+  return <span className="toast-icon toast-icon-info" aria-hidden="true"><ToastInfoIcon /></span>;
 }
 
 function ToastCard({ record, onClose }: { record: ToastRecord; onClose: () => void }) {
@@ -69,13 +48,13 @@ function ToastCard({ record, onClose }: { record: ToastRecord; onClose: () => vo
         ref.current?.setPointerCapture?.(event.pointerId);
       }}
       onPointerMove={(event) => {
-        if (drag.current?.pointerId === event.pointerId) setDragX(Math.max(0, event.clientX - drag.current.startX));
+        if (drag.current?.pointerId === event.pointerId) setDragX(event.clientX - drag.current.startX);
       }}
       onPointerUp={(event) => {
         if (drag.current?.pointerId !== event.pointerId) return;
         const distance = event.clientX - drag.current.startX;
         drag.current = null;
-        if (distance > 100 || distance > (ref.current?.offsetWidth ?? 0) * 0.35) onClose();
+        if (Math.abs(distance) > DISMISS_DISTANCE || Math.abs(distance) > (ref.current?.offsetWidth ?? 0) * DISMISS_VELOCITY) onClose();
         else setDragX(0);
       }}
       onPointerCancel={() => { drag.current = null; setDragX(0); }}
@@ -212,7 +191,7 @@ export function ToastViewport() {
       {expanded && errorCount > 1 ? (
         <button className="toast-clear-all" type="button" onClick={() => toast.clear()}>Clear all</button>
       ) : null}
-      {paused ? <span className="sr-only">Notifications paused while open</span> : null}
+      {paused ? <span className="visually-hidden">Notifications paused</span> : null}
     </section>
   );
 }
