@@ -4,7 +4,7 @@
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -291,6 +291,32 @@ impl Store {
         }
     }
 
+    /// Run a write transaction on the blocking pool. The executor never waits
+    /// on the writer lock: a slow commit or a queue of writers costs a
+    /// blocking thread, not one of the few threads every request shares.
+    pub async fn write<T, F>(self: &Arc<Self>, work: F) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&rusqlite::Transaction<'_>) -> Result<T, StoreError> + Send + 'static,
+    {
+        let store = Arc::clone(self);
+        tokio::task::spawn_blocking(move || store.transaction(work))
+            .await
+            .map_err(|error| StoreError::Refusal(format!("write stopped: {error}")))?
+    }
+
+    /// Fold the WAL back into the main file without waiting on readers.
+    /// SQLite's automatic checkpoint gives up whenever a reader is open, and
+    /// the broker always has one, so the log grows until something asks.
+    pub fn checkpoint(&self) -> Result<(), StoreError> {
+        if self.observe {
+            return Ok(());
+        }
+        let connection = self.lock()?;
+        connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE)")?;
+        Ok(())
+    }
+
     /// Close the handle. Only a writable handle pays for `PRAGMA optimize`:
     /// it can run ANALYZE, which writes.
     pub fn close(self) -> Result<(), StoreError> {
@@ -358,6 +384,7 @@ pub fn configure_writable(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(concat!(
         "PRAGMA busy_timeout = 5000;\n",
         "PRAGMA synchronous = NORMAL;\n",
+        "PRAGMA journal_size_limit = 67108864;\n",
         "PRAGMA foreign_keys = ON;",
     ))?;
     let _mode: String = connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;

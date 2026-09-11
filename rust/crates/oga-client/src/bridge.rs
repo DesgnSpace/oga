@@ -40,6 +40,9 @@ pub enum BrokerCall {
     TaskDiff {
         task_id: String,
     },
+    TaskBranch {
+        task_id: String,
+    },
     ConsumerInbox {
         consumer_id: String,
         channel: Option<String>,
@@ -265,6 +268,7 @@ mod native {
                     encode(self.get_task_events(&task_id, &query).await)
                 }
                 BrokerCall::TaskDiff { task_id } => encode(self.get_task_diff(&task_id).await),
+                BrokerCall::TaskBranch { task_id } => encode(self.get_task_branch(&task_id).await),
                 BrokerCall::ConsumerInbox {
                     consumer_id,
                     channel,

@@ -681,6 +681,7 @@ export type BrokerCall =
   | { call: "task"; taskId: string }
   | { call: "taskEvents"; taskId: string; query: TaskEventsQuery }
   | { call: "taskDiff"; taskId: string }
+  | { call: "taskBranch"; taskId: string }
   | { call: "projects" }
   | { call: "memories"; cwd: string }
   | { call: "prompt"; cwd?: string }
@@ -715,6 +716,7 @@ export interface BrokerCallResult {
   task: Task;
   taskEvents: TaskEventPage;
   taskDiff: TaskDiff;
+  taskBranch: { branch?: string; source: "checkout" | "recorded" };
   projects: ProjectList;
   memories: MemoryEntry[];
   prompt: PromptConfig;

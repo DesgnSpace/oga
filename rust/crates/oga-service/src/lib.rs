@@ -120,6 +120,8 @@ pub(crate) fn close_attempt(task: &Task, ended_at: &str, always_close: bool) -> 
     attempts
 }
 
+pub use oga_runner::worker_path::warm_login_path;
+
 pub(crate) fn append_event_tx(
     tx: &Transaction<'_>,
     task_id: &str,

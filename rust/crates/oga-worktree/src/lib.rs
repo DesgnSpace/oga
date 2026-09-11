@@ -803,6 +803,12 @@ pub async fn plan_task_worktree_at(
 pub async fn prepare_task_worktree(planned: &PlannedWorktree) -> Result<(), WorktreeError> {
     let lock = repository_lock(&planned.root);
     let _guard = lock.lock().await;
+    if branch_exists_locked(&planned.root, &planned.created.worktree.branch).await? {
+        return Err(WorktreeError::Message(format!(
+            "branch already exists: {}",
+            planned.created.worktree.branch
+        )));
+    }
     let checkout = PathBuf::from(&planned.created.worktree.path);
     let parent = checkout
         .parent()

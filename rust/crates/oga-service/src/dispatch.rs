@@ -508,7 +508,11 @@ impl Dispatcher {
         let plan = self.plan(request).await?;
         let task_id = plan.task.id.clone();
         let launched = plan.launch;
-        persist_plan(&self.store, &plan)?;
+        let store = Arc::clone(&self.store);
+        let persisted = plan.clone();
+        tokio::task::spawn_blocking(move || persist_plan(&store, &persisted))
+            .await
+            .map_err(|error| DispatchError::Refusal(format!("dispatch stopped: {error}")))??;
         if let Some(preparation) = plan.checkout_preparation.clone() {
             self.prepare_checkout(plan, preparation);
         } else if launched {
@@ -1422,8 +1426,11 @@ async fn cleanup_preparing_checkout(task: &Task) -> Result<(), oga_worktree::Wor
     let Some(worktree) = &task.worktree else {
         return Ok(());
     };
+    let created = Path::new(&worktree.path).exists();
     oga_worktree::remove_task_worktree(worktree).await?;
-    let _ = oga_worktree::remove_task_branch(worktree).await?;
+    if created {
+        let _ = oga_worktree::remove_task_branch(worktree).await?;
+    }
     Ok(())
 }
 

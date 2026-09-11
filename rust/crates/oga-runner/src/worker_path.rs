@@ -3,7 +3,11 @@
 use std::{
     env,
     process::Command,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
     time::{Duration, Instant},
 };
 
@@ -12,6 +16,7 @@ const START: &str = "__OGA_PATH__";
 const END: &str = "__OGA_END__";
 
 static LOGIN_PATH: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+static REFRESHING: AtomicBool = AtomicBool::new(false);
 
 /// The broker outlives the session that launched it, so `PATH` is a snapshot
 /// from whenever that was — and an app launched from Finder carries almost
@@ -27,16 +32,34 @@ pub fn worker_path() -> String {
     )
 }
 
+/// Capture the login shell's PATH now, on the calling thread. The broker
+/// calls this once at start so the first spawn already has it.
+pub fn warm_login_path() {
+    refresh_login_path();
+}
+
+/// The last captured login PATH. A stale value is handed back as it is and a
+/// fresh capture starts on its own thread: the shell takes over a second to
+/// start, and a spawn must never wait on it.
 fn login_path() -> Option<String> {
-    let mut cached = LOGIN_PATH.lock().ok()?;
-    if let Some((path, read_at)) = cached.as_ref()
-        && read_at.elapsed() < REFRESH_TTL
-    {
-        return Some(path.clone());
+    let cached = LOGIN_PATH.lock().ok()?.clone();
+    let fresh = cached
+        .as_ref()
+        .is_some_and(|(_, read_at)| read_at.elapsed() < REFRESH_TTL);
+    if !fresh && !REFRESHING.swap(true, Ordering::AcqRel) {
+        thread::spawn(refresh_login_path);
     }
-    let captured = capture_login_path()?;
-    *cached = Some((captured.clone(), Instant::now()));
-    Some(captured)
+    cached.map(|(path, _)| path)
+}
+
+fn refresh_login_path() {
+    let captured = capture_login_path();
+    if let Some(captured) = captured
+        && let Ok(mut cached) = LOGIN_PATH.lock()
+    {
+        *cached = Some((captured, Instant::now()));
+    }
+    REFRESHING.store(false, Ordering::Release);
 }
 
 /// Login *and* interactive: PATH edits live in profile files and rc files

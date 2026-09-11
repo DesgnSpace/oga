@@ -45,6 +45,7 @@ use tokio::{
 };
 
 const DEFAULT_PORT: u16 = 7331;
+const WAL_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(30);
 const DEFAULT_WATCH_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const MAX_WATCH_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_EVENT_OUTCOME: usize = 200;
@@ -236,6 +237,17 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
     }
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let bound_port = listener.local_addr()?.port();
+    tokio::task::spawn_blocking(oga_service::warm_login_path);
+    let checkpoint_task = {
+        let store = store.clone();
+        tokio::spawn(async move {
+            loop {
+                sleep(WAL_CHECKPOINT_INTERVAL).await;
+                let store = store.clone();
+                let _ = tokio::task::spawn_blocking(move || store.checkpoint()).await;
+            }
+        })
+    };
     let sweep_task = state.dispatcher.start_hold_sweep(HOLD_SWEEP_INTERVAL);
     let wake_task = state.dispatcher.start_wake_watch(WAKE_WATCH_INTERVAL);
     let cleanup_task = {
@@ -302,6 +314,7 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
     sweep_task.abort();
     wake_task.abort();
     cleanup_task.abort();
+    checkpoint_task.abort();
     result
 }
 

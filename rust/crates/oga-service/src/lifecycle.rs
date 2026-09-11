@@ -663,7 +663,7 @@ struct LiveEventCapture {
 }
 
 async fn wait_for_process_events(
-    store: &Store,
+    store: &Arc<Store>,
     task: &Task,
     turn_id: i64,
     resumed_session: Option<&str>,
@@ -708,7 +708,7 @@ async fn wait_for_process_events(
 }
 
 async fn persist_live_provider_event(
-    store: &Store,
+    store: &Arc<Store>,
     task: &Task,
     turn_id: i64,
     resumed_session: Option<&str>,
@@ -717,19 +717,23 @@ async fn persist_live_provider_event(
 ) -> Result<(), LifecycleError> {
     let event = enrich_codex_file_change(task, event).await;
     let now = now_iso();
+    let task = task.clone();
+    let resumed_session = resumed_session.map(str::to_owned);
     let mut session_event_written = capture.session_event_written;
-    store.transaction(|tx| {
-        append_provider_event_tx(
-            tx,
-            task,
-            turn_id,
-            &event,
-            resumed_session,
-            &mut session_event_written,
-            &now,
-        )?;
-        Ok(())
-    })?;
+    let session_event_written = store
+        .write(move |tx| {
+            append_provider_event_tx(
+                tx,
+                &task,
+                turn_id,
+                &event,
+                resumed_session.as_deref(),
+                &mut session_event_written,
+                &now,
+            )?;
+            Ok(session_event_written)
+        })
+        .await?;
     capture.persisted_provider_events += 1;
     capture.session_event_written = session_event_written;
     Ok(())

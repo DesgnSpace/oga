@@ -70,6 +70,8 @@ export const broker = {
 
   taskDiff: (taskId: string) => call({ call: "taskDiff", taskId }),
 
+  taskBranch: (taskId: string) => call({ call: "taskBranch", taskId }),
+
   projects: () => call({ call: "projects" }),
 
   memories: (cwd: string) => call({ call: "memories", cwd }),
