@@ -127,7 +127,7 @@ describe("TraceRows", () => {
       if (!(target instanceof HTMLElement)) throw new Error("expected an anchored trace row");
 
       act(() => TestResizeObserver.current?.trigger(target, 180));
-      expect(root.scrollTop).toBe(1_552);
+      expect(root.scrollTop).toBe(1_554);
     } finally {
       globalThis.ResizeObserver = previous;
       TestResizeObserver.current = undefined;
@@ -211,7 +211,7 @@ describe("TraceRows", () => {
     expect(screen.getByText("Fix the palette")).toBeDefined();
     expect(screen.getByText("Run the tests")).toBeDefined();
     expect(container.querySelector(".trace-raw-event")?.hasAttribute("open")).toBe(false);
-    fireEvent.click(screen.getByText("Show raw event"));
+    fireEvent.click(screen.getByText("Show technical details"));
     expect(container.querySelector(".trace-raw-event")?.hasAttribute("open")).toBe(true);
   });
 
@@ -251,7 +251,7 @@ describe("TraceRows", () => {
 
     const terminal = container.querySelector(".trace-terminal");
     expect(terminal).toBeDefined();
-    expect(terminal?.querySelector(".trace-terminal-label")?.textContent).toBe("shell");
+    expect(terminal?.querySelector(".trace-terminal-label")?.textContent).toBe("Terminal");
     expect(terminal?.querySelector(".trace-terminal-prompt")?.textContent).toBe("$");
     expect(terminal?.querySelector(".trace-terminal-command code")?.textContent).toBe("cargo test\n--workspace");
     expect(terminal?.querySelector(".trace-terminal-command code")?.getAttribute("data-language")).toBe("shell");

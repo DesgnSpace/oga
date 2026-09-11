@@ -98,10 +98,15 @@ function ContentPreviewBody({
 
   switch (expansion.preview?.kind) {
     case "image":
-      if (imageError) return <p className="trace-file-preview-error" role="status">{imageError}</p>;
+      if (imageError) return <p className="trace-file-preview-error" role="alert" title={imageError}>We couldn't open this image.</p>;
       if (!payloadImage && !diskImage) return <p className="trace-file-preview-status" role="status">Loading image…</p>;
       return (
-        <button type="button" className="trace-file-preview trace-file-preview-image" onClick={() => onOpen(path, payloadImage ?? diskImage ?? undefined)}>
+        <button
+          type="button"
+          className="trace-file-preview trace-file-preview-image"
+          aria-label="Open full-size preview"
+          onClick={() => onOpen(path, payloadImage ?? diskImage ?? undefined)}
+        >
           <img src={payloadImage ?? diskImage ?? ""} alt={path ?? "Image preview"} />
         </button>
       );
@@ -138,7 +143,7 @@ function CommandTerminal({
 
   return (
     <div className={`trace-terminal${failed ? " trace-terminal-failed" : ""}`}>
-      <div className="trace-terminal-label">shell</div>
+      <div className="trace-terminal-label">Terminal</div>
       {command !== undefined && (
         <div className="trace-terminal-command">
           <span className="trace-terminal-prompt" aria-hidden="true">
@@ -202,7 +207,9 @@ function ExpansionBody({
       return (
         <div className="trace-expansion-content">
           <ContentPreviewBody expansion={expansion} path={path} cwd={cwd} onOpen={(p, imageDataUrl) => onOpenPreview(expansion, p, imageDataUrl)} />
-          {expansion.hiddenLines > 0 && <small>{`${expansion.hiddenLines} more lines`}</small>}
+          {expansion.hiddenLines > 0 && (
+            <small>{`${expansion.hiddenLines} more line${expansion.hiddenLines === 1 ? "" : "s"}`}</small>
+          )}
         </div>
       );
       case "todo":
@@ -211,10 +218,11 @@ function ExpansionBody({
             {expansion.items.map((item: TodoItem, index: number) => {
               const marker = item.status === "completed" ? "done" : item.status === "in_progress" ? "current" : "pending";
               const markerText = marker === "done" ? "[x]" : marker === "current" ? "[>]" : "[ ]";
+              const statusLabel = marker === "done" ? "Done" : marker === "current" ? "In progress" : "To do";
               return (
                 <li
                   className={`trace-todo-item trace-todo-${marker}`}
-                  aria-label={`${item.status}: ${item.text}`}
+                  aria-label={`${statusLabel}: ${item.text}`}
                   key={index}
                 >
                   <span className="trace-todo-marker" aria-hidden="true">
@@ -265,12 +273,22 @@ function TraceTarget({ row }: { row: TraceRow }) {
   const technical = presentationType === "file" || presentationType === "command" || row.event?.verb === "Searched";
   const className = `trace-target${technical ? " trace-target-technical" : ""}`;
   if (prose === undefined || !containsMarkdown(source)) {
-    return <span className={className}>{source}</span>;
+    return <span className={className} title={source}>{source}</span>;
   }
   return (
     <div className={className}>
       <MarkdownContent source={source} />
     </div>
+  );
+}
+
+export function RawEventDetails({ source }: { source: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <details className="trace-raw-event" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{open ? "Hide technical details" : "Show technical details"}</summary>
+      <ReviewContent source={source} language="json" />
+    </details>
   );
 }
 
@@ -296,10 +314,7 @@ export function EventExpansionView({
         onOpenPreview={onOpenPreview}
       />
       {hasPrimaryExpansion && event.rawText !== undefined && (
-        <details className="trace-raw-event">
-          <summary>Show raw event</summary>
-          <ReviewContent source={stripTransportMarkup(event.rawText)} language="json" />
-        </details>
+        <RawEventDetails source={stripTransportMarkup(event.rawText)} />
       )}
     </div>
   );
@@ -451,7 +466,7 @@ function FilePreviewModalBody({ preview }: { preview: OpenFilePreview }) {
       </h2>
       {image ? (
         imageError ? (
-          <p className="trace-file-preview-error" role="status">{imageError}</p>
+          <p className="trace-file-preview-error" role="alert" title={imageError}>We couldn't open this image.</p>
         ) : source ? (
           <img
             className="trace-file-preview-modal-image"
@@ -485,7 +500,7 @@ export function useShowThinking(): [boolean, () => void] {
   return [showing, toggle];
 }
 
-const ESTIMATED_ROW_HEIGHT = 28;
+const ESTIMATED_ROW_HEIGHT = 26;
 const DEFAULT_VIEWPORT_HEIGHT = 640;
 const OVERSCAN_PX = 560;
 
@@ -783,10 +798,12 @@ export function TraceRows({
   rows,
   cwd,
   scrollRoot,
+  live = false,
 }: {
   rows: TraceRow[];
   cwd?: string;
   scrollRoot?: React.RefObject<HTMLElement | null>;
+  live?: boolean;
 }) {
   const [expanded, setExpanded] = React.useState<Map<string, boolean>>(new Map());
   const [openPreview, setOpenPreview] = React.useState<OpenFilePreview | null>(null);
@@ -817,7 +834,11 @@ export function TraceRows({
       onFocusCapture={onFocusCapture}
     >
       {rows.length === 0 ? (
-        <EmptyState title="No activity yet" className="detail-message" />
+        <EmptyState
+          title="No activity yet"
+          hint={live ? "The worker is starting up." : "This task finished without recording any steps."}
+          className="detail-message"
+        />
       ) : (
         <div className="trace-list-static" role="list">
           {range.start > 0 && (

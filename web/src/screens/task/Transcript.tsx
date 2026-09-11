@@ -9,7 +9,7 @@ import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking
 import { ChevronIcon, FollowUpIcon, ReplyIcon, ResponseIcon, SteerIcon } from "@/ui/icons";
 import { AttachmentsRow } from "./Attachments";
 import { ReviewContent } from "./CodeReview";
-import { TraceRows } from "./Trace";
+import { RawEventDetails, TraceRows } from "./Trace";
 import type { Bubble, ResponseBlock, TranscriptItem, WorkSegment } from "./transcriptModel";
 
 /** Whether anything in this transcript is worth turning "Show thinking" on for. */
@@ -63,7 +63,7 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
     return () => observer.disconnect();
   }, [open, full]);
 
-  const collapsed = !open && hasMore !== false;
+  const collapsed = !open && hasMore === true;
   const expandFromPreview = (event: React.MouseEvent) => {
     if (!collapsed) return;
     if (event.target instanceof HTMLElement && event.target.closest("a, button")) return;
@@ -91,12 +91,7 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
             {open ? "Show less" : "Show more"}
           </button>
         )}
-        {bubble.rawText !== undefined && (
-          <details className="trace-raw-event">
-            <summary>Show raw event</summary>
-            <ReviewContent source={stripTransportMarkup(bubble.rawText)} language="json" />
-          </details>
-        )}
+        {bubble.rawText !== undefined && <RawEventDetails source={stripTransportMarkup(bubble.rawText)} />}
         <AttachmentsRow paths={bubble.attachments} cwd={cwd} />
       </div>
     </div>
@@ -151,13 +146,11 @@ function workLabel(segment: WorkSegment): string {
 }
 
 function durationWords(ms: number): string {
-  const seconds = Math.max(Math.trunc(ms / 1_000), 1);
+  const seconds = Math.max(Math.round(ms / 1_000), 1);
   if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
-  if (seconds < 3_600) {
-    const minutes = Math.trunc(seconds / 60);
-    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  }
-  const hours = Math.trunc(seconds / 3_600);
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(minutes / 60);
   return `${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
@@ -170,14 +163,9 @@ function workSummary(segment: WorkSegment, rows: TraceRow[]): string {
 
 function segmentNarration(composition: ActivityComposition): string | undefined {
   for (const block of composition.blocks) {
-    if (block.type === "chapter" && block.title !== undefined) return shortSummary(block.title);
+    if (block.type === "chapter" && block.title !== undefined) return block.title.replace(/\s+/g, " ").trim();
   }
   return undefined;
-}
-
-function shortSummary(value: string): string {
-  const line = value.replace(/\s+/g, " ").trim();
-  return line.length > 48 ? `${line.slice(0, 47)}…` : line;
 }
 
 function traceRowCount(row: TraceRow): number {
@@ -205,6 +193,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
   }, [segment.composition, segment.cwd, segment.live, showThinking]);
   if (rows.length === 0) return null;
   const summary = workSummary(segment, rows);
+  const fullTitle = `${workLabel(segment)}${summary ? ` · ${summary}` : ""}`;
 
   return (
     <div className="transcript-work">
@@ -212,16 +201,17 @@ const TranscriptWork = React.memo(function TranscriptWork({
         className="transcript-work-toggle"
         type="button"
         aria-expanded={open}
+        aria-label={open ? "Hide worker steps" : "Show worker steps"}
         onClick={() => onToggle(segment.id, segment.startsExpanded)}
       >
-        <span className="transcript-work-label">{workLabel(segment)}{summary ? ` · ${summary}` : ""}</span>
+        <span className="transcript-work-label" title={fullTitle}>{fullTitle}</span>
         <span className={`transcript-work-chevron${open ? " transcript-work-chevron-open" : ""}`} aria-hidden="true">
           <ChevronIcon size={14} />
         </span>
       </button>
       {open && (
         <div className="transcript-work-body">
-          <TraceRows rows={rows} cwd={segment.cwd} scrollRoot={scrollRoot} />
+          <TraceRows rows={rows} cwd={segment.cwd} scrollRoot={scrollRoot} live={segment.live} />
         </div>
       )}
     </div>
