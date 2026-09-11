@@ -34,7 +34,7 @@ export interface ModelBar {
   costUsd: number;
 }
 
-/** The top `limit` models by cost, with the remainder folded into one "Other" bar. */
+/** The top `limit` workers by cost, with the remainder folded into one "Other" bar. */
 export function topBreakdown(rows: UsageBreakdown[], limit: number): ModelBar[] {
   const sorted = [...rows].sort((a, b) => b.costUsd - a.costUsd);
   const head = sorted.slice(0, limit).map((row) => ({ label: row.profile, costUsd: row.costUsd }));

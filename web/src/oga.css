@@ -3558,6 +3558,11 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     cursor: pointer;
 }
 
+.usage-tab:not(.usage-tab-active):hover,
+.usage-period-option:not(.usage-period-option-active):hover {
+    background: var(--color-elevated);
+}
+
 .usage-tab-active {
     background: var(--color-selection);
     color: var(--color-text);
@@ -3682,6 +3687,21 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     grid-auto-flow: column;
     gap: 3px;
     flex: 0 0 auto;
+}
+
+.usage-heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    grid-column: 1;
+    grid-row: 4;
+    color: var(--color-text-muted);
+    font-size: 9px;
+}
+
+.usage-heatmap-legend .usage-heatmap-cell {
+    display: block;
 }
 
 .usage-heatmap-grid-4 {

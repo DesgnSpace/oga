@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { broker } from "@/bridge/client";
-import type { UsageBreakdown, UsageDay, UsagePeriod, UsageResponse } from "@/bridge/types";
+import type { Provider, UsageBreakdown, UsageDay, UsagePeriod, UsageResponse } from "@/bridge/types";
 import { formatCost, formatTokenCount } from "@/lib/format";
 import { BackArrowIcon, ForwardArrowIcon } from "@/ui/icons";
+import { providerLabel } from "../settings/state";
 import { buildDailySeries, topBreakdown, type DailyPoint, type ModelBar } from "./charts";
 import {
   addMonths,
@@ -35,19 +36,26 @@ export default function UsagePage() {
   const [tab, setTab] = useState<UsageTab>("overview");
   const [periodId, setPeriodId] = useState<string>("all");
   const [sort, setSort] = useState<ModelSort>("cost");
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     void broker.usage(-new Date().getTimezoneOffset()).then((result) => {
       if (result.ok) setData(result.value);
       else setError(result.error.message);
     });
-  }, []);
+  }, [loadAttempt]);
 
   if (error) {
     return (
       <div className="usage-page">
         <UsageHeader />
-        <p role="alert">Couldn&apos;t load usage. Try again later.</p>
+        <p role="alert">
+          Couldn&apos;t load usage. Try again later. <button className="text-button" type="button" onClick={() => {
+            setError(undefined);
+            setData(undefined);
+            setLoadAttempt((attempt) => attempt + 1);
+          }}>Try again</button>
+        </p>
       </div>
     );
   }
@@ -155,10 +163,10 @@ function OverviewPanel({
 }) {
   const [view, setView] = useState<OverviewView>("grid");
   const cards: ReadonlyArray<{ label: string; value: string }> = [
-    { label: "Tasks", value: period.tasks.toLocaleString("en-US") },
+    { label: "Tasks", value: period.tasks.toLocaleString() },
     { label: "Cost", value: formatCost(period.costUsd) ?? "$0.00" },
     { label: "Total tokens", value: formatTokenCount(period.tokens) },
-    { label: "Active days", value: period.activeDays.toLocaleString("en-US") },
+    { label: "Active days", value: period.activeDays.toLocaleString() },
     { label: "Current streak", value: formatStreak(currentStreakDays) },
     { label: "Longest streak", value: formatStreak(longestStreakDays) },
     { label: "Peak hour", value: period.peakHour === null ? "—" : formatPeakHour(period.peakHour) },
@@ -170,7 +178,7 @@ function OverviewPanel({
         {cards.map((card) => (
           <div className="usage-card" key={card.label}>
             <dt>{card.label}</dt>
-            <dd>{card.value}</dd>
+            <dd title={card.value}>{card.value}</dd>
           </div>
         ))}
       </dl>
@@ -202,8 +210,8 @@ function formatStreak(days: number): string {
 }
 
 function formatPeakHour(hour: number): string {
-  const twelve = hour % 12 === 0 ? 12 : hour % 12;
-  return `${twelve} ${hour < 12 ? "AM" : "PM"}`;
+  const date = new Date(2000, 0, 1, hour);
+  return date.toLocaleTimeString(undefined, { hour: "numeric" });
 }
 
 const WEEKDAY_LABELS: ReadonlyArray<string> = ["", "Mon", "", "Wed", "", "Fri", ""];
@@ -226,6 +234,7 @@ function Heatmap({
   const calendar = useMemo(() => buildHeatmapMonth(days, month), [days, month]);
   const max = Math.max(0, ...days.map((day) => day.costUsd));
   const hasActivity = calendar.weeks.some((week) => week.some((cell) => cell.inMonth && cell.day !== undefined));
+  const monthTasks = calendar.weeks.flat().reduce((total, cell) => total + (cell.inMonth ? cell.day?.tasks ?? 0 : 0), 0);
   const canGoBack = compareMonths(month, bounds.min) > 0;
   const canGoForward = compareMonths(month, bounds.max) < 0;
   const label = monthLabel(month);
@@ -265,7 +274,7 @@ function Heatmap({
             </span>
           ))}
         </div>
-        <div className={`usage-heatmap-grid usage-heatmap-grid-${calendar.weeks.length}`} role="img" aria-label={`Daily activity for ${label}`}>
+        <div className={`usage-heatmap-grid usage-heatmap-grid-${calendar.weeks.length}`} role="img" aria-label={`Daily activity for ${label} · ${monthTasks} ${monthTasks === 1 ? "task" : "tasks"}`}>
           {calendar.weeks.flatMap((week) =>
             week.map((cell) => (
               <span
@@ -279,6 +288,15 @@ function Heatmap({
           )}
         </div>
       </div>
+      <div className="usage-heatmap-legend" aria-hidden="true">
+        <span>Less</span>
+        <span className="usage-heatmap-cell" data-level="0" />
+        <span className="usage-heatmap-cell" data-level="1" />
+        <span className="usage-heatmap-cell" data-level="2" />
+        <span className="usage-heatmap-cell" data-level="3" />
+        <span className="usage-heatmap-cell" data-level="4" />
+        <span>More</span>
+      </div>
       {!hasActivity && <p className="usage-heatmap-empty">No activity in {label}.</p>}
     </div>
   );
@@ -288,9 +306,9 @@ function heatmapTooltip(cell: HeatmapCell): string {
   if (cell.day !== undefined && cell.inMonth) {
     const cost = formatCost(cell.day.costUsd) ?? "$0.00";
     const tasks = `${cell.day.tasks} ${cell.day.tasks === 1 ? "task" : "tasks"}`;
-    return `${cell.date} · ${cost} · ${formatTokenCount(cell.day.tokens)} tokens · ${tasks}`;
+    return `${formatShortDate(cell.date)} · ${cost} · ${formatTokenCount(cell.day.tokens)} tokens · ${tasks}`;
   }
-  return `${cell.date} · $0.00 · 0 tokens · 0 tasks`;
+  return `${formatShortDate(cell.date)} · $0.00 · 0 tokens · 0 tasks`;
 }
 
 function intensityLevel(cost: number, max: number): number {
@@ -395,7 +413,7 @@ function DailyBarChart({
 }
 
 function formatShortDate(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function ModelBarChart({ bars }: { bars: ReadonlyArray<ModelBar> }) {
@@ -403,9 +421,9 @@ function ModelBarChart({ bars }: { bars: ReadonlyArray<ModelBar> }) {
   const isEmpty = bars.length === 0 || max <= 0;
   return (
     <div className="usage-chart">
-      <h3 className="usage-chart-title">Cost by model</h3>
+      <h3 className="usage-chart-title">Cost by worker</h3>
       {isEmpty ? (
-        <p className="usage-chart-empty">No usage by model in this period.</p>
+        <p className="usage-chart-empty">No usage by worker in this period.</p>
       ) : (
         <ul className="usage-bar-chart">
           {bars.map((bar) => (
@@ -446,7 +464,7 @@ function ModelsPanel({
         <label className="usage-sort">
           <span>Sort by</span>
           <select value={sort} onChange={(event) => handleSortChange(event.target.value)}>
-            <option value="cost">Most used</option>
+            <option value="cost">Highest cost</option>
             <option value="tokens">Most tokens</option>
             <option value="tasks">Most tasks</option>
           </select>
@@ -457,7 +475,7 @@ function ModelsPanel({
       ) : (
         <div className="usage-breakdown">{rows.map((row) => (
           <div className="usage-row" key={`${row.provider}:${row.profile}:${row.model}`}>
-            <span className="usage-row-name"><strong>{row.profile}</strong><small>{row.provider} · {row.model}</small></span>
+            <span className="usage-row-name"><strong>{row.profile}</strong><small>{providerLabel(row.provider as Provider)} · <span title={row.model}>{row.model.slice(row.model.lastIndexOf("/") + 1)}</span></small></span>
             <span className="usage-row-cost">{formatCost(row.costUsd) ?? "$0.00"}</span>
             <span className="usage-row-tokens">{formatTokenCount(row.tokens)} tokens</span>
             <span className="usage-row-tasks">{row.tasks} {row.tasks === 1 ? "task" : "tasks"}</span>
