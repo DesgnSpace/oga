@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Dozens of small polish fixes across the app: waiting tasks show a fine dashed ring, buttons no longer double-submit, stopping a task always asks first, truncated paths show the full name on hover, settings and usage speak in plain words instead of internal names, and dialogs keep your focus while you type.
 - The red connection bar no longer flashes across the top every time a new task lands. It now shows only when Oga is really unreachable.
 
 ## 0.1.0 - 2026-09-10
