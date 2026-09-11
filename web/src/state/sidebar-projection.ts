@@ -390,6 +390,8 @@ const PRIORITY_ORDER: TaskState[] = [
   "failed",
   "cancelled",
   "blocked",
+  "preparing_checkout",
+  "removing_checkout",
   "running",
   "queued",
   "pending",

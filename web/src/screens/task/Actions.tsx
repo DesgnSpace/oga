@@ -66,12 +66,12 @@ export function executeRemoveFollowUp(taskId: string, index: number) {
 }
 
 export function canCancel(task: TaskLike): boolean {
-  return (["queued", "pending", "running", "needs_input", "blocked"] as string[]).includes(task.state);
+  return (["queued", "preparing_checkout", "pending", "running", "needs_input", "blocked"] as string[]).includes(task.state);
 }
 
 export function canComplete(task: TaskLike): boolean {
   return (
-    (["queued", "pending", "running", "needs_input", "answered", "blocked", "failed", "cancelled"] as string[]).includes(
+    (["queued", "preparing_checkout", "pending", "running", "needs_input", "answered", "blocked", "failed", "cancelled"] as string[]).includes(
       task.state,
     )
   );
@@ -91,7 +91,7 @@ export function canResume(task: TaskLike): boolean {
 }
 
 export function canHandoff(task: TaskLike): boolean {
-  return task.state !== "completed";
+  return !(["completed", "preparing_checkout", "removing_checkout"] as TaskState[]).includes(task.state);
 }
 
 function actionFailure(error: BridgeError, action: string): { title: string; options: { description?: string; detail?: string } } {
@@ -164,12 +164,12 @@ export function archiveBranchTitles(task: TaskToastSource): TaskToastTitles {
   return taskToastTitles(task,
     (name) => ({
       pending: `Archiving ${name} and deleting its branch`,
-      success: `${name} archived and branch deleted`,
+      success: `${name} archived; checkout removal started`,
       failure: `archive ${name} and delete its branch`,
     }),
     {
       pending: "Archiving task and deleting its branch",
-      success: "Task archived and branch deleted",
+      success: "Task archived; checkout removal started",
       failure: "archive this task and delete its branch",
     });
 }
@@ -245,7 +245,7 @@ export function ArchiveBranchDialog({
   const [busy, setBusy] = React.useState(false);
   const titleId = React.useId();
   // SAFETY: task.state is the domain state used by the archive action.
-  const stopsBeforeArchive = !(["completed", "failed", "cancelled"] as TaskState[]).includes(task.state);
+  const stopsBeforeArchive = !(["completed", "failed", "cancelled", "removing_checkout"] as TaskState[]).includes(task.state);
 
   const archive = async () => {
     if (busy) return;

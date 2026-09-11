@@ -28,6 +28,9 @@ export function routingForState(
     case "queued":
     case "answered":
       return { type: "queue" };
+    case "preparing_checkout":
+    case "removing_checkout":
+      return { type: "none" };
     case "pending":
     case "failed":
     case "cancelled":

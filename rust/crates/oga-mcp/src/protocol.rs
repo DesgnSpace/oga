@@ -103,7 +103,7 @@ const HANDOFF_DESCRIPTION: &str = concat!(
 );
 
 const CANCEL_DESCRIPTION: &str = concat!(
-    "Stop a task and kill its worker's process tree, from queued, pending, running, needs_input, answered, or blocked. Instructions queued behind the run are discarded with it. ",
+    "Stop a task and kill its worker's process tree, from queued, preparing_checkout, pending, running, needs_input, answered, or blocked. Instructions queued behind the run are discarded with it. ",
     "The record survives, with `reason` stored as the task's error and shown to the user, so a cancelled task can still be inspected, resumed, handed off, or archived. ",
     "A task already cancelled is left as it is; one that already completed or failed is refused. Given an array of ids it answers per id, and an id it cannot cancel does not fail the rest."
 );
@@ -117,8 +117,8 @@ const COMPLETE_DESCRIPTION: &str = concat!(
 
 const ARCHIVE_DESCRIPTION: &str = concat!(
     "Archive a task, or restore one, without deleting its history: an archived task leaves the active lists and stays addressable by its id. ",
-    "A task still working is stopped first, then archived. A worktree task's checkout is removed when no other live task shares it and it holds no uncommitted work; otherwise it stays, and `checkout` reports which and why. ",
-    "`deleteBranch` also asks for the task's own branch; it is refused unless a worktree task is being archived, and the branch is kept anyway whenever the checkout was kept. `branchOutcome` and `branchReason` report whether it was deleted, kept, or already gone. ",
+    "A task still working is stopped first, then archived. A worktree task moves to removing_checkout while its checkout is checked and removed in the background; no other live task may share it and it must have no uncommitted work. `checkout` reports progress or why it stays. ",
+    "`deleteBranch` also asks for the task's own branch; it is refused unless a worktree task is being archived. The branch stays until checkout removal finishes, and is kept whenever the checkout is kept. `branchOutcome` and `branchReason` report the current decision. ",
     "`archived: false` restores a task; resume unarchives one too, and starts it running again. Given an array of ids it answers per id."
 );
 
@@ -147,7 +147,7 @@ const SCOPE_DESCRIPTION: &str = concat!(
 );
 const WORKTREE_DESCRIPTION: &str = concat!(
     "Run the task in its own git checkout of the repository at cwd, on a branch of its own, so the work lands there instead of in the user's working tree — or `join` a checkout another task already has. ",
-    "Omitted, `false`, or null runs the task directly in cwd. `true` takes every default: the branch is `oga/<slug-of-title>`, falling back to `oga/<taskId>`, and git-ignored directories and `.env*` files are copied in from the original at any depth while editor and agent state is not. ",
+    "Omitted, `false`, or null runs the task directly in cwd. `true` takes every default: the branch is `oga/<slug-of-title>`, falling back to `oga/<taskId>`, and eligible git-ignored directories are copied in while editor and agent state, `.env*`, `target`, `node_modules`, `dist`, `build`, and `.venv` are skipped. Name an excluded path in `link` to copy it. The response can read preparing_checkout while copying finishes. ",
     "cwd must sit inside a git repository holding at least one commit; a repository with no commits is refused. ",
     "The checkout carries the repository's whole history, so the worker can read every commit in it — get the user's approval where that history holds anything they would not send to the provider."
 );
@@ -623,8 +623,8 @@ fn shared_tools() -> Vec<Value> {
             "state".into(),
             described(
                 json!({ "anyOf": [
-                    { "type": "string", "enum": ["queued", "pending", "running", "needs_input", "answered", "blocked", "completed", "failed", "cancelled"] },
-                    { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["queued", "pending", "running", "needs_input", "answered", "blocked", "completed", "failed", "cancelled"] } }
+                    { "type": "string", "enum": ["queued", "preparing_checkout", "removing_checkout", "pending", "running", "needs_input", "answered", "blocked", "completed", "failed", "cancelled"] },
+                    { "type": "array", "minItems": 1, "items": { "type": "string", "enum": ["queued", "preparing_checkout", "removing_checkout", "pending", "running", "needs_input", "answered", "blocked", "completed", "failed", "cancelled"] } }
                 ]}),
                 "Only tasks sitting in this state right now; pass an array to match any of several.",
             ),

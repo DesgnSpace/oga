@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fs,
+    process::Command,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     Router,
@@ -366,6 +372,127 @@ async fn read_routes() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(missing, json!({ "error": "unknown task" }));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn archive_returns_while_a_worktree_copy_is_preparing() {
+    let fixture = Fixture::new();
+    let project = fixture._directory.path().join("project");
+    fs::create_dir_all(&project).expect("project directory");
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&project)
+            .args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"])
+            .args(args)
+            .output()
+            .expect("git is installed");
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-b", "main"]);
+    fs::write(project.join("tracked.txt"), "tracked\n").expect("tracked file");
+    fs::write(project.join(".gitignore"), "slow/\n").expect("ignore file");
+    git(&["add", "tracked.txt", ".gitignore"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "fixture",
+    ]);
+    let slow = project.join("slow");
+    fs::create_dir_all(&slow).expect("slow directory");
+    for index in 0..50_000 {
+        fs::write(slow.join(format!("file-{index}")), "fixture\n").expect("ignored file");
+    }
+
+    fixture.insert_task(&Task {
+        id: "archive-target".into(),
+        kind: Some(TaskKind::Delegated),
+        profile_id: "profile".into(),
+        model: "fake".into(),
+        prompt: "archive me".into(),
+        cwd: fixture.cwd.clone(),
+        state: TaskState::Completed,
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: "2026-01-01T00:01:00.000Z".into(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        allow_questions: true,
+        ..Task::default()
+    });
+
+    let previous_db = std::env::var_os("OGA_DB");
+    unsafe {
+        std::env::set_var("OGA_DB", fixture._directory.path().join("oga.db"));
+    }
+    let delegate_router = fixture.router.clone();
+    let delegate = tokio::spawn(async move {
+        request(
+            &delegate_router,
+            Method::POST,
+            "/api/tasks",
+            Body::from(
+                json!({
+                    "profile": "profile",
+                    "model": "fake",
+                    "prompt": "copy the ignored directory",
+                    "cwd": project,
+                    "tldr": "copy the ignored directory",
+                    "title": "Slow checkout",
+                    "worktree": { "link": ["slow"] }
+                })
+                .to_string(),
+            ),
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let archive_started = Instant::now();
+    let archive_response = tokio::time::timeout(
+        Duration::from_secs(30),
+        request(
+            &fixture.router,
+            Method::PATCH,
+            "/api/tasks/archive-target",
+            Body::from(r#"{"archived":true}"#),
+        ),
+    )
+    .await
+    .expect("archive response");
+    let archive_elapsed = archive_started.elapsed();
+    let (archive_status, archive_body) = json_response(archive_response).await;
+    let delegate_response = delegate.await.expect("delegate response");
+    let (delegate_status, delegate_body) = json_response(delegate_response).await;
+    println!(
+        "archive_wait_ms={} delegate_status={} archive_status={} delegate_state={} archive_state={}",
+        archive_elapsed.as_millis(),
+        delegate_status,
+        archive_status,
+        delegate_body["state"],
+        archive_body["state"]
+    );
+    assert_eq!(delegate_status, StatusCode::ACCEPTED);
+    assert_eq!(archive_status, StatusCode::OK);
+    assert!(archive_elapsed < Duration::from_millis(500));
+    assert_eq!(delegate_body["state"], "preparing_checkout");
+    assert_eq!(archive_body["state"], "completed");
+
+    unsafe {
+        match previous_db {
+            Some(value) => std::env::set_var("OGA_DB", value),
+            None => std::env::remove_var("OGA_DB"),
+        }
+    }
 }
 
 #[tokio::test]

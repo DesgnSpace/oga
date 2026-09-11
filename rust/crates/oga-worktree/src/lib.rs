@@ -25,6 +25,14 @@ pub struct CreatedWorktree {
     pub cwd: PathBuf,
 }
 
+/// A checkout whose destination and branch are known before files are copied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedWorktree {
+    pub created: CreatedWorktree,
+    root: PathBuf,
+    base: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeGitPaths {
     pub root: PathBuf,
@@ -326,15 +334,21 @@ fn is_default_link(path: &str, is_directory: bool) -> bool {
     if components.iter().any(|component| {
         matches!(
             *component,
-            ".claude" | ".agents" | ".DS_Store" | ".plans" | ".malico"
+            ".claude"
+                | ".agents"
+                | ".DS_Store"
+                | ".plans"
+                | ".malico"
+                | "target"
+                | "node_modules"
+                | "dist"
+                | "build"
+                | ".venv"
         ) || component.ends_with(".bun-build")
     }) {
         return false;
     }
-    let Some(name) = components.last() else {
-        return false;
-    };
-    is_directory || name.starts_with(".env")
+    !components.is_empty() && is_directory
 }
 
 fn deduplicate_default_links(candidates: Vec<String>) -> Vec<String> {
@@ -628,6 +642,8 @@ pub fn worktree_active(state: TaskState) -> bool {
     matches!(
         state,
         TaskState::Queued
+            | TaskState::PreparingCheckout
+            | TaskState::RemovingCheckout
             | TaskState::Pending
             | TaskState::Running
             | TaskState::NeedsInput
@@ -688,6 +704,27 @@ pub async fn create_task_worktree_at(
     request: &WorktreeRequest,
     title: Option<&str>,
 ) -> Result<CreatedWorktree, WorktreeError> {
+    let planned = plan_task_worktree_at(root_dir, origin_cwd, task_id, request, title).await?;
+    prepare_task_worktree(&planned).await?;
+    Ok(planned.created)
+}
+
+pub async fn plan_task_worktree(
+    origin_cwd: &Path,
+    task_id: &str,
+    request: &WorktreeRequest,
+    title: Option<&str>,
+) -> Result<PlannedWorktree, WorktreeError> {
+    plan_task_worktree_at(&worktrees_root(), origin_cwd, task_id, request, title).await
+}
+
+pub async fn plan_task_worktree_at(
+    root_dir: &Path,
+    origin_cwd: &Path,
+    task_id: &str,
+    request: &WorktreeRequest,
+    title: Option<&str>,
+) -> Result<PlannedWorktree, WorktreeError> {
     let root_dir = absolute_path(root_dir)?;
     if request.join.is_some() {
         return Err(WorktreeError::Message(
@@ -731,8 +768,6 @@ pub async fn create_task_worktree_at(
     };
     let links = planned_links(origin_cwd, &requested_links).await?;
     let checkout = root_dir.join(task_id);
-    let lock = repository_lock(&root);
-    let _guard = lock.lock().await;
     let branch = match request.branch.as_deref() {
         Some(branch) => branch.to_owned(),
         None => available_default_branch(&root, task_id, title).await?,
@@ -747,33 +782,61 @@ pub async fn create_task_worktree_at(
             "invalid worktree branch: {branch}"
         )));
     }
-    create_directory(&root_dir)?;
+    let worktree = TaskWorktree {
+        origin_cwd: origin_cwd.to_string_lossy().into_owned(),
+        path: checkout.to_string_lossy().into_owned(),
+        branch,
+        links: (!links.is_empty()).then_some(links),
+    };
+    Ok(PlannedWorktree {
+        created: CreatedWorktree {
+            cwd: checkout_cwd(&checkout, &root, origin_cwd)?,
+            worktree,
+        },
+        root,
+        base,
+    })
+}
+
+/// Create a planned checkout. The repository lock belongs only to this
+/// detached operation, including its potentially slow file copy.
+pub async fn prepare_task_worktree(planned: &PlannedWorktree) -> Result<(), WorktreeError> {
+    let lock = repository_lock(&planned.root);
+    let _guard = lock.lock().await;
+    let checkout = PathBuf::from(&planned.created.worktree.path);
+    let parent = checkout
+        .parent()
+        .ok_or_else(|| WorktreeError::Message("worktree path has no parent".into()))?;
+    create_directory(parent)?;
     let add_args = vec![
         "worktree".into(),
         "add".into(),
         "-b".into(),
-        branch.clone(),
-        checkout.to_string_lossy().into_owned(),
-        base,
+        planned.created.worktree.branch.clone(),
+        planned.created.worktree.path.clone(),
+        planned.base.clone(),
     ];
-    let added = run_git(&root, &add_args).await?;
+    let added = run_git(&planned.root, &add_args).await?;
     if !added.succeeded() {
         return Err(WorktreeError::Message(format!(
             "could not create a worktree for this task: {}",
             added.stderr.trim()
         )));
     }
-    let worktree = TaskWorktree {
-        origin_cwd: origin_cwd.to_string_lossy().into_owned(),
-        path: checkout.to_string_lossy().into_owned(),
-        branch,
-        links: (!links.is_empty()).then_some(links.clone()),
-    };
-    match setup_checkout(&checkout, &root, origin_cwd, &links) {
-        Ok(cwd) => Ok(CreatedWorktree { worktree, cwd }),
+    let root = planned.root.clone();
+    let origin = PathBuf::from(&planned.created.worktree.origin_cwd);
+    let links = planned.created.worktree.links.clone().unwrap_or_default();
+    let copied =
+        tokio::task::spawn_blocking(move || setup_checkout(&checkout, &root, &origin, &links))
+            .await
+            .map_err(|error| WorktreeError::Message(format!("checkout copy stopped: {error}")))?;
+    match copied {
+        Ok(_) => Ok(()),
         Err(error) => {
-            let _ = remove_task_worktree_locked(Some(&root), &worktree, true).await;
-            let _ = remove_task_branch_locked(&root, &worktree).await;
+            let _ =
+                remove_task_worktree_locked(Some(&planned.root), &planned.created.worktree, true)
+                    .await;
+            let _ = remove_task_branch_locked(&planned.root, &planned.created.worktree).await;
             Err(error)
         }
     }
@@ -1033,12 +1096,14 @@ mod tests {
 
     #[test]
     fn default_link_selection_accepts_supported_paths_only() {
-        assert!(is_default_link("web/node_modules", true));
-        assert!(is_default_link("rust/target", true));
-        assert!(is_default_link("web/.env.test", false));
+        assert!(!is_default_link("web/node_modules", true));
+        assert!(!is_default_link("rust/target", true));
+        assert!(!is_default_link("output/dist", true));
+        assert!(!is_default_link("tools/.venv", true));
+        assert!(!is_default_link("web/.env.test", false));
         assert!(is_default_link("generated-out", true));
         assert!(!is_default_link(".claude/node_modules", true));
         assert!(!is_default_link("cache.bun-build", true));
-        assert!(is_default_link(".env.backup.txt", false));
+        assert!(!is_default_link(".env.backup.txt", false));
     }
 }

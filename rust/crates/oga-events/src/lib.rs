@@ -3803,6 +3803,8 @@ fn task_state_result(value: &Value, subject: &str) -> Option<String> {
 fn oga_state_label(state: &str) -> &'static str {
     match state.to_ascii_lowercase().as_str() {
         "queued" => "waiting to start",
+        "preparing_checkout" => "preparing checkout",
+        "removing_checkout" => "removing checkout",
         "pending" => "waiting to start",
         "running" | "answered" => "in progress",
         "needs_input" => "waiting for an answer",
@@ -4322,6 +4324,11 @@ fn lifecycle_title(event_type: &str) -> String {
         "answered" => "Question answered",
         "blocked" => "Task blocked",
         "cancelled" => "Task cancelled",
+        "checkout_prepared" => "Checkout ready",
+        "checkout_preparation_failed" => "Checkout preparation failed",
+        "checkout_removal_started" => "Removing checkout",
+        "checkout_removed" => "Checkout removed",
+        "checkout_removal_failed" => "Checkout removal failed",
         "line_dropped" | "event_dropped" | "events_truncated" => ACTIVITY_SKIPPED_TITLE,
         "history_dropped" => "History removed",
         "handed_off" => "Handed off",
@@ -4376,7 +4383,11 @@ fn system_subtype(payload: &BTreeMap<String, Value>) -> &str {
 
 fn default_kind(event_type: &str, payload: &BTreeMap<String, Value>) -> EventKind {
     match event_type {
-        "failed" | "blocked" | "cancelled" => EventKind::Error,
+        "failed"
+        | "blocked"
+        | "cancelled"
+        | "checkout_preparation_failed"
+        | "checkout_removal_failed" => EventKind::Error,
         "scope_refusal" | "hold_expired" | "network_retry_exhausted" => EventKind::Error,
         // Losing a line of output is a gap in the record, not a failed run;
         // it reads as one notice rather than an error per drop.

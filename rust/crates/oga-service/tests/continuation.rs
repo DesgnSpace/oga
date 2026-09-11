@@ -312,6 +312,7 @@ async fn cancel_and_timeout_cover_every_legal_source_state() {
     let (directory, store, dispatcher) = service();
     let states = [
         TaskState::Queued,
+        TaskState::PreparingCheckout,
         TaskState::Pending,
         TaskState::Running,
         TaskState::NeedsInput,
@@ -558,9 +559,23 @@ async fn archives_a_clean_worktree_and_deletes_its_branch() {
     .await
     .expect("archive");
 
-    assert_eq!(result.checkout.as_deref(), Some("removed"));
-    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
-    assert!(result.branch_reason.is_none());
+    assert_eq!(result.task.state, TaskState::RemovingCheckout);
+    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
+    assert_eq!(result.branch, Some(BranchOutcome::Kept));
+    assert_eq!(
+        result.branch_reason.as_deref(),
+        Some("checkout removal is in progress; the branch is kept until it finishes")
+    );
+    for _ in 0..100 {
+        if dispatcher.task("archive-worktree").expect("task").state == TaskState::Completed {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        dispatcher.task("archive-worktree").expect("task").state,
+        TaskState::Completed
+    );
     assert!(!Path::new(&created.worktree.path).exists());
     assert!(
         !branch_exists(&repo, &created.worktree.branch)
@@ -629,8 +644,26 @@ async fn prunes_a_missing_checkout_before_deleting_its_branch() {
     .await
     .expect("archive");
 
-    assert_eq!(result.checkout.as_deref(), Some("nothing to remove"));
-    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
+    assert_eq!(result.task.state, TaskState::RemovingCheckout);
+    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
+    for _ in 0..100 {
+        if dispatcher
+            .task("archive-missing-checkout")
+            .expect("task")
+            .state
+            == TaskState::Completed
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        dispatcher
+            .task("archive-missing-checkout")
+            .expect("task")
+            .state,
+        TaskState::Completed
+    );
     assert!(
         !branch_exists(&repo, &created.worktree.branch)
             .await
@@ -698,16 +731,26 @@ async fn keeps_uncommitted_worktree_and_branch_when_archiving() {
     .await
     .expect("archive");
 
-    assert!(
-        result
-            .checkout
-            .as_deref()
-            .is_some_and(|checkout| checkout.starts_with("kept because it has uncommitted work: "))
-    );
+    assert_eq!(result.task.state, TaskState::RemovingCheckout);
+    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
     assert_eq!(result.branch, Some(BranchOutcome::Kept));
     assert_eq!(
         result.branch_reason.as_deref(),
-        Some("checkout was kept, so the branch was kept")
+        Some("checkout removal is in progress; the branch is kept until it finishes")
+    );
+    for _ in 0..100 {
+        let task = dispatcher.task("archive-uncommitted").expect("task");
+        if task.state == TaskState::Completed && task.error.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let archived = dispatcher.task("archive-uncommitted").expect("task");
+    assert_eq!(archived.state, TaskState::Completed);
+    assert!(
+        archived
+            .error
+            .is_some_and(|error| error.starts_with("kept because it has uncommitted work: "))
     );
     assert!(Path::new(&created.worktree.path).exists());
     assert!(
@@ -795,8 +838,15 @@ async fn archive_keeps_a_checkout_used_by_a_settled_joined_task() {
     )
     .await
     .expect("archive joined task");
-    assert_eq!(result.checkout.as_deref(), Some("removed"));
-    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
+    assert_eq!(result.task.state, TaskState::RemovingCheckout);
+    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
+    assert_eq!(result.branch, Some(BranchOutcome::Kept));
+    for _ in 0..100 {
+        if dispatcher.task("archive-joined").expect("task").state == TaskState::Completed {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert!(!Path::new(&created.worktree.path).exists());
 }
 

@@ -48,6 +48,8 @@ export function taskDotTone(state: TaskState): TaskDotTone {
     case "blocked":
       return "warning";
     case "queued":
+    case "preparing_checkout":
+    case "removing_checkout":
     case "running":
     case "answered":
     case "cancelled":
