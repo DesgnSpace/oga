@@ -42,6 +42,8 @@ export interface ModalProps {
 export function Modal({ open, onClose, labelledBy, children, className }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -52,13 +54,16 @@ export function Modal({ open, onClose, labelledBy, children, className }: ModalP
     const previousOverflow = shouldLockBodyScroll ? document.body.style.overflow : undefined;
     if (shouldLockBodyScroll) document.body.style.overflow = "hidden";
 
-    const focusable = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []);
+    const focusable = () =>
+      Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []).filter(
+        (element) => element.offsetParent !== null && element.getAttribute("aria-hidden") !== "true",
+      );
     (focusable()[0] ?? dialogRef.current)?.focus();
 
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -86,7 +91,7 @@ export function Modal({ open, onClose, labelledBy, children, className }: ModalP
       if (shouldLockBodyScroll) document.body.style.overflow = previousOverflow ?? "";
       openerRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

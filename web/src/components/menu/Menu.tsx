@@ -2,7 +2,7 @@
 // trigger and the sidebar row context menu. One presentational component,
 // different items per caller.
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 export interface MenuAction {
   key: string;
@@ -25,9 +25,12 @@ export function MenuPanel({ sections, prompt, className, onClose }: MenuPanelPro
   const items = visible.flat();
   const enabledItems = items.filter((item) => !item.disabled);
   const [focusedKey, setFocusedKey] = useState(enabledItems[0]?.key);
+  const promptId = useId();
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const openerRef = useRef<HTMLElement | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -39,7 +42,7 @@ export function MenuPanel({ sections, prompt, className, onClose }: MenuPanelPro
     const closeOnPointer = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (target && (menuRef.current?.contains(target) || openerRef.current?.contains(target))) return;
-      onClose?.();
+      onCloseRef.current?.();
     };
     document.addEventListener("pointerdown", closeOnPointer);
     return () => document.removeEventListener("pointerdown", closeOnPointer);
@@ -84,11 +87,16 @@ export function MenuPanel({ sections, prompt, className, onClose }: MenuPanelPro
       ref={menuRef}
       className={`menu-panel${className ? ` ${className}` : ""}`}
       role="menu"
+      aria-describedby={prompt ? promptId : undefined}
       onKeyDown={handleKeyDown}
     >
-      {prompt && <p className="menu-prompt">{prompt}</p>}
+      {prompt && (
+        <p className="menu-prompt" id={promptId} role="presentation">
+          {prompt}
+        </p>
+      )}
       {visible.map((section, index) => (
-        <div className="menu-section" key={section[0]?.key ?? index}>
+        <div className="menu-section" role="group" key={section[0]?.key ?? index}>
           {index > 0 && <div className="menu-separator" role="separator" />}
           {section.map((item) => (
             <button

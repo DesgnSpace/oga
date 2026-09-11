@@ -1483,6 +1483,10 @@ h1 {
     outline: none;
 }
 
+.menu-item:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
 .menu-item-destructive {
     color: var(--color-danger);
 }
@@ -3468,10 +3472,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     right: var(--space-3);
     z-index: var(--z-raised);
     border: 0;
-}
-
-.modal-close:focus-visible {
-    outline: none;
 }
 
 .modal-body {
