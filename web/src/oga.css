@@ -1250,7 +1250,7 @@ a {
     min-height: 0;
     overflow: hidden;
     margin: 0;
-    padding: var(--gutter);
+    padding: var(--space-3);
 }
 
 .eyebrow {
@@ -1338,6 +1338,8 @@ h1 {
     min-height: 0;
     max-height: 100%;
     flex-direction: column;
+    overflow: hidden;
+    border-radius: var(--radius);
 }
 
 .task-detail-content-main {
