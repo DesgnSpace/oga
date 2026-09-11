@@ -268,6 +268,11 @@ impl LoopbackClient {
             .await
     }
 
+    pub async fn get_task_branch(&self, task_id: &str) -> Result<crate::TaskBranch, ClientError> {
+        self.get_json(self.endpoint(&["api", "tasks", task_id, "branch"]))
+            .await
+    }
+
     pub async fn mark_task_viewed(&self, task_id: &str) -> Result<(), ClientError> {
         self.send_empty(
             Method::POST,

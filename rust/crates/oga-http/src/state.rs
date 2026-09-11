@@ -137,6 +137,31 @@ pub async fn get_task_diff(
     Ok(Json(serde_json::to_value(diff).unwrap()))
 }
 
+pub async fn get_task_branch(
+    State(state): State<HttpState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<impl IntoResponse, HttpError> {
+    let task = load_task(&state.store, &id)?
+        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
+        .ok_or_else(|| HttpError::not_found("unknown task"))?;
+    let recorded = || {
+        task.worktree
+            .as_ref()
+            .map(|worktree| worktree.branch.clone())
+            .or(task.branch.clone())
+    };
+    let cwd = Path::new(&task.cwd);
+    let response = if tokio::fs::metadata(cwd).await.is_ok() {
+        match oga_worktree::current_branch(cwd).await {
+            Ok(branch) => json!({ "branch": branch, "source": "checkout" }),
+            Err(_) => json!({ "branch": recorded(), "source": "recorded" }),
+        }
+    } else {
+        json!({ "branch": recorded(), "source": "recorded" })
+    };
+    Ok(Json(response))
+}
+
 pub async fn get_task_events(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,

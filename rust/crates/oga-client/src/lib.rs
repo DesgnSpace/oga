@@ -23,6 +23,20 @@ use thiserror::Error;
 #[cfg(not(target_arch = "wasm32"))]
 pub use loopback::{ClientError, EventStream, LoopbackClient};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBranch {
+    pub branch: Option<String>,
+    pub source: TaskBranchSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskBranchSource {
+    Checkout,
+    Recorded,
+}
+
 /// Query parameters for the broker state snapshot.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

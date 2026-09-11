@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { broker } from "@/bridge/client";
 import type { Task, TaskEventView } from "@/bridge/types";
 import { copyText, shortId } from "@/lib/identifiers";
 import { toast } from "@/state/toast";
@@ -64,14 +65,32 @@ export function TaskMetadata({
   events: TaskEventView[];
   contextWindow: number | undefined;
 }) {
-  const branch = task.worktree?.branch ?? task.branch;
+  const storedBranch = task.worktree?.branch ?? task.branch;
+  const [liveBranch, setLiveBranch] = useState<{ branch?: string; source: "checkout" | "recorded" }>();
+  useEffect(() => {
+    let active = true;
+    setLiveBranch(undefined);
+    void broker.taskBranch(task.id).then((result) => {
+      if (active && result.ok) setLiveBranch(result.value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [task.id]);
+  const branch = liveBranch?.branch ?? storedBranch;
   const usage = contextUsage(events, contextWindow);
 
   return (
     <div className="task-metadata" aria-label="Task details">
       <CopyableDetail label="Task" value={task.id} shorten />
       {task.sessionId && <CopyableDetail label="Session" value={task.sessionId} shorten />}
-      {branch && <CopyableDetail label="Branch" value={branch} />}
+      {branch && (
+        <CopyableDetail
+          label="Branch"
+          value={branch}
+          title={liveBranch?.source === "recorded" ? "Recorded when the task started; the checkout is gone" : undefined}
+        />
+      )}
       {task.worktree ? (
         <CopyableDetail
           label="Worktree"
