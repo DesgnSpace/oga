@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The red connection bar no longer flashes across the top every time a new task lands. It now shows only when Oga is really unreachable.
+
 ## 0.1.0 - 2026-09-10
 
 - Replies, briefs and update notes now show tables, checklists, crossed-out words, dividers, and lists inside lists, instead of the raw symbols they were written with.
