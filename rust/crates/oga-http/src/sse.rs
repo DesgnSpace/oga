@@ -230,15 +230,18 @@ async fn run_stream(
         if sender.is_closed() {
             return;
         }
-        let rows = match list_events(&store, cursor, MAX_BATCH_EVENTS, &task_ids) {
-            Ok(rows) => rows,
-            Err(_) => return,
+        let reader = Arc::clone(&store);
+        let filter = task_ids.clone();
+        let batch = tokio::task::spawn_blocking(move || {
+            let rows = list_events(&reader, cursor, MAX_BATCH_EVENTS, &filter)?;
+            let contexts = load_pointer_contexts(&reader, &rows)?;
+            Ok::<_, HttpError>((rows, contexts))
+        })
+        .await;
+        let Ok(Ok((rows, contexts))) = batch else {
+            return;
         };
         if !rows.is_empty() {
-            let contexts = match load_pointer_contexts(&store, &rows) {
-                Ok(contexts) => contexts,
-                Err(_) => return,
-            };
             for event in rows {
                 if sender.is_closed() {
                     return;
