@@ -52,11 +52,11 @@ export function tabLabel(tab: SettingsTab): string {
     case "memories":
       return "Memories";
     case "prompts":
-      return "Worker Prompt";
+      return "Worker instructions";
     case "callerPrompts":
-      return "Brief Rules";
+      return "Brief rules";
     case "storage":
-      return "Storage";
+      return "Task history";
     case "about":
       return "About";
   }

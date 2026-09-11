@@ -297,10 +297,6 @@ export default function SettingsPage({
       </aside>
 
       <div className="settings-content">
-        <header className="settings-header">
-          <p className="settings-description">Choose how Oga works with your projects and command-line tools.</p>
-        </header>
-
         {state.error ? (
           <div className="settings-message settings-message-error" role="alert">
             <strong>Couldn&apos;t load workspace settings</strong>
@@ -604,7 +600,7 @@ const WORK_LABELS = {
 function workLabel(when: WorkKind[]): string {
   if (when.length === 0) return "Everything else";
   const [first, ...rest] = when.map((kind) => WORK_LABELS[kind]);
-  return [first, ...rest.map((label) => label.toLowerCase())].join(", ");
+  return [first, ...rest].join(", ");
 }
 
 function destinationLabel(destination: { profileId?: string; model?: string }): string {
@@ -783,7 +779,9 @@ function WorkersPanel({
           {state.overview === "loading" ? (
             <p className="settings-status">Loading workers…</p>
           ) : state.overview === "error" ? (
-            <p className="settings-status">Workers are unavailable. Try again above.</p>
+            <p className="settings-status">
+              Couldn&apos;t load workers. <button className="text-button" type="button" onClick={() => void onRefresh()}>Try again</button>
+            </p>
           ) : state.profiles.length === 0 ? (
             editor.kind === "add" ? null : (
               <EmptyState
@@ -1534,7 +1532,7 @@ function ProfileEditor({
                   onChange={(e) => setTags(e.target.value)}
                   placeholder="build, review"
                 />
-                <small id="worker-form-tags-help">Separate tags with commas.</small>
+                <small id="worker-form-tags-help">Tags help Oga pick this worker for matching work. Separate with commas.</small>
               </div>
             </div>
           </div>
@@ -1631,7 +1629,7 @@ function InstallResultRow({ result }: { result: McpInstallResult }) {
       <div>
         <strong>{result.client}</strong>
         <p>
-          {result.message} - {result.path}
+          {result.message} · {result.path}
         </p>
       </div>
     </div>
@@ -1691,7 +1689,7 @@ function MemoriesPanel({
         </div>
         <SearchField className="settings-search" value={query} onChange={setQuery} placeholder="Search memories" />
       </div>
-      <p className="settings-helper">These notes are shared with workers in the project. Values stay on the broker until you open a project.</p>
+      <p className="settings-helper">These notes are shared with workers in the project. Values stay in Oga until you open a project.</p>
       <div className="settings-memory-layout">
         <nav className="settings-memory-projects" aria-label="Projects with memories">
           {state.memories.projects.length === 0 ? (
@@ -1741,7 +1739,7 @@ function MemoriesPanel({
             />
           ) : filtered.length === 0 ? (
             <EmptyState
-              title="No memories yet"
+              title="No memories match"
               hint="Try a different filter."
               className="settings-placeholder"
               action={<button className="text-button" type="button" onClick={() => setQuery("")}>Clear filter</button>}
@@ -1899,7 +1897,7 @@ function PromptsPanel({
         <div className="settings-prompt-editor">
           <div className="settings-prompt-meta">
             <span className="settings-muted">
-              {prompts.configPath ? "Set in .oga.yaml" : prompts.written ? "Set for this scope" : "Inherited"}
+              {prompts.configPath ? "Set by the project file" : prompts.written ? "Set for this project" : "Using the default for all projects"}
             </span>
             {prompts.configPath === undefined && prompts.written ? (
               <button className="text-button" type="button" onClick={handleReset}>
@@ -1915,7 +1913,7 @@ function PromptsPanel({
           />
           <p className="settings-helper">{surface.helper}</p>
           {prompts.configPath !== undefined ? (
-            <p className="settings-helper">Set in {prompts.configPath}. Edit that file to change them.</p>
+            <p className="settings-helper">Set by the project file. Edit that file to change them.</p>
           ) : (
             <div className="settings-form-footer">
               {isPromptDirty(prompts) ? (
@@ -1974,14 +1972,14 @@ function CleanupPanel({
   const save = async () => {
     if (!settings || state.cleanup.saving) return;
     setState((s) => ({ ...s, cleanup: { ...s.cleanup, saving: true, error: undefined } }));
-    const lifecycle = toast.pending("Saving history settings");
+    const lifecycle = toast.pending("Saving task history settings");
     const result = await broker.putCleanup(settings);
     if (result.ok) {
-      lifecycle.success("History settings saved");
+      lifecycle.success("Task history settings saved");
       setState((s) => ({ ...s, cleanup: { ...s.cleanup, saving: false, snapshot: result.value } }));
       setDraft(result.value.settings);
     } else {
-      lifecycle.error("Couldn't save history settings", { description: "Try again.", detail: result.error.message });
+      lifecycle.error("Couldn't save task history settings", { description: "Try again.", detail: result.error.message });
       setState((s) => ({ ...s, cleanup: { ...s.cleanup, saving: false, error: result.error.message } }));
     }
   };
@@ -2009,7 +2007,7 @@ function CleanupPanel({
       <div className="settings-section-heading">
         <div>
           <p className="eyebrow">Task history</p>
-          <h2>Manage task history</h2>
+          <h2>Task history</h2>
         </div>
         <button className="text-button" type="button" onClick={() => void reload()} disabled={state.cleanup.loading}>
           Refresh
@@ -2054,7 +2052,7 @@ function CleanupPanel({
           </div>
           <div className="settings-inline-actions">
             <button className="settings-button settings-button-primary" type="button" onClick={() => void save()} disabled={state.cleanup.saving || offline}>
-              {state.cleanup.saving ? "Saving…" : "Save storage choices"}
+              {state.cleanup.saving ? "Saving…" : "Save"}
             </button>
           </div>
           {snapshot ? <CleanupPreview plan={snapshot.plan} /> : null}
@@ -2076,7 +2074,7 @@ function CleanupPanel({
               </button>
             )}
           </div>
-          {hasUnsavedChanges ? <p className="settings-muted">Save your history settings to refresh this preview before removing logs.</p> : null}
+          {hasUnsavedChanges ? <p className="settings-muted">Save your task history settings to refresh this preview before removing logs.</p> : null}
           {state.cleanup.result ? <p className="settings-success" role="status">Removed {state.cleanup.result.plan.events.toLocaleString()} logs and reclaimed {formatBytes(state.cleanup.result.fileBytesBefore - state.cleanup.result.fileBytesAfter)}.</p> : null}
         </>
       ) : null}
@@ -2127,7 +2125,7 @@ function AboutPanel({
     if (result.ok) {
       setState((s) => ({ ...s, health: result.value }));
     } else {
-      toast.error("Couldn't check Oga", { description: "Check that the broker is running and try again.", detail: result.error.message });
+      toast.error("Couldn't check Oga", { description: "Check that Oga is running and try again.", detail: result.error.message });
     }
   }, [setState]);
 
@@ -2170,7 +2168,7 @@ function AboutPanel({
         ) : (
           <div className="settings-message settings-message-error">
             <strong>Oga is unreachable</strong>
-            <p>Check that the broker is running, then try again.</p>
+            <p>Check that Oga is running, then try again.</p>
             <button className="settings-button" type="button" onClick={handleRefresh}>
               Try again
             </button>
@@ -2213,7 +2211,7 @@ function AboutPanel({
             </button>
           </>
         ) : updateStatus.kind === "unavailable" ? (
-          <p className="settings-status">Updates are available in the desktop app.</p>
+          <p className="settings-status">Update Oga from the desktop app.</p>
         ) : (
           <button className="settings-button" type="button" onClick={onCheckForUpdates}>
             Check for updates

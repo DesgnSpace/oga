@@ -341,12 +341,12 @@ describe("storage tab", () => {
     );
     render(<SettingsPage />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Storage" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Task history" }));
     expect(await screen.findByRole("heading", { name: "Logs ready to remove" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Remove old logs automatically/ }));
     expect(screen.getByRole("button", { name: "Review and remove now" }).hasAttribute("disabled")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Save storage choices" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(saved?.enabled).toBe(true));
 
     fireEvent.click(screen.getByRole("button", { name: "Review and remove now" }));
@@ -481,12 +481,12 @@ describe("worker instructions", () => {
     setTransport(makeTransport());
     render(<SettingsPage />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Worker Prompt" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Worker instructions" }));
 
-    const editor = await screen.findByLabelText("Worker instructions");
+    const editor = await screen.findByRole("textbox", { name: "Worker instructions" });
     expect(editor.hasAttribute("readonly")).toBe(true);
     expect(screen.getByDisplayValue("1. Blocked means stop.")).toBeTruthy();
-    expect(screen.getByText("Set in /tmp/project/.oga.yaml. Edit that file to change them.")).toBeTruthy();
+    expect(screen.getByText("Set by the project file. Edit that file to change them.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 });
@@ -504,7 +504,7 @@ describe("brief rules", () => {
     setTransport(makeTransport());
     render(<SettingsPage />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Brief Rules" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Brief rules" }));
 
     const editor = await screen.findByLabelText("How briefs are written");
     expect(editor.hasAttribute("readonly")).toBe(true);
@@ -516,7 +516,7 @@ describe("brief rules", () => {
     setTransport(makeTransport());
     render(<SettingsPage />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Brief Rules" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Brief rules" }));
     const editor = await screen.findByLabelText("How briefs are written");
     fireEvent.change(editor, { target: { value: "{{default}} Name the entry file." } });
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
