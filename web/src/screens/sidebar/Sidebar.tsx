@@ -102,8 +102,7 @@ const SETTLED_STATES = new Set(["completed", "failed", "cancelled"]);
 
 function taskSubtitle(task: TaskSummary, state: SidebarState): string {
   const profile = state.profiles.find((p) => p.id === task.profileId);
-  const worker = profile?.label ?? "Unknown worker";
-  const parts = [worker, taskProjectLabel(task)];
+  const parts = [profile?.label, taskProjectLabel(task)].filter((part): part is string => part !== undefined);
   // A task nobody stopped is waiting for something; the row says what, because
   // otherwise it reads as stalled.
   if (isExplainedWait(task.hold)) parts.push(waitLabel(task.hold));
@@ -686,7 +685,11 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
         <a className="icon-button" href="/usage" aria-label="Usage" title="Usage ⇧⌘U" onClick={(event) => {
           if (!handlesClick(event)) return;
           event.preventDefault();
-          onOpenUsage?.();
+          if (onOpenUsage) onOpenUsage();
+          else {
+            window.history.pushState(null, "", "/usage");
+            window.dispatchEvent(new PopStateEvent("popstate"));
+          }
         }}><UsageIcon /></a>
         <button
           className="icon-button"
@@ -714,8 +717,9 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
           value={sidebar.search}
           onChange={handleSearch}
           placeholder="Search tasks"
-          aria-label="Search tasks by title"
-          title="Search tasks ⌘K"
+          aria-label="Search tasks"
+          title="Search tasks (⌘K)"
+          data-task-search
           onKeyDown={(event) => {
             if (event.key === "ArrowDown" && taskIds.length > 0) {
               event.preventDefault();
@@ -756,11 +760,9 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
             >
               <div className="filter-popover-header">
                 <h2>Filter and sort</h2>
-                {filtersAreActive && (
-                  <button className="text-button" type="button" onClick={handleResetFilters}>
-                    Reset
-                  </button>
-                )}
+                <button className="text-button" type="button" disabled={!filtersAreActive} onClick={handleResetFilters}>
+                  Reset
+                </button>
               </div>
 
               <fieldset className="filter-section">
@@ -833,7 +835,7 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
                       onChange={() => handleProject(project.id)}
                     />
                     <span>{project.name}</span>
-                    <span className="filter-option-count">{project.count}</span>
+                    <span className="filter-option-count">{project.count}<span className="visually-hidden"> tasks</span></span>
                   </label>
                 ))}
               </fieldset>
@@ -1012,14 +1014,14 @@ function SidebarRowView({
             <span className="task-title">{label}</span>
             <span className="task-time" title={absoluteTime(task.updatedAt)}>{relativeTime(task.updatedAt)}</span>
           </span>
-          <span className="task-subtitle" title={task.model}>{subtitle}</span>
+          <span className="task-subtitle" title={subtitle}>{subtitle}</span>
         </span>
       </a>
       <button
         className="icon-button sidebar-row-menu-button"
         type="button"
-        aria-label={`Actions for ${label}`}
-        title={openMenuTaskId === task.id ? undefined : "Task actions"}
+        aria-label={`Task actions for ${label}`}
+        title="Task actions"
         onClick={(event) => onOpenMenu(event, task)}
       >
         <MoreIcon />
@@ -1045,7 +1047,7 @@ function SidebarFooter({
 }) {
   if (state.loadState === "loading" && state.tasks.length === 0) {
     return (
-      <div className="sidebar-skeleton" aria-label="Loading tasks…" aria-busy="true">
+      <div className="sidebar-skeleton" role="status" aria-label="Loading tasks…" aria-busy="true">
         <span className="sidebar-skeleton-row" />
         <span className="sidebar-skeleton-row" />
         <span className="sidebar-skeleton-row" />
@@ -1056,7 +1058,7 @@ function SidebarFooter({
   }
   if (state.loadState === "error" && state.tasks.length === 0) {
     return (
-      <div className="sidebar-message sidebar-message-error">
+      <div className="sidebar-message sidebar-message-error" role="status">
         <p>Couldn&apos;t load tasks.</p>
         <button className="text-button" type="button" onClick={onRefresh}>
           Try again
@@ -1088,7 +1090,7 @@ function SidebarFooter({
   if (emptyMessage) {
     return (
       <EmptyState
-        title="No tasks yet"
+        title={emptyMessage}
         hint={emptyMessage === NO_TASKS_MESSAGE ? "Start a task from the command line." : "Try changing your search or filters."}
         className="sidebar-message"
       />
@@ -1107,9 +1109,12 @@ function SidebarFooter({
   if (state.tasksHasMore) {
     const label = state.isLoadingMore ? "Loading…" : state.loadMoreFailed ? "Couldn't load more. Try again" : "Load more";
     return (
-      <button className="load-more" type="button" disabled={state.isLoadingMore} onClick={onLoadMore}>
-        {label}
-      </button>
+      <>
+        {state.loadMoreFailed && <span role="status">Couldn&apos;t load more.</span>}
+        <button className="load-more" type="button" disabled={state.isLoadingMore} onClick={onLoadMore}>
+          {state.loadMoreFailed ? "Try again" : label}
+        </button>
+      </>
     );
   }
   return null;

@@ -686,7 +686,7 @@ a {
     font-size: var(--text-base);
 }
 
-.search-field input:focus-visible {
+.sidebar-search input:focus-visible {
     outline: none;
 }
 
@@ -893,6 +893,11 @@ a {
 .sidebar-task-row:focus-within .sidebar-row-menu-button {
     opacity: 1;
     pointer-events: auto;
+}
+
+.sidebar-task-row:hover .task-time,
+.sidebar-task-row:focus-within .task-time {
+    margin-right: var(--control-height);
 }
 
 .sidebar-group {
@@ -1171,7 +1176,7 @@ a {
 
 .sidebar-skeleton-row {
     display: block;
-    height: 56px;
+    height: 36px;
     border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
     background: var(--color-bg);
 }

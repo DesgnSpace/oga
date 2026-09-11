@@ -151,14 +151,14 @@ describe("the sidebar", () => {
     expect(screen.getAllByText(/^Night Shift/)).toHaveLength(2);
   });
 
-  it("falls back to a sensible subtitle when no worker is recorded", async () => {
+  it("omits the worker from the subtitle when it is not recorded", async () => {
     setTransport(transport({ profiles: [] }));
     const controller = new SidebarController();
 
     render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
 
     await screen.findByText("second task");
-    expect(screen.getAllByText(/^Unknown worker/)).toHaveLength(2);
+    expect(screen.queryByText(/^Unknown worker/)).toBeNull();
   });
 
   it("rebuilds the projection when an outcome view changes", async () => {

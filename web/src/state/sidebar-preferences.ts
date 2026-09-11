@@ -23,7 +23,7 @@ export const TASK_GROUPINGS: TaskGrouping[] = ["parent", "project", "status", "n
 export function taskGroupingLabel(grouping: TaskGrouping): string {
   switch (grouping) {
     case "parent":
-      return "With sub-tasks";
+      return "Parent task";
     case "project":
       return "Project";
     case "status":
@@ -41,9 +41,9 @@ export function taskSortLabel(sort: TaskSort): string {
     case "recent":
       return "Newest first";
     case "priority":
-      return "Priority";
+      return "Priority first";
     case "updated":
-      return "Recently updated";
+      return "Recently updated first";
   }
 }
 
