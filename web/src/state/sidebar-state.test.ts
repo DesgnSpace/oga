@@ -10,6 +10,7 @@ import {
   applyPreferences,
   applySummary,
   beginLoadMore,
+  beginRefresh,
   defaultSidebarState,
   filtersActive,
   filtersHideTasks,
@@ -334,6 +335,19 @@ describe("event frames", () => {
 });
 
 describe("connection", () => {
+  it("keeps a live connection while a refresh runs", () => {
+    const state: SidebarState = { ...defaultSidebarState(), connection: "connected" };
+    const [begun] = beginRefresh(state);
+    expect(begun.connection).toBe("connected");
+  });
+
+  it("shows connecting when a refresh starts from offline", () => {
+    const state: SidebarState = { ...defaultSidebarState(), connection: "offline", reconnectAttempts: 3 };
+    const [begun] = beginRefresh(state);
+    expect(begun.connection).toBe("connecting");
+    expect(begun.reconnectAttempts).toBe(0);
+  });
+
   it("reads a dropped shell stream as reconnecting", () => {
     let state: SidebarState = { ...defaultSidebarState(), connection: "connected" };
 

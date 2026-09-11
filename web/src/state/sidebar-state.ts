@@ -131,8 +131,8 @@ export function beginRefresh(state: SidebarState): [SidebarState, StateQuery] {
   const next: SidebarState = {
     ...state,
     loadState: state.tasks.length === 0 ? "loading" : state.loadState,
-    connection: "connecting",
-    reconnectAttempts: 0,
+    connection: state.connection === "connected" ? "connected" : "connecting",
+    reconnectAttempts: state.connection === "connected" ? state.reconnectAttempts : 0,
     error: undefined,
   };
   return [next, summaryQuery(next)];
