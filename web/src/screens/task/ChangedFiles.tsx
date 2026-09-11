@@ -10,7 +10,7 @@ import type { ChangeTurn, ChangeTurnSet } from "@/domain/changes/grouped";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
 import { CloseIcon, DisclosureIcon, RefreshIcon } from "@/ui/icons";
-import { EmptyState } from "@/components/atoms/ListState";
+import { EmptyState, LoadingState } from "@/components/atoms/ListState";
 import { CodeDiff } from "@/components/CodeDiff";
 import { CHANGED_FILES_MAX_WIDTH, CHANGED_FILES_MIN_WIDTH } from "@/state/changed-files-preferences";
 import { patchFromBlocks } from "@/lib/unified-patch";
@@ -92,7 +92,7 @@ function ChangedFileRow({
         <span className="changed-file-disclosure" aria-hidden="true">
           <DisclosureIcon open={expanded} />
         </span>
-        <span className="changed-file-path">{file.path}</span>
+        <span className="changed-file-path" title={file.path}>{file.path}</span>
         <span className="changed-file-count">
           {status !== undefined && <span className="changed-file-status">{status}</span>}
           <span className="diff-stat-added">{`+${file.added}`}</span>{" "}
@@ -194,7 +194,7 @@ function FileTreeNodes({
               <span className="changed-file-disclosure" aria-hidden="true">
                 <DisclosureIcon open={!collapsedDirs.has(node.path)} />
               </span>
-              <span className="changed-files-tree-name">{node.name}</span>
+              <span className="changed-files-tree-name" title={node.path}>{node.name}</span>
             </button>
             {!collapsedDirs.has(node.path) && (
               <FileTreeNodes
@@ -221,7 +221,7 @@ function FileTreeNodes({
                   {STATUS_GLYPHS[node.file.status]}
                 </span>
               )}
-              <span className="changed-files-tree-name">{node.name}</span>
+              <span className="changed-files-tree-name" title={node.path}>{node.name}</span>
               <span className="changed-files-tree-count">
                 <span className="diff-stat-added">{`+${node.file.added}`}</span>{" "}
                 <span className="diff-stat-removed">{`-${node.file.removed}`}</span>
@@ -475,6 +475,7 @@ export function ChangedFilesPanel({
           onResizeStart(event.clientX);
         }}
         onDoubleClick={onResetWidth}
+        title="Drag to resize · double-click to reset"
         onKeyDown={(event) => {
           if (event.key === "ArrowLeft") {
             event.preventDefault();
@@ -491,7 +492,7 @@ export function ChangedFilesPanel({
       <header className="changed-files-header">
         <div className="changed-files-header-row">
           <div className="changed-files-header-title">
-            <h2>{`Changed files (${changes.files.length})`}</h2>
+            <h2>{`Changed files (${fileCount(grouped ? turns.turns.reduce((count, turn) => count + turn.files.length, 0) : changes.files.length)})`}</h2>
             {activePath !== undefined ? (
               <p className="changed-files-active-file" title={activePath}>
                 {activePath}
@@ -513,11 +514,17 @@ export function ChangedFilesPanel({
                 <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />
                 Group by turn
               </label>
-            ) : (
-              <button className="icon-button" type="button" disabled={loading} aria-label="Refresh" title="Refresh" onClick={onReload}>
-                <RefreshIcon />
-              </button>
-            )}
+            ) : null}
+            <button
+              className="icon-button"
+              type="button"
+              disabled={loading || source === "reported"}
+              aria-label="Refresh"
+              title={source === "reported" ? "Refresh applies to changes read from git" : "Refresh"}
+              onClick={onReload}
+            >
+              <RefreshIcon />
+            </button>
             {!empty && !loading && error === undefined && (
               <div className="changed-files-tree-popover" ref={filePopoverRef}>
                 <button
@@ -555,9 +562,7 @@ export function ChangedFilesPanel({
       </header>
       <div className="changed-files-content">
         {loading ? (
-          <p className="changed-files-message" role="status">
-            Loading changes…
-          </p>
+          <LoadingState label="Loading changed files" className="changed-files-message" />
         ) : error !== undefined ? (
           <div className="changed-files-message" role="alert">
             <p>We couldn't read this task's checkout. Refresh to try again.</p>

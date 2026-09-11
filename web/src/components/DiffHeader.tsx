@@ -4,7 +4,7 @@ import { useDiffView, type DiffView } from "@/state/diff-preferences";
 export function DiffHeader() {
   const [view, setView] = useDiffView();
   return (
-    <div className="diff-view-toggle" role="group">
+    <div className="diff-view-toggle" role="group" aria-label="Diff layout">
       {(["unified", "split"] as const).map((option: DiffView) => (
         <button
           className={`diff-view-toggle-option${view === option ? " diff-view-toggle-option-active" : ""}`}

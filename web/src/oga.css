@@ -1553,16 +1553,27 @@ h1 {
     z-index: var(--z-raised);
     top: 0;
     bottom: 0;
-    left: -3px;
-    width: 6px;
+    left: -6px;
+    width: 12px;
     cursor: ew-resize;
+    border-radius: var(--radius);
+}
+
+.changed-files-resize-handle::before {
+    position: absolute;
+    inset: 0 3px;
+    content: "";
     border-radius: var(--radius);
 }
 
 .changed-files-resize-handle:hover,
 .changed-files-resize-handle:focus-visible {
-    background: var(--color-accent);
     opacity: 0.6;
+}
+
+.changed-files-resize-handle:hover::before,
+.changed-files-resize-handle:focus-visible::before {
+    background: var(--color-accent);
 }
 
 .changed-files-header {
@@ -1935,6 +1946,7 @@ h1 {
 }
 
 .diff-view-toggle-option {
+    min-height: 24px;
     border: 0;
     padding: 2px var(--space-2);
     color: var(--color-text-muted);
