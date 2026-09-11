@@ -283,7 +283,7 @@ export function ArchiveBranchDialog({
       </p>
       <div className="handoff-actions">
         <button className="settings-button" type="button" onClick={onClose} disabled={busy}>
-          Cancel
+          Keep task
         </button>
         <button className="settings-button settings-button-danger" type="button" onClick={() => void archive()} disabled={busy}>
           Archive and delete
@@ -344,6 +344,33 @@ export function explainBlocked(
     rawReason: reason,
     deniedPaths: [],
   };
+}
+
+function StopConfirmDialog({
+  open,
+  onClose,
+  onConfirm,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  busy?: boolean;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} labelledBy="cancel-dialog-title" className="modal-dialog-cancel">
+      <h2 id="cancel-dialog-title">Stop this task?</h2>
+      <p>The worker stops. You can resume it later.</p>
+      <div className="handoff-actions">
+        <button className="settings-button" type="button" onClick={onClose} disabled={busy}>
+          Don&apos;t stop
+        </button>
+        <button className="settings-button settings-button-danger" type="button" onClick={onConfirm} disabled={busy}>
+          Stop task
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 /** Gap between the header trigger and its menu, and between the menu and the viewport edge. */
@@ -560,25 +587,15 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
           </div>,
           document.body,
         )}
-      <Modal open={confirmingCancel} onClose={() => setConfirmingCancel(false)} labelledBy="cancel-dialog-title" className="modal-dialog-cancel">
-        <h2 id="cancel-dialog-title">Stop this task?</h2>
-        <p>The worker stops. You can resume it later.</p>
-        <div className="handoff-actions">
-          <button className="settings-button" type="button" onClick={() => setConfirmingCancel(false)}>
-            Don&apos;t stop
-          </button>
-          <button
-            className="settings-button settings-button-danger"
-            type="button"
-            onClick={() => {
-              setConfirmingCancel(false);
-              void run(() => executeCancel(task.id), stopTitles(task));
-            }}
-          >
-            Stop task
-          </button>
-        </div>
-      </Modal>
+      <StopConfirmDialog
+        open={confirmingCancel}
+        onClose={() => setConfirmingCancel(false)}
+        onConfirm={() => {
+          setConfirmingCancel(false);
+          void run(() => executeCancel(task.id), stopTitles(task));
+        }}
+        busy={busy}
+      />
       {branch && (
         <ArchiveBranchDialog
           task={{ ...task, branch }}
@@ -625,7 +642,7 @@ function HandoffDialog({
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [noOtherWorker, setNoOtherWorker] = React.useState(false);
-  const [currentLabels, setCurrentLabels] = React.useState({ profile: task.profileId, model: task.model });
+  const [currentLabels, setCurrentLabels] = React.useState<{ profile?: string; model?: string }>({});
 
   React.useEffect(() => {
     if (!open) return;
@@ -648,8 +665,8 @@ function HandoffDialog({
       const currentWorker = settings.value.workers.find((worker) => worker.id === task.profileId);
       const currentProfile = summary.value.profiles.find((candidate) => candidate.id === task.profileId);
       setCurrentLabels({
-        profile: currentProfile?.label ?? task.profileId,
-        model: currentWorker?.models.find((model) => model.id === task.model)?.label ?? task.model,
+        profile: currentProfile?.label,
+        model: currentWorker?.models.find((model) => model.id === task.model)?.label,
       });
       const available = settings.value.workers.flatMap((worker) => {
         const profile = summary.value.profiles.find((candidate) => candidate.id === worker.id);
@@ -709,7 +726,7 @@ function HandoffDialog({
         <p className="handoff-description">Keep this task&apos;s history while changing its worker.</p>
         {loading ? <p role="status">Loading workers…</p> : null}
         {!loading && noOtherWorker ? (
-          <p className="handoff-description">This task has no other worker and model to move to.</p>
+          <p className="handoff-description">No other worker is set up yet.</p>
         ) : null}
         {!loading && workers.length > 0 && !noOtherWorker ? (
           <>
@@ -732,11 +749,15 @@ function HandoffDialog({
                 {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </select>
             </label>
-            <p className="handoff-current">Current: {currentLabels.profile} / {currentLabels.model}</p>
+            <p className="handoff-current">
+              Current: {currentLabels.profile && currentLabels.model
+                ? `${currentLabels.profile} / ${currentLabels.model}`
+                : "Current worker"}
+            </p>
           </>
         ) : null}
         <div className="handoff-actions">
-          <button className="settings-button" type="button" onClick={onClose}>Cancel</button>
+          <button className="settings-button" type="button" onClick={onClose} disabled={busy}>Keep worker</button>
           <button className="settings-button settings-button-primary" type="submit" disabled={!canSubmit}>
             {busy ? "Moving…" : "Move task"}
           </button>
@@ -752,6 +773,7 @@ function HandoffDialog({
  */
 export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
+  const [confirmingCancel, setConfirmingCancel] = React.useState(false);
   if (!isExplainedWait(task.hold) || !task.hold) return null;
   const nextTry = nextTryLabel(task.hold);
 
@@ -790,11 +812,20 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
           className="task-action"
           type="button"
           disabled={busy}
-          onClick={() => void run(() => executeCancel(task.id), stopTitles(task))}
+          onClick={() => setConfirmingCancel(true)}
         >
           Stop task
         </button>
       </div>
+      <StopConfirmDialog
+        open={confirmingCancel}
+        onClose={() => setConfirmingCancel(false)}
+        onConfirm={() => {
+          setConfirmingCancel(false);
+          void run(() => executeCancel(task.id), stopTitles(task));
+        }}
+        busy={busy}
+      />
     </div>
   );
 }
@@ -902,7 +933,7 @@ export function TaskControls({
     <section className="task-controls" aria-label="Task actions" aria-busy={busy}>
       {explanation && (
         <div className="blocked-task" role="status">
-            <strong>{task.state === "blocked" ? "Blocked: " : "Failed: "}{explanation.headline}</strong>
+            <strong>{explanation.headline}</strong>
           {explanation.rawReason && (
             <details className="blocked-technical-detail">
               <summary>Technical detail</summary>
@@ -917,14 +948,18 @@ export function TaskControls({
               <button
                 className="task-action task-action-primary"
                 type="button"
+                disabled={busy}
+                title={explanation.deniedPaths.length > 1 ? explanation.deniedPaths.join(", ") : undefined}
                 onClick={() => void run(() => executeResume(task.id, { scope: explanation.suggestedScope }), resumeTitles(task))}
               >
-                {explanation.deniedPaths.length > 0
-                  ? `Continue with access to ${explanation.deniedPaths.join(", ")}`
-                  : "Continue with wider access"}
+                {explanation.deniedPaths.length === 0
+                  ? "Continue with wider access"
+                  : explanation.deniedPaths.length === 1
+                  ? `Continue with access to ${explanation.deniedPaths[0]}`
+                  : `Continue with access to ${explanation.deniedPaths[0]} and ${explanation.deniedPaths.length - 1} more`}
               </button>
             )}
-            <button className="task-action" type="button" onClick={() => void run(() => executeResume(task.id), resumeTitles(task))}>
+            <button className="task-action" type="button" disabled={busy} onClick={() => void run(() => executeResume(task.id), resumeTitles(task))}>
               Continue as-is
             </button>
           </div>
