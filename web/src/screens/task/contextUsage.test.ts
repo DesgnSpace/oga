@@ -47,6 +47,7 @@ describe("contextUsage", () => {
       used: 20_000,
       window: 200_000,
       percent: 10,
+      displayPercent: 10,
       delta: 10_000,
       deltaPercent: 5,
       compacted: false,
@@ -59,6 +60,12 @@ describe("contextUsage", () => {
     expect(usage?.percent).toBe(20);
   });
 
+  test("fill clamps to 100 for display when usage exceeds the window", () => {
+    const usage = contextUsage([usageEvent(1, 260_000)], 200_000);
+    expect(usage?.percent).toBe(130);
+    expect(usage?.displayPercent).toBe(100);
+  });
+
   test("a compaction starts a new stretch instead of climbing forever", () => {
     const usage = contextUsage(
       [usageEvent(1, 150_000), boundaryEvent(2), usageEvent(3, 20_000)],
@@ -68,6 +75,7 @@ describe("contextUsage", () => {
       used: 20_000,
       window: 200_000,
       percent: 10,
+      displayPercent: 10,
       delta: 0,
       deltaPercent: 0,
       compacted: true,

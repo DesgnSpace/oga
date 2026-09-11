@@ -37,7 +37,7 @@ const TASK_STATE_LABELS: Record<string, string> = {
 };
 
 export function taskStateLabel(state: string): string {
-  return TASK_STATE_LABELS[state] ?? state;
+  return TASK_STATE_LABELS[state] ?? "Unknown";
 }
 
 /**

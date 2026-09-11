@@ -2233,6 +2233,7 @@ h1 {
     display: inline-flex;
     min-width: 0;
     max-width: 100%;
+    min-height: 24px;
     flex: 0 1 auto;
     align-items: center;
     gap: var(--space-1);
@@ -2250,8 +2251,22 @@ h1 {
     color: var(--color-text);
 }
 
+.task-metadata-static {
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0;
+    overflow: hidden;
+    color: inherit;
+    font: inherit;
+}
+
 .task-metadata-chip {
     padding: 1px var(--space-1);
+    min-height: 24px;
     border-radius: 4px;
 }
 

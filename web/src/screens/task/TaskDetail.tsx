@@ -7,6 +7,7 @@ import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
+import { absoluteTime } from "@/ui/time";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
 import { taskOutcomeKey, taskOutcomeViews } from "@/state/task-outcome-views";
 import type { TaskTitleBarInfo } from "@/shell/TitleBar";
@@ -23,7 +24,7 @@ import {
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
 import { terminalResumeCommand } from "./terminalResume";
 import { ChangedFilesPanel, type ChangesSource } from "./ChangedFiles";
-import { effortDisplay, taskStatusLabel } from "./format";
+import { effortDisplay, shortModel, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
 import { activityIsSettled, buildTranscript, WorkSegmentCache } from "./transcriptModel";
@@ -105,6 +106,15 @@ interface StatItem {
   title?: string;
 }
 
+function durationTitle(task: NonNullable<TaskDetailState["task"]>): string | undefined {
+  const running = !activityIsSettled(task.state);
+  if (running) return task.runningSince ? `Started ${absoluteTime(task.runningSince)}` : undefined;
+  if (task.durationMs === undefined) return undefined;
+  const finishedAt = task.updatedAt;
+  const startedAt = new Date(new Date(finishedAt).getTime() - task.durationMs);
+  return `Started ${absoluteTime(startedAt)} · Finished ${absoluteTime(finishedAt)}`;
+}
+
 function taskDetailStatItems(task: NonNullable<TaskDetailState["task"]>, events: TaskEventView[]): StatItem[] {
   const cost = formatCost(task.costUsd, task.costUsdEstimated);
   const { tokensIn, tokensOut, tokensCached } = usageTotals(events);
@@ -113,7 +123,7 @@ function taskDetailStatItems(task: NonNullable<TaskDetailState["task"]>, events:
   const items: StatItem[] = [];
   if (cost) items.push({ text: cost, title: task.costUsdEstimated ? "Estimated from public pricing" : undefined });
   if (task.turns !== undefined && task.turns > 0) items.push({ text: `${task.turns} turn${task.turns === 1 ? "" : "s"}` });
-  if (duration) items.push({ text: duration });
+  if (duration) items.push({ text: duration, title: durationTitle(task) });
   if (tokensIn > 0) items.push({ text: `${formatTokenCount(tokensIn)} in` });
   if (tokensOut > 0) items.push({ text: `${formatTokenCount(tokensOut)} out` });
   if (tokensCached > 0) items.push({ text: `${formatTokenCount(tokensCached)} cached` });
@@ -136,11 +146,11 @@ function TaskDetailSecondary({
   return (
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
       <span className="task-detail-fact" title={task.model}>
-        {task.model}
+        {shortModel(task.model)}
         {effort && (
           <span title={effort.title}>
             {" · "}
-            {effort.label}
+            {effort.label.charAt(0).toUpperCase() + effort.label.slice(1)}
           </span>
         )}
       </span>
@@ -391,7 +401,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
           ) : (
             <div className="detail-message detail-message-error">
               <p>We couldn't load this task. Check the connection and try again.</p>
-              <button className="load-more" type="button" onClick={retry}>
+              <button className="text-button" type="button" onClick={retry}>
                 Try again
               </button>
             </div>
@@ -411,8 +421,13 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
             )}
             <div className="task-detail-content-main" ref={contentRef} onScroll={trackScroll}>
               {state.hasEarlier && (
-                <div ref={topSentinelRef} className="transcript-load-earlier" aria-hidden={!state.loadingEarlier}>
-                  {state.loadingEarlier && <span className="transcript-load-earlier-spinner" />}
+                <div ref={topSentinelRef} className="transcript-load-earlier" role="status">
+                  {state.loadingEarlier && (
+                    <>
+                      <span className="transcript-load-earlier-spinner" />
+                      <span className="visually-hidden">Loading earlier activity</span>
+                    </>
+                  )}
                 </div>
               )}
               <Transcript

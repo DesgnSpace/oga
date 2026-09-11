@@ -15,8 +15,10 @@ export interface ContextUsage {
   used: number;
   /** The model's published window, in tokens. */
   window: number;
-  /** Fill against the window, rounded. */
+  /** Fill against the window, rounded — can exceed 100. */
   percent: number;
+  /** Fill against the window, rounded and clamped to 100 for display. */
+  displayPercent: number;
   /** Growth since the first read of the current stretch, in tokens. */
   delta: number;
   /** Growth against the window, rounded. */
@@ -48,10 +50,12 @@ export function contextUsage(
   const used = reads[reads.length - 1] ?? 0;
   const first = reads[0] ?? used;
   const delta = Math.max(0, used - first);
+  const percent = Math.round((used / contextWindow) * 100);
   return {
     used,
     window: contextWindow,
-    percent: Math.round((used / contextWindow) * 100),
+    percent,
+    displayPercent: Math.min(percent, 100),
     delta,
     deltaPercent: Math.round((delta / contextWindow) * 100),
     compacted: segmentStart > 0,

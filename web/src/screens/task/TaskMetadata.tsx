@@ -81,7 +81,10 @@ export function TaskMetadata({
           title={task.worktree.path}
         />
       ) : (
-        <CopyableDetail label="Tree" value="Main tree" />
+        <span className="task-metadata-static">
+          <span className="task-metadata-label">Tree</span>
+          <span className="task-metadata-value">Main tree</span>
+        </span>
       )}
       <CopyableDetail label="Project" value={task.worktree?.originCwd ?? task.cwd} />
       {usage && <ContextDetail usage={usage} />}
@@ -100,14 +103,17 @@ function ContextDetail({
 }: {
   usage: NonNullable<ReturnType<typeof contextUsage>>;
 }) {
-  const text = usage.deltaPercent > 0 ? `${usage.percent}% · +${usage.deltaPercent}%` : `${usage.percent}%`;
+  const text =
+    usage.deltaPercent > 0
+      ? `${usage.displayPercent}% · +${usage.deltaPercent}%`
+      : `${usage.displayPercent}%`;
   const since = usage.compacted ? "the last compaction" : "this run started";
   const title =
     usage.delta > 0
       ? `About ${usage.used.toLocaleString()} of ${usage.window.toLocaleString()} tokens used · up ${usage.deltaPercent}% since ${since}`
       : `About ${usage.used.toLocaleString()} of ${usage.window.toLocaleString()} tokens used`;
   return (
-    <span className="task-metadata-item" title={title}>
+    <span className="task-metadata-static" title={title}>
       <span className="task-metadata-label">Context</span>
       <span className="task-metadata-value">{text}</span>
     </span>
