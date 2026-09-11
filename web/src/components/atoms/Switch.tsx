@@ -2,7 +2,7 @@ import type { ChangeEventHandler } from "react";
 
 interface SwitchProps {
   checked: boolean;
-  label: string;
+  label?: string;
   accessibleName?: string;
   disabled?: boolean;
   onChange: ChangeEventHandler<HTMLInputElement>;
@@ -23,15 +23,14 @@ export function Switch({
 
   return (
     <label className={classes}>
-      <span className="settings-switch-label">{label}</span>
+      {label ? <span className="settings-switch-label">{label}</span> : null}
       <span className="settings-switch-control">
         <input
           type="checkbox"
           role="switch"
           checked={checked}
           disabled={disabled}
-          aria-checked={checked}
-          aria-label={accessibleName}
+          aria-label={accessibleName !== label ? accessibleName : undefined}
           onChange={onChange}
         />
         <span className="settings-switch-track" aria-hidden="true">

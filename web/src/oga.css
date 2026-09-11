@@ -4393,10 +4393,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     transform: rotate(180deg);
 }
 
-.settings-worker-row-switch .settings-switch-label {
-    display: none;
-}
-
 .settings-worker-row-copy {
     display: grid;
     gap: var(--space-1);
@@ -4605,6 +4601,11 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .settings-prompt-editor textarea {
     min-height: 220px;
     resize: vertical;
+}
+
+.settings-prompt-editor textarea[readonly] {
+    color: var(--color-text-muted);
+    background: var(--color-elevated);
 }
 
 .settings-toggle {

@@ -251,8 +251,8 @@ describe("workers list", () => {
 
     const claudeSwitch = screen.getByRole("switch", { name: /Enable Claude work|Disable Claude work/ });
     const opencodeSwitch = screen.getByRole("switch", { name: /Enable OpenCode work/ });
-    expect(claudeSwitch.getAttribute("aria-checked")).toBe("true");
-    expect(opencodeSwitch.getAttribute("aria-checked")).toBe("false");
+    expect((claudeSwitch as HTMLInputElement).checked).toBe(true);
+    expect((opencodeSwitch as HTMLInputElement).checked).toBe(false);
     expect(document.querySelector('[data-provider-logo="claude"]')).toBeTruthy();
     expect(document.querySelector('[data-provider-logo="opencode"]')).toBeTruthy();
     expect(screen.queryByText(longModelId)).toBeNull();
@@ -388,11 +388,11 @@ describe("worker availability", () => {
 
     await screen.findByRole("button", { name: /OpenCode work/ });
     const workerSwitch = screen.getByRole("switch", { name: /Enable OpenCode work/ });
-    expect(workerSwitch.getAttribute("aria-checked")).toBe("false");
+    expect((workerSwitch as HTMLInputElement).checked).toBe(false);
 
     fireEvent.click(workerSwitch);
 
-    await waitFor(() => expect(workerSwitch.getAttribute("aria-checked")).toBe("true"));
+    await waitFor(() => expect((workerSwitch as HTMLInputElement).checked).toBe(true));
     expect(received).toMatchObject({ profileId: "opencode-work", enabled: true });
   });
 
@@ -408,9 +408,9 @@ describe("worker availability", () => {
     const workerSwitch = screen.getByRole("switch", { name: /Enable OpenCode work/ });
 
     fireEvent.click(workerSwitch);
-    expect(workerSwitch.getAttribute("aria-checked")).toBe("true");
+    expect((workerSwitch as HTMLInputElement).checked).toBe(true);
 
-    await waitFor(() => expect(workerSwitch.getAttribute("aria-checked")).toBe("false"));
+    await waitFor(() => expect((workerSwitch as HTMLInputElement).checked).toBe(false));
   });
 });
 
@@ -424,8 +424,8 @@ describe("model access", () => {
     expect(await screen.findByRole("switch", { name: /openai\/gpt-5\.6-luna/ })).toBeTruthy();
     const enabledSwitch = screen.getByRole("switch", { name: new RegExp(longModelId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) });
     const disabledSwitch = screen.getByRole("switch", { name: /openai\/gpt-5\.6-luna/ });
-    expect(enabledSwitch.getAttribute("aria-checked")).toBe("true");
-    expect(disabledSwitch.getAttribute("aria-checked")).toBe("false");
+    expect((enabledSwitch as HTMLInputElement).checked).toBe(true);
+    expect((disabledSwitch as HTMLInputElement).checked).toBe(false);
   });
 
   it("toggling a switch sends the update and persists the new state", async () => {
@@ -444,11 +444,11 @@ describe("model access", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /OpenCode work/ }));
     const disabledSwitch = await screen.findByRole("switch", { name: /openai\/gpt-5\.6-luna/ });
-    expect(disabledSwitch.getAttribute("aria-checked")).toBe("false");
+    expect((disabledSwitch as HTMLInputElement).checked).toBe(false);
 
     fireEvent.click(disabledSwitch);
 
-    await waitFor(() => expect(disabledSwitch.getAttribute("aria-checked")).toBe("true"));
+    await waitFor(() => expect((disabledSwitch as HTMLInputElement).checked).toBe(true));
     expect(received).toMatchObject({
       profileId: "opencode-work",
       modelId: "openai/gpt-5.6-luna",
@@ -464,7 +464,7 @@ describe("model access", () => {
 
     const allowed = await screen.findByRole("switch", { name: /Opus/ });
     expect(allowed.hasAttribute("disabled")).toBe(false);
-    expect(allowed.getAttribute("aria-checked")).toBe("false");
+    expect((allowed as HTMLInputElement).checked).toBe(false);
   });
 });
 

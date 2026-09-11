@@ -284,8 +284,7 @@ export function applyPromptConfig(model: PromptsModel, snapshot: PromptConfig): 
 }
 
 export function updatePromptText(model: PromptsModel, text: string): PromptsModel {
-  const written = model.written || true;
-  return { ...model, text, written, saved: false };
+  return { ...model, text, written: true, saved: false };
 }
 
 export function resetPrompt(model: PromptsModel): PromptsModel {
@@ -360,7 +359,6 @@ export function applyMemoryError(state: MemoryState, message: string): MemorySta
 export interface IntegrationState {
   loading: boolean;
   results: McpInstallResult[];
-  error: string | undefined;
 }
 
 export interface CleanupState {
@@ -384,7 +382,7 @@ export function defaultCleanupState(): CleanupState {
 }
 
 export function defaultIntegrationState(): IntegrationState {
-  return { loading: false, results: [], error: undefined };
+  return { loading: false, results: [] };
 }
 
 

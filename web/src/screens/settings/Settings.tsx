@@ -6,6 +6,7 @@ import { SearchField } from "@/components/SearchField";
 import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
+import { CloseIcon } from "@/ui/icons";
 import { MarkdownContent } from "@/domain/markdown";
 import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
@@ -453,18 +454,26 @@ function WaitingPanel() {
   const [settings, setSettings] = useState<WaitSettings | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [minutesDraft, setMinutesDraft] = useState("");
+  const [minutesError, setMinutesError] = useState<string | undefined>(undefined);
+
+  const loadWaiting = useCallback(async () => {
+    const result = await broker.waiting();
+    if (result.ok) {
+      setSettings(result.value);
+      setError(undefined);
+    } else {
+      setError(result.error.message);
+    }
+  }, []);
 
   useEffect(() => {
-    let disposed = false;
-    void broker.waiting().then((result) => {
-      if (disposed) return;
-      if (result.ok) setSettings(result.value);
-      else setError(result.error.message);
-    });
-    return () => {
-      disposed = true;
-    };
-  }, []);
+    void loadWaiting();
+  }, [loadWaiting]);
+
+  useEffect(() => {
+    if (settings) setMinutesDraft(String(settings.networkMaxWaitMinutes));
+  }, [settings?.networkMaxWaitMinutes]);
 
   const save = async (next: WaitSettings) => {
     const previous = settings;
@@ -481,6 +490,17 @@ function WaitingPanel() {
     setError(result.error.message);
   };
 
+  const commitMinutes = () => {
+    if (!settings) return;
+    const value = Number(minutesDraft);
+    if (!Number.isInteger(value) || value < 1 || value > 1440) {
+      setMinutesError("Enter a number from 1 to 1440.");
+      return;
+    }
+    setMinutesError(undefined);
+    if (value !== settings.networkMaxWaitMinutes) void save({ ...settings, networkMaxWaitMinutes: value });
+  };
+
   return (
     <section className="settings-section">
       <div className="settings-section-heading">
@@ -492,7 +512,15 @@ function WaitingPanel() {
       <p className="settings-helper">
         Tasks that lose the connection, or run out of usage, wait and pick up on their own.
       </p>
-      {error ? <p className="settings-status">We couldn&apos;t load these choices. Try again in a moment.</p> : null}
+      {error ? (
+        <div className="settings-message settings-message-error" role="alert">
+          <strong>Couldn&apos;t load these choices</strong>
+          <p>{error}</p>
+          <button className="text-button" type="button" onClick={() => void loadWaiting()}>
+            Try again
+          </button>
+        </div>
+      ) : null}
       {settings ? (
         <div className="settings-option-list">
           <label className="settings-option">
@@ -517,15 +545,25 @@ function WaitingPanel() {
                 type="number"
                 min={1}
                 max={1440}
-                value={settings.networkMaxWaitMinutes}
+                value={minutesDraft}
                 disabled={saving}
                 aria-label="Minutes to wait for the connection"
-                onChange={(event) =>
-                  void save({ ...settings, networkMaxWaitMinutes: Number(event.target.value) })
-                }
+                onChange={(event) => setMinutesDraft(event.target.value)}
+                onBlur={commitMinutes}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitMinutes();
+                  }
+                }}
               />
               <span>minutes</span>
             </span>
+            {minutesError ? (
+              <p className="settings-form-error" role="alert">
+                {minutesError}
+              </p>
+            ) : null}
           </label>
         </div>
       ) : null}
@@ -679,7 +717,11 @@ function WorkersPanel({
   const [editor, setEditor] = useState<EditorMode>({ kind: "closed" });
   const [deleteId, setDeleteId] = useState<string | undefined>(undefined);
   const [deleting, setDeleting] = useState(false);
-  const [checkedAt, setCheckedAt] = useState(() => Date.now());
+  const [checkedAt, setCheckedAt] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (state.overview === "ready") setCheckedAt(Date.now());
+  }, [state.overview]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -745,7 +787,9 @@ function WorkersPanel({
             <p className="settings-helper">Each worker keeps its own provider account, model, and environment.</p>
           </div>
           <div className="settings-inline-actions">
-            <span className="settings-muted">Checked <span title={absoluteTime(checkedAt)}>{relativeTime(checkedAt)}</span></span>
+            {checkedAt !== undefined ? (
+              <span className="settings-muted">Checked <span title={absoluteTime(checkedAt)}>{relativeTime(checkedAt)}</span></span>
+            ) : null}
             <button className="text-button" type="button" onClick={handleRefresh} disabled={refreshing}>
               Refresh
             </button>
@@ -907,6 +951,7 @@ function WorkerRow({
               className={`settings-worker-row-dot${available ? " settings-worker-row-dot-on" : ""}`}
               aria-hidden="true"
             />
+            <span className="visually-hidden">{available ? "Available" : "Unavailable"}</span>
           </span>
           <span className="settings-worker-row-copy">
             <strong>{profile.label}</strong>
@@ -922,7 +967,6 @@ function WorkerRow({
           <Switch
             className="settings-worker-row-switch"
             checked={profile.enabled}
-            label=""
             accessibleName={`${profile.enabled ? "Disable" : "Enable"} ${profile.label} for tasks`}
             disabled={offline}
             onChange={(e) => onToggle(profile.id, e.target.checked)}
@@ -1488,7 +1532,7 @@ function ProfileEditor({
                         setEnvRows((rows) => rows.filter((r) => r.id !== row.id));
                       }}
                     >
-                      –
+                      <CloseIcon size={14} />
                     </button>
                   </div>
                 ))}
@@ -1578,17 +1622,17 @@ function McpIntegrationPanel({
 }) {
   const handleInstall = useCallback(async () => {
     if (state.integrations.loading) return;
-    setState((s) => ({ ...s, integrations: { loading: true, error: undefined, results: [] } }));
+    setState((s) => ({ ...s, integrations: { loading: true, results: [] } }));
     const lifecycle = toast.pending("Connecting tools");
     const result = await installMcpConfigs(state.profiles);
     if (result.ok) {
       const failed = result.value.filter((item) => !item.success);
       if (failed.length === 0) lifecycle.dismiss();
       else lifecycle.error("Some tools could not connect", { detail: failed.map((item) => `${item.client}: ${item.message}`).join("\n") });
-      setState((s) => ({ ...s, integrations: { loading: false, error: undefined, results: result.value } }));
+      setState((s) => ({ ...s, integrations: { loading: false, results: result.value } }));
     } else {
       lifecycle.error("Couldn't connect tools", { description: "Check the client settings and try again.", detail: result.error.message });
-      setState((s) => ({ ...s, integrations: { loading: false, error: undefined, results: [] } }));
+      setState((s) => ({ ...s, integrations: { loading: false, results: [] } }));
     }
   }, [state.integrations.loading, state.profiles, setState]);
 
@@ -1626,6 +1670,7 @@ function InstallResultRow({ result }: { result: McpInstallResult }) {
       <span className="settings-install-mark" aria-hidden="true">
         {result.success ? "OK" : "!"}
       </span>
+      <span className="visually-hidden">{result.success ? "Connected" : "Failed"}</span>
       <div>
         <strong>{result.client}</strong>
         <p>
@@ -1960,6 +2005,11 @@ function CleanupPanel({
       settings.archivedOnly !== snapshot.settings.archivedOnly
     ),
   );
+  const removeDisabledReason = hasUnsavedChanges
+    ? "Save your changes first."
+    : !snapshot?.plan.events
+      ? "Nothing to remove yet."
+      : undefined;
 
   useEffect(() => {
     if (snapshot) setDraft(snapshot.settings);
@@ -2051,7 +2101,13 @@ function CleanupPanel({
             </label>
           </div>
           <div className="settings-inline-actions">
-            <button className="settings-button settings-button-primary" type="button" onClick={() => void save()} disabled={state.cleanup.saving || offline}>
+            {hasUnsavedChanges ? <span className="settings-muted">Unsaved changes</span> : null}
+            <button
+              className="settings-button settings-button-primary"
+              type="button"
+              onClick={() => void save()}
+              disabled={state.cleanup.saving || offline || !hasUnsavedChanges}
+            >
               {state.cleanup.saving ? "Saving…" : "Save"}
             </button>
           </div>
@@ -2074,7 +2130,7 @@ function CleanupPanel({
               </button>
             )}
           </div>
-          {hasUnsavedChanges ? <p className="settings-muted">Save your task history settings to refresh this preview before removing logs.</p> : null}
+          {!confirming && removeDisabledReason ? <p className="settings-muted">{removeDisabledReason}</p> : null}
           {state.cleanup.result ? <p className="settings-success" role="status">Removed {state.cleanup.result.plan.events.toLocaleString()} logs and reclaimed {formatBytes(state.cleanup.result.fileBytesBefore - state.cleanup.result.fileBytesAfter)}.</p> : null}
         </>
       ) : null}
