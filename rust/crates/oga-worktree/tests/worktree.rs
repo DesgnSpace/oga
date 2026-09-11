@@ -183,26 +183,13 @@ async fn discovers_ignored_paths_and_skips_nested_duplicates() {
 
     assert_eq!(
         created.worktree.links,
-        Some(vec![
-            ".env.test".into(),
-            "node_modules".into(),
-            "rust/target".into(),
-            "swift".into(),
-            "vendor".into(),
-            "web/node_modules".into(),
-        ])
+        Some(vec!["swift".into(), "vendor".into(),])
     );
-    assert!(created.cwd.join("node_modules/package/index.js").exists());
-    assert!(created.cwd.join("rust/target/debug/app").exists());
+    assert!(!created.cwd.join("node_modules/package/index.js").exists());
+    assert!(!created.cwd.join("rust/target/debug/app").exists());
     assert!(created.cwd.join("swift/.build/debug/app").exists());
-    assert!(created.cwd.join(".env.test").exists());
-    for seeded in [
-        ".env.test",
-        "node_modules",
-        "rust/target",
-        "swift",
-        "vendor",
-    ] {
+    assert!(!created.cwd.join(".env.test").exists());
+    for seeded in ["swift", "vendor"] {
         assert!(
             !fs::symlink_metadata(created.cwd.join(seeded))
                 .expect("seeded path")
@@ -230,7 +217,10 @@ async fn every_seeded_path_resolves_inside_the_checkout() {
         &temp.path().join("worktrees"),
         &repo,
         "seeded-task",
-        &WorktreeRequest::default(),
+        &WorktreeRequest {
+            link: Some(vec!["vendor".into(), ".env".into()]),
+            ..WorktreeRequest::default()
+        },
         None,
     )
     .await

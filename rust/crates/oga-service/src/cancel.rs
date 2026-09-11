@@ -81,7 +81,7 @@ pub async fn cancel(
     let now = now_iso();
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state=?,error=?,completion_json=?,updated_at=? WHERE id=? AND state IN ('queued','pending','running','needs_input','answered','blocked')",
+            "UPDATE tasks SET state=?,error=?,completion_json=?,updated_at=? WHERE id=? AND state IN ('queued','preparing_checkout','pending','running','needs_input','answered','blocked')",
             rusqlite::params![
                 state.as_str(),
                 reason,

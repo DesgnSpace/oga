@@ -7,6 +7,8 @@ export type Provider = "claude" | "codex" | "opencode" | "opencode-2" | "antigra
 
 export type TaskState =
   | "queued"
+  | "preparing_checkout"
+  | "removing_checkout"
   | "pending"
   | "running"
   | "needs_input"

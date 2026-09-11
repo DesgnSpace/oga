@@ -78,7 +78,6 @@ pub async fn resume(
     dispatcher: &Dispatcher,
     request: ResumeRequest,
 ) -> Result<Task, ContinuationError> {
-    let _worktree_guard = dispatcher.worktree_operations().lock().await;
     let old = require_task(dispatcher.store(), &request.task_id)?;
     if !matches!(
         old.state,

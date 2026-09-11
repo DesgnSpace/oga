@@ -993,6 +993,11 @@ a {
     border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
 }
 
+.task-dot-preparing_checkout,
+.task-dot-removing_checkout {
+    border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+}
+
 .task-dot-pending {
     border-color: var(--color-warning);
 }

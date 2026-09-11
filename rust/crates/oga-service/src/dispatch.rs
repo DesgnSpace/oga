@@ -16,13 +16,14 @@ use oga_domain::{
 use oga_runner::ProviderRunner;
 use oga_store::{Store, StoreError};
 use oga_worktree::{
-    create_task_worktree, current_branch, joined_worktree_of, project_cwd, worktree_request,
+    PlannedWorktree, current_branch, joined_worktree_of, plan_task_worktree, prepare_task_worktree,
+    project_cwd, worktree_request,
 };
 use rusqlite::params;
 use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::time::sleep;
 use uuid::Uuid;
 
 use crate::{
@@ -199,7 +200,8 @@ pub struct DispatchPlan {
     pub dependencies: Vec<String>,
     pub hold: Option<oga_domain::TaskHold>,
     pub launch: bool,
-    pub worktree_created: bool,
+    pub checkout_preparation: Option<PlannedWorktree>,
+    pub checkout_ready_state: Option<TaskState>,
     pub joined_task_id: Option<String>,
 }
 
@@ -216,7 +218,6 @@ pub struct Dispatcher {
     store: Arc<Store>,
     runner: ProviderRunner,
     active: ActiveRuns,
-    worktree_operations: Arc<Mutex<()>>,
 }
 
 pub type TaskService = Dispatcher;
@@ -227,16 +228,11 @@ impl Dispatcher {
             store,
             runner,
             active: ActiveRuns::default(),
-            worktree_operations: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn store(&self) -> &Arc<Store> {
         &self.store
-    }
-
-    pub(crate) fn worktree_operations(&self) -> &Mutex<()> {
-        &self.worktree_operations
     }
 
     pub(crate) fn active_runs(&self) -> ActiveRuns {
@@ -385,7 +381,7 @@ impl Dispatcher {
         if let Some(start_at) = request.start_at.as_deref() {
             dependency_plan = schedule_plan(dependency_plan, &task_id, start_at)?;
         }
-        let (task_cwd, worktree, worktree_created, branch, joined_task_id) = self
+        let (task_cwd, worktree, checkout_preparation, branch, joined_task_id) = self
             .resolve_worktree(
                 &workspace,
                 &task_id,
@@ -410,6 +406,7 @@ impl Dispatcher {
                     effort: request.effort.clone(),
                 },
             });
+        let checkout_ready_state = checkout_preparation.as_ref().map(|_| state);
         let task = Task {
             id: task_id,
             kind: Some(request.kind),
@@ -421,7 +418,11 @@ impl Dispatcher {
             branch,
             worktree,
             worktree_label: None,
-            state,
+            state: if checkout_ready_state.is_some() {
+                TaskState::PreparingCheckout
+            } else {
+                state
+            },
             created_at: now.clone(),
             updated_at: now,
             duration_ms: 0,
@@ -493,8 +494,9 @@ impl Dispatcher {
             caller_id: request.caller_id,
             dependencies: request.depends_on,
             hold,
-            launch: state == TaskState::Queued,
-            worktree_created,
+            launch: checkout_ready_state.is_none() && state == TaskState::Queued,
+            checkout_preparation,
+            checkout_ready_state,
             joined_task_id,
         })
     }
@@ -503,40 +505,42 @@ impl Dispatcher {
         &self,
         request: DispatchRequest,
     ) -> Result<DispatchResult, DispatchError> {
-        let worktree_guard = if request.worktree.is_some() {
-            Some(self.worktree_operations.lock().await)
-        } else {
-            None
-        };
         let plan = self.plan(request).await?;
         let task_id = plan.task.id.clone();
         let launched = plan.launch;
-        if let Err(error) = persist_plan(&self.store, &plan) {
-            if plan.worktree_created
-                && let Some(worktree) = &plan.task.worktree
-            {
-                let _ = oga_worktree::remove_task_worktree(worktree).await;
-                let _ = oga_worktree::remove_task_branch(worktree).await;
-            }
-            return Err(error);
-        }
-        if launched {
+        persist_plan(&self.store, &plan)?;
+        if let Some(preparation) = plan.checkout_preparation.clone() {
+            self.prepare_checkout(plan, preparation);
+        } else if launched {
             self.launch(plan);
         }
-        drop(worktree_guard);
         let task = lifecycle::load_task(&self.store, &task_id)?.ok_or_else(|| {
             DispatchError::Refusal(format!("task disappeared after dispatch: {task_id}"))
         })?;
         Ok(DispatchResult { task, launched })
     }
 
+    fn prepare_checkout(&self, plan: DispatchPlan, preparation: PlannedWorktree) {
+        let dispatcher = self.clone();
+        tokio::spawn(async move {
+            let task_id = plan.task.id.clone();
+            match prepare_task_worktree(&preparation).await {
+                Ok(()) => dispatcher.finish_checkout_preparation(plan).await,
+                Err(error) => dispatcher.fail_checkout_preparation(&task_id, error).await,
+            }
+        });
+    }
+
     pub async fn dispatch_and_wait(&self, request: DispatchRequest) -> Result<Task, DispatchError> {
         let result = self.dispatch(request).await?;
-        if !result.launched {
+        if !result.launched && result.task.state != TaskState::PreparingCheckout {
             return self.task(&result.task.id);
         }
         loop {
             let task = self.task(&result.task.id)?;
+            if !result.launched && matches!(task.state, TaskState::Pending | TaskState::Blocked) {
+                return Ok(task);
+            }
             if task.state.settled() {
                 return Ok(task);
             }
@@ -551,6 +555,82 @@ impl Dispatcher {
 
     fn launch(&self, plan: DispatchPlan) {
         self.launch_task(plan.task, plan.profile, plan.prompt, None);
+    }
+
+    async fn finish_checkout_preparation(&self, plan: DispatchPlan) {
+        let task_id = &plan.task.id;
+        let now = lifecycle::now_iso();
+        let ready = plan
+            .checkout_ready_state
+            .expect("checkout preparation has a ready state");
+        let changed = self.store.transaction(|tx| {
+            let changed = tx.execute(
+                "UPDATE tasks SET state=?,checkout_state=NULL,updated_at=? WHERE id=? AND state='preparing_checkout' AND archived_at IS NULL",
+                params![ready.as_str(), now, task_id],
+            )?;
+            if changed == 1 {
+                append_event_tx(
+                    tx,
+                    task_id,
+                    "checkout_prepared",
+                    ready,
+                    json!({}),
+                    &now,
+                    None,
+                )?;
+            }
+            Ok(changed)
+        });
+        let Ok(changed) = changed else {
+            return;
+        };
+        if changed == 1 {
+            if ready == TaskState::Queued
+                && let Ok(task) = self.task(task_id)
+            {
+                self.launch_task(task, plan.profile, plan.prompt, None);
+            }
+            return;
+        }
+        if let Ok(task) = self.task(task_id)
+            && task.state != TaskState::RemovingCheckout
+        {
+            let _ = cleanup_preparing_checkout(&task).await;
+        }
+    }
+
+    async fn fail_checkout_preparation(&self, task_id: &str, error: oga_worktree::WorktreeError) {
+        let task = match self.task(task_id) {
+            Ok(task) => task,
+            Err(_) => return,
+        };
+        if task.state == TaskState::RemovingCheckout {
+            return;
+        }
+        let cleanup = cleanup_preparing_checkout(&task).await;
+        let mut message = format!("could not prepare checkout: {error}");
+        if let Err(cleanup_error) = cleanup {
+            message.push_str(&format!("; could not clean it up: {cleanup_error}"));
+        }
+        let now = lifecycle::now_iso();
+        let _ = self.store.transaction(|tx| {
+            let changed = tx.execute(
+                "UPDATE tasks SET state='failed',checkout_state=NULL,error=?,updated_at=? WHERE id=? AND state='preparing_checkout'",
+                params![message, now, task_id],
+            )?;
+            if changed == 1 {
+                append_event_tx(
+                    tx,
+                    task_id,
+                    "checkout_preparation_failed",
+                    TaskState::Failed,
+                    json!({"error": message}),
+                    &now,
+                    None,
+                )?;
+            }
+            Ok(())
+        });
     }
 
     /// Detach one run and the chain of dependents its ending releases.
@@ -1061,7 +1141,7 @@ impl Dispatcher {
         (
             PathBuf,
             Option<TaskWorktree>,
-            bool,
+            Option<PlannedWorktree>,
             Option<String>,
             Option<String>,
         ),
@@ -1071,7 +1151,7 @@ impl Dispatcher {
             return Ok((
                 workspace.to_path_buf(),
                 None,
-                false,
+                None,
                 current_branch(workspace).await?,
                 None,
             ));
@@ -1099,17 +1179,17 @@ impl Dispatcher {
             return Ok((
                 PathBuf::from(&joined.cwd),
                 Some(worktree.clone()),
-                false,
+                None,
                 Some(worktree.branch),
                 Some(join_id.to_owned()),
             ));
         }
-        let created = create_task_worktree(workspace, task_id, &request, title).await?;
-        let branch = created.worktree.branch.clone();
+        let planned = plan_task_worktree(workspace, task_id, &request, title).await?;
+        let branch = planned.created.worktree.branch.clone();
         Ok((
-            created.cwd,
-            Some(created.worktree),
-            true,
+            planned.created.cwd.clone(),
+            Some(planned.created.worktree.clone()),
+            Some(planned),
             Some(branch),
             None,
         ))
@@ -1338,6 +1418,15 @@ fn schedule_plan(
     })
 }
 
+async fn cleanup_preparing_checkout(task: &Task) -> Result<(), oga_worktree::WorktreeError> {
+    let Some(worktree) = &task.worktree else {
+        return Ok(());
+    };
+    oga_worktree::remove_task_worktree(worktree).await?;
+    let _ = oga_worktree::remove_task_branch(worktree).await?;
+    Ok(())
+}
+
 fn validate_request(request: &DispatchRequest) -> Result<(), DispatchError> {
     if request.profile_id.trim().is_empty() {
         return Err(DispatchError::Refusal("profile is required".into()));
@@ -1391,7 +1480,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
             }
         }
         tx.execute(
-            "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,can_delegate,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,can_delegate,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json,checkout_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 task.id,
                 kind_string(task.kind.unwrap_or(TaskKind::Delegated)),
@@ -1430,6 +1519,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 task.updated_at,
                 selection,
                 attachments,
+                plan.checkout_ready_state.map(TaskState::as_str),
             ],
         )?;
         for blocker in &plan.dependencies {
@@ -1469,7 +1559,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 None,
             )?;
         }
-        if let Some(completion) = &task.completion {
+        if task.state == TaskState::Blocked && let Some(completion) = &task.completion {
             append_event_tx(
                 tx,
                 &task.id,

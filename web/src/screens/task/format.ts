@@ -26,6 +26,8 @@ export function effortDisplay(
 
 const TASK_STATE_LABELS: Record<string, string> = {
   queued: "Queued",
+  preparing_checkout: "Preparing checkout",
+  removing_checkout: "Removing checkout",
   pending: "Waiting",
   running: "Running",
   needs_input: "Needs input",

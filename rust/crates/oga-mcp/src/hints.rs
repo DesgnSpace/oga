@@ -219,6 +219,16 @@ fn settled(task: &Task, hints: &mut Vec<Value>, branch_gone: bool) {
                 "stops it when the question is not worth answering",
             ));
         }
+        TaskState::PreparingCheckout => {
+            watch(task, hints);
+            hints.push(hint(
+                "cancel",
+                "stops before the worker starts and removes the checkout",
+            ));
+        }
+        TaskState::RemovingCheckout => {
+            watch(task, hints);
+        }
         TaskState::Pending | TaskState::Queued | TaskState::Running | TaskState::Answered => {
             started(task, hints);
         }

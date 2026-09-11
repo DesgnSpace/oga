@@ -111,6 +111,12 @@ line, and one still waiting on other work or on a start time keeps waiting.
 Archive hides a record without deleting it. `cleanup` is the
 only command that permanently removes task activity.
 
+Worktree setup and removal run in the background. `preparing_checkout` means
+Oga is copying the checkout before the worker can start. `removing_checkout`
+means an archived checkout is being checked and removed. Watch or inspect the
+task for the final result; a branch requested with `--delete-branch` stays put
+until checkout removal finishes safely.
+
 To archive a worktree task and also ask Git to remove its local branch:
 
 ```sh

@@ -39,6 +39,8 @@ impl Provider {
 pub enum TaskState {
     #[default]
     Queued,
+    PreparingCheckout,
+    RemovingCheckout,
     Pending,
     Running,
     NeedsInput,
@@ -67,6 +69,8 @@ impl TaskState {
     pub fn as_str(self) -> &'static str {
         match self {
             TaskState::Queued => "queued",
+            TaskState::PreparingCheckout => "preparing_checkout",
+            TaskState::RemovingCheckout => "removing_checkout",
             TaskState::Pending => "pending",
             TaskState::Running => "running",
             TaskState::NeedsInput => "needs_input",

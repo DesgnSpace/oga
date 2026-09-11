@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use crate::connection::StoreError;
 
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 45;
+pub const LATEST_SCHEMA_VERSION: i64 = 46;
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -66,7 +66,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
        cwd TEXT NOT NULL,
        branch TEXT,
        state TEXT NOT NULL CHECK(state IN (
-        'queued','pending','running','needs_input','answered','blocked','completed','failed','cancelled'
+        'queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'
       )),
       output TEXT NOT NULL DEFAULT '',
       error TEXT,
@@ -102,7 +102,10 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
        worktree_links_json TEXT,
        caller_id TEXT,
        cost_usd_estimated INTEGER,
-       attachments_json TEXT CHECK(attachments_json IS NULL OR json_valid(attachments_json))
+       attachments_json TEXT CHECK(attachments_json IS NULL OR json_valid(attachments_json)),
+       checkout_state TEXT CHECK(checkout_state IS NULL OR checkout_state IN (
+        'queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'
+       ))
     );
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
@@ -236,7 +239,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
     );
-     INSERT INTO schema_migrations(version, name) VALUES (45, 'taught route phrases');"#;
+     INSERT INTO schema_migrations(version, name) VALUES (46, 'checkout lifecycle');"#;
 
 /// One row per indexed file, one per symbol, with the symbol search index
 /// derived from the same rows.
@@ -543,6 +546,44 @@ pub fn migrate_v44_to_v45(conn: &Connection) -> Result<(), StoreError> {
         INSERT INTO schema_migrations(version, name) VALUES (45, 'taught route phrases');
         COMMIT;"#
     ))?;
+    Ok(())
+}
+
+pub fn migrate_v45_to_v46(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"PRAGMA legacy_alter_table=ON;
+        PRAGMA foreign_keys=OFF;
+        BEGIN IMMEDIATE;
+        ALTER TABLE tasks RENAME TO tasks_v45;
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'delegated' CHECK(kind IN ('delegated','orchestrator')),
+          profile_id TEXT NOT NULL REFERENCES profiles(id), model TEXT NOT NULL, prompt TEXT NOT NULL,
+          cwd TEXT NOT NULL, branch TEXT,
+          state TEXT NOT NULL CHECK(state IN ('queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled')),
+          output TEXT NOT NULL DEFAULT '', error TEXT, question TEXT, parent_task_id TEXT REFERENCES tasks(id), orchestrator_id TEXT,
+          scope_json TEXT NOT NULL DEFAULT '{"read":["**"],"write":["**"]}' CHECK(json_valid(scope_json)), grant_id TEXT,
+          allow_questions INTEGER NOT NULL DEFAULT 1 CHECK(allow_questions IN (0,1)), can_delegate INTEGER NOT NULL DEFAULT 0 CHECK(can_delegate IN (0,1)),
+          timeout_ms INTEGER, session_id TEXT, shipped_prompt TEXT, completion_json TEXT CHECK(completion_json IS NULL OR json_valid(completion_json)),
+          attempts_json TEXT CHECK(attempts_json IS NULL OR json_valid(attempts_json)), cost_usd REAL, turns INTEGER, tokens_in INTEGER, tokens_out INTEGER,
+          spend_at TEXT, archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, effort TEXT, tldr TEXT, title TEXT,
+          worker_json TEXT, selection_json TEXT, effort_actual TEXT, origin_cwd TEXT, worktree_path TEXT, worktree_branch TEXT,
+          worktree_links_json TEXT, caller_id TEXT, cost_usd_estimated INTEGER, attachments_json TEXT CHECK(attachments_json IS NULL OR json_valid(attachments_json)),
+          checkout_state TEXT CHECK(checkout_state IS NULL OR checkout_state IN ('queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'))
+        );
+        INSERT INTO tasks SELECT *, NULL FROM tasks_v45;
+        DROP TABLE tasks_v45;
+        CREATE INDEX tasks_parent ON tasks(parent_task_id);
+        CREATE INDEX tasks_updated_at ON tasks(updated_at DESC, id DESC);
+        CREATE INDEX tasks_profile_updated ON tasks(profile_id, updated_at DESC);
+        CREATE INDEX tasks_worktree_path ON tasks(worktree_path, archived_at);
+        CREATE INDEX tasks_title_nocase ON tasks(title COLLATE NOCASE);
+        CREATE INDEX tasks_tldr_nocase ON tasks(tldr COLLATE NOCASE);
+        CREATE INDEX tasks_prompt_nocase ON tasks(prompt COLLATE NOCASE);
+        INSERT INTO schema_migrations(version, name) VALUES (46, 'checkout lifecycle');
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+        PRAGMA legacy_alter_table=OFF;"#,
+    )?;
     Ok(())
 }
 
