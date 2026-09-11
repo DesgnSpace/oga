@@ -216,6 +216,11 @@ a {
     text-align: center;
 }
 
+.offline-banner[data-tone="neutral"] {
+    background: var(--color-elevated);
+    color: var(--color-text-muted);
+}
+
 .offline-banner button {
     border: 0;
     background: transparent;
@@ -530,7 +535,9 @@ a {
 }
 
 .title-bar-meta {
-    display: contents;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
 }
 
 .title-bar-stat-separator {
@@ -538,7 +545,9 @@ a {
 }
 
 .title-bar-stat-group {
-    display: contents;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
 }
 
 
@@ -3350,6 +3359,7 @@ select {
 }
 
 .sidebar-topbar,
+.title-bar,
 .task-detail-header,
 .settings-rail-header,
 .settings-header,

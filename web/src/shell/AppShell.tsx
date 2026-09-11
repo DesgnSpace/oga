@@ -48,7 +48,11 @@ function scheduleMenuCommands(work: () => void): () => void {
 
 function ScreenLoading({ route }: { route: Route }) {
   const label = route.kind === "task" ? "Loading task activity…" : route.kind === "settings" ? "Loading settings…" : route.kind === "usage" ? "Loading usage…" : "Loading…";
-  return <LoadingState label={label} />;
+  return (
+    <div id="page-title">
+      <LoadingState label={label} />
+    </div>
+  );
 }
 
 function TaskDetailRoute({ taskId, onHeader }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void }) {
@@ -75,11 +79,15 @@ function offlineBannerCopy(connection: ConnectionState): string | undefined {
   }
 }
 
+function offlineBannerTone(connection: ConnectionState): "neutral" | "danger" {
+  return connection === "offline" ? "danger" : "neutral";
+}
+
 function OfflineBanner({ connection, onRetry }: { connection: ConnectionState; onRetry: () => void }) {
   const copy = offlineBannerCopy(connection);
   if (!copy) return null;
   return (
-    <div className="offline-banner" role="status">
+    <div className="offline-banner" role="status" data-tone={offlineBannerTone(connection)}>
       <span>{copy}</span>
       <button className="text-button" type="button" onClick={onRetry}>
         Retry
@@ -98,19 +106,20 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
 
   if (sidebar.loadState === "loading" && !hasTasks) {
     return (
-      <>
-        <p className="eyebrow">Workspace</p>
-        <h1 id="page-title">Your workspace</h1>
-      </>
+      <div id="page-title">
+        <LoadingState label="Loading your workspace…" />
+      </div>
     );
   }
 
   if (sidebar.loadState === "error" && !hasTasks) {
     return (
       <>
-        <p className="eyebrow">Workspace</p>
         <h1 id="page-title">Your workspace</h1>
-        <p className="app-description">Couldn&apos;t load your workspace. Use Retry to try again.</p>
+        <p className="app-description">Couldn&apos;t load your workspace.</p>
+        <button className="text-button" type="button" onClick={() => sidebarController.refresh()}>
+          Try again
+        </button>
       </>
     );
   }
@@ -118,7 +127,6 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
   if (sidebar.loadState === "ready" && !hasConnectedAi) {
     return (
       <div className="app-first-run-card">
-        <p className="eyebrow">Workspace</p>
         <h1 id="page-title">Connect your AI to start delegating</h1>
         <p className="app-description">Choose an AI account for the work you want to hand off.</p>
         <button className="settings-button settings-button-primary" type="button" onClick={() => onOpenSettings("workers")}>
@@ -131,7 +139,6 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
   if (hasTasks) {
     return (
       <>
-        <p className="eyebrow">Workspace</p>
         <h1 id="page-title">Your workspace</h1>
         <p className="app-description">Choose a task from the sidebar.</p>
       </>
@@ -140,7 +147,6 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
 
   return (
     <>
-      <p className="eyebrow">Workspace</p>
       <h1 id="page-title">Get your first task running</h1>
       <ol className="app-first-run-steps">
         <li>
@@ -153,7 +159,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
               onOpenSettings("workers");
             }}
           >
-            Settings ▸ Workers
+            Open worker settings
           </a>
           .
         </li>
@@ -167,7 +173,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
               onOpenSettings("connections");
             }}
           >
-            Settings ▸ Connect tools
+            Open connection settings
           </a>
           .
         </li>

@@ -50,7 +50,7 @@ export function useKeyboardShortcuts({ onBack, onForward, onSettings, onUsage, o
           if (event.shiftKey) action = onUsage;
           break;
         case "r":
-          action = onRefresh;
+          if (hasDesktopBridge()) action = onRefresh;
           break;
       }
       if (!action) return;

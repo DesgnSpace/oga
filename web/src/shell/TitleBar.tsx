@@ -96,7 +96,7 @@ export function TitleBar({
               className="icon-button"
               type="button"
               aria-label="Back"
-              title="Back ⌘["
+              title="Back (⌘[)"
               disabled={!canGoBack}
               onClick={onBack}
             >
@@ -106,7 +106,7 @@ export function TitleBar({
               className="icon-button"
               type="button"
               aria-label="Forward"
-              title="Forward ⌘]"
+              title="Forward (⌘])"
               disabled={!canGoForward}
               onClick={onForward}
             >
@@ -121,7 +121,12 @@ export function TitleBar({
         <span className="title-bar-drag" data-tauri-drag-region />
         {task && (
           <div className="title-bar-actions">
-            {task.diffAdded > 0 && <span className="title-bar-diff">{`+${task.diffAdded}`}</span>}
+            {task.diffAdded > 0 && (
+              <span className="title-bar-diff" title={`${task.diffAdded} lines added`}>
+                {`+${task.diffAdded}`}
+                <span className="visually-hidden"> lines added</span>
+              </span>
+            )}
             {task.diffAdded > 0 && <span className="title-bar-stat-separator" aria-hidden="true">·</span>}
             <span className="title-bar-meta" data-tauri-drag-region={undefined}>
               {task.secondary}
