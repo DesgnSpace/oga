@@ -570,7 +570,8 @@ pub fn migrate_v45_to_v46(conn: &Connection) -> Result<(), StoreError> {
           worktree_links_json TEXT, caller_id TEXT, cost_usd_estimated INTEGER, attachments_json TEXT CHECK(attachments_json IS NULL OR json_valid(attachments_json)),
           checkout_state TEXT CHECK(checkout_state IS NULL OR checkout_state IN ('queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'))
         );
-        INSERT INTO tasks SELECT *, NULL FROM tasks_v45;
+        INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,can_delegate,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,tokens_in,tokens_out,spend_at,archived_at,created_at,updated_at,effort,tldr,title,worker_json,selection_json,effort_actual,origin_cwd,worktree_path,worktree_branch,worktree_links_json,caller_id,cost_usd_estimated,attachments_json)
+          SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,can_delegate,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,tokens_in,tokens_out,spend_at,archived_at,created_at,updated_at,effort,tldr,title,worker_json,selection_json,effort_actual,origin_cwd,worktree_path,worktree_branch,worktree_links_json,caller_id,cost_usd_estimated,attachments_json FROM tasks_v45;
         DROP TABLE tasks_v45;
         CREATE INDEX tasks_parent ON tasks(parent_task_id);
         CREATE INDEX tasks_updated_at ON tasks(updated_at DESC, id DESC);
