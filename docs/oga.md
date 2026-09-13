@@ -11,7 +11,7 @@ follow it, or operate without the app open.
 | `oga delegate "<task>"` | Start a task and print its ID. `-` reads the task from stdin. |
 | `oga watch <task-id>...` | Stream task events until a watched task settles. |
 | `oga tail` | Stream events from every task. |
-| `oga query "question"` | Find the place in the code that answers a question. Add `--limit` or `--code`. |
+| `oga query "question"` | Find the place in the code that answers a question. Add `--limit`, `--code`, or `--in` to search only part of the project. |
 | `oga relearn` | Pick up what changed on disk, or save a hint. Add `--force` to read the project again from scratch. |
 | `oga love` | Read or set defaults for unnamed work. |
 | `oga inflight` | List work a restart would interrupt. |
@@ -45,6 +45,12 @@ from the words in it:
 oga query "rust/crates/oga-context/src/query.rs#is_confident"
 oga query "screens/sidebar/Sidebar.tsx"
 oga query "rust/Cargo.toml#workspace.package.version"
+```
+
+Add `--in` to answer only from a folder or file, repeated for more than one:
+
+```sh
+oga query --in rust/crates/oga-context "ranking"
 ```
 
 The name can be the plain one or the one that reads with what encloses it —

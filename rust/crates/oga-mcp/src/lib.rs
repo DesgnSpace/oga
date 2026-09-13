@@ -529,6 +529,7 @@ impl McpServer {
     fn query(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
         let requested_cwd = required_string(args, "cwd")?;
         let question = required_string(args, "q")?;
+        let paths = string_or_array(args.get("in"), "in")?;
         let cwd = if let Some(orchestrator_id) = &self.orchestrator_id {
             let task = self
                 .state
@@ -547,7 +548,7 @@ impl McpServer {
             requested_cwd
         };
         Ok((
-            json!(query::query(&self.state, &cwd, &question).map_err(McpError::Message)?),
+            json!(query::query(&self.state, &cwd, &question, &paths).map_err(McpError::Message)?),
             Some(cwd),
         ))
     }
@@ -1441,6 +1442,20 @@ fn string_array(value: Option<&Value>, key: &str) -> Result<Vec<String>, McpErro
                 })
         })
         .collect()
+}
+
+fn string_or_array(value: Option<&Value>, key: &str) -> Result<Vec<String>, McpError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Some(text) = value.as_str() else {
+        return string_array(Some(value), key);
+    };
+    Ok(if text.is_empty() {
+        Vec::new()
+    } else {
+        vec![text.to_owned()]
+    })
 }
 
 fn fields(value: Option<&Value>) -> Result<Option<Vec<String>>, McpError> {

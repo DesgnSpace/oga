@@ -29,6 +29,8 @@ pub struct QueryParams {
     pub q: Option<String>,
     pub limit: Option<u64>,
     pub code: Option<bool>,
+    #[serde(rename = "in")]
+    pub in_paths: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -79,6 +81,7 @@ pub async fn get_query(
     let options = oga_context::QuestionOptions {
         limit: query.limit.map(|limit| limit as usize),
         code: query.code.unwrap_or(false),
+        paths: split_paths(query.in_paths.as_deref()),
     };
     let result = run_blocking(move || {
         let index = ContextIndex::new(&store);
@@ -174,6 +177,15 @@ fn refresh(index: &ContextIndex<'_>, cwd: &str) -> Result<(), HttpError> {
         )));
     }
     Ok(())
+}
+
+fn split_paths(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn everything() -> TaskScope {

@@ -641,6 +641,7 @@ pub struct QueryRequest {
     pub task: Option<String>,
     pub limit: Option<u64>,
     pub code: bool,
+    pub paths: Vec<String>,
 }
 
 impl QueryRequest {
@@ -651,6 +652,7 @@ impl QueryRequest {
             task: None,
             limit: None,
             code: false,
+            paths: Vec::new(),
         }
     }
 
@@ -666,6 +668,11 @@ impl QueryRequest {
 
     pub fn code(mut self, code: bool) -> Self {
         self.code = code;
+        self
+    }
+
+    pub fn paths(mut self, paths: Vec<String>) -> Self {
+        self.paths = paths;
         self
     }
 }

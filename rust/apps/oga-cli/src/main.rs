@@ -349,7 +349,7 @@ fn run_version() -> CliResult<i32> {
 async fn run_query(args: &[String]) -> CliResult<i32> {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
         println!(
-            "Usage: oga query [--limit N] [--code] \"<question>\" | oga query --init [--force]"
+            "Usage: oga query [--in PATH]... [--limit N] [--code] \"<question>\" | oga query --init [--force]"
         );
         return Ok(0);
     }
@@ -410,7 +410,8 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
                 &QueryRequest::new(cwd.display().to_string(), question)
                     .task(task_id)
                     .limit(options.limit)
-                    .code(options.code),
+                    .code(options.code)
+                    .paths(options.paths.clone()),
             )
             .await
     } else {
@@ -418,7 +419,8 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
             .query(
                 &QueryRequest::new(cwd.display().to_string(), question)
                     .limit(options.limit)
-                    .code(options.code),
+                    .code(options.code)
+                    .paths(options.paths.clone()),
             )
             .await
     };
@@ -441,12 +443,14 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
 struct QueryCliOptions {
     limit: u64,
     code: bool,
+    paths: Vec<String>,
 }
 
 fn parse_query_options(args: &[String]) -> CliResult<(QueryCliOptions, Vec<String>)> {
     let mut options = QueryCliOptions {
         limit: 10,
         code: false,
+        paths: Vec::new(),
     };
     let mut question = Vec::new();
     let mut index = 0;
@@ -463,11 +467,32 @@ fn parse_query_options(args: &[String]) -> CliResult<(QueryCliOptions, Vec<Strin
             value if value.starts_with("--limit=") => {
                 options.limit = parse_limit(value.trim_start_matches("--limit="))?;
             }
+            "--in" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| CliError::new("--in needs a path"))?;
+                options.paths.extend(split_paths(value));
+            }
+            value if value.starts_with("--in=") => {
+                options
+                    .paths
+                    .extend(split_paths(value.trim_start_matches("--in=")));
+            }
             value => question.push(value.to_owned()),
         }
         index += 1;
     }
     Ok((options, question))
+}
+
+fn split_paths(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Only a transport failure means the broker is down. Every other failure
@@ -720,6 +745,8 @@ Usage: oga <command> [options]
   query "<question>"   Ask in plain words and get the file, line, and name that
                        answer it. Paste a path, or path#name, to go straight
                        there. --limit N sets how many; --code prints the code.
+                       --in PATH answers only from that folder or file; repeat
+                       it for more than one.
   love [worker:model[:effort]]...  Send work that names no model to the first
                         destination that can take it. Add
                         --when ui,review to send only those kinds of
@@ -3997,6 +4024,31 @@ mod tests {
         assert_eq!(defaults.limit, 10);
         assert!(!defaults.code);
         assert_eq!(question, ["where is auth"]);
+    }
+
+    #[test]
+    fn parses_query_in_paths() {
+        let args = vec![
+            "--in".into(),
+            "src/".into(),
+            "--in".into(),
+            "web/src".into(),
+            "where is auth".into(),
+        ];
+        let (options, question) = parse_query_options(&args).unwrap();
+        assert_eq!(options.paths, ["src/", "web/src"]);
+        assert_eq!(question, ["where is auth"]);
+
+        let (options, _) =
+            parse_query_options(&["--in=rust/crates/oga-context".into(), "q".into()]).unwrap();
+        assert_eq!(options.paths, ["rust/crates/oga-context"]);
+
+        let (options, _) =
+            parse_query_options(&["--in".into(), "src/,web/src".into(), "q".into()]).unwrap();
+        assert_eq!(options.paths, ["src/", "web/src"]);
+
+        let error = parse_query_options(&["--in".into()]).unwrap_err();
+        assert_eq!(error.to_string(), "--in needs a path");
     }
 
     #[test]

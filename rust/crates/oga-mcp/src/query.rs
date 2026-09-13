@@ -1,16 +1,25 @@
 //! Plain-language code lookups for the MCP surface, answered from the shared
 //! index after it is reconciled against disk.
 
-use oga_context::{BuildOptions, ContextIndex, ContextTarget};
+use oga_context::{BuildOptions, ContextIndex, ContextTarget, QuestionOptions};
 use oga_domain::TaskScope;
 use oga_http::HttpState;
 use std::path::Path;
 
-pub fn query(state: &HttpState, cwd: &str, question: &str) -> Result<String, String> {
+pub fn query(
+    state: &HttpState,
+    cwd: &str,
+    question: &str,
+    paths: &[String],
+) -> Result<String, String> {
     let cwd = canonical_directory(cwd)?;
     let index = refreshed(state, &cwd)?;
+    let options = QuestionOptions {
+        paths: paths.to_vec(),
+        ..Default::default()
+    };
     index
-        .question(&ContextTarget::new(&cwd, everything()), question)
+        .question_with_options(&ContextTarget::new(&cwd, everything()), question, options)
         .map(|result| result.markdown)
         .map_err(|error| error.to_string())
 }

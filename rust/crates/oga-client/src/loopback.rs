@@ -747,6 +747,10 @@ impl LoopbackClient {
         if request.code {
             url.query_pairs_mut().append_pair("code", "true");
         }
+        if !request.paths.is_empty() {
+            url.query_pairs_mut()
+                .append_pair("in", &request.paths.join(","));
+        }
         let response: MarkdownResponse = self.get_json(url).await?;
         Ok(response.markdown)
     }

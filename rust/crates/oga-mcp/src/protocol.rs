@@ -746,6 +746,18 @@ fn shared_tools() -> Vec<Value> {
                         "What is being looked for, in plain language — 'where is the token refresh handled'. It matches on meaning, so it need not be a symbol name. A path, or a path and a name such as `src/adapters.ts#emailDriver`, answers with that exact place.",
                     ),
                 ),
+                (
+                    "in".into(),
+                    described(
+                        json!({
+                            "oneOf": [
+                                { "type": "string" },
+                                { "type": "array", "items": { "type": "string" } },
+                            ],
+                        }),
+                        "Folders or files to answer from, relative to the project. Leave out to search the whole project.",
+                    ),
+                ),
             ]),
             &["cwd", "q"],
         ),
