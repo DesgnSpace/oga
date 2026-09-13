@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-13
+
 - Code questions no longer answer from files your git setup ignores, such as local notes and reports.
 - Code questions with several words now leave out files that only share one everyday word with them.
 - Code questions answer faster; the first question after updating rebuilds the project's index once.
