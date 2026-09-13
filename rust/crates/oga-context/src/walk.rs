@@ -60,12 +60,68 @@ struct IgnoreGroup {
 
 pub fn walk_files(cwd: &Path, max_files: usize) -> WalkResult {
     let mut result = WalkResult::default();
-    let mut ignores = Vec::new();
+    let mut ignores = repository_ignore_groups(cwd);
     walk_directory(cwd, cwd, max_files, &mut ignores, &mut result);
     result
         .files
         .sort_by(|left, right| left.path.cmp(&right.path));
     result
+}
+
+fn repository_ignore_groups(cwd: &Path) -> Vec<IgnoreGroup> {
+    let mut groups = Vec::new();
+    if let Some(path) = global_ignore_path(cwd) {
+        add_ignore_group(&path, &mut groups);
+    }
+    if let Some(path) = git_info_exclude_path(cwd) {
+        add_ignore_group(&path, &mut groups);
+    }
+    groups
+}
+
+fn add_ignore_group(path: &Path, groups: &mut Vec<IgnoreGroup>) {
+    if let Ok(source) = fs::read_to_string(path) {
+        groups.push(IgnoreGroup {
+            base: String::new(),
+            rules: parse_ignore_rules(&source),
+        });
+    }
+}
+
+fn global_ignore_path(cwd: &Path) -> Option<PathBuf> {
+    if let Ok(output) = std::process::Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["config", "--path", "--get", "core.excludesFile"])
+        .output()
+    {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(config_home.join("git/ignore"))
+}
+
+fn git_info_exclude_path(cwd: &Path) -> Option<PathBuf> {
+    let git_path = cwd.join(".git");
+    let git_dir = if git_path.is_dir() {
+        git_path
+    } else {
+        let gitfile = fs::read_to_string(git_path).ok()?;
+        let path = gitfile.strip_prefix("gitdir: ")?.trim();
+        let path = PathBuf::from(path);
+        if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        }
+    };
+    Some(git_dir.join("info/exclude"))
 }
 
 /// True when some adapter would parse this path.
@@ -233,4 +289,47 @@ fn mtime_ms(metadata: &Metadata) -> i64 {
 
 pub fn absolute_path(cwd: &Path, relative: &str) -> PathBuf {
     cwd.join(relative)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+    use tempfile::tempdir;
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    #[test]
+    fn skips_files_from_global_and_info_exclude() {
+        let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let project = tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(project.path())
+            .status()
+            .unwrap();
+        fs::write(project.path().join(".git/info/exclude"), "info.rs\n").unwrap();
+        fs::write(project.path().join("info.rs"), "fn info() {}\n").unwrap();
+        fs::write(project.path().join("global.rs"), "fn global() {}\n").unwrap();
+        let global = tempdir().unwrap();
+        fs::write(global.path().join("ignore"), "global.rs\n").unwrap();
+        unsafe {
+            std::env::set_var("GIT_CONFIG_GLOBAL", global.path().join("config"));
+        }
+        fs::write(
+            global.path().join("config"),
+            format!(
+                "[core]\n\texcludesFile = {}\n",
+                global.path().join("ignore").display()
+            ),
+        )
+        .unwrap();
+
+        let result = walk_files(project.path(), 10);
+
+        unsafe {
+            std::env::remove_var("GIT_CONFIG_GLOBAL");
+        }
+        assert!(result.files.is_empty(), "{:?}", result.files);
+    }
 }

@@ -535,7 +535,7 @@ impl<'a> ContextIndex<'a> {
         keys.sort();
         keys.dedup();
         let path_filter = (!paths.is_empty()).then_some(paths);
-        for symbol in index_store::symbols_by_name(self.store, index_cwd, &keys, 32, path_filter)? {
+        for symbol in index_store::symbols_by_name(self.store, index_cwd, &keys, path_filter)? {
             ranking.add_symbol(symbol, terms, &question_key, &weights, None);
         }
         let search = index_store::symbols_by_search(

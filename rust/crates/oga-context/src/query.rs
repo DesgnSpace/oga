@@ -32,6 +32,7 @@ const ROUTE_COVERED: f64 = 500_000.0;
 const ROUTE_PARTIAL: f64 = 6_000.0;
 const NAME_EXACT: f64 = 40_000.0;
 const NAME_COVERED: f64 = 6_000.0;
+const NAME_WORD: f64 = 6_000.0;
 const NAME_TERM: f64 = 3_000.0;
 const PARENT_TERM: f64 = 800.0;
 const DOC_TERM: f64 = 400.0;
@@ -183,6 +184,10 @@ impl Ranking {
         {
             score += NAME_COVERED;
         }
+        let name_match = matched.iter().any(|term| name_tokens.contains(term));
+        if name_match {
+            score += NAME_WORD;
+        }
         if symbol.exported {
             score += EXPORTED;
         }
@@ -192,7 +197,7 @@ impl Ranking {
             symbol,
             matched,
             decisive: exact,
-            retain_single_term: exact,
+            retain_single_term: exact || name_match,
         });
     }
 
@@ -351,6 +356,13 @@ mod tests {
         }
     }
 
+    fn symbol_with_doc(name: &str, doc: &str) -> SymbolRow {
+        SymbolRow {
+            doc: Some(doc.to_owned()),
+            ..symbol(name)
+        }
+    }
+
     fn ranking_with_terms(count: usize, name: &str) -> Vec<Scored> {
         let terms = ["alpha".to_owned(), "beta".to_owned(), "quartz".to_owned()];
         let mut hits = HashMap::from([
@@ -372,7 +384,12 @@ mod tests {
                 None,
             );
         }
-        ranking.add_symbol(symbol(name), &terms, "target words", &weights, None);
+        let candidate = if name == "alpha" {
+            symbol_with_doc("common", name)
+        } else {
+            symbol(name)
+        };
+        ranking.add_symbol(candidate, &terms, "target words", &weights, None);
         ranking.ranked(10, &weights)
     }
 
@@ -383,7 +400,7 @@ mod tests {
         assert!(
             !ranked
                 .iter()
-                .any(|candidate| candidate.symbol.name == "alpha")
+                .any(|candidate| candidate.symbol.name == "common")
         );
     }
 
@@ -395,11 +412,44 @@ mod tests {
         assert!(
             short
                 .iter()
-                .any(|candidate| candidate.symbol.name == "alpha")
+                .any(|candidate| candidate.symbol.name == "common")
         );
         assert!(
             rare.iter()
                 .any(|candidate| candidate.symbol.name == "quartz")
+        );
+    }
+
+    #[test]
+    fn retains_a_compound_name_with_a_whole_word_match() {
+        let terms = ["query".to_owned(), "other".to_owned()];
+        let weights = TermWeights::new(
+            &HashMap::from([("query".to_owned(), 99), ("other".to_owned(), 10)]),
+            100,
+        );
+        let mut ranking = Ranking::default();
+        for index in 0..10 {
+            ranking.add_symbol(
+                symbol(&format!("query_other_{index}")),
+                &terms,
+                "unrelated question",
+                &weights,
+                None,
+            );
+        }
+        ranking.add_symbol(
+            symbol("run_query"),
+            &terms,
+            "unrelated question",
+            &weights,
+            None,
+        );
+
+        assert!(
+            ranking
+                .ranked(10, &weights)
+                .iter()
+                .any(|candidate| candidate.symbol.name == "run_query")
         );
     }
 }

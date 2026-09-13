@@ -10,7 +10,7 @@ use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 /// The index layout this binary writes. An index built by an older layout is
 /// rebuilt rather than read.
-pub(crate) const INDEX_SCHEME: u32 = 8;
+pub(crate) const INDEX_SCHEME: u32 = 9;
 
 /// What the index knows about its own last build for one project.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,13 +119,16 @@ pub fn symbols_by_name(
     store: &Store,
     cwd: &Path,
     names: &[String],
-    limit: usize,
     paths: Option<&[String]>,
 ) -> Result<Vec<SymbolRow>, StoreError> {
     if names.is_empty() {
         return Ok(Vec::new());
     }
-    let placeholders = vec!["?"; names.len()].join(",");
+    let name_conditions = names
+        .iter()
+        .map(|_| "(name_key = ? OR instr(' ' || name_key || ' ', ' ' || ? || ' ') > 0)")
+        .collect::<Vec<_>>()
+        .join(" OR ");
     store.with_connection(|connection| {
         let path_sql = paths
             .filter(|paths| !paths.is_empty())
@@ -141,7 +144,7 @@ pub fn symbols_by_name(
             })
             .unwrap_or_default();
         let mut statement = connection.prepare(&format!(
-            "SELECT {SYMBOL_COLUMNS} FROM context_symbols WHERE cwd=? AND name_key IN ({placeholders}){path_sql} ORDER BY exported DESC, length(qualified) LIMIT {limit}"
+            "SELECT {SYMBOL_COLUMNS} FROM context_symbols WHERE cwd=? AND ({name_conditions}){path_sql} ORDER BY length(name_key), exported DESC, length(qualified)"
         ))?;
         let path_values = paths
             .unwrap_or_default()
@@ -149,10 +152,11 @@ pub fn symbols_by_name(
             .map(|path| path.trim_end_matches("/**").to_owned())
             .collect::<Vec<_>>();
         let mut arguments: Vec<&dyn rusqlite::ToSql> =
-            Vec::with_capacity(names.len() + 1 + path_values.len() * 2);
+            Vec::with_capacity(names.len() * 2 + 1 + path_values.len() * 2);
         let cwd = cwd.display().to_string();
         arguments.push(&cwd);
         for name in names {
+            arguments.push(name);
             arguments.push(name);
         }
         let escaped = path_values
