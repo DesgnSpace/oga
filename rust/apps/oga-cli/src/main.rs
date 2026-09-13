@@ -746,7 +746,8 @@ Usage: oga <command> [options]
                        answer it. Paste a path, or path#name, to go straight
                        there. --limit N sets how many; --code prints the code.
                        --in PATH answers only from that folder or file; repeat
-                       it for more than one.
+                       it for more than one. Ask with --code and --in together
+                       to read the answer without a second lookup.
   love [worker:model[:effort]]...  Send work that names no model to the first
                         destination that can take it. Add
                         --when ui,review to send only those kinds of

@@ -11,12 +11,15 @@ pub fn query(
     cwd: &str,
     question: &str,
     paths: &[String],
+    limit: Option<usize>,
+    code: bool,
 ) -> Result<String, String> {
     let cwd = canonical_directory(cwd)?;
     let index = refreshed(state, &cwd)?;
     let options = QuestionOptions {
         paths: paths.to_vec(),
-        ..Default::default()
+        limit,
+        code,
     };
     index
         .question_with_options(&ContextTarget::new(&cwd, everything()), question, options)

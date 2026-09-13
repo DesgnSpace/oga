@@ -530,6 +530,8 @@ impl McpServer {
         let requested_cwd = required_string(args, "cwd")?;
         let question = required_string(args, "q")?;
         let paths = string_or_array(args.get("in"), "in")?;
+        let limit = optional_u64(args, "limit")?.map(|limit| limit.clamp(1, 20) as usize);
+        let code = optional_bool(args, "code").unwrap_or(false);
         let cwd = if let Some(orchestrator_id) = &self.orchestrator_id {
             let task = self
                 .state
@@ -548,7 +550,10 @@ impl McpServer {
             requested_cwd
         };
         Ok((
-            json!(query::query(&self.state, &cwd, &question, &paths).map_err(McpError::Message)?),
+            json!(
+                query::query(&self.state, &cwd, &question, &paths, limit, code)
+                    .map_err(McpError::Message)?
+            ),
             Some(cwd),
         ))
     }
