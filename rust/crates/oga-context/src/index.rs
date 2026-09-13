@@ -1,8 +1,10 @@
 //! Building the index, keeping it in step with disk, and answering from it.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use oga_domain::Task;
 use oga_store::{Store, StoreError};
@@ -154,6 +156,19 @@ pub struct LearnRouteRejection {
 pub struct LearnRoutesResult {
     pub accepted: usize,
     pub rejected: Vec<LearnRouteRejection>,
+}
+
+/// Bytes read from disk while answering one question, keyed by absolute
+/// path, so a file named by several candidates is only read once.
+type FileCache = RefCell<HashMap<PathBuf, Option<Rc<str>>>>;
+
+fn read_cached(cache: &FileCache, path: &Path) -> Option<Rc<str>> {
+    if let Some(hit) = cache.borrow().get(path) {
+        return hit.clone();
+    }
+    let read = fs::read_to_string(path).ok().map(Rc::from);
+    cache.borrow_mut().insert(path.to_owned(), read.clone());
+    read
 }
 
 #[derive(Clone)]
@@ -311,7 +326,8 @@ impl<'a> ContextIndex<'a> {
         let terms = prompt_terms(question);
         let limit = options.limit.unwrap_or(DEFAULT_LIMIT).max(1);
         let ranked = self.rank(target, question, &terms, &paths, limit)?;
-        let mut reachable = self.reachable(target, &ranked, limit)?;
+        let cache = FileCache::default();
+        let mut reachable = self.reachable(target, &ranked, limit, &cache)?;
         if reachable.kept.is_empty() {
             let absent = terms
                 .iter()
@@ -329,7 +345,9 @@ impl<'a> ContextIndex<'a> {
                 path: candidate.symbol.path.clone(),
                 line: candidate.symbol.line.max(1),
                 symbol: (!candidate.symbol.name.is_empty()).then(|| candidate.symbol.name.clone()),
-                code: options.code.then(|| source_body(target, &candidate.symbol)),
+                code: options
+                    .code
+                    .then(|| source_body(target, &candidate.symbol, &cache)),
             })
             .collect::<Vec<_>>();
         let mut lines = answer_lines(
@@ -363,6 +381,7 @@ impl<'a> ContextIndex<'a> {
         target: &ContextTarget,
         ranked: &[Scored],
         limit: usize,
+        cache: &FileCache,
     ) -> Result<Reachable, ContextError> {
         let limit = limit + 1;
         let mut reachable = Reachable::default();
@@ -371,7 +390,7 @@ impl<'a> ContextIndex<'a> {
                 reachable.outside_scope += 1;
                 continue;
             }
-            let Some(symbol) = self.locate(target, &candidate.symbol)? else {
+            let Some(symbol) = self.locate(target, &candidate.symbol, cache)? else {
                 reachable.gone += 1;
                 continue;
             };
@@ -626,16 +645,20 @@ impl<'a> ContextIndex<'a> {
         &self,
         target: &ContextTarget,
         symbol: &SymbolRow,
+        cache: &FileCache,
     ) -> Result<Option<SymbolRow>, ContextError> {
-        let Ok(source) = fs::read_to_string(target.cwd.join(&symbol.path)) else {
+        let path = target.cwd.join(&symbol.path);
+        let on_origin = || target.index_cwd().join(&symbol.path).is_file();
+        if target.source_cwd.is_none() || symbol.name.is_empty() {
+            // Nothing past this point reads the symbol's position, so only
+            // existence matters.
+            return Ok((path.is_file() || on_origin()).then(|| symbol.clone()));
+        }
+        let Some(source) = read_cached(cache, &path) else {
             // A checkout that has not materialised the file yet still answers
             // from the origin it was cut from.
-            let origin = target.index_cwd().join(&symbol.path);
-            return Ok(origin.is_file().then(|| symbol.clone()));
+            return Ok(on_origin().then(|| symbol.clone()));
         };
-        if target.source_cwd.is_none() || symbol.name.is_empty() {
-            return Ok(Some(symbol.clone()));
-        }
         if digest_of(source.as_bytes()) == file_digest(target.index_cwd(), &symbol.path) {
             return Ok(Some(symbol.clone()));
         }
@@ -990,9 +1013,9 @@ fn omitted(count: usize, reason: &str) -> String {
     )
 }
 
-fn source_body(target: &ContextTarget, symbol: &SymbolRow) -> String {
+fn source_body(target: &ContextTarget, symbol: &SymbolRow, cache: &FileCache) -> String {
     let path = target.cwd.join(&symbol.path);
-    let Ok(source) = fs::read_to_string(&path) else {
+    let Some(source) = read_cached(cache, &path) else {
         return format!("source unavailable: {}", path.display());
     };
     let lines = source.lines().collect::<Vec<_>>();

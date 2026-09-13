@@ -12,6 +12,7 @@
 - Changed files now open full screen, with the file list beside the diffs so you can read a task's whole change end to end.
 - The red connection bar no longer flashes across the top every time a new task lands. It now shows only when Oga is really unreachable.
 - Each code answer now says in a few words what the match is, so you can pick the right one without opening it.
+- Repeated code questions answer almost at once, since the project is not re-scanned each time.
 
 ## 0.1.0 - 2026-09-10
 

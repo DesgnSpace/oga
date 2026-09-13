@@ -1637,13 +1637,20 @@ async fn plain_language_lookup_indexes_on_first_use_and_follows_edits() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["candidates"][0]["path"], "src/auth.ts");
-    assert_eq!(body["candidates"][0]["line"], 1);
+    assert!(
+        body["markdown"]
+            .as_str()
+            .expect("markdown")
+            .contains("src/auth.ts:1#checkAuth")
+    );
 
     fixture.write_source(
         "src/auth.ts",
         "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
     );
+    // Past the reconcile debounce window, so this question walks the tree
+    // again instead of answering from the first question's stale index.
+    tokio::time::sleep(Duration::from_secs(2)).await;
     let (status, body) = json_response(
         request(
             &fixture.router,
@@ -1655,7 +1662,90 @@ async fn plain_language_lookup_indexes_on_first_use_and_follows_edits() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["candidates"][0]["line"], 5);
+    assert!(
+        body["markdown"]
+            .as_str()
+            .expect("markdown")
+            .contains("src/auth.ts:5#checkAuth")
+    );
+}
+
+#[tokio::test]
+async fn a_second_question_within_the_debounce_window_skips_the_walk_but_init_does_not() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    let cwd = fixture.canonical_cwd();
+    Command::new("git")
+        .arg("-C")
+        .arg(&cwd)
+        .arg("init")
+        .output()
+        .expect("git is installed");
+
+    let (status, _) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={cwd}&q=where%20is%20checkAuth%20handled"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    fixture.write_source(
+        "src/auth.ts",
+        "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+
+    // Still inside the debounce window, so this question answers from the
+    // index as it stood before the edit above.
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={cwd}&q=where%20is%20checkAuth%20handled"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["markdown"]
+            .as_str()
+            .expect("markdown")
+            .contains("src/auth.ts:1#checkAuth")
+    );
+
+    // `oga query --init` always walks, debounce window or not.
+    let (status, _) = json_response(
+        request(
+            &fixture.router,
+            Method::POST,
+            &format!("/api/query/init?cwd={cwd}"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={cwd}&q=where%20is%20checkAuth%20handled"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     assert!(
         body["markdown"]
             .as_str()
@@ -1721,7 +1811,13 @@ async fn plain_language_lookup_inside_a_worktree_answers_from_the_origin_index()
         )
         .await;
         assert_eq!(status, StatusCode::OK, "cwd {cwd}");
-        assert_eq!(body["candidates"][0]["path"], "src/auth.ts");
+        assert!(
+            body["markdown"]
+                .as_str()
+                .expect("markdown")
+                .contains("src/auth.ts:1#checkAuth"),
+            "cwd {cwd}"
+        );
     }
 }
 

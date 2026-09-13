@@ -30,6 +30,7 @@ pub struct HttpState {
     pub dispatcher: Arc<Dispatcher>,
     pub build: String,
     pub staleness: Staleness,
+    pub reconcile_debounce: context::ReconcileDebounce,
 }
 
 /// Name used by applications that construct the broker router.
@@ -43,6 +44,7 @@ impl HttpState {
             store,
             build: "dev".into(),
             staleness: Staleness::default(),
+            reconcile_debounce: context::ReconcileDebounce::default(),
         }
     }
 

@@ -3,14 +3,20 @@
 //! Every lookup reconciles the index against disk first, so files that changed,
 //! moved, or vanished since the last call are re-read before answering.
 
-use std::{path::Path, process::Command, time::Instant};
+use std::{
+    collections::HashMap,
+    path::Path,
+    process::Command,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use axum::{
     Json,
     extract::{Query, State},
     response::IntoResponse,
 };
-use oga_context::{BuildOptions, ContextError, ContextIndex, ContextTarget};
+use oga_context::{BuildOptions, ContextError, ContextIndex, ContextTarget, ReconcileResult};
 use oga_domain::{TaskKind, TaskScope};
 use oga_store::Store;
 use rusqlite::OptionalExtension;
@@ -78,6 +84,7 @@ pub async fn get_query(
         }
     };
     let store = state.store.clone();
+    let debounce = state.reconcile_debounce.clone();
     let options = oga_context::QuestionOptions {
         limit: query.limit.map(|limit| limit as usize),
         code: query.code.unwrap_or(false),
@@ -91,14 +98,11 @@ pub async fn get_query(
             .unwrap_or(&target.cwd)
             .display()
             .to_string();
-        refresh(&index, &index_cwd)?;
+        refresh(&debounce, &index, &index_cwd)?;
         Ok(index.question_with_options(&target, &question, options)?)
     })
     .await?;
-    Ok(Json(json!({
-        "markdown": result.markdown,
-        "candidates": result.candidates,
-    })))
+    Ok(Json(json!({ "markdown": result.markdown })))
 }
 
 pub async fn init_index(
@@ -168,9 +172,62 @@ fn origin_of_worktree(store: &Store, cwd: &str) -> Result<Option<String>, HttpEr
         .map_err(HttpError::from)
 }
 
-/// Bring the index for `cwd` up to date with disk before answering from it.
-fn refresh(index: &ContextIndex<'_>, cwd: &str) -> Result<(), HttpError> {
+/// How long a project's reconcile stays valid before the next question walks
+/// its tree again.
+const RECONCILE_DEBOUNCE: Duration = Duration::from_secs(2);
+
+/// The last time each project's tree was walked for a question, so
+/// back-to-back questions against the same project skip repeating the walk.
+/// `oga query --init` never consults this — it always walks.
+#[derive(Clone, Default)]
+pub struct ReconcileDebounce(Arc<Mutex<HashMap<String, Instant>>>);
+
+impl ReconcileDebounce {
+    fn is_fresh(&self, cwd: &str) -> bool {
+        self.0
+            .lock()
+            .expect("reconcile debounce lock poisoned")
+            .get(cwd)
+            .is_some_and(|walked| walked.elapsed() < RECONCILE_DEBOUNCE)
+    }
+
+    fn mark_walked(&self, cwd: &str) {
+        self.0
+            .lock()
+            .expect("reconcile debounce lock poisoned")
+            .insert(cwd.to_owned(), Instant::now());
+    }
+}
+
+/// Walk `cwd`'s tree and reconcile it with the index, unless it was already
+/// walked within the debounce window — in which case nothing runs and `None`
+/// comes back. An empty reconcile (nothing indexed) is never remembered, so
+/// an unindexed `cwd` keeps reporting that on every question.
+pub fn reconcile_if_stale(
+    debounce: &ReconcileDebounce,
+    index: &ContextIndex<'_>,
+    cwd: &str,
+) -> Result<Option<ReconcileResult>, ContextError> {
+    if debounce.is_fresh(cwd) {
+        return Ok(None);
+    }
     let reconciled = index.reconcile(cwd, BuildOptions::default())?;
+    if reconciled.file_count > 0 {
+        debounce.mark_walked(cwd);
+    }
+    Ok(Some(reconciled))
+}
+
+/// Bring the index for `cwd` up to date with disk before answering from it,
+/// unless it was already walked within the debounce window.
+fn refresh(
+    debounce: &ReconcileDebounce,
+    index: &ContextIndex<'_>,
+    cwd: &str,
+) -> Result<(), HttpError> {
+    let Some(reconciled) = reconcile_if_stale(debounce, index, cwd)? else {
+        return Ok(());
+    };
     if reconciled.file_count == 0 {
         return Err(HttpError::conflict(format!(
             "{cwd} is not indexed; run 'oga query --init' there to index it"
