@@ -7,8 +7,79 @@ use rusqlite::Connection;
 
 use crate::connection::StoreError;
 
+/// A migration and the ledger row it leaves behind.
+pub(crate) struct Migration {
+    pub(crate) version: i64,
+    pub(crate) name: &'static str,
+    pub(crate) run: fn(&Connection) -> Result<(), StoreError>,
+}
+
+/// Every migration, oldest first. Adding one here is the whole edit: the
+/// version this binary speaks and the row a fresh database carries both come
+/// from the last entry, so neither can drift from the migrations themselves.
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 38,
+        name: "user learned routes",
+        run: migrate_v37_to_v38,
+    },
+    Migration {
+        version: 39,
+        name: "learned route aliases",
+        run: migrate_v38_to_v39,
+    },
+    Migration {
+        version: 40,
+        name: "task search indexes",
+        run: migrate_v39_to_v40,
+    },
+    Migration {
+        version: 41,
+        name: "task attachments",
+        run: migrate_v40_to_v41,
+    },
+    Migration {
+        version: 42,
+        name: "tree-sitter code index",
+        run: migrate_v41_to_v42,
+    },
+    Migration {
+        version: 43,
+        name: "code index without context maps",
+        run: migrate_v42_to_v43,
+    },
+    Migration {
+        version: 44,
+        name: "tasks that may delegate",
+        run: migrate_v43_to_v44,
+    },
+    Migration {
+        version: 45,
+        name: "taught route phrases",
+        run: migrate_v44_to_v45,
+    },
+    Migration {
+        version: 46,
+        name: "checkout lifecycle",
+        run: migrate_v45_to_v46,
+    },
+    Migration {
+        version: 47,
+        name: "project-scoped code search",
+        run: migrate_v46_to_v47,
+    },
+];
+
 /// The schema this binary can read.
-pub const LATEST_SCHEMA_VERSION: i64 = 46;
+pub const LATEST_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;
+
+/// The first migration that carries `version` forward, or `None` once the
+/// database is current.
+pub(crate) fn migration_after(version: i64) -> Option<&'static Migration> {
+    MIGRATIONS
+        .iter()
+        .find(|migration| migration.version > version)
+}
 
 /// Create the current schema on an empty database, in one transaction.
 ///
@@ -27,7 +98,13 @@ pub fn create_fresh_schema(conn: &Connection) -> Result<(), StoreError> {
 
 fn create_fresh_schema_inner(conn: &Connection) -> Result<(), StoreError> {
     let schema = [BASE_SCHEMA, CONTEXT_INDEX, ROUTE_HINTS_TABLE].concat();
-    exec(conn, &schema)
+    exec(conn, &schema)?;
+    let head = &MIGRATIONS[MIGRATIONS.len() - 1];
+    conn.execute(
+        "INSERT INTO schema_migrations(version, name) VALUES (?1, ?2)",
+        rusqlite::params![head.version, head.name],
+    )?;
+    Ok(())
 }
 
 fn exec(conn: &Connection, sql: &str) -> Result<(), StoreError> {
@@ -238,8 +315,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY(cwd, key)
-    );
-     INSERT INTO schema_migrations(version, name) VALUES (46, 'checkout lifecycle');"#;
+    );"#;
 
 /// One row per indexed file, one per symbol, with the symbol search index
 /// derived from the same rows.
