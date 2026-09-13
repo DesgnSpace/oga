@@ -312,6 +312,7 @@ fn does_not_present_one_of_two_equal_answers_as_sure() {
             QuestionOptions {
                 limit: Some(1),
                 code: false,
+                paths: Vec::new(),
             },
         )
         .expect("the question answers");

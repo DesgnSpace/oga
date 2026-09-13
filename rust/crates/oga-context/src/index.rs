@@ -122,10 +122,11 @@ pub struct QuestionCandidate {
     pub code: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct QuestionOptions {
     pub limit: Option<usize>,
     pub code: bool,
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -304,9 +305,10 @@ impl<'a> ContextIndex<'a> {
         options: QuestionOptions,
     ) -> Result<ContextResult, ContextError> {
         self.ensure(target.index_cwd())?;
+        let paths = normalize_paths(&options.paths)?;
         let terms = prompt_terms(question);
         let limit = options.limit.unwrap_or(DEFAULT_LIMIT).max(1);
-        let ranked = self.rank(target, question, &terms)?;
+        let ranked = self.rank(target, question, &terms, &paths)?;
         let mut reachable = self.reachable(target, &ranked, limit)?;
         if reachable.kept.is_empty() {
             let absent = terms
@@ -314,7 +316,7 @@ impl<'a> ContextIndex<'a> {
                 .filter(|term| !ranked.iter().any(|hit| hit.matched.contains(term)))
                 .cloned()
                 .collect::<Vec<_>>();
-            return Ok(miss(question, &absent, reachable.outside_scope));
+            return Ok(miss(question, &absent, reachable.outside_scope, &paths));
         }
         let confident = query::is_confident(&reachable.kept, &terms);
         reachable.kept.truncate(limit);
@@ -479,9 +481,10 @@ impl<'a> ContextIndex<'a> {
         target: &ContextTarget,
         question: &str,
         terms: &[String],
+        paths: &[String],
     ) -> Result<Vec<Scored>, ContextError> {
         let index_cwd = target.index_cwd();
-        let direct = self.direct(target, question)?;
+        let direct = self.direct(target, question, paths)?;
         if !direct.is_empty() {
             return Ok(direct);
         }
@@ -497,7 +500,9 @@ impl<'a> ContextIndex<'a> {
             }
             // A route whose target has gone is dropped by the next reconcile,
             // which reads disk. A lookup only reads, so it passes over it.
-            if let Some(symbol) = self.route_target(target, &route)? {
+            if let Some(symbol) = self.route_target(target, &route)?
+                && path_matches(paths, &symbol.path)
+            {
                 ranking.add_route(&route, symbol, terms, &weights);
             }
         }
@@ -506,7 +511,8 @@ impl<'a> ContextIndex<'a> {
         keys.extend(terms.iter().cloned());
         keys.sort();
         keys.dedup();
-        for symbol in index_store::symbols_by_name(self.store, index_cwd, &keys, 32)? {
+        let path_filter = (!paths.is_empty()).then_some(paths);
+        for symbol in index_store::symbols_by_name(self.store, index_cwd, &keys, 32, path_filter)? {
             ranking.add_symbol(symbol, terms, &question_key, &weights, None);
         }
         let search = index_store::symbols_by_search(
@@ -514,6 +520,7 @@ impl<'a> ContextIndex<'a> {
             index_cwd,
             &fts_query(terms),
             CANDIDATE_POOL,
+            path_filter,
         )?;
         for (symbol, rank) in search {
             ranking.add_symbol(symbol, terms, &question_key, &weights, Some(rank));
@@ -576,15 +583,24 @@ impl<'a> ContextIndex<'a> {
     /// The answer to a question that named a place instead of describing one.
     /// It is the whole answer: a path someone typed is not a starting point
     /// for a search.
-    fn direct(&self, target: &ContextTarget, question: &str) -> Result<Vec<Scored>, ContextError> {
+    fn direct(
+        &self,
+        target: &ContextTarget,
+        question: &str,
+        paths: &[String],
+    ) -> Result<Vec<Scored>, ContextError> {
         let Some(named) = query::direct_target(question) else {
             return Ok(Vec::new());
         };
         let index_cwd = target.index_cwd();
-        let paths = index_store::files_by_path(self.store, index_cwd, named.path, DIRECT_MATCHES)?;
-        let unique = paths.len() == 1;
+        let direct_paths =
+            index_store::files_by_path(self.store, index_cwd, named.path, DIRECT_MATCHES)?;
+        let unique = direct_paths.len() == 1;
         let mut answers = Vec::new();
-        for path in paths {
+        for path in direct_paths {
+            if !path_matches(paths, &path) {
+                continue;
+            }
             let anchor = match named.symbol {
                 Some(name) => index_store::symbol_named(self.store, index_cwd, &path, name)?,
                 None => Some(file_anchor(&path)),
@@ -807,8 +823,21 @@ fn file_anchor(path: &str) -> SymbolRow {
     }
 }
 
-fn miss(question: &str, absent: &[String], outside_scope: usize) -> ContextResult {
+fn miss(
+    question: &str,
+    absent: &[String],
+    outside_scope: usize,
+    paths: &[String],
+) -> ContextResult {
     let mut detail = String::new();
+    let prefix = if paths.is_empty() {
+        format!("No confident match for \"{question}\" in this project.")
+    } else {
+        format!(
+            "Nothing under `{}` matched \"{question}\".",
+            paths.join(", ")
+        )
+    };
     if !absent.is_empty() {
         detail.push_str(&format!(" Not indexed: {}.", absent.join(", ")));
     }
@@ -819,11 +848,41 @@ fn miss(question: &str, absent: &[String], outside_scope: usize) -> ContextResul
         ));
     }
     ContextResult {
-        markdown: format!(
-            "No confident match for \"{question}\" in this project.{detail} Search the tree or read likely files directly."
-        ),
+        markdown: format!("{prefix}{detail} Search the tree or read likely files directly."),
         candidates: Vec::new(),
     }
+}
+
+fn normalize_paths(paths: &[String]) -> Result<Vec<String>, ContextError> {
+    paths
+        .iter()
+        .map(|raw| {
+            if raw
+                .chars()
+                .any(|character| matches!(character, '*' | '?' | '{' | '}'))
+            {
+                return Err(ContextError::Invalid(
+                    "path globs are not supported; name a directory or file".into(),
+                ));
+            }
+            Ok(raw
+                .trim_start_matches("./")
+                .replace('\\', "/")
+                .trim_end_matches('/')
+                .to_owned())
+        })
+        .collect()
+}
+
+fn path_matches(paths: &[String], target: &str) -> bool {
+    paths.is_empty()
+        || paths.iter().any(|path| {
+            let base = path.trim_end_matches("/**");
+            target == base
+                || target
+                    .strip_prefix(base)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
 }
 
 /// What survived the scope and existence checks, and how many did not.

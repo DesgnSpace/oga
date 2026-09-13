@@ -796,6 +796,99 @@ fn reports_an_honest_miss() {
 }
 
 #[test]
+fn filters_questions_to_directories_files_and_unions() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let under_src = index
+        .question_with_options(
+            &fixture.target(),
+            "where is checkAuth handled",
+            QuestionOptions {
+                paths: vec!["./src/".into()],
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("directory-filtered question answers");
+    assert_eq!(under_src.candidates[0].path, "src/auth.ts");
+
+    let exact_file = index
+        .question_with_options(
+            &fixture.target(),
+            "where is checkAuth handled",
+            QuestionOptions {
+                paths: vec!["src/auth.ts".into()],
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("file-filtered question answers");
+    assert_eq!(exact_file.candidates[0].path, "src/auth.ts");
+
+    let union = index
+        .question_with_options(
+            &fixture.target(),
+            "where is other",
+            QuestionOptions {
+                paths: vec!["missing".into(), "src/other.ts".into()],
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("union-filtered question answers");
+    assert_eq!(union.candidates[0].path, "src/other.ts");
+}
+
+#[test]
+fn reports_a_filter_miss_outside_the_read_scope_and_rejects_globs() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+    let target = ContextTarget::new(
+        fixture.project.path(),
+        TaskScope {
+            read: vec!["src/auth.ts".into()],
+            write: Vec::new(),
+        },
+    );
+
+    let outside = index
+        .question_with_options(
+            &target,
+            "where is checkAuth handled",
+            QuestionOptions {
+                paths: vec!["src/other.ts".into()],
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("outside filter returns a miss");
+    assert!(outside.candidates.is_empty());
+    assert!(
+        outside
+            .markdown
+            .starts_with("Nothing under `src/other.ts` matched \"where is checkAuth handled\".")
+    );
+
+    let error = index.question_with_options(
+        &target,
+        "where is checkAuth handled",
+        QuestionOptions {
+            paths: vec!["src/*".into()],
+            ..QuestionOptions::default()
+        },
+    );
+    assert!(
+        matches!(error, Err(oga_context::ContextError::Invalid(message)) if message.contains("globs are not supported"))
+    );
+}
+
+#[test]
 fn limits_question_results_and_reads_current_source_for_code() {
     let fixture = Fixture::new();
     fixture.write_auth(
@@ -814,6 +907,7 @@ fn limits_question_results_and_reads_current_source_for_code() {
             QuestionOptions {
                 limit: Some(1),
                 code: true,
+                paths: Vec::new(),
             },
         )
         .expect("question renders");

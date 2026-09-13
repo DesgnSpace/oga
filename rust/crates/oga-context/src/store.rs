@@ -119,20 +119,52 @@ pub fn symbols_by_name(
     cwd: &Path,
     names: &[String],
     limit: usize,
+    paths: Option<&[String]>,
 ) -> Result<Vec<SymbolRow>, StoreError> {
     if names.is_empty() {
         return Ok(Vec::new());
     }
     let placeholders = vec!["?"; names.len()].join(",");
     store.with_connection(|connection| {
+        let path_sql = paths
+            .filter(|paths| !paths.is_empty())
+            .map(|paths| {
+                format!(
+                    " AND ({})",
+                    paths
+                        .iter()
+                        .map(|_| "path = ? OR path LIKE ? || '/%' ESCAPE '\\'")
+                        .collect::<Vec<_>>()
+                        .join(" OR ")
+                )
+            })
+            .unwrap_or_default();
         let mut statement = connection.prepare(&format!(
-            "SELECT {SYMBOL_COLUMNS} FROM context_symbols WHERE cwd=? AND name_key IN ({placeholders}) ORDER BY exported DESC, length(qualified) LIMIT {limit}"
+            "SELECT {SYMBOL_COLUMNS} FROM context_symbols WHERE cwd=? AND name_key IN ({placeholders}){path_sql} ORDER BY exported DESC, length(qualified) LIMIT {limit}"
         ))?;
-        let mut arguments: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(names.len() + 1);
+        let path_values = paths
+            .unwrap_or_default()
+            .iter()
+            .map(|path| path.trim_end_matches("/**").to_owned())
+            .collect::<Vec<_>>();
+        let mut arguments: Vec<&dyn rusqlite::ToSql> =
+            Vec::with_capacity(names.len() + 1 + path_values.len() * 2);
         let cwd = cwd.display().to_string();
         arguments.push(&cwd);
         for name in names {
             arguments.push(name);
+        }
+        let escaped = path_values
+            .iter()
+            .map(|path| {
+                path
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            })
+            .collect::<Vec<_>>();
+        for (path, value) in path_values.iter().zip(&escaped) {
+            arguments.push(path);
+            arguments.push(value);
         }
         let rows = statement
             .query_map(arguments.as_slice(), symbol_from_row)?
@@ -147,16 +179,30 @@ pub fn symbols_by_search(
     cwd: &Path,
     query: &str,
     limit: usize,
+    paths: Option<&[String]>,
 ) -> Result<Vec<(SymbolRow, f64)>, StoreError> {
     if query.is_empty() {
         return Ok(Vec::new());
     }
     store.with_connection(|connection| {
+        let path_sql = paths
+            .filter(|paths| !paths.is_empty())
+            .map(|paths| {
+                format!(
+                    " AND ({})",
+                    paths
+                        .iter()
+                        .map(|_| "s.path = ? OR s.path LIKE ? || '/%' ESCAPE '\\'")
+                        .collect::<Vec<_>>()
+                        .join(" OR ")
+                )
+            })
+            .unwrap_or_default();
         let mut statement = connection.prepare(&format!(
             "SELECT {}, bm25(context_symbols_fts, 12.0, 8.0, 10.0, 3.0, 4.0, 2.0) AS rank \
              FROM context_symbols_fts \
              JOIN context_symbols s ON s.id=context_symbols_fts.rowid \
-             WHERE context_symbols_fts MATCH ? AND s.cwd=? \
+              WHERE context_symbols_fts MATCH ? AND s.cwd=? {path_sql} \
              ORDER BY rank LIMIT {limit}",
             SYMBOL_COLUMNS
                 .split(',')
@@ -164,8 +210,23 @@ pub fn symbols_by_search(
                 .collect::<Vec<_>>()
                 .join(",")
         ))?;
+        let cwd = cwd.display().to_string();
+        let mut arguments: Vec<&dyn rusqlite::ToSql> = vec![&query, &cwd];
+        let path_values = paths
+            .unwrap_or_default()
+            .iter()
+            .map(|path| path.trim_end_matches("/**").to_owned())
+            .collect::<Vec<_>>();
+        let escaped = path_values
+            .iter()
+            .map(|path| path.replace('%', "\\%").replace('_', "\\_"))
+            .collect::<Vec<_>>();
+        for (path, value) in path_values.iter().zip(&escaped) {
+            arguments.push(path);
+            arguments.push(value);
+        }
         let rows = statement
-            .query_map(params![query, cwd.display().to_string()], |row| {
+            .query_map(arguments.as_slice(), |row| {
                 Ok((symbol_from_row(row)?, -row.get::<_, f64>(11)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
