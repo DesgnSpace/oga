@@ -25,13 +25,27 @@ fn searchable(word: &str, filler: &[&str]) -> bool {
     word.len() >= 2 && !SHORT_STOP_WORDS.contains(&word) && !filler.contains(&word)
 }
 
-pub fn raw_words(text: &str) -> Vec<String> {
+#[derive(Debug)]
+pub struct RawWords {
+    expanded: String,
+    ranges: Vec<(usize, usize)>,
+}
+
+impl RawWords {
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.ranges
+            .iter()
+            .map(|(start, end)| &self.expanded[*start..*end])
+    }
+}
+
+pub fn raw_words(text: &str) -> RawWords {
     let mut expanded = String::with_capacity(text.len() + 8);
-    let chars = text.chars().collect::<Vec<_>>();
-    for (index, char) in chars.iter().enumerate() {
-        if index > 0 {
-            let previous = chars[index - 1];
-            let next_is_lower = chars.get(index + 1).is_some_and(|next| next.is_lowercase());
+    let mut previous: Option<char> = None;
+    let mut chars = text.chars().peekable();
+    while let Some(char) = chars.next() {
+        if let Some(previous) = previous {
+            let next_is_lower = chars.peek().is_some_and(|next| next.is_lowercase());
             if (previous.is_lowercase() || previous.is_ascii_digit()) && char.is_uppercase()
                 || previous.is_uppercase() && char.is_uppercase() && next_is_lower
             {
@@ -39,12 +53,21 @@ pub fn raw_words(text: &str) -> Vec<String> {
             }
         }
         expanded.push(char.to_ascii_lowercase());
+        previous = Some(char);
     }
-    expanded
-        .split(|char: char| !char.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_owned)
-        .collect()
+    let ranges = expanded
+        .split_inclusive(|char: char| !char.is_ascii_alphanumeric())
+        .scan(0, |offset, part| {
+            let start = *offset;
+            *offset += part.len();
+            let end = start
+                + part
+                    .trim_end_matches(|char: char| !char.is_ascii_alphanumeric())
+                    .len();
+            (!part[..end - start].is_empty()).then_some((start, end))
+        })
+        .collect();
+    RawWords { expanded, ranges }
 }
 
 pub fn normalize_word(word: &str) -> String {
@@ -101,10 +124,7 @@ fn collapse_final_double(word: &mut String) {
 }
 
 pub fn words(text: &str) -> Vec<String> {
-    raw_words(text)
-        .into_iter()
-        .map(|word| normalize_word(&word))
-        .collect()
+    raw_words(text).iter().map(normalize_word).collect()
 }
 
 /// The one key an exact-name lookup compares against, so `extractSymbols`,
@@ -147,9 +167,9 @@ pub fn prompt_terms(text: &str) -> Vec<String> {
                 terms.insert(whole);
             }
         }
-        for word in raw_words(token) {
-            if searchable(&word, MAP_STOP_WORDS) {
-                terms.insert(normalize_word(&word));
+        for word in raw_words(token).iter() {
+            if searchable(word, MAP_STOP_WORDS) {
+                terms.insert(normalize_word(word));
             }
         }
     }
@@ -160,8 +180,8 @@ pub fn prompt_terms(text: &str) -> Vec<String> {
 /// someone taught and the question someone types fold together.
 pub fn hint_words(text: &str) -> Vec<String> {
     raw_words(text)
-        .into_iter()
-        .map(|word| normalize_word(&word))
+        .iter()
+        .map(normalize_word)
         .filter(|word| searchable(word, FTS_STOP_WORDS))
         .collect()
 }

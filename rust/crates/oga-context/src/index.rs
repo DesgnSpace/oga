@@ -17,7 +17,7 @@ use crate::query::{self, CANDIDATE_POOL, DEFAULT_LIMIT, Ranking, Scored, TermWei
 use crate::routes::{self, MAX_HINTS_CHARS, RouteMove, RouteRecord};
 use crate::store::{self as index_store, FileUpdate, INDEX_SCHEME, SymbolRow};
 use crate::symbols::extract_symbols;
-use crate::text::{fts_query, name_key, prompt_terms};
+use crate::text::{fts_query, identifier_tokens, name_key, prompt_terms};
 use crate::walk::{self, WalkFile};
 
 /// The most files one project contributes. Past this the walk reports itself
@@ -588,6 +588,8 @@ impl<'a> ContextIndex<'a> {
             .symbols
             .into_iter()
             .find(|symbol| symbol.name == name)?;
+        let found_name_key = name_key(&found.name);
+        let found_tokens = identifier_tokens(&[&found.name, &found.qualified, path]);
         Some(SymbolRow {
             digest: symbol_digest(&source, &found.name, found.line, found.end_line),
             path: path.to_owned(),
@@ -600,6 +602,8 @@ impl<'a> ContextIndex<'a> {
             signature: found.signature,
             doc: found.doc,
             exported: found.exported,
+            name_key: found_name_key,
+            tokens: found_tokens,
         })
     }
 
@@ -672,6 +676,8 @@ impl<'a> ContextIndex<'a> {
             .map(|found| SymbolRow {
                 line: found.line,
                 end_line: found.end_line,
+                name_key: name_key(&found.name),
+                tokens: identifier_tokens(&[&found.name, &found.qualified, &symbol.path]),
                 ..symbol.clone()
             }))
     }
@@ -759,18 +765,30 @@ fn parse_all(cwd: &Path, files: &[WalkFile]) -> Vec<FileUpdate> {
                 symbols: extracted
                     .symbols
                     .into_iter()
-                    .map(|symbol| SymbolRow {
-                        digest: symbol_digest(&source, &symbol.name, symbol.line, symbol.end_line),
-                        path: file.path.clone(),
-                        kind: symbol.kind,
-                        name: symbol.name,
-                        qualified: symbol.qualified,
-                        parent: symbol.parent,
-                        line: symbol.line,
-                        end_line: symbol.end_line,
-                        signature: symbol.signature,
-                        doc: symbol.doc,
-                        exported: symbol.exported,
+                    .map(|symbol| {
+                        let name_key = name_key(&symbol.name);
+                        let tokens =
+                            identifier_tokens(&[&symbol.name, &symbol.qualified, &file.path]);
+                        SymbolRow {
+                            digest: symbol_digest(
+                                &source,
+                                &symbol.name,
+                                symbol.line,
+                                symbol.end_line,
+                            ),
+                            path: file.path.clone(),
+                            kind: symbol.kind,
+                            name: symbol.name,
+                            qualified: symbol.qualified,
+                            parent: symbol.parent,
+                            line: symbol.line,
+                            end_line: symbol.end_line,
+                            signature: symbol.signature,
+                            doc: symbol.doc,
+                            exported: symbol.exported,
+                            name_key,
+                            tokens,
+                        }
                     })
                     .collect(),
             })
@@ -847,6 +865,8 @@ fn file_anchor(path: &str) -> SymbolRow {
         doc: None,
         exported: true,
         digest: String::new(),
+        name_key: String::new(),
+        tokens: String::new(),
     }
 }
 
@@ -1113,13 +1133,14 @@ fn scope_covers_path(rules: &[String], cwd: &Path, target: &str) -> bool {
 }
 
 fn digest_of(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>()
-        .chars()
-        .take(DIGEST_CHARS)
-        .collect()
+    let digest = Sha256::digest(bytes);
+    let mut hex = [0u8; DIGEST_CHARS];
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for (index, byte) in digest.iter().take(DIGEST_CHARS / 2).enumerate() {
+        hex[index * 2] = HEX[(byte >> 4) as usize];
+        hex[index * 2 + 1] = HEX[(byte & 0x0f) as usize];
+    }
+    String::from_utf8_lossy(&hex).into_owned()
 }
 
 fn timestamp_now() -> String {

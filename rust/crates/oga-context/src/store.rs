@@ -8,8 +8,6 @@ use oga_domain::SymbolKind;
 use oga_store::{Store, StoreError};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 
-use crate::text::{identifier_tokens, name_key};
-
 /// The index layout this binary writes. An index built by an older layout is
 /// rebuilt rather than read.
 pub(crate) const INDEX_SCHEME: u32 = 8;
@@ -47,6 +45,8 @@ pub struct SymbolRow {
     pub doc: Option<String>,
     pub exported: bool,
     pub digest: String,
+    pub name_key: String,
+    pub tokens: String,
 }
 
 /// A file and its symbols, ready to write.
@@ -415,7 +415,7 @@ fn write(
                     update.path,
                     symbol.kind.as_str(),
                     symbol.name,
-                    name_key(&symbol.name),
+                    symbol.name_key,
                     symbol.qualified,
                     symbol.parent.as_deref().unwrap_or_default(),
                     symbol.line,
@@ -424,7 +424,7 @@ fn write(
                     symbol.doc.as_deref().unwrap_or_default(),
                     i64::from(symbol.exported),
                     symbol.digest,
-                    identifier_tokens(&[&symbol.name, &symbol.qualified, &update.path]),
+                    symbol.tokens,
                 ])?;
             }
         }
@@ -579,6 +579,8 @@ fn symbol_from_row(row: &Row<'_>) -> rusqlite::Result<SymbolRow> {
         doc: non_empty(row.get(8)?),
         exported: row.get::<_, i64>(9)? != 0,
         digest: row.get(10)?,
+        name_key: String::new(),
+        tokens: String::new(),
     })
 }
 

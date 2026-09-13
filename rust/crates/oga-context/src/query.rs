@@ -346,6 +346,8 @@ mod tests {
             doc: None,
             exported: true,
             digest: String::new(),
+            name_key: name_key(name),
+            tokens: String::new(),
         }
     }
 
