@@ -491,7 +491,8 @@ impl<'a> ContextIndex<'a> {
         if !direct.is_empty() {
             return Ok(direct);
         }
-        let (_, total) = index_store::counts(self.store, index_cwd)?;
+        let total =
+            index_store::index_row(self.store, index_cwd)?.map_or(0, |row| row.symbol_count);
         let weights = TermWeights::new(
             &index_store::term_hits(self.store, index_cwd, terms)?,
             total,

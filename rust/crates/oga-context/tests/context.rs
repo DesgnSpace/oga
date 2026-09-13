@@ -755,7 +755,7 @@ fn refuses_lockfiles_whatever_their_format() {
 fn builds_symbols_and_answers_an_exact_name() {
     let fixture = Fixture::new();
     fixture.write_auth(
-        "/** Verify the caller token. */\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
+        "/** Verify the caller token. */\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n\nexport function checkAuthToken(token: string): boolean {\n  return checkAuth(token);\n}\n",
     );
     let index = ContextIndex::new(&fixture.store);
 
@@ -763,7 +763,7 @@ fn builds_symbols_and_answers_an_exact_name() {
         .build(fixture.project.path(), BuildOptions::default())
         .expect("index builds");
     assert_eq!(result.file_count, 1);
-    assert_eq!(result.symbol_count, 1);
+    assert_eq!(result.symbol_count, 2);
 
     let result = index
         .question(&fixture.target(), "where is checkAuth handled")

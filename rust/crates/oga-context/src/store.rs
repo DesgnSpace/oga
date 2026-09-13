@@ -12,12 +12,13 @@ use crate::text::{identifier_tokens, name_key};
 
 /// The index layout this binary writes. An index built by an older layout is
 /// rebuilt rather than read.
-pub(crate) const INDEX_SCHEME: u32 = 7;
+pub(crate) const INDEX_SCHEME: u32 = 8;
 
 /// What the index knows about its own last build for one project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexRow {
     pub scheme: u32,
+    pub symbol_count: usize,
 }
 
 /// One file as the index holds it, before its symbols are loaded.
@@ -199,10 +200,10 @@ pub fn symbols_by_search(
             })
             .unwrap_or_default();
         let mut statement = connection.prepare(&format!(
-            "SELECT {}, bm25(context_symbols_fts, 12.0, 8.0, 10.0, 3.0, 4.0, 2.0) AS rank \
+            "SELECT {}, bm25(context_symbols_fts, 0.0, 12.0, 8.0, 10.0, 3.0, 4.0, 2.0) AS rank \
              FROM context_symbols_fts \
              JOIN context_symbols s ON s.id=context_symbols_fts.rowid \
-              WHERE context_symbols_fts MATCH ? AND s.cwd=? {path_sql} \
+              WHERE context_symbols_fts MATCH ? {path_sql} \
              ORDER BY rank LIMIT {limit}",
             SYMBOL_COLUMNS
                 .split(',')
@@ -210,8 +211,8 @@ pub fn symbols_by_search(
                 .collect::<Vec<_>>()
                 .join(",")
         ))?;
-        let cwd = cwd.display().to_string();
-        let mut arguments: Vec<&dyn rusqlite::ToSql> = vec![&query, &cwd];
+        let match_query = project_match(cwd, query);
+        let mut arguments: Vec<&dyn rusqlite::ToSql> = vec![&match_query];
         let path_values = paths
             .unwrap_or_default()
             .iter()
@@ -241,17 +242,19 @@ pub fn term_hits(
     cwd: &Path,
     terms: &[String],
 ) -> Result<HashMap<String, u64>, StoreError> {
-    let cwd = cwd.display().to_string();
     store.with_connection(|connection| {
         let mut statement = connection.prepare(
             "SELECT COUNT(*) FROM context_symbols_fts \
              JOIN context_symbols s ON s.id=context_symbols_fts.rowid \
-             WHERE context_symbols_fts MATCH ? AND s.cwd=?",
+              WHERE context_symbols_fts MATCH ?",
         )?;
         let mut hits = HashMap::with_capacity(terms.len());
         for term in terms {
             let count: i64 = statement.query_row(
-                params![format!("\"{}\"", term.replace('"', "\"\"")), cwd],
+                [project_match(
+                    cwd,
+                    &format!("\"{}\"", term.replace('"', "\"\"")),
+                )],
                 |row| row.get(0),
             )?;
             hits.insert(term.clone(), count.max(0) as u64);
@@ -501,16 +504,24 @@ pub fn index_row(store: &Store, cwd: &Path) -> Result<Option<IndexRow>, StoreErr
     store.with_connection(|connection| {
         Ok(connection
             .query_row(
-                "SELECT scheme FROM context_index WHERE cwd=?",
+                "SELECT scheme, symbol_count FROM context_index WHERE cwd=?",
                 [cwd.display().to_string()],
                 |row| {
                     Ok(IndexRow {
                         scheme: row.get::<_, i64>(0)?.max(0) as u32,
+                        symbol_count: row.get::<_, i64>(1)?.max(0) as usize,
                     })
                 },
             )
             .optional()?)
     })
+}
+
+fn project_match(cwd: &Path, query: &str) -> String {
+    format!(
+        "{{cwd}} : \"{}\" AND ({query})",
+        cwd.display().to_string().replace('"', "\"\"")
+    )
 }
 
 pub fn save_index(

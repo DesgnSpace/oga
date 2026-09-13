@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Code questions with several words now leave out files that only share one everyday word with them.
+- Code questions answer faster; the first question after updating rebuilds the project's index once.
 - You can now point a code question at one folder or file, so the answer only comes from there.
 - A task's details now show the branch its checkout is on right now, not the one it started with. The details row also stays tidy when you zoom the app.
 - Starting a task no longer freezes the app or other running tasks. Oga now writes its records and reads your shell setup off the main path, and keeps its database log from growing without limit.

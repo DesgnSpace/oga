@@ -285,7 +285,8 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
       CREATE INDEX context_symbols_digest ON context_symbols(cwd, digest);
       CREATE INDEX context_symbols_path ON context_symbols(cwd, path, line);
       CREATE VIRTUAL TABLE context_symbols_fts USING fts5(
-        name,
+         cwd,
+         name,
         qualified,
         tokens,
         signature,
@@ -297,20 +298,20 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
       );
       CREATE TRIGGER context_symbols_ai
       AFTER INSERT ON context_symbols BEGIN
-        INSERT INTO context_symbols_fts(rowid, name, qualified, tokens, signature, doc, path)
-        VALUES (new.id, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
+         INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path)
+         VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
       END;
       CREATE TRIGGER context_symbols_ad
       AFTER DELETE ON context_symbols BEGIN
-        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, name, qualified, tokens, signature, doc, path)
-        VALUES ('delete', old.id, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
+         INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path)
+         VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
       END;
       CREATE TRIGGER context_symbols_au
       AFTER UPDATE ON context_symbols BEGIN
-        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, name, qualified, tokens, signature, doc, path)
-        VALUES ('delete', old.id, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
-        INSERT INTO context_symbols_fts(rowid, name, qualified, tokens, signature, doc, path)
-        VALUES (new.id, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
+         INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path)
+         VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
+         INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path)
+         VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
       END;"#;
 
 /// Learned routes keep one bounded alias set for each place a worker found.
@@ -584,6 +585,49 @@ pub fn migrate_v45_to_v46(conn: &Connection) -> Result<(), StoreError> {
         COMMIT;
         PRAGMA foreign_keys=ON;
         PRAGMA legacy_alter_table=OFF;"#,
+    )?;
+    Ok(())
+}
+
+pub fn migrate_v46_to_v47(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"BEGIN IMMEDIATE;
+        DROP TRIGGER context_symbols_ai;
+        DROP TRIGGER context_symbols_ad;
+        DROP TRIGGER context_symbols_au;
+        DROP TABLE context_symbols_fts;
+        CREATE VIRTUAL TABLE context_symbols_fts USING fts5(
+          cwd,
+          name,
+          qualified,
+          tokens,
+          signature,
+          doc,
+          path,
+          content='context_symbols',
+          content_rowid='id',
+          tokenize='porter unicode61 remove_diacritics 2'
+        );
+        INSERT INTO context_symbols_fts(context_symbols_fts) VALUES ('rebuild');
+        CREATE TRIGGER context_symbols_ai
+        AFTER INSERT ON context_symbols BEGIN
+          INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path)
+          VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
+        END;
+        CREATE TRIGGER context_symbols_ad
+        AFTER DELETE ON context_symbols BEGIN
+          INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path)
+          VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
+        END;
+        CREATE TRIGGER context_symbols_au
+        AFTER UPDATE ON context_symbols BEGIN
+          INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path)
+          VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
+          INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path)
+          VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
+        END;
+        INSERT INTO schema_migrations(version, name) VALUES (47, 'project-scoped code search');
+        COMMIT;"#,
     )?;
     Ok(())
 }

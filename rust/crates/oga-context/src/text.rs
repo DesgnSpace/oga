@@ -189,7 +189,6 @@ pub fn fts_query(terms: &[String]) -> String {
 pub fn identifier_tokens(values: &[&str]) -> String {
     let mut tokens = BTreeSet::new();
     for value in values {
-        tokens.insert(value.to_ascii_lowercase());
         tokens.extend(identifier_words(value));
     }
     tokens.into_iter().collect::<Vec<_>>().join(" ")
