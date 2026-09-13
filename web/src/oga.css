@@ -1614,6 +1614,12 @@ h1 {
     border-bottom: 1px solid var(--color-border);
 }
 
+/* The full-screen review reaches the top of the window, which is where macOS
+   draws the traffic lights. */
+.platform-macos .changed-files-header-full {
+    padding-left: var(--macos-titlebar-inset);
+}
+
 .changed-files-header-row {
     display: flex;
     align-items: center;

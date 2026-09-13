@@ -528,7 +528,7 @@ function ChangedFilesView({
 
   return (
     <>
-      <header className="changed-files-header">
+      <header className={`changed-files-header${full ? " changed-files-header-full" : ""}`}>
         <div className="changed-files-header-row">
           <div className="changed-files-header-title">
             <h2 id={full ? FULL_SCREEN_TITLE_ID : undefined}>
