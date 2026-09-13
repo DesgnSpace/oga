@@ -308,7 +308,7 @@ impl<'a> ContextIndex<'a> {
         let paths = normalize_paths(&options.paths)?;
         let terms = prompt_terms(question);
         let limit = options.limit.unwrap_or(DEFAULT_LIMIT).max(1);
-        let ranked = self.rank(target, question, &terms, &paths)?;
+        let ranked = self.rank(target, question, &terms, &paths, limit)?;
         let mut reachable = self.reachable(target, &ranked, limit)?;
         if reachable.kept.is_empty() {
             let absent = terms
@@ -482,6 +482,7 @@ impl<'a> ContextIndex<'a> {
         question: &str,
         terms: &[String],
         paths: &[String],
+        limit: usize,
     ) -> Result<Vec<Scored>, ContextError> {
         let index_cwd = target.index_cwd();
         let direct = self.direct(target, question, paths)?;
@@ -525,7 +526,7 @@ impl<'a> ContextIndex<'a> {
         for (symbol, rank) in search {
             ranking.add_symbol(symbol, terms, &question_key, &weights, Some(rank));
         }
-        Ok(ranking.ranked())
+        Ok(ranking.ranked(limit, &weights))
     }
 
     /// Where a route points now, as a symbol row. A route saved against a

@@ -39,6 +39,7 @@ const PATH_TERM: f64 = 250.0;
 const EXPORTED: f64 = 300.0;
 const SEARCH_WEIGHT: f64 = 20.0;
 const SEARCH_CEILING: f64 = 30.0;
+const RARE_TERM_THRESHOLD: f64 = 3.25;
 
 #[derive(Debug, Clone)]
 pub struct Scored {
@@ -48,6 +49,7 @@ pub struct Scored {
     /// A named place, a taught phrase, or an exact name settles the answer on
     /// its own.
     pub decisive: bool,
+    pub(crate) retain_single_term: bool,
 }
 
 /// How much each of the question's words is worth. A word that reaches most
@@ -118,6 +120,7 @@ impl Ranking {
             symbol,
             score: base + weighted * NAME_TERM,
             decisive: route.exact,
+            retain_single_term: true,
         });
     }
 
@@ -189,6 +192,7 @@ impl Ranking {
             symbol,
             matched,
             decisive: exact,
+            retain_single_term: exact,
         });
     }
 
@@ -205,7 +209,7 @@ impl Ranking {
     /// Best first. A score tie goes to whichever matched more of the
     /// question, then to path, so the same question keeps answering the
     /// same way instead of turning on an arbitrary tiebreak.
-    pub fn ranked(self) -> Vec<Scored> {
+    pub fn ranked(self, limit: usize, weights: &TermWeights) -> Vec<Scored> {
         let mut ranked = self.scored.into_values().collect::<Vec<_>>();
         ranked.sort_by(|left, right| {
             right
@@ -217,6 +221,21 @@ impl Ranking {
                 .then_with(|| left.symbol.line.cmp(&right.symbol.line))
         });
         ranked.truncate(CANDIDATE_POOL);
+        if ranked
+            .iter()
+            .filter(|candidate| candidate.matched.len() >= 2)
+            .count()
+            >= limit
+        {
+            ranked.retain(|candidate| {
+                candidate.matched.len() >= 2
+                    || candidate.retain_single_term
+                    || candidate
+                        .matched
+                        .iter()
+                        .any(|term| weights.of(term) >= RARE_TERM_THRESHOLD)
+            });
+        }
         ranked
     }
 }
@@ -253,6 +272,7 @@ pub fn direct_hit(symbol: SymbolRow, sure: bool) -> Scored {
         score: DIRECT,
         matched: Vec::new(),
         decisive: sure,
+        retain_single_term: true,
     }
 }
 
@@ -307,4 +327,77 @@ fn support_weight(path: &str) -> f64 {
     }) || lower.contains(".test.")
         || lower.contains(".spec.");
     if support { 0.4 } else { 1.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn symbol(name: &str) -> SymbolRow {
+        SymbolRow {
+            path: format!("src/{name}.rs"),
+            kind: SymbolKind::Fn,
+            name: name.to_owned(),
+            qualified: name.to_owned(),
+            parent: None,
+            line: 1,
+            end_line: 1,
+            signature: String::new(),
+            doc: None,
+            exported: true,
+            digest: String::new(),
+        }
+    }
+
+    fn ranking_with_terms(count: usize, name: &str) -> Vec<Scored> {
+        let terms = ["alpha".to_owned(), "beta".to_owned(), "quartz".to_owned()];
+        let mut hits = HashMap::from([
+            ("alpha".to_owned(), 10),
+            ("beta".to_owned(), 10),
+            (name.to_owned(), 99),
+        ]);
+        if name == "quartz" {
+            hits.insert(name.to_owned(), 1);
+        }
+        let weights = TermWeights::new(&hits, 100);
+        let mut ranking = Ranking::default();
+        for index in 0..count {
+            ranking.add_symbol(
+                symbol(&format!("alpha_beta_{index}")),
+                &terms,
+                "target words",
+                &weights,
+                None,
+            );
+        }
+        ranking.add_symbol(symbol(name), &terms, "target words", &weights, None);
+        ranking.ranked(10, &weights)
+    }
+
+    #[test]
+    fn drops_common_single_term_hits_when_limit_has_multi_term_hits() {
+        let ranked = ranking_with_terms(10, "alpha");
+
+        assert!(
+            !ranked
+                .iter()
+                .any(|candidate| candidate.symbol.name == "alpha")
+        );
+    }
+
+    #[test]
+    fn keeps_single_term_hits_when_pool_is_short_or_term_is_rare() {
+        let short = ranking_with_terms(1, "alpha");
+        let rare = ranking_with_terms(10, "quartz");
+
+        assert!(
+            short
+                .iter()
+                .any(|candidate| candidate.symbol.name == "alpha")
+        );
+        assert!(
+            rare.iter()
+                .any(|candidate| candidate.symbol.name == "quartz")
+        );
+    }
 }
