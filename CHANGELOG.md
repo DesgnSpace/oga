@@ -6,6 +6,7 @@
 - Starting a task no longer freezes the app or other running tasks. Oga now writes its records and reads your shell setup off the main path, and keeps its database log from growing without limit.
 - Tasks now stay responsive while Oga prepares or removes large separate checkouts in the background.
 - Dozens of small polish fixes across the app: waiting tasks show a fine dashed ring, buttons no longer double-submit, stopping a task always asks first, truncated paths show the full name on hover, settings and usage speak in plain words instead of internal names, and dialogs keep your focus while you type.
+- Changed files now open full screen, with the file list beside the diffs so you can read a task's whole change end to end.
 - The red connection bar no longer flashes across the top every time a new task lands. It now shows only when Oga is really unreachable.
 
 ## 0.1.0 - 2026-09-10

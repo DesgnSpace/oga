@@ -25,7 +25,7 @@ pub struct WorkerAttribution {
 }
 
 impl WorkerAttribution {
-    /// `on claude/opus, high effort`, or `on claude/opus` when no effort ran.
+    /// `claude/opus, high`, or `claude/opus` when no effort ran.
     pub fn summary(&self) -> String {
         match self
             .effort
@@ -33,8 +33,8 @@ impl WorkerAttribution {
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            Some(effort) => format!("on {}/{}, {effort} effort", self.provider, self.model),
-            None => format!("on {}/{}", self.provider, self.model),
+            Some(effort) => format!("{}/{}, {effort}", self.provider, self.model),
+            None => format!("{}/{}", self.provider, self.model),
         }
     }
 
@@ -965,9 +965,7 @@ mod tests {
             ..WorkerPromptInput::default()
         });
         assert!(prompt.contains("## Attribution"));
-        assert!(
-            prompt.contains("Co-Authored-By: Oga (on claude/opus, high effort) <oga@desgn.space>")
-        );
+        assert!(prompt.contains("Co-Authored-By: Oga (claude/opus, high) <oga@desgn.space>"));
         assert!(!prompt.contains("Supervised by Oga"));
         assert!(prompt.contains(ATTRIBUTION_EMAIL));
         assert!(prompt.contains("Never stamp the same commit twice"));
@@ -986,8 +984,8 @@ mod tests {
             }),
             ..WorkerPromptInput::default()
         });
-        assert!(prompt.contains("Co-Authored-By: Oga (on claude/opus) <oga@desgn.space>"));
-        assert!(!prompt.contains("effort)"));
+        assert!(prompt.contains("Co-Authored-By: Oga (claude/opus) <oga@desgn.space>"));
+        assert!(!prompt.contains("claude/opus,"));
 
         let silent = assemble_worker_prompt(&WorkerPromptInput {
             task: "do the thing".into(),

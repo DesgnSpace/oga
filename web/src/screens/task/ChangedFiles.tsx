@@ -1,4 +1,6 @@
-// The changed-files side panel: files a run touched, with bounded per-file diffs.
+// The changed-files view: files a run touched, with bounded per-file diffs.
+// Two chromes over one body — a side panel beside the transcript, and a
+// full-screen review with the file tree kept open beside the diffs.
 // Ported from rust/crates/oga-ui/src/changes/mod.rs's view layer — the pure
 // derivation (`collectRunChanges`) already lives in @/domain/changes.
 
@@ -9,15 +11,19 @@ import { runChangeSetAdded, runChangeSetRemoved } from "@/domain/changes";
 import type { ChangeTurn, ChangeTurnSet } from "@/domain/changes/grouped";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
-import { CloseIcon, DisclosureIcon, RefreshIcon } from "@/ui/icons";
+import { CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
 import { EmptyState, LoadingState } from "@/components/atoms/ListState";
 import { CodeDiff } from "@/components/CodeDiff";
+import { Modal } from "@/components/primitives/Modal";
 import { CHANGED_FILES_MAX_WIDTH, CHANGED_FILES_MIN_WIDTH } from "@/state/changed-files-preferences";
 import { patchFromBlocks } from "@/lib/unified-patch";
 import { DiffHeader } from "@/components/DiffHeader";
 
 /** Arrow-key resize increment, in pixels. */
 const RESIZE_KEYBOARD_STEP = 16;
+
+/** Names the full-screen dialog for assistive technology. */
+const FULL_SCREEN_TITLE_ID = "changed-files-full-screen-title";
 
 /** Turn id for grouped turns, or a stable key for the pre-turn bucket. */
 function turnKey(turn: ChangeTurn): string {
@@ -66,12 +72,14 @@ function ChangedFileRow({
   onToggle,
   active,
   registerRow,
+  showDiffHeader,
 }: {
   file: ChangedFileView;
   expanded: boolean;
   onToggle: () => void;
   active: boolean;
   registerRow: (path: string, element: HTMLElement | null) => void;
+  showDiffHeader: boolean;
 }) {
   const patch = React.useMemo(
     () => file.patch ?? patchFromBlocks(file.path, file.change.blocks),
@@ -101,7 +109,7 @@ function ChangedFileRow({
       </button>
       {expanded && (
         <div className="changed-file-diff">
-          <DiffHeader />
+          {showDiffHeader && <DiffHeader />}
           {patch !== undefined && <CodeDiff patch={patch} numbered={file.patch !== undefined} wrap />}
           {file.tooLarge ? (
             <p className="changed-file-note">This file's diff is too big to show here. Open it in your editor.</p>
@@ -125,9 +133,10 @@ interface FileRowProps {
   onToggleFile: (path: string) => void;
   activePath?: string;
   registerRow: (path: string, element: HTMLElement | null) => void;
+  showDiffHeader: boolean;
 }
 
-function ChangedFileList({ files, expandedPaths, onToggleFile, activePath, registerRow }: FileRowProps & { files: ChangedFileView[] }) {
+function ChangedFileList({ files, expandedPaths, onToggleFile, activePath, registerRow, showDiffHeader }: FileRowProps & { files: ChangedFileView[] }) {
   return (
     <div className="changed-files-list">
       {files.map((file) => (
@@ -138,6 +147,7 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, activePath, regis
           onToggle={() => onToggleFile(file.path)}
           active={activePath === file.path}
           registerRow={registerRow}
+          showDiffHeader={showDiffHeader}
         />
       ))}
     </div>
@@ -259,7 +269,8 @@ function SourcePicker({
   );
 }
 
-export interface ChangedFilesPanelProps {
+/** The files and their state, shared by both chromes. */
+export interface ChangedFilesProps {
   source: ChangesSource;
   onSourceChange: (source: ChangesSource) => void;
   groupByTurn: boolean;
@@ -279,14 +290,19 @@ export interface ChangedFilesPanelProps {
   hasEarlier: boolean;
   loadingEarlier: boolean;
   onLoadEarlier: () => void;
-  onClose: () => void;
-  width: number;
-  onResizeStart: (clientX: number) => void;
-  onResetWidth: () => void;
-  onResizeStep: (deltaWidth: number) => void;
 }
 
-export function ChangedFilesPanel({
+type ChangedFilesLayout = "docked" | "full";
+
+interface ChangedFilesViewProps extends ChangedFilesProps {
+  layout: ChangedFilesLayout;
+  onClose: () => void;
+  /** Opens the full-screen review. Offered by the docked panel only. */
+  onExpand?: () => void;
+}
+
+function ChangedFilesView({
+  layout,
   source,
   onSourceChange,
   groupByTurn,
@@ -302,11 +318,9 @@ export function ChangedFilesPanel({
   loadingEarlier,
   onLoadEarlier,
   onClose,
-  width,
-  onResizeStart,
-  onResetWidth,
-  onResizeStep,
-}: ChangedFilesPanelProps) {
+  onExpand,
+}: ChangedFilesViewProps) {
+  const full = layout === "full";
   const added = runChangeSetAdded(changes);
   const removed = runChangeSetRemoved(changes);
   const grouped = turns !== undefined && groupByTurn;
@@ -321,19 +335,38 @@ export function ChangedFilesPanel({
   const [activePath, setActivePath] = React.useState<string | undefined>(undefined);
   const [scrollRequest, setScrollRequest] = React.useState<{ path: string } | undefined>(undefined);
   const seenTurnsRef = React.useRef<Set<string>>(new Set());
+  const seenPathsRef = React.useRef<Set<string>>(new Set());
   const rowElementsRef = React.useRef<Map<string, HTMLElement>>(new Map());
   const scrollFrameRef = React.useRef<number | undefined>(undefined);
 
-  // The newest turn opens on its own, same as the reader would expect from an
-  // accordion; turns they have already seen keep whatever they set.
+  // Docked, the newest turn opens on its own, same as the reader would expect
+  // from an accordion; turns they have already seen keep whatever they set.
+  // Full screen there is room for everything, so every turn opens.
   React.useEffect(() => {
-    const newest = turns?.turns[0];
-    if (!newest) return;
-    const key = turnKey(newest);
-    if (seenTurnsRef.current.has(key)) return;
-    seenTurnsRef.current.add(key);
-    setExpandedTurns((prev) => new Set(prev).add(key));
-  }, [turns]);
+    const candidates = full ? (turns?.turns ?? []) : (turns?.turns.slice(0, 1) ?? []);
+    const fresh = candidates.map(turnKey).filter((key) => !seenTurnsRef.current.has(key));
+    if (fresh.length === 0) return;
+    for (const key of fresh) seenTurnsRef.current.add(key);
+    setExpandedTurns((prev) => {
+      const next = new Set(prev);
+      for (const key of fresh) next.add(key);
+      return next;
+    });
+  }, [turns, full]);
+
+  // Full screen reads as one continuous diff, so a file opens the first time
+  // it appears and stays however the reader leaves it.
+  React.useEffect(() => {
+    if (!full) return;
+    const fresh = changes.files.map((file) => file.path).filter((path) => !seenPathsRef.current.has(path));
+    if (fresh.length === 0) return;
+    for (const path of fresh) seenPathsRef.current.add(path);
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      for (const path of fresh) next.add(path);
+      return next;
+    });
+  }, [full, changes.files]);
 
   React.useEffect(() => {
     if (!filePopoverOpen) return;
@@ -452,8 +485,186 @@ export function ChangedFilesPanel({
     });
   };
 
-  const fileRowProps: FileRowProps = { expandedPaths, onToggleFile: toggleFile, activePath, registerRow };
+  const fileRowProps: FileRowProps = {
+    expandedPaths,
+    onToggleFile: toggleFile,
+    activePath,
+    registerRow,
+    showDiffHeader: !full,
+  };
 
+  const fileTree = (
+    <FileTreeNodes
+      nodes={tree}
+      activePath={activePath}
+      collapsedDirs={collapsedDirs}
+      onToggleDir={toggleDir}
+      onSelectFile={(path) => {
+        selectFile(path);
+        setFilePopoverOpen(false);
+      }}
+    />
+  );
+
+  const diffs = (
+    <div className="changed-files-diffs" onScroll={handleDiffsScroll}>
+      {grouped ? (
+        <div className="changed-files-turns">
+          {turns.turns.map((turn) => (
+            <ChangeTurnGroup
+              key={turnKey(turn)}
+              turn={turn}
+              expanded={expandedTurns.has(turnKey(turn))}
+              onToggleTurn={() => toggleTurn(turnKey(turn))}
+              {...fileRowProps}
+            />
+          ))}
+        </div>
+      ) : (
+        <ChangedFileList files={changes.files} {...fileRowProps} />
+      )}
+    </div>
+  );
+
+  return (
+    <>
+      <header className="changed-files-header">
+        <div className="changed-files-header-row">
+          <div className="changed-files-header-title">
+            <h2 id={full ? FULL_SCREEN_TITLE_ID : undefined}>
+              {`Changed files (${fileCount(grouped ? turns.turns.reduce((count, turn) => count + turn.files.length, 0) : changes.files.length)})`}
+            </h2>
+            {activePath !== undefined ? (
+              <p className="changed-files-active-file" title={activePath}>
+                {activePath}
+              </p>
+            ) : (
+              changes.files.length > 0 && (
+                <p className="changed-files-summary">
+                  <span className="diff-stat-added">{`+${added}`}</span>
+                  {" · "}
+                  <span className="diff-stat-removed">{`-${removed}`}</span>
+                </p>
+              )
+            )}
+          </div>
+          <div className="changed-files-header-actions">
+            {full && <DiffHeader />}
+            <SourcePicker source={source} onSourceChange={onSourceChange} />
+            {source === "reported" ? (
+              <label className="changed-files-group">
+                <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />
+                Group by turn
+              </label>
+            ) : null}
+            <button
+              className="icon-button"
+              type="button"
+              disabled={loading || source === "reported"}
+              aria-label="Refresh"
+              title={source === "reported" ? "Refresh applies to changes read from git" : "Refresh"}
+              onClick={onReload}
+            >
+              <RefreshIcon />
+            </button>
+            {!full && !empty && !loading && error === undefined && (
+              <div className="changed-files-tree-popover" ref={filePopoverRef}>
+                <button
+                  className="text-button"
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded={filePopoverOpen}
+                  onClick={() => setFilePopoverOpen((value) => !value)}
+                >
+                  Files
+                </button>
+                {filePopoverOpen && (
+                  <div className="changed-files-tree-popover-panel">
+                    <nav aria-label="File list">{fileTree}</nav>
+                  </div>
+                )}
+              </div>
+            )}
+            {onExpand !== undefined && (
+              <button className="icon-button" type="button" aria-label="Full screen" title="Full screen" onClick={onExpand}>
+                <ExpandIcon />
+              </button>
+            )}
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={full ? "Exit full screen" : "Hide changed files"}
+              title={full ? "Exit full screen" : "Hide changed files"}
+              onClick={onClose}
+            >
+              {full ? <CollapseIcon /> : <CloseIcon />}
+            </button>
+          </div>
+        </div>
+      </header>
+      <div className={`changed-files-content${full ? " changed-files-content-full" : ""}`}>
+        {loading ? (
+          <LoadingState label="Loading changed files" className="changed-files-message" />
+        ) : error !== undefined ? (
+          <div className="changed-files-message" role="alert">
+            <p>We couldn't read this task's checkout. Refresh to try again.</p>
+            <small>{error}</small>
+          </div>
+        ) : empty ? (
+          <EmptyState
+            title="No files changed yet"
+            hint={live && source === "reported" ? "Changes appear here as the run continues." : "Changes appear here when this run edits files."}
+            className="changed-files-message"
+          />
+        ) : full ? (
+          <div className="changed-files-split">
+            <nav className="changed-files-rail" aria-label="File list">{fileTree}</nav>
+            {diffs}
+          </div>
+        ) : (
+          diffs
+        )}
+        {changes.unmatched > 0 && (
+          <p className="changed-files-note">
+            {`${changes.unmatched} change${changes.unmatched === 1 ? "" : "s"} did not name a file.`}
+          </p>
+        )}
+        {truncated && (
+          <p className="changed-files-note">
+            This checkout has more changes than fit here. Open it in your editor to see them all.
+          </p>
+        )}
+        {hasEarlier && source === "reported" && (
+          <div className="changed-files-earlier">
+            <p>Earlier activity is not loaded, so this may not be the whole run.</p>
+            <button className="text-button" type="button" disabled={loadingEarlier} onClick={onLoadEarlier}>
+              {loadingEarlier ? "Loading earlier activity…" : "Load earlier activity"}
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+export interface ChangedFilesPanelProps extends ChangedFilesProps {
+  onClose: () => void;
+  onExpand: () => void;
+  width: number;
+  onResizeStart: (clientX: number) => void;
+  onResetWidth: () => void;
+  onResizeStep: (deltaWidth: number) => void;
+}
+
+export function ChangedFilesPanel({
+  onClose,
+  onExpand,
+  width,
+  onResizeStart,
+  onResetWidth,
+  onResizeStep,
+  ...view
+}: ChangedFilesPanelProps) {
   return (
     <aside
       id="changed-files-panel"
@@ -489,129 +700,23 @@ export function ChangedFilesPanel({
           }
         }}
       />
-      <header className="changed-files-header">
-        <div className="changed-files-header-row">
-          <div className="changed-files-header-title">
-            <h2>{`Changed files (${fileCount(grouped ? turns.turns.reduce((count, turn) => count + turn.files.length, 0) : changes.files.length)})`}</h2>
-            {activePath !== undefined ? (
-              <p className="changed-files-active-file" title={activePath}>
-                {activePath}
-              </p>
-            ) : (
-              changes.files.length > 0 && (
-                <p className="changed-files-summary">
-                  <span className="diff-stat-added">{`+${added}`}</span>
-                  {" · "}
-                  <span className="diff-stat-removed">{`-${removed}`}</span>
-                </p>
-              )
-            )}
-          </div>
-          <div className="changed-files-header-actions">
-            <SourcePicker source={source} onSourceChange={onSourceChange} />
-            {source === "reported" ? (
-              <label className="changed-files-group">
-                <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />
-                Group by turn
-              </label>
-            ) : null}
-            <button
-              className="icon-button"
-              type="button"
-              disabled={loading || source === "reported"}
-              aria-label="Refresh"
-              title={source === "reported" ? "Refresh applies to changes read from git" : "Refresh"}
-              onClick={onReload}
-            >
-              <RefreshIcon />
-            </button>
-            {!empty && !loading && error === undefined && (
-              <div className="changed-files-tree-popover" ref={filePopoverRef}>
-                <button
-                  className="text-button"
-                  type="button"
-                  aria-haspopup="true"
-                  aria-expanded={filePopoverOpen}
-                  onClick={() => setFilePopoverOpen((value) => !value)}
-                >
-                  Files
-                </button>
-                {filePopoverOpen && (
-                  <div className="changed-files-tree-popover-panel">
-                    <nav aria-label="File list">
-                      <FileTreeNodes
-                        nodes={tree}
-                        activePath={activePath}
-                        collapsedDirs={collapsedDirs}
-                        onToggleDir={toggleDir}
-                        onSelectFile={(path) => {
-                          selectFile(path);
-                          setFilePopoverOpen(false);
-                        }}
-                      />
-                    </nav>
-                  </div>
-                )}
-              </div>
-            )}
-            <button className="icon-button" type="button" aria-label="Hide changed files" title="Hide changed files" onClick={onClose}>
-              <CloseIcon />
-            </button>
-          </div>
-        </div>
-      </header>
-      <div className="changed-files-content">
-        {loading ? (
-          <LoadingState label="Loading changed files" className="changed-files-message" />
-        ) : error !== undefined ? (
-          <div className="changed-files-message" role="alert">
-            <p>We couldn't read this task's checkout. Refresh to try again.</p>
-            <small>{error}</small>
-          </div>
-        ) : empty ? (
-          <EmptyState
-            title="No files changed yet"
-            hint={live && source === "reported" ? "Changes appear here as the run continues." : "Changes appear here when this run edits files."}
-            className="changed-files-message"
-          />
-        ) : (
-          <div className="changed-files-diffs" onScroll={handleDiffsScroll}>
-            {grouped ? (
-              <div className="changed-files-turns">
-                {turns.turns.map((turn) => (
-                  <ChangeTurnGroup
-                    key={turnKey(turn)}
-                    turn={turn}
-                    expanded={expandedTurns.has(turnKey(turn))}
-                    onToggleTurn={() => toggleTurn(turnKey(turn))}
-                    {...fileRowProps}
-                  />
-                ))}
-              </div>
-            ) : (
-              <ChangedFileList files={changes.files} {...fileRowProps} />
-            )}
-          </div>
-        )}
-        {changes.unmatched > 0 && (
-          <p className="changed-files-note">
-            {`${changes.unmatched} change${changes.unmatched === 1 ? "" : "s"} did not name a file.`}
-          </p>
-        )}
-        {truncated && (
-          <p className="changed-files-note">
-            This checkout has more changes than fit here. Open it in your editor to see them all.
-          </p>
-        )}
-        {hasEarlier && source === "reported" && (
-          <div className="changed-files-earlier">
-            <p>Earlier activity is not loaded, so this may not be the whole run.</p>
-            <button className="text-button" type="button" disabled={loadingEarlier} onClick={onLoadEarlier}>
-              {loadingEarlier ? "Loading earlier activity…" : "Load earlier activity"}
-            </button>
-          </div>
-        )}
-      </div>
+      <ChangedFilesView layout="docked" onClose={onClose} onExpand={onExpand} {...view} />
     </aside>
+  );
+}
+
+/** The same files over the whole window, for reading a run's diff end to end. */
+export function ChangedFilesFullScreen({ onClose, ...view }: ChangedFilesProps & { onClose: () => void }) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      labelledBy={FULL_SCREEN_TITLE_ID}
+      overlayClassName="modal-overlay-bleed"
+      className="modal-dialog-review"
+      hideClose
+    >
+      <ChangedFilesView layout="full" onClose={onClose} {...view} />
+    </Modal>
   );
 }

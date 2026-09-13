@@ -23,7 +23,7 @@ import {
 } from "@/state/changed-files-preferences";
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
 import { terminalResumeCommand } from "./terminalResume";
-import { ChangedFilesPanel, type ChangesSource } from "./ChangedFiles";
+import { ChangedFilesFullScreen, ChangedFilesPanel, type ChangedFilesProps, type ChangesSource } from "./ChangedFiles";
 import { effortDisplay, shortModel, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
@@ -170,6 +170,7 @@ function TaskDetailSecondary({
 export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void }) {
   const forceUpdate = useForceUpdate();
   const [showingChanges, setShowingChanges] = React.useState(false);
+  const [reviewingChanges, setReviewingChanges] = React.useState(false);
   const [changesSource, setChangesSource] = React.useState<ChangesSource>(loadChangesSource);
   const [groupByTurn, setGroupByTurn] = React.useState(loadChangesGrouped);
   const [changedFilesWidth, setChangedFilesWidth] = React.useState(loadChangedFilesWidth);
@@ -305,7 +306,8 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
     void watched.controller.loadInitial().then(forceUpdate);
   }, [watched, forceUpdate]);
 
-  const git = useGitDiff(taskId, showingChanges && changesSource === "git");
+  const changesVisible = showingChanges || reviewingChanges;
+  const git = useGitDiff(taskId, changesVisible && changesSource === "git");
   const chooseSource = (source: ChangesSource) => {
     setChangesSource(source);
     storeChangesSource(source);
@@ -321,15 +323,32 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   );
   const reportedTurns = React.useMemo(
     () =>
-      cwd !== undefined && showingChanges && changesSource === "reported" && groupByTurn
+      cwd !== undefined && changesVisible && changesSource === "reported" && groupByTurn
         ? changeTurnsProjection.update(events, cwd)
         : undefined,
-    [cwd, eventRevision, events, showingChanges, changesSource, groupByTurn, changeTurnsProjection],
+    [cwd, eventRevision, events, changesVisible, changesSource, groupByTurn, changeTurnsProjection],
   );
   const gitChanges = React.useMemo(
     () => (git.diff ? gitChangeSet(git.diff) : RUN_CHANGES_EMPTY),
     [git.diff],
   );
+
+  const changedFiles: ChangedFilesProps | undefined = task ? {
+    source: changesSource,
+    onSourceChange: chooseSource,
+    groupByTurn,
+    onGroupByTurn: chooseGrouping,
+    onReload: git.reload,
+    changes: changesSource === "git" ? gitChanges : reportedChanges,
+    turns: changesSource === "git" ? undefined : reportedTurns,
+    loading: changesSource === "git" ? git.loading : state.loading,
+    error: changesSource === "git" ? git.error : undefined,
+    truncated: changesSource === "git" && git.diff?.truncated === true,
+    live: !activityIsSettled(task.state),
+    hasEarlier: state.hasEarlier,
+    loadingEarlier: state.loadingEarlier,
+    onLoadEarlier: loadEarlier,
+  } : undefined;
 
   // Profiles carry each worker's provider and environment, which the
   // terminal resume command is built from. Only read when the task holds a
@@ -451,29 +470,20 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
           />
         )}
       </div>
-      {showingChanges && task && (
+      {showingChanges && changedFiles && (
         <ChangedFilesPanel
           key={taskId}
-          source={changesSource}
-          onSourceChange={chooseSource}
-          groupByTurn={groupByTurn}
-          onGroupByTurn={chooseGrouping}
-          onReload={git.reload}
-          changes={changesSource === "git" ? gitChanges : reportedChanges}
-          turns={changesSource === "git" ? undefined : reportedTurns}
-          loading={changesSource === "git" ? git.loading : state.loading}
-          error={changesSource === "git" ? git.error : undefined}
-          truncated={changesSource === "git" && git.diff?.truncated === true}
-          live={!activityIsSettled(task.state)}
-          hasEarlier={state.hasEarlier}
-          loadingEarlier={state.loadingEarlier}
-          onLoadEarlier={loadEarlier}
+          {...changedFiles}
           onClose={() => setShowingChanges(false)}
+          onExpand={() => setReviewingChanges(true)}
           width={changedFilesWidth}
           onResizeStart={(clientX) => setResizeStart({ x: clientX, width: changedFilesWidth })}
           onResetWidth={() => applyChangedFilesWidth(CHANGED_FILES_DEFAULT_WIDTH)}
           onResizeStep={(deltaWidth) => applyChangedFilesWidth(changedFilesWidth + deltaWidth)}
         />
+      )}
+      {reviewingChanges && changedFiles && (
+        <ChangedFilesFullScreen key={taskId} {...changedFiles} onClose={() => setReviewingChanges(false)} />
       )}
     </div>
   );

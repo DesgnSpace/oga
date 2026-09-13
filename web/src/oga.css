@@ -1656,7 +1656,9 @@ h1 {
 .changed-files-header-actions {
     display: flex;
     align-items: center;
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--space-3);
 }
 
@@ -1714,6 +1716,52 @@ h1 {
     min-height: 0;
     overflow: hidden;
     padding: var(--space-3);
+}
+
+/* Full screen the columns carry their own padding, so each scrolls to the
+   dialog's edge instead of inside a common inset. */
+.changed-files-content-full {
+    padding: 0;
+}
+
+.changed-files-content-full > .changed-files-message,
+.changed-files-content-full > .changed-files-note,
+.changed-files-content-full > .changed-files-earlier {
+    padding: var(--space-3);
+    margin-top: 0;
+}
+
+/* The tree stays open beside the diffs, so a reader moves between files
+   without losing the list. */
+.changed-files-split {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: minmax(200px, 20rem) minmax(0, 1fr);
+}
+
+.changed-files-rail {
+    min-height: 0;
+    padding: var(--space-3);
+    overflow: auto;
+    overscroll-behavior: contain;
+    border-right: 1px solid var(--color-border);
+}
+
+.changed-files-split > .changed-files-diffs {
+    padding: var(--space-3);
+}
+
+@media (max-width: 800px) {
+    .changed-files-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .changed-files-rail {
+        max-height: 30vh;
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+    }
 }
 
 .changed-files-tree-popover {
@@ -3490,6 +3538,26 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
+}
+
+/* The review dialog takes the window whole: a run's diff is what the reader
+   came for, and every edge of padding is a line they cannot see. */
+.modal-overlay-bleed {
+    padding: 0;
+}
+
+.modal-dialog-review {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+}
+
+.modal-dialog-review > .modal-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .modal-dialog-settings {

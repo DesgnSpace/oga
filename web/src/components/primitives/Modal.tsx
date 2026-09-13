@@ -38,8 +38,12 @@ export interface ModalProps {
   labelledBy: string;
   children: ReactNode;
   className?: string;
+  /** Extra class on the overlay, for dialogs that set their own bleed. */
+  overlayClassName?: string;
+  /** Leaves out the corner close button, for dialogs that carry their own. */
+  hideClose?: boolean;
 }
-export function Modal({ open, onClose, labelledBy, children, className }: ModalProps) {
+export function Modal({ open, onClose, labelledBy, children, className, overlayClassName, hideClose = false }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -97,7 +101,7 @@ export function Modal({ open, onClose, labelledBy, children, className }: ModalP
 
   return (
     <div
-      className="modal-overlay"
+      className={overlayClassName ? `modal-overlay ${overlayClassName}` : "modal-overlay"}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -110,9 +114,11 @@ export function Modal({ open, onClose, labelledBy, children, className }: ModalP
         aria-labelledby={labelledBy}
         tabIndex={-1}
       >
-        <button className="modal-close icon-button" type="button" aria-label="Close dialog" onClick={onClose}>
-          <CloseIcon size={18} />
-        </button>
+        {!hideClose && (
+          <button className="modal-close icon-button" type="button" aria-label="Close dialog" onClick={onClose}>
+            <CloseIcon size={18} />
+          </button>
+        )}
         <div className="modal-body">{children}</div>
       </div>
     </div>

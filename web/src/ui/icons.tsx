@@ -250,6 +250,28 @@ export function BlockedIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function ExpandIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M9.5 2.5h4v4" />
+      <path d="M6.5 13.5h-4v-4" />
+      <path d="M13.5 2.5 9 7" />
+      <path d="M2.5 13.5 7 9" />
+    </Svg>
+  );
+}
+
+export function CollapseIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M13.5 2.5 9.5 6.5" />
+      <path d="M13 6.5H9.5V3" />
+      <path d="M2.5 13.5 6.5 9.5" />
+      <path d="M3 9.5h3.5V13" />
+    </Svg>
+  );
+}
+
 export function ChangedFilesIcon({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>
