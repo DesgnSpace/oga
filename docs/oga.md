@@ -63,8 +63,9 @@ TSX, JavaScript, Swift, Python, Go, PHP, Ruby, Java, C#, C, C++, Markdown,
 JSON, TOML, and YAML. Short names count: `db` and `Io` are searchable.
 
 When one place is clearly the answer, you get one line. When several could be,
-you get up to `--limit` of them, each with the words it matched. When nothing
-fits, it says so instead of guessing.
+you get up to `--limit` of them, each with the words it matched and a few words
+of what it is — its doc comment's first sentence, or its signature when it has
+none. When nothing fits, it says so instead of guessing.
 
 `oga relearn` picks up whatever changed on disk. Add `--force` to read the
 whole project again. You can also teach it where something lives, so the words

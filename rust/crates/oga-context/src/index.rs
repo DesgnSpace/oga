@@ -31,6 +31,8 @@ const MAX_FILE_BODY_LINES: usize = 120;
 /// the list rather than the file.
 const DIRECT_MATCHES: usize = 5;
 const DIGEST_CHARS: usize = 16;
+/// How long an answer's summary text may run before it is trimmed with `…`.
+const MAX_SUMMARY_CHARS: usize = 90;
 
 #[derive(Debug, Error)]
 pub enum ContextError {
@@ -920,11 +922,16 @@ fn answer_lines(
             .cloned()
             .collect::<Vec<_>>()
             .join(", ");
-        lines.push(if bare || matched.is_empty() {
+        let mut line = if bare || matched.is_empty() {
             anchor
         } else {
             format!("{anchor} (matched: {matched})")
-        });
+        };
+        if let Some(summary) = candidate_summary(&scored.symbol) {
+            line.push_str(" — ");
+            line.push_str(&summary);
+        }
+        lines.push(line);
         if code {
             lines.push(
                 candidate
@@ -936,6 +943,43 @@ fn answer_lines(
         }
     }
     lines
+}
+
+/// What a hit is, in a few words: the first sentence of its doc comment, or
+/// its signature when it has none. A file-level hit carries neither.
+fn candidate_summary(symbol: &SymbolRow) -> Option<String> {
+    if symbol.name.is_empty() {
+        return None;
+    }
+    let text = symbol
+        .doc
+        .as_deref()
+        .and_then(first_sentence)
+        .unwrap_or_else(|| symbol.signature.clone());
+    (!text.is_empty()).then(|| trim_summary(&text))
+}
+
+/// The first sentence of a doc comment, its lines flattened to one so a
+/// sentence that wraps still reads whole.
+fn first_sentence(doc: &str) -> Option<String> {
+    let flattened = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flattened.is_empty() {
+        return None;
+    }
+    let end = flattened
+        .match_indices(['.', '!', '?'])
+        .map(|(index, _)| index + 1)
+        .next()
+        .unwrap_or(flattened.len());
+    Some(flattened[..end].to_owned())
+}
+
+fn trim_summary(text: &str) -> String {
+    if text.chars().count() <= MAX_SUMMARY_CHARS {
+        return text.to_owned();
+    }
+    let truncated = text.chars().take(MAX_SUMMARY_CHARS - 1).collect::<String>();
+    format!("{}…", truncated.trim_end())
 }
 
 fn omitted(count: usize, reason: &str) -> String {

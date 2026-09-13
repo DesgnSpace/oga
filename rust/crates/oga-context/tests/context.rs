@@ -774,6 +774,90 @@ fn builds_symbols_and_answers_an_exact_name() {
 }
 
 #[test]
+fn answer_shows_the_first_sentence_of_a_doc_comment() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "/** Verify the caller token. Also logs the attempt. */\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
+    );
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let result = index
+        .question(&fixture.target(), "where is checkAuth handled")
+        .expect("question ranks context");
+    assert!(
+        result.markdown.contains(" — Verify the caller token."),
+        "{}",
+        result.markdown
+    );
+    assert!(!result.markdown.contains("Also logs the attempt"));
+}
+
+#[test]
+fn answer_shows_the_signature_when_undocumented() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "export function doLogin(token: string): boolean {\n  return token.length > 0;\n}\n",
+    );
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let result = index
+        .question(&fixture.target(), "where is doLogin handled")
+        .expect("question ranks context");
+    assert!(
+        result
+            .markdown
+            .contains(" — function doLogin(token: string): boolean"),
+        "{}",
+        result.markdown
+    );
+}
+
+#[test]
+fn file_hit_shows_no_summary() {
+    let fixture = Fixture::new();
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let result = index
+        .question(&fixture.target(), "src/other.ts")
+        .expect("question answers a direct path");
+    assert_eq!(result.candidates[0].symbol, None);
+    assert!(!result.markdown.contains(" — "), "{}", result.markdown);
+}
+
+#[test]
+fn answer_trims_a_long_summary_to_ninety_characters() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "/** This sentence about token verification runs on for a very long while so it must be trimmed down. */\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
+    );
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let result = index
+        .question(&fixture.target(), "where is checkAuth handled")
+        .expect("question ranks context");
+    let summary = result
+        .markdown
+        .split(" — ")
+        .nth(1)
+        .expect("a summary follows the anchor");
+    assert!(summary.ends_with('…'), "{summary}");
+    assert_eq!(summary.chars().count(), 90);
+}
+
+#[test]
 fn reports_an_honest_miss() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth() { return true; }\n");
