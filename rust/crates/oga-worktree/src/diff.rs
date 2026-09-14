@@ -5,6 +5,7 @@
 //! ceiling on how much of git's stdout is consumed at all — so a checkout
 //! holding a generated tree cannot turn one panel into a whole-repo read.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -25,23 +26,154 @@ const MAX_PATCH_BYTES: usize = 4 * 1024 * 1024;
 const MAX_UNTRACKED_BYTES: u64 = 256 * 1024;
 /// How many untracked files one read carries.
 const MAX_UNTRACKED_FILES: usize = 200;
+/// How many branches the base picker is offered.
+const MAX_BRANCHES: usize = 400;
 
 /// Reads what a task actually changed in the checkout it ran in.
-pub async fn task_diff(task: &Task) -> Result<TaskDiff, WorktreeError> {
+///
+/// `against` names the side to compare the checkout with: `HEAD` for work that
+/// is not committed yet, a branch to see everything this checkout carries that
+/// the branch does not. Left out, the task's own shape decides — a worktree
+/// task against the commit its branch was cut from, any other against `HEAD`.
+pub async fn task_diff(task: &Task, against: Option<&str>) -> Result<TaskDiff, WorktreeError> {
     let cwd = PathBuf::from(&task.cwd);
-    match task.worktree.as_ref() {
+    let worktree = task.worktree.as_ref();
+    let pathspecs = match worktree {
         Some(worktree) => {
             require_worktree_paths(worktree)?;
-            let base = branch_base(&cwd, &worktree.branch).await;
-            let against = base.clone().unwrap_or_else(|| "HEAD".to_owned());
-            read_diff(&cwd, TaskDiffBasis::Branch, &against, base, &[]).await
+            Vec::new()
         }
         None => {
             require_repository(&cwd).await?;
-            let pathspecs = scope_pathspecs(&task.scope.write);
-            read_diff(&cwd, TaskDiffBasis::WorkingTree, "HEAD", None, &pathspecs).await
+            scope_pathspecs(&task.scope.write)
+        }
+    };
+    let (basis, against, base) = match (against, worktree) {
+        (Some("HEAD"), _) | (None, None) => (TaskDiffBasis::WorkingTree, "HEAD".to_owned(), None),
+        (Some(revision), _) => {
+            let revision = checked_revision(revision)?.to_owned();
+            (TaskDiffBasis::Branch, revision.clone(), Some(revision))
+        }
+        (None, Some(worktree)) => {
+            let base = branch_base(&cwd, &worktree.branch).await;
+            let against = base.clone().unwrap_or_else(|| "HEAD".to_owned());
+            (TaskDiffBasis::Branch, against, base)
+        }
+    };
+    read_diff(&cwd, basis, &against, base, &pathspecs).await
+}
+
+/// The branches a checkout offers as a diff base.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BranchChoices {
+    pub branches: Vec<String>,
+    /// The one to compare against until the reader picks another.
+    pub default: Option<String>,
+}
+
+/// Lists the branches a task's checkout can be compared against, newest first.
+///
+/// Remote-tracking branches come along, since the base a reader wants may not
+/// be checked out here, but one that only mirrors a local branch is left out,
+/// as are the symbolic refs standing for a remote's own head.
+pub async fn branch_choices(cwd: &Path) -> Result<BranchChoices, WorktreeError> {
+    let (listing, _) = git_capped(
+        cwd,
+        &[
+            "for-each-ref".into(),
+            "--format=%(symref)\t%(refname)".into(),
+            "--sort=-committerdate".into(),
+            format!("--count={MAX_BRANCHES}"),
+            "refs/heads".into(),
+            "refs/remotes".into(),
+        ],
+        256 * 1024,
+    )
+    .await?;
+    let mut named: Vec<(bool, &str)> = Vec::new();
+    for line in listing.lines() {
+        let Some((symref, refname)) = line.split_once('\t') else {
+            continue;
+        };
+        if !symref.is_empty() {
+            continue;
+        }
+        if let Some(name) = refname.strip_prefix("refs/heads/") {
+            named.push((true, name));
+        } else if let Some(name) = refname.strip_prefix("refs/remotes/") {
+            named.push((false, name));
         }
     }
+    let locals: HashSet<&str> = named
+        .iter()
+        .filter(|(local, _)| *local)
+        .map(|(_, name)| *name)
+        .collect();
+    let branches: Vec<String> = named
+        .iter()
+        .filter(|(local, name)| *local || !locals.contains(remote_tail(name)))
+        .map(|(_, name)| (*name).to_owned())
+        .collect();
+    let current = crate::current_branch(cwd).await.ok().flatten();
+    let default = default_branch(cwd, &branches, current.as_deref()).await;
+    Ok(BranchChoices { branches, default })
+}
+
+/// A remote-tracking branch without its remote: `origin/main` is `main`.
+fn remote_tail(name: &str) -> &str {
+    name.split_once('/').map_or(name, |(_, tail)| tail)
+}
+
+/// The repository's trunk: what the remote points its own head at, falling
+/// back to a conventional trunk name the checkout has, and past that to any
+/// branch other than the one the checkout is already on.
+async fn default_branch(cwd: &Path, branches: &[String], current: Option<&str>) -> Option<String> {
+    let head = git_capped(
+        cwd,
+        &[
+            "symbolic-ref".into(),
+            "--short".into(),
+            "refs/remotes/origin/HEAD".into(),
+        ],
+        4 * 1024,
+    )
+    .await
+    .map(|(head, _)| head)
+    .unwrap_or_default();
+    let remote = head.trim();
+    if !remote.is_empty() {
+        let local = remote.strip_prefix("origin/").unwrap_or(remote);
+        if branches.iter().any(|branch| branch == local) {
+            return Some(local.to_owned());
+        }
+        return Some(remote.to_owned());
+    }
+    ["main", "master", "trunk"]
+        .into_iter()
+        .find(|name| branches.iter().any(|branch| branch == name))
+        .map(str::to_owned)
+        .or_else(|| {
+            branches
+                .iter()
+                .find(|branch| Some(branch.as_str()) != current)
+                .cloned()
+        })
+}
+
+/// A revision a caller named. Anything that could read as a git option is
+/// refused rather than handed to git.
+fn checked_revision(raw: &str) -> Result<&str, WorktreeError> {
+    let usable = !raw.is_empty()
+        && raw.len() <= 255
+        && !raw.starts_with('-')
+        && !raw.contains("..")
+        && raw.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '/' | '.' | '_' | '-' | '+' | '@')
+        });
+    usable
+        .then_some(raw)
+        .ok_or_else(|| WorktreeError::Message(format!("not a branch name: {raw}")))
 }
 
 async fn require_repository(cwd: &Path) -> Result<(), WorktreeError> {
@@ -116,10 +248,8 @@ async fn read_diff(
         "--relative".into(),
         against.to_owned(),
     ];
-    if !pathspecs.is_empty() {
-        args.push("--".into());
-        args.extend(pathspecs.iter().cloned());
-    }
+    args.push("--".into());
+    args.extend(pathspecs.iter().cloned());
     let (patch, over_cap) = git_capped(cwd, &args, MAX_PATCH_BYTES).await?;
 
     let mut files = split_patch(&patch);

@@ -37,6 +37,14 @@ pub enum TaskBranchSource {
     Recorded,
 }
 
+/// The branches a task's checkout can be compared against.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBranches {
+    pub branches: Vec<String>,
+    pub default: Option<String>,
+}
+
 /// Query parameters for the broker state snapshot.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]

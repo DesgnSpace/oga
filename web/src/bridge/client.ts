@@ -68,9 +68,11 @@ export const broker = {
   taskEvents: (taskId: string, query: TaskEventsQuery) =>
     call({ call: "taskEvents", taskId, query }),
 
-  taskDiff: (taskId: string) => call({ call: "taskDiff", taskId }),
+  taskDiff: (taskId: string, against?: string) => call({ call: "taskDiff", taskId, against }),
 
   taskBranch: (taskId: string) => call({ call: "taskBranch", taskId }),
+
+  taskBranches: (taskId: string) => call({ call: "taskBranches", taskId }),
 
   projects: () => call({ call: "projects" }),
 

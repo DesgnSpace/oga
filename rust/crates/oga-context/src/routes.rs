@@ -162,7 +162,8 @@ pub fn save(
                 Some((id, existing_aliases, existing_phrases)) => {
                     transaction.execute(
                         "UPDATE context_learned_routes SET aliases=?,hint_keys=?,source_digest=?,\
-                         task_id=?,attempt=?,profile_id=?,model=?,last_confirmed_at=? WHERE id=?",
+                         task_id=?,attempt=?,profile_id=?,model=?,last_confirmed_at=?,\
+                         missing_since=NULL WHERE id=?",
                         params![
                             merge(&existing_aliases, record.aliases),
                             merge_phrases(&existing_phrases, record.phrases),
@@ -249,20 +250,23 @@ pub fn matching(
     })
 }
 
-pub fn forget(store: &Store, id: i64) -> Result<(), StoreError> {
-    store.transaction(|transaction| {
-        transaction.execute("DELETE FROM context_learned_routes WHERE id=?", [id])?;
-        Ok(())
-    })
-}
-
 /// Point every route at where its target lives now. A route whose file and
-/// symbol both survived is confirmed; one whose symbol body turns up
-/// elsewhere follows it; one with neither is dropped.
+/// symbol both survived is confirmed; one whose symbol body turns up elsewhere
+/// follows it.
+///
+/// A route with neither is recorded as missing from this checkout and left
+/// exactly as it was taught. A branch that does not carry the code is not
+/// evidence that nobody knows where it lives, and switching back must find the
+/// route waiting.
+///
+/// The count of missing routes covers the ones that went missing on this run,
+/// not every route this checkout cannot resolve: a checkout parked on a branch
+/// that never carried the code reports it once and then stops.
 pub fn heal(
     store: &Store,
     cwd: &Path,
     moves: &[(String, String)],
+    now: &str,
 ) -> Result<(usize, usize, Vec<RouteMove>), StoreError> {
     let rows = store.with_connection(|connection| {
         let mut statement = connection.prepare(
@@ -280,7 +284,7 @@ pub fn heal(
             .collect::<Result<Vec<_>, _>>()?)
     })?;
     let mut confirmed = 0;
-    let mut dropped = 0;
+    let mut missing = 0;
     let mut route_moves = Vec::new();
     for (id, from_path, from_symbol, source_digest) in rows {
         let path = moves
@@ -298,14 +302,19 @@ pub fn heal(
             }
         };
         let Some((path, symbol, digest)) = resolved else {
-            forget(store, id)?;
-            dropped += 1;
+            missing += store.transaction(|transaction| {
+                Ok(transaction.execute(
+                    "UPDATE context_learned_routes SET missing_since=? \
+                     WHERE id=? AND missing_since IS NULL",
+                    params![now, id],
+                )?)
+            })?;
             continue;
         };
         store.transaction(|transaction| {
             transaction.execute(
                 "UPDATE context_learned_routes SET learned_path=?,learned_symbol=?,\
-                 source_digest=? WHERE id=?",
+                 source_digest=?,missing_since=NULL WHERE id=?",
                 params![path, symbol, digest, id],
             )?;
             Ok(())
@@ -320,7 +329,7 @@ pub fn heal(
             });
         }
     }
-    Ok((confirmed, dropped, route_moves))
+    Ok((confirmed, missing, route_moves))
 }
 
 /// The terms of `question` this route claims to answer.

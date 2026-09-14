@@ -14,16 +14,19 @@ import type { TaskTitleBarInfo } from "@/shell/TitleBar";
 import {
   CHANGED_FILES_DEFAULT_WIDTH,
   clampChangedFilesWidth,
+  loadChangesBase,
   loadChangesGrouped,
   loadChangesSource,
   loadChangedFilesWidth,
+  storeChangesBase,
   storeChangesGrouped,
   storeChangesSource,
   storeChangedFilesWidth,
+  type ChangesSource,
 } from "@/state/changed-files-preferences";
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
 import { terminalResumeCommand } from "./terminalResume";
-import { ChangedFilesFullScreen, ChangedFilesPanel, type ChangedFilesProps, type ChangesSource } from "./ChangedFiles";
+import { ChangedFilesFullScreen, ChangedFilesPanel, type ChangedFilesProps } from "./ChangedFiles";
 import { effortDisplay, shortModel, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
@@ -59,26 +62,54 @@ interface GitDiffState {
 }
 
 /**
- * Reads the task's checkout while the panel is showing git, and again on
- * demand. A live task is not re-read on its own: the reported view is the one
- * that follows a worker, and every re-read costs a git process.
+ * Reads the task's checkout while the panel is comparing against git, and
+ * again on demand. A live task is not re-read on its own: the run's own edits
+ * are what follows a worker, and every re-read costs a git process.
  */
-function useGitDiff(taskId: string, active: boolean): GitDiffState & { reload: () => void } {
+function useGitDiff(taskId: string, against: string | undefined): GitDiffState & { reload: () => void } {
   const [state, setState] = React.useState<GitDiffState>({ loading: false });
   const [attempt, setAttempt] = React.useState(0);
   React.useEffect(() => {
-    if (!active) return;
+    if (against === undefined) return;
     let cancelled = false;
     setState({ loading: true });
-    void broker.taskDiff(taskId).then((result) => {
+    void broker.taskDiff(taskId, against).then((result) => {
       if (cancelled) return;
       setState(result.ok ? { loading: false, diff: result.value } : { loading: false, error: result.error.message });
     });
     return () => {
       cancelled = true;
     };
-  }, [taskId, active, attempt]);
+  }, [taskId, against, attempt]);
   return { ...state, reload: () => setAttempt((value) => value + 1) };
+}
+
+interface BranchChoices {
+  loading: boolean;
+  branches: string[];
+  default?: string;
+}
+
+/** The branches the checkout offers as a comparison, read once the panel opens. */
+function useTaskBranches(taskId: string, active: boolean): BranchChoices {
+  const [state, setState] = React.useState<BranchChoices>({ loading: false, branches: [] });
+  React.useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    setState({ loading: true, branches: [] });
+    void broker.taskBranches(taskId).then((result) => {
+      if (cancelled) return;
+      setState(
+        result.ok
+          ? { loading: false, branches: result.value.branches, default: result.value.default }
+          : { loading: false, branches: [] },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, active]);
+  return state;
 }
 
 interface UsageTotals {
@@ -172,6 +203,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   const [showingChanges, setShowingChanges] = React.useState(false);
   const [reviewingChanges, setReviewingChanges] = React.useState(false);
   const [changesSource, setChangesSource] = React.useState<ChangesSource>(loadChangesSource);
+  const [changesBase, setChangesBase] = React.useState<string | undefined>(loadChangesBase);
   const [groupByTurn, setGroupByTurn] = React.useState(loadChangesGrouped);
   const [changedFilesWidth, setChangedFilesWidth] = React.useState(loadChangedFilesWidth);
   const [resizeStart, setResizeStart] = React.useState<{ x: number; width: number } | null>(null);
@@ -307,10 +339,25 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   }, [watched, forceUpdate]);
 
   const changesVisible = showingChanges || reviewingChanges;
-  const git = useGitDiff(taskId, changesVisible && changesSource === "git");
+  const branches = useTaskBranches(taskId, changesVisible);
+  const base = changesBase ?? branches.default;
+  const against =
+    !changesVisible || changesSource === "run"
+      ? undefined
+      : changesSource === "uncommitted"
+        ? "HEAD"
+        : base;
+  const git = useGitDiff(taskId, against);
+  const showingGit = changesSource !== "run";
+  const awaitingBranches = changesSource === "branch" && base === undefined;
   const chooseSource = (source: ChangesSource) => {
     setChangesSource(source);
     storeChangesSource(source);
+  };
+  const chooseBase = (branch: string) => {
+    setChangesBase(branch);
+    storeChangesBase(branch);
+    chooseSource("branch");
   };
   const chooseGrouping = (grouped: boolean) => {
     setGroupByTurn(grouped);
@@ -323,7 +370,7 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   );
   const reportedTurns = React.useMemo(
     () =>
-      cwd !== undefined && changesVisible && changesSource === "reported" && groupByTurn
+      cwd !== undefined && changesVisible && changesSource === "run" && groupByTurn
         ? changeTurnsProjection.update(events, cwd)
         : undefined,
     [cwd, eventRevision, events, changesVisible, changesSource, groupByTurn, changeTurnsProjection],
@@ -336,14 +383,17 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
   const changedFiles: ChangedFilesProps | undefined = task ? {
     source: changesSource,
     onSourceChange: chooseSource,
+    base: changesSource === "branch" ? base : undefined,
+    onBaseChange: chooseBase,
+    branches: branches.branches,
     groupByTurn,
     onGroupByTurn: chooseGrouping,
     onReload: git.reload,
-    changes: changesSource === "git" ? gitChanges : reportedChanges,
-    turns: changesSource === "git" ? undefined : reportedTurns,
-    loading: changesSource === "git" ? git.loading : state.loading,
-    error: changesSource === "git" ? git.error : undefined,
-    truncated: changesSource === "git" && git.diff?.truncated === true,
+    changes: showingGit ? gitChanges : reportedChanges,
+    turns: showingGit ? undefined : reportedTurns,
+    loading: showingGit ? (awaitingBranches ? branches.loading : git.loading) : state.loading,
+    error: showingGit ? git.error : undefined,
+    truncated: showingGit && git.diff?.truncated === true,
     live: !activityIsSettled(task.state),
     hasEarlier: state.hasEarlier,
     loadingEarlier: state.loadingEarlier,

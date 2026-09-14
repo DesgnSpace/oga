@@ -263,8 +263,23 @@ impl LoopbackClient {
             .await
     }
 
-    pub async fn get_task_diff(&self, task_id: &str) -> Result<TaskDiff, ClientError> {
-        self.get_json(self.endpoint(&["api", "tasks", task_id, "diff"]))
+    pub async fn get_task_diff(
+        &self,
+        task_id: &str,
+        against: Option<&str>,
+    ) -> Result<TaskDiff, ClientError> {
+        let mut url = self.endpoint(&["api", "tasks", task_id, "diff"]);
+        if let Some(against) = against {
+            url.query_pairs_mut().append_pair("against", against);
+        }
+        self.get_json(url).await
+    }
+
+    pub async fn get_task_branches(
+        &self,
+        task_id: &str,
+    ) -> Result<crate::TaskBranches, ClientError> {
+        self.get_json(self.endpoint(&["api", "tasks", task_id, "branches"]))
             .await
     }
 

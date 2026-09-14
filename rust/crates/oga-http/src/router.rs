@@ -141,6 +141,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/api/tasks/{id}/turns", get(state::get_task_turns))
         .route("/api/tasks/{id}/events", get(state::get_task_events))
         .route("/api/tasks/{id}/diff", get(state::get_task_diff))
+        .route("/api/tasks/{id}/branches", get(state::get_task_branches))
         .route("/api/tasks/{id}/branch", get(state::get_task_branch))
         .route("/api/tasks", post(tasks::dispatch))
         .route("/api/tasks/{id}/resume", post(tasks::resume))

@@ -587,7 +587,9 @@ async fn a_worktree_task_diffs_its_branch_against_where_it_started() {
         worktree: Some(created.worktree.clone()),
         ..Task::default()
     };
-    let diff = oga_worktree::task_diff(&task).await.expect("task diff");
+    let diff = oga_worktree::task_diff(&task, None)
+        .await
+        .expect("task diff");
 
     assert_eq!(diff.basis, TaskDiffBasis::Branch);
     assert_eq!(diff.base.as_deref(), Some(base.as_str()));
@@ -627,7 +629,9 @@ async fn a_task_in_the_callers_checkout_diffs_only_what_it_could_write() {
         },
         ..Task::default()
     };
-    let diff = oga_worktree::task_diff(&task).await.expect("task diff");
+    let diff = oga_worktree::task_diff(&task, None)
+        .await
+        .expect("task diff");
 
     assert_eq!(diff.basis, TaskDiffBasis::WorkingTree);
     assert_eq!(diff.base, None);

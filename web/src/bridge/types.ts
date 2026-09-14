@@ -262,6 +262,12 @@ export interface TaskDiff {
   truncated: boolean;
 }
 
+/** The branches a task's checkout can be compared against. */
+export interface TaskBranches {
+  branches: string[];
+  default?: string;
+}
+
 export interface EventPointer {
   id: number;
   cursor: number;
@@ -680,8 +686,9 @@ export type BrokerCall =
   | { call: "usage"; tzOffset?: number }
   | { call: "task"; taskId: string }
   | { call: "taskEvents"; taskId: string; query: TaskEventsQuery }
-  | { call: "taskDiff"; taskId: string }
+  | { call: "taskDiff"; taskId: string; against?: string }
   | { call: "taskBranch"; taskId: string }
+  | { call: "taskBranches"; taskId: string }
   | { call: "projects" }
   | { call: "memories"; cwd: string }
   | { call: "prompt"; cwd?: string }
@@ -717,6 +724,7 @@ export interface BrokerCallResult {
   taskEvents: TaskEventPage;
   taskDiff: TaskDiff;
   taskBranch: { branch?: string; source: "checkout" | "recorded" };
+  taskBranches: TaskBranches;
   projects: ProjectList;
   memories: MemoryEntry[];
   prompt: PromptConfig;

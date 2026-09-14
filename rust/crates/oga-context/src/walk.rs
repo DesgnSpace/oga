@@ -12,6 +12,7 @@ pub struct WalkFile {
     pub path: String,
     pub size: u64,
     pub mtime_ms: i64,
+    pub ctime_ms: i64,
 }
 
 #[derive(Debug, Default)]
@@ -180,6 +181,7 @@ fn walk_directory(
             path: relative,
             size: metadata.len(),
             mtime_ms: mtime_ms(&metadata),
+            ctime_ms: ctime_ms(&metadata),
         });
     }
 
@@ -285,6 +287,24 @@ fn mtime_ms(metadata: &Metadata) -> i64 {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
         .unwrap_or_default()
+}
+
+/// When the file's inode last changed. A restore can hand a file back the size
+/// and modification time it had; nothing in userland can hand back this. Zero
+/// where the platform does not report one, which leaves the size and
+/// modification time to decide on their own.
+#[cfg(unix)]
+fn ctime_ms(metadata: &Metadata) -> i64 {
+    use std::os::unix::fs::MetadataExt;
+    metadata
+        .ctime()
+        .saturating_mul(1_000)
+        .saturating_add(i64::from(metadata.ctime_nsec() as i32) / 1_000_000)
+}
+
+#[cfg(not(unix))]
+fn ctime_ms(_metadata: &Metadata) -> i64 {
+    0
 }
 
 pub fn absolute_path(cwd: &Path, relative: &str) -> PathBuf {

@@ -8,9 +8,12 @@ export const CHANGED_FILES_DEFAULT_WIDTH = 380;
 
 const CHANGED_FILES_WIDTH_KEY = "changedFilesPanelWidth";
 const CHANGES_SOURCE_KEY = "oga:changes-source";
+const CHANGES_BASE_KEY = "oga:changes-base-branch";
 const CHANGES_GROUP_KEY = "oga:changes-group-by-turn";
 
-export type ChangesSource = "reported" | "git";
+export type ChangesSource = "run" | "uncommitted" | "branch";
+
+const CHANGES_SOURCES: readonly ChangesSource[] = ["run", "uncommitted", "branch"];
 
 export function clampChangedFilesWidth(width: number): number {
   return Math.min(Math.max(width, CHANGED_FILES_MIN_WIDTH), CHANGED_FILES_MAX_WIDTH);
@@ -29,11 +32,21 @@ export function storeChangedFilesWidth(width: number): void {
 }
 
 export function loadChangesSource(): ChangesSource {
-  return readStorage(CHANGES_SOURCE_KEY) === "git" ? "git" : "reported";
+  const stored = readStorage(CHANGES_SOURCE_KEY);
+  return CHANGES_SOURCES.find((source) => source === stored) ?? "run";
 }
 
 export function storeChangesSource(source: ChangesSource): void {
   writeStorage(CHANGES_SOURCE_KEY, source);
+}
+
+export function loadChangesBase(): string | undefined {
+  const stored = readStorage(CHANGES_BASE_KEY);
+  return stored === undefined || stored === "" ? undefined : stored;
+}
+
+export function storeChangesBase(branch: string): void {
+  writeStorage(CHANGES_BASE_KEY, branch);
 }
 
 export function loadChangesGrouped(): boolean {

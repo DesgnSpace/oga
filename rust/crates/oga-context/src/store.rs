@@ -10,7 +10,7 @@ use rusqlite::{OptionalExtension, Row, Transaction, params};
 
 /// The index layout this binary writes. An index built by an older layout is
 /// rebuilt rather than read.
-pub(crate) const INDEX_SCHEME: u32 = 9;
+pub(crate) const INDEX_SCHEME: u32 = 10;
 
 /// What the index knows about its own last build for one project.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +28,7 @@ pub struct FileRow {
     pub digest: String,
     pub size: u64,
     pub mtime_ms: i64,
+    pub ctime_ms: i64,
     pub lines: u64,
 }
 
@@ -57,11 +58,12 @@ pub struct FileUpdate {
     pub digest: String,
     pub size: u64,
     pub mtime_ms: i64,
+    pub ctime_ms: i64,
     pub lines: u64,
     pub symbols: Vec<SymbolRow>,
 }
 
-const FILE_COLUMNS: &str = "id,path,lang,digest,size,mtime_ms,lines";
+const FILE_COLUMNS: &str = "id,path,lang,digest,size,mtime_ms,ctime_ms,lines";
 const SYMBOL_COLUMNS: &str =
     "path,kind,name,qualified,parent,line,end_line,signature,doc,exported,digest";
 
@@ -328,6 +330,19 @@ pub fn symbol_at(
     })
 }
 
+/// The whole-file hash the index holds for one path, if it holds the file.
+pub fn file_digest(store: &Store, cwd: &Path, path: &str) -> Result<Option<String>, StoreError> {
+    store.with_connection(|connection| {
+        Ok(connection
+            .query_row(
+                "SELECT digest FROM context_files WHERE cwd=? AND path=? LIMIT 1",
+                params![cwd.display().to_string(), path],
+                |row| row.get(0),
+            )
+            .optional()?)
+    })
+}
+
 pub fn file_exists(store: &Store, cwd: &Path, path: &str) -> Result<bool, StoreError> {
     store.with_connection(|connection| {
         Ok(connection
@@ -381,11 +396,12 @@ fn write(
             delete_file(transaction, &cwd, path)?;
         }
         let mut upsert_file = transaction.prepare(
-            "INSERT INTO context_files(cwd,path,lang,digest,size,mtime_ms,lines,updated_at) \
-             VALUES(?,?,?,?,?,?,?,?) \
+            "INSERT INTO context_files(cwd,path,lang,digest,size,mtime_ms,ctime_ms,lines,updated_at) \
+             VALUES(?,?,?,?,?,?,?,?,?) \
              ON CONFLICT(cwd,path) DO UPDATE SET \
              lang=excluded.lang,digest=excluded.digest,size=excluded.size,\
-             mtime_ms=excluded.mtime_ms,lines=excluded.lines,updated_at=excluded.updated_at \
+             mtime_ms=excluded.mtime_ms,ctime_ms=excluded.ctime_ms,lines=excluded.lines,\
+             updated_at=excluded.updated_at \
              RETURNING id",
         )?;
         let mut clear_symbols =
@@ -404,6 +420,7 @@ fn write(
                     update.digest,
                     update.size,
                     update.mtime_ms,
+                    update.ctime_ms,
                     update.lines,
                     now
                 ],
@@ -436,12 +453,19 @@ fn write(
     })
 }
 
+/// A file rewritten with the same contents, carrying the stamps it now wears.
+pub struct TouchedFile {
+    pub path: String,
+    pub mtime_ms: i64,
+    pub ctime_ms: i64,
+}
+
 /// Record that a file was rewritten with the same contents, so the next run
 /// takes the cheap path again instead of re-reading it.
 pub fn touch_files(
     store: &Store,
     cwd: &Path,
-    touched: &[(String, i64)],
+    touched: &[TouchedFile],
     now: &str,
 ) -> Result<(), StoreError> {
     if touched.is_empty() {
@@ -449,10 +473,17 @@ pub fn touch_files(
     }
     let cwd = cwd.display().to_string();
     store.transaction(|transaction| {
-        let mut statement = transaction
-            .prepare("UPDATE context_files SET mtime_ms=?,updated_at=? WHERE cwd=? AND path=?")?;
-        for (path, mtime_ms) in touched {
-            statement.execute(params![mtime_ms, now, cwd, path])?;
+        let mut statement = transaction.prepare(
+            "UPDATE context_files SET mtime_ms=?,ctime_ms=?,updated_at=? WHERE cwd=? AND path=?",
+        )?;
+        for touched in touched {
+            statement.execute(params![
+                touched.mtime_ms,
+                touched.ctime_ms,
+                now,
+                cwd,
+                touched.path
+            ])?;
         }
         Ok(())
     })
@@ -566,7 +597,8 @@ fn file_from_row(row: &Row<'_>) -> rusqlite::Result<FileRow> {
         digest: row.get(3)?,
         size: row.get::<_, i64>(4)?.max(0) as u64,
         mtime_ms: row.get(5)?,
-        lines: row.get::<_, i64>(6)?.max(0) as u64,
+        ctime_ms: row.get(6)?,
+        lines: row.get::<_, i64>(7)?.max(0) as u64,
     })
 }
 

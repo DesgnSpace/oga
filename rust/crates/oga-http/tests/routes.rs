@@ -1671,7 +1671,7 @@ async fn plain_language_lookup_indexes_on_first_use_and_follows_edits() {
 }
 
 #[tokio::test]
-async fn a_second_question_within_the_debounce_window_skips_the_walk_but_init_does_not() {
+async fn a_question_sees_an_edit_made_since_the_last_one() {
     let fixture = Fixture::new();
     fixture.write_source(
         "src/auth.ts",
@@ -1702,8 +1702,8 @@ async fn a_second_question_within_the_debounce_window_skips_the_walk_but_init_do
         "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
     );
 
-    // Still inside the debounce window, so this question answers from the
-    // index as it stood before the edit above.
+    // Back-to-back questions are the branch-switch case: the second one walks
+    // the tree again rather than answering from where the symbol used to be.
     let (status, body) = json_response(
         request(
             &fixture.router,
@@ -1719,10 +1719,10 @@ async fn a_second_question_within_the_debounce_window_skips_the_walk_but_init_do
         body["markdown"]
             .as_str()
             .expect("markdown")
-            .contains("src/auth.ts:1#checkAuth")
+            .contains("src/auth.ts:5#checkAuth")
     );
 
-    // `oga query --init` always walks, debounce window or not.
+    // `oga query --init` walks too, and says what it found.
     let (status, _) = json_response(
         request(
             &fixture.router,
@@ -1755,7 +1755,7 @@ async fn a_second_question_within_the_debounce_window_skips_the_walk_but_init_do
 }
 
 #[tokio::test]
-async fn plain_language_lookup_inside_a_worktree_answers_from_the_origin_index() {
+async fn plain_language_lookup_inside_a_worktree_answers_from_the_checkout() {
     let fixture = Fixture::new();
     fixture.write_source(
         "src/auth.ts",
@@ -1763,9 +1763,15 @@ async fn plain_language_lookup_inside_a_worktree_answers_from_the_origin_index()
     );
     let origin = fixture.canonical_cwd();
 
-    // The checkout holds no sources of its own, so an answer can only have come
-    // from the origin's index.
+    // The checkout carries the same file on its own branch, moved down the
+    // page, so the line in the answer says which tree it was read from.
     let checkout = tempfile::tempdir().expect("worktree directory");
+    std::fs::create_dir_all(checkout.path().join("src")).expect("checkout source directory");
+    std::fs::write(
+        checkout.path().join("src/auth.ts"),
+        "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
+    )
+    .expect("checkout source writes");
     let checkout_cwd = std::fs::canonicalize(checkout.path())
         .expect("canonicalize worktree")
         .display()
@@ -1815,7 +1821,7 @@ async fn plain_language_lookup_inside_a_worktree_answers_from_the_origin_index()
             body["markdown"]
                 .as_str()
                 .expect("markdown")
-                .contains("src/auth.ts:1#checkAuth"),
+                .contains("src/auth.ts:5#checkAuth"),
             "cwd {cwd}"
         );
     }

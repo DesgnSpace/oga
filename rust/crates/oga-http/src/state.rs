@@ -123,18 +123,43 @@ pub async fn get_task_turns(
     Ok(Json(json!({ "turns": turns })))
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct DiffQuery {
+    /// The side to compare the checkout with: `HEAD` for uncommitted work, or
+    /// a branch name. Absent lets the task's own shape decide.
+    pub against: Option<String>,
+}
+
 /// The task's checkout as git sees it, rather than as its worker described it.
 pub async fn get_task_diff(
+    State(state): State<HttpState>,
+    AxumPath(id): AxumPath<String>,
+    Query(query): Query<DiffQuery>,
+) -> Result<impl IntoResponse, HttpError> {
+    let task = load_task(&state.store, &id)?
+        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
+        .ok_or_else(|| HttpError::not_found("unknown task"))?;
+    let diff = oga_worktree::task_diff(&task, query.against.as_deref())
+        .await
+        .map_err(|error| HttpError::conflict(error.to_string()))?;
+    Ok(Json(serde_json::to_value(diff).unwrap()))
+}
+
+/// The branches the task's checkout can be compared against.
+pub async fn get_task_branches(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
     let task = load_task(&state.store, &id)?
         .filter(|task| task.kind != Some(TaskKind::Orchestrator))
         .ok_or_else(|| HttpError::not_found("unknown task"))?;
-    let diff = oga_worktree::task_diff(&task)
+    let choices = oga_worktree::branch_choices(Path::new(&task.cwd))
         .await
         .map_err(|error| HttpError::conflict(error.to_string()))?;
-    Ok(Json(serde_json::to_value(diff).unwrap()))
+    Ok(Json(json!({
+        "branches": choices.branches,
+        "default": choices.default,
+    })))
 }
 
 pub async fn get_task_branch(

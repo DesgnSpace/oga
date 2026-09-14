@@ -68,6 +68,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "project-scoped code search",
         run: migrate_v46_to_v47,
     },
+    Migration {
+        version: 48,
+        name: "per-checkout index",
+        run: migrate_v47_to_v48,
+    },
 ];
 
 /// The schema this binary can read.
@@ -329,6 +334,10 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
         digest TEXT NOT NULL,
         size INTEGER NOT NULL,
         mtime_ms INTEGER NOT NULL,
+        -- Inode change time. A restore can hand a file back its size and
+        -- modification time together; neither it nor anything else in
+        -- userland can hand back this one.
+        ctime_ms INTEGER NOT NULL DEFAULT 0,
         lines INTEGER NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -405,6 +414,10 @@ const ROUTE_HINTS_TABLE: &str = r#"      CREATE TABLE context_learned_routes (
         model TEXT NOT NULL,
         created_at TEXT NOT NULL,
         last_confirmed_at TEXT NOT NULL,
+        -- When this route first failed to resolve in the checkout that was
+        -- reconciled. A branch that does not carry the code is not a reason
+        -- to forget where it lives on the branch that does.
+        missing_since TEXT,
         UNIQUE(cwd, learned_path, learned_symbol)
        );
        CREATE INDEX context_learned_routes_cwd_aliases ON context_learned_routes(cwd, aliases);
@@ -705,6 +718,36 @@ pub fn migrate_v46_to_v47(conn: &Connection) -> Result<(), StoreError> {
         INSERT INTO schema_migrations(version, name) VALUES (47, 'project-scoped code search');
         COMMIT;"#,
     )?;
+    Ok(())
+}
+
+/// Give each checkout its own index and stop a branch switch from forgetting
+/// routes.
+///
+/// `ctime_ms` joins the size and modification time a file is judged unchanged
+/// by. `missing_since` records that a route did not resolve where it was last
+/// looked for, in place of deleting it.
+///
+/// A database coming up from the v42 rebuild already carries the current table
+/// shape, so each column is added only where it is missing.
+pub fn migrate_v47_to_v48(conn: &Connection) -> Result<(), StoreError> {
+    let ctime = if has_column(conn, "context_files", "ctime_ms")? {
+        ""
+    } else {
+        "ALTER TABLE context_files ADD COLUMN ctime_ms INTEGER NOT NULL DEFAULT 0;"
+    };
+    let missing = if has_column(conn, "context_learned_routes", "missing_since")? {
+        ""
+    } else {
+        "ALTER TABLE context_learned_routes ADD COLUMN missing_since TEXT;"
+    };
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        {ctime}
+        {missing}
+        INSERT INTO schema_migrations(version, name) VALUES (48, 'per-checkout index');
+        COMMIT;"#
+    ))?;
     Ok(())
 }
 

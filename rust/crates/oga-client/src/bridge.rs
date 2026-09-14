@@ -39,8 +39,15 @@ pub enum BrokerCall {
     },
     TaskDiff {
         task_id: String,
+        /// The side to compare the checkout with: `HEAD` for uncommitted work,
+        /// or a branch name. Absent lets the task's own shape decide.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        against: Option<String>,
     },
     TaskBranch {
+        task_id: String,
+    },
+    TaskBranches {
         task_id: String,
     },
     ConsumerInbox {
@@ -267,8 +274,13 @@ mod native {
                 BrokerCall::TaskEvents { task_id, query } => {
                     encode(self.get_task_events(&task_id, &query).await)
                 }
-                BrokerCall::TaskDiff { task_id } => encode(self.get_task_diff(&task_id).await),
+                BrokerCall::TaskDiff { task_id, against } => {
+                    encode(self.get_task_diff(&task_id, against.as_deref()).await)
+                }
                 BrokerCall::TaskBranch { task_id } => encode(self.get_task_branch(&task_id).await),
+                BrokerCall::TaskBranches { task_id } => {
+                    encode(self.get_task_branches(&task_id).await)
+                }
                 BrokerCall::ConsumerInbox {
                     consumer_id,
                     channel,

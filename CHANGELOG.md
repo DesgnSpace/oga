@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Changed files now let you pick what you are looking at: this run's edits, everything not yet committed, or the checkout compared with any branch you choose.
+
 ## 0.2.0 - 2026-09-13
 
 - Code questions no longer answer from files your git setup ignores, such as local notes and reports.

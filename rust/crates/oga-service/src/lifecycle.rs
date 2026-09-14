@@ -753,7 +753,7 @@ async fn enrich_codex_file_change(task: &Task, mut event: ParsedEvent) -> Parsed
         return event;
     }
 
-    let Ok(diff) = oga_worktree::task_diff(task).await else {
+    let Ok(diff) = oga_worktree::task_diff(task, None).await else {
         return event;
     };
     let cwd = Path::new(&task.cwd);

@@ -11,11 +11,16 @@ import { runChangeSetAdded, runChangeSetRemoved } from "@/domain/changes";
 import type { ChangeTurn, ChangeTurnSet } from "@/domain/changes/grouped";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
-import { CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
+import { CheckIcon, ChevronIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
 import { EmptyState, LoadingState } from "@/components/atoms/ListState";
 import { CodeDiff } from "@/components/CodeDiff";
 import { Modal } from "@/components/primitives/Modal";
-import { CHANGED_FILES_MAX_WIDTH, CHANGED_FILES_MIN_WIDTH } from "@/state/changed-files-preferences";
+import { MenuPanel } from "@/components/menu/Menu";
+import {
+  CHANGED_FILES_MAX_WIDTH,
+  CHANGED_FILES_MIN_WIDTH,
+  type ChangesSource,
+} from "@/state/changed-files-preferences";
 import { patchFromBlocks } from "@/lib/unified-patch";
 import { DiffHeader } from "@/components/DiffHeader";
 
@@ -30,19 +35,22 @@ function turnKey(turn: ChangeTurn): string {
   return turn.turnId !== undefined ? `t${turn.turnId}` : `e${turn.ordinal}`;
 }
 
-/** Where the panel's diffs come from. */
-const CHANGES_SOURCES = ["reported", "git"] as const;
+/** Which two sides the panel compares. */
+const CHANGES_SOURCES = ["run", "uncommitted", "branch"] as const;
 
-export type ChangesSource = (typeof CHANGES_SOURCES)[number];
+/** How many branches the picker offers before the rest are left out. */
+const BRANCH_CHOICES = 12;
 
 const CHANGES_SOURCE_LABELS = {
-  reported: "Reported",
-  git: "Git",
+  run: "This run",
+  uncommitted: "Uncommitted",
+  branch: "Against a branch",
 } satisfies Record<ChangesSource, string>;
 
 const CHANGES_SOURCE_HINTS = {
-  reported: "What the worker said it changed",
-  git: "What git shows in this task's checkout",
+  run: "Files this run touched",
+  uncommitted: "Not yet committed in this checkout",
+  branch: "This checkout compared with another branch",
 } satisfies Record<ChangesSource, string>;
 
 const STATUS_LABELS = {
@@ -244,27 +252,69 @@ function FileTreeNodes({
   );
 }
 
+/** The most recent branches, with the one in use always among them. */
+function branchChoices(branches: string[], base?: string): string[] {
+  const offered = branches.slice(0, BRANCH_CHOICES);
+  if (base === undefined || offered.includes(base)) return offered;
+  return [base, ...offered.slice(0, BRANCH_CHOICES - 1)];
+}
+
 function SourcePicker({
   source,
+  base,
+  branches,
   onSourceChange,
+  onBaseChange,
 }: {
   source: ChangesSource;
+  base?: string;
+  branches: string[];
   onSourceChange: (source: ChangesSource) => void;
+  onBaseChange: (branch: string) => void;
 }) {
+  const [open, setOpen] = React.useState(false);
+  const label = source === "branch" && base !== undefined ? `Against ${base}` : CHANGES_SOURCE_LABELS[source];
+  const sources = CHANGES_SOURCES.map((option) => ({
+    key: option,
+    label: CHANGES_SOURCE_LABELS[option],
+    icon: source === option ? <CheckIcon /> : undefined,
+    onSelect: () => {
+      setOpen(false);
+      onSourceChange(option);
+    },
+  }));
+  const bases = branchChoices(branches, base).map((branch) => ({
+    key: `branch:${branch}`,
+    label: branch,
+    icon: source === "branch" && base === branch ? <CheckIcon /> : undefined,
+    onSelect: () => {
+      setOpen(false);
+      onBaseChange(branch);
+    },
+  }));
   return (
-    <div className="changed-files-sources" role="group" aria-label="Show changes from">
-      {CHANGES_SOURCES.map((option) => (
-        <button
-          key={option}
-          className={`changed-files-source${source === option ? " changed-files-source-active" : ""}`}
-          type="button"
-          aria-pressed={source === option}
-          title={CHANGES_SOURCE_HINTS[option]}
-          onClick={() => onSourceChange(option)}
-        >
-          {CHANGES_SOURCE_LABELS[option]}
-        </button>
-      ))}
+    <div className="changed-files-source-picker">
+      <button
+        className="changed-files-source-trigger"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Show changes: ${label}`}
+        title={CHANGES_SOURCE_HINTS[source]}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="changed-files-source-label">{label}</span>
+        <span className="changed-files-source-chevron" aria-hidden="true">
+          <ChevronIcon />
+        </span>
+      </button>
+      {open && (
+        <MenuPanel
+          className="changed-files-source-menu"
+          sections={[sources, bases]}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -273,13 +323,18 @@ function SourcePicker({
 export interface ChangedFilesProps {
   source: ChangesSource;
   onSourceChange: (source: ChangesSource) => void;
+  /** The branch the checkout is compared with, while one is selected. */
+  base?: string;
+  onBaseChange: (branch: string) => void;
+  /** The branches the checkout offers as a comparison, most recent first. */
+  branches: string[];
   groupByTurn: boolean;
   onGroupByTurn: (grouped: boolean) => void;
-  /** Reads the checkout again. Only offered for the git source. */
+  /** Reads the checkout again. Only offered for the two git comparisons. */
   onReload: () => void;
-  /** The flat view of whichever source is showing. */
+  /** The flat view of whichever comparison is showing. */
   changes: ChangedFileSet;
-  /** The same files split by turn, present only for the reported source. */
+  /** The same files split by turn, present only for this run's own edits. */
   turns?: ChangeTurnSet;
   loading: boolean;
   /** Why reading the checkout failed, when it did. */
@@ -305,6 +360,9 @@ function ChangedFilesView({
   layout,
   source,
   onSourceChange,
+  base,
+  onBaseChange,
+  branches,
   groupByTurn,
   onGroupByTurn,
   onReload,
@@ -550,8 +608,14 @@ function ChangedFilesView({
           </div>
           <div className="changed-files-header-actions">
             {full && <DiffHeader />}
-            <SourcePicker source={source} onSourceChange={onSourceChange} />
-            {source === "reported" ? (
+            <SourcePicker
+              source={source}
+              base={base}
+              branches={branches}
+              onSourceChange={onSourceChange}
+              onBaseChange={onBaseChange}
+            />
+            {source === "run" ? (
               <label className="changed-files-group">
                 <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />
                 Group by turn
@@ -560,9 +624,9 @@ function ChangedFilesView({
             <button
               className="icon-button"
               type="button"
-              disabled={loading || source === "reported"}
+              disabled={loading || source === "run"}
               aria-label="Refresh"
-              title={source === "reported" ? "Refresh applies to changes read from git" : "Refresh"}
+              title={source === "run" ? "This run's edits appear on their own" : "Refresh"}
               onClick={onReload}
             >
               <RefreshIcon />
@@ -613,7 +677,7 @@ function ChangedFilesView({
         ) : empty ? (
           <EmptyState
             title="No files changed yet"
-            hint={live && source === "reported" ? "Changes appear here as the run continues." : "Changes appear here when this run edits files."}
+            hint={live && source === "run" ? "Changes appear here as the run continues." : "Changes appear here when this run edits files."}
             className="changed-files-message"
           />
         ) : full ? (
@@ -634,7 +698,7 @@ function ChangedFilesView({
             This checkout has more changes than fit here. Open it in your editor to see them all.
           </p>
         )}
-        {hasEarlier && source === "reported" && (
+        {hasEarlier && source === "run" && (
           <div className="changed-files-earlier">
             <p>Earlier activity is not loaded, so this may not be the whole run.</p>
             <button className="text-button" type="button" disabled={loadingEarlier} onClick={onLoadEarlier}>

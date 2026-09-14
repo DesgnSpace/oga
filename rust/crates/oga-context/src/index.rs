@@ -82,8 +82,11 @@ pub struct ReconcileResult {
     pub route_moves: Vec<RouteMove>,
 }
 
-/// Where a lookup runs and what it may read. A task working in its own
-/// checkout answers from the origin's index but reads the checkout's files.
+/// Where a lookup runs and what it may read. Every checkout carries its own
+/// symbol index, so the answer is whatever that branch has on disk. Learned
+/// routes stay with the origin a checkout was cut from, because the words
+/// people use for a place are knowledge about the project rather than about
+/// one branch.
 #[derive(Debug, Clone, Default)]
 pub struct ContextTarget {
     pub cwd: PathBuf,
@@ -112,7 +115,7 @@ impl ContextTarget {
         }
     }
 
-    fn index_cwd(&self) -> &Path {
+    fn routes_cwd(&self) -> &Path {
         self.source_cwd.as_deref().unwrap_or(&self.cwd)
     }
 }
@@ -195,7 +198,7 @@ impl<'a> ContextIndex<'a> {
         index_store::replace_files(self.store, cwd, &updates, &now)?;
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
         index_store::save_index(self.store, cwd, partial, file_count, symbol_count, &now)?;
-        let (routes_confirmed, routes_dropped, _) = routes::heal(self.store, cwd, &[])?;
+        let (routes_confirmed, routes_dropped, _) = routes::heal(self.store, cwd, &[], &now)?;
         Ok(BuildResult {
             partial,
             file_count,
@@ -209,14 +212,21 @@ impl<'a> ContextIndex<'a> {
     /// writes a layout the stored one predates.
     pub fn ensure(&self, cwd: impl AsRef<Path>) -> Result<(), ContextError> {
         let cwd = cwd.as_ref();
-        if index_store::index_row(self.store, cwd)?.is_none_or(|row| row.scheme != INDEX_SCHEME) {
+        if self.unreadable(cwd)? {
             self.build(cwd, BuildOptions::default())?;
         }
         Ok(())
     }
 
+    /// True when nothing is stored for `cwd`, or what is stored was written to
+    /// a layout this binary no longer reads.
+    fn unreadable(&self, cwd: &Path) -> Result<bool, ContextError> {
+        Ok(index_store::index_row(self.store, cwd)?.is_none_or(|row| row.scheme != INDEX_SCHEME))
+    }
+
     /// Re-read only what changed on disk, and follow every saved route to
-    /// wherever its target moved.
+    /// wherever its target moved. An index written to a layout this binary no
+    /// longer reads is rebuilt instead of merged into.
     pub fn reconcile(
         &self,
         cwd: impl AsRef<Path>,
@@ -224,7 +234,7 @@ impl<'a> ContextIndex<'a> {
     ) -> Result<ReconcileResult, ContextError> {
         let cwd = cwd.as_ref();
         let known = index_store::file_rows(self.store, cwd)?;
-        if known.is_empty() || index_store::index_row(self.store, cwd)?.is_none() {
+        if known.is_empty() || self.unreadable(cwd)? {
             let built = self.build(cwd, options)?;
             return Ok(ReconcileResult {
                 partial: built.partial,
@@ -244,9 +254,11 @@ impl<'a> ContextIndex<'a> {
         let mut candidates = Vec::new();
         for file in &walk.files {
             seen.insert(file.path.clone());
-            let unchanged = known
-                .get(&file.path)
-                .is_some_and(|known| known.size == file.size && known.mtime_ms == file.mtime_ms);
+            let unchanged = known.get(&file.path).is_some_and(|known| {
+                known.size == file.size
+                    && known.mtime_ms == file.mtime_ms
+                    && known.ctime_ms == file.ctime_ms
+            });
             if !unchanged {
                 candidates.push(file.clone());
             }
@@ -258,7 +270,11 @@ impl<'a> ContextIndex<'a> {
                 .get(&update.path)
                 .is_some_and(|known| known.digest == update.digest);
             if same {
-                touched.push((update.path.clone(), update.mtime_ms));
+                touched.push(index_store::TouchedFile {
+                    path: update.path.clone(),
+                    mtime_ms: update.mtime_ms,
+                    ctime_ms: update.ctime_ms,
+                });
             }
             !same
         });
@@ -281,7 +297,7 @@ impl<'a> ContextIndex<'a> {
         }
         index_store::merge_files(self.store, cwd, &updates, &removed, &now)?;
         index_store::touch_files(self.store, cwd, &touched, &now)?;
-        let (confirmed, dropped, route_moves) = routes::heal(self.store, cwd, &moved)?;
+        let (confirmed, dropped, route_moves) = routes::heal(self.store, cwd, &moved, &now)?;
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
         if changed {
             index_store::save_index(
@@ -321,7 +337,7 @@ impl<'a> ContextIndex<'a> {
         question: &str,
         options: QuestionOptions,
     ) -> Result<ContextResult, ContextError> {
-        self.ensure(target.index_cwd())?;
+        self.ensure(&target.cwd)?;
         let paths = normalize_paths(&options.paths)?;
         let terms = prompt_terms(question);
         let limit = options.limit.unwrap_or(DEFAULT_LIMIT).max(1);
@@ -421,7 +437,7 @@ impl<'a> ContextIndex<'a> {
             });
         }
         let read_cwd = PathBuf::from(&task.cwd);
-        let index_cwd = task.worktree.as_ref().map_or_else(
+        let routes_cwd = task.worktree.as_ref().map_or_else(
             || read_cwd.clone(),
             |worktree| PathBuf::from(&worktree.origin_cwd),
         );
@@ -461,7 +477,7 @@ impl<'a> ContextIndex<'a> {
                 model: &task.model,
             })
             .collect::<Vec<_>>();
-        routes::save(self.store, &index_cwd, &records, &timestamp_now())?;
+        routes::save(self.store, &routes_cwd, &records, &timestamp_now())?;
         Ok(LearnRoutesResult {
             accepted: prepared.len(),
             rejected,
@@ -505,24 +521,20 @@ impl<'a> ContextIndex<'a> {
         paths: &[String],
         limit: usize,
     ) -> Result<Vec<Scored>, ContextError> {
-        let index_cwd = target.index_cwd();
+        let cwd = target.cwd.as_path();
         let direct = self.direct(target, question, paths)?;
         if !direct.is_empty() {
             return Ok(direct);
         }
-        let total =
-            index_store::index_row(self.store, index_cwd)?.map_or(0, |row| row.symbol_count);
-        let weights = TermWeights::new(
-            &index_store::term_hits(self.store, index_cwd, terms)?,
-            total,
-        );
+        let total = index_store::index_row(self.store, cwd)?.map_or(0, |row| row.symbol_count);
+        let weights = TermWeights::new(&index_store::term_hits(self.store, cwd, terms)?, total);
         let mut ranking = Ranking::default();
-        for route in routes::matching(self.store, index_cwd, question, terms)? {
+        for route in routes::matching(self.store, target.routes_cwd(), question, terms)? {
             if !route.exact && routes::overlap(&route, terms) == 0 {
                 continue;
             }
-            // A route whose target has gone is dropped by the next reconcile,
-            // which reads disk. A lookup only reads, so it passes over it.
+            // A lookup only reads. A route naming code this checkout does not
+            // carry resolves to nothing, and a reconcile marks it later.
             if let Some(symbol) = self.route_target(target, &route)?
                 && path_matches(paths, &symbol.path)
             {
@@ -535,12 +547,12 @@ impl<'a> ContextIndex<'a> {
         keys.sort();
         keys.dedup();
         let path_filter = (!paths.is_empty()).then_some(paths);
-        for symbol in index_store::symbols_by_name(self.store, index_cwd, &keys, path_filter)? {
+        for symbol in index_store::symbols_by_name(self.store, cwd, &keys, path_filter)? {
             ranking.add_symbol(symbol, terms, &question_key, &weights, None);
         }
         let search = index_store::symbols_by_search(
             self.store,
-            index_cwd,
+            cwd,
             &fts_query(terms),
             CANDIDATE_POOL,
             path_filter,
@@ -554,29 +566,25 @@ impl<'a> ContextIndex<'a> {
     /// Where a route points now, as a symbol row. A route saved against a
     /// whole file answers with the file itself.
     ///
-    /// A task working in its own checkout can have taught a route to code its
-    /// branch added, which the origin's index has never seen. That route
-    /// answers from the branch.
+    /// Routes are shared across the checkouts of one project, so a route can
+    /// name code this branch does not carry. Such a route answers with
+    /// nothing rather than with the other branch's location.
     fn route_target(
         &self,
         target: &ContextTarget,
         route: &routes::LearnedRoute,
     ) -> Result<Option<SymbolRow>, ContextError> {
-        let index_cwd = target.index_cwd();
+        let cwd = target.cwd.as_path();
         match &route.symbol {
             Some(name) => {
-                if let Some(symbol) =
-                    index_store::symbol_at(self.store, index_cwd, &route.path, name)?
-                {
+                if let Some(symbol) = index_store::symbol_at(self.store, cwd, &route.path, name)? {
                     return Ok(Some(symbol));
                 }
                 Ok(self.checkout_symbol(target, &route.path, name))
             }
-            None => Ok(
-                (index_store::file_exists(self.store, index_cwd, &route.path)?
-                    || target.cwd.join(&route.path).is_file())
-                .then(|| file_anchor(&route.path)),
-            ),
+            None => Ok((index_store::file_exists(self.store, cwd, &route.path)?
+                || target.cwd.join(&route.path).is_file())
+            .then(|| file_anchor(&route.path))),
         }
     }
 
@@ -619,9 +627,8 @@ impl<'a> ContextIndex<'a> {
         let Some(named) = query::direct_target(question) else {
             return Ok(Vec::new());
         };
-        let index_cwd = target.index_cwd();
-        let direct_paths =
-            index_store::files_by_path(self.store, index_cwd, named.path, DIRECT_MATCHES)?;
+        let cwd = target.cwd.as_path();
+        let direct_paths = index_store::files_by_path(self.store, cwd, named.path, DIRECT_MATCHES)?;
         let unique = direct_paths.len() == 1;
         let mut answers = Vec::new();
         for path in direct_paths {
@@ -629,7 +636,7 @@ impl<'a> ContextIndex<'a> {
                 continue;
             }
             let anchor = match named.symbol {
-                Some(name) => index_store::symbol_named(self.store, index_cwd, &path, name)?,
+                Some(name) => index_store::symbol_named(self.store, cwd, &path, name)?,
                 None => Some(file_anchor(&path)),
             };
             // The file is still the answer when the symbol named with it is
@@ -644,7 +651,12 @@ impl<'a> ContextIndex<'a> {
     }
 
     /// Confirm a candidate still exists where the index says, re-reading the
-    /// task's own checkout when it holds a different copy of the file.
+    /// file when it has changed since the walk this answer ran.
+    ///
+    /// The index is reconciled before an answer is ranked, but nothing stops
+    /// the tree changing while the answer is being put together. A candidate
+    /// whose file no longer hashes to what the index recorded is re-parsed
+    /// here, so the line quoted is the line the file has now.
     fn locate(
         &self,
         target: &ContextTarget,
@@ -652,18 +664,16 @@ impl<'a> ContextIndex<'a> {
         cache: &FileCache,
     ) -> Result<Option<SymbolRow>, ContextError> {
         let path = target.cwd.join(&symbol.path);
-        let on_origin = || target.index_cwd().join(&symbol.path).is_file();
-        if target.source_cwd.is_none() || symbol.name.is_empty() {
+        if symbol.name.is_empty() {
             // Nothing past this point reads the symbol's position, so only
             // existence matters.
-            return Ok((path.is_file() || on_origin()).then(|| symbol.clone()));
+            return Ok(path.is_file().then(|| symbol.clone()));
         }
         let Some(source) = read_cached(cache, &path) else {
-            // A checkout that has not materialised the file yet still answers
-            // from the origin it was cut from.
-            return Ok(on_origin().then(|| symbol.clone()));
+            return Ok(None);
         };
-        if digest_of(source.as_bytes()) == file_digest(target.index_cwd(), &symbol.path) {
+        let indexed = index_store::file_digest(self.store, &target.cwd, &symbol.path)?;
+        if indexed.is_some_and(|digest| digest == digest_of(source.as_bytes())) {
             return Ok(Some(symbol.clone()));
         }
         let Some(extracted) = extract_symbols(&symbol.path, &source) else {
@@ -761,6 +771,7 @@ fn parse_all(cwd: &Path, files: &[WalkFile]) -> Vec<FileUpdate> {
                 digest: digest_of(source.as_bytes()),
                 size: file.size,
                 mtime_ms: file.mtime_ms,
+                ctime_ms: file.ctime_ms,
                 lines: line_count(source.as_bytes()) as u64,
                 symbols: extracted
                     .symbols
@@ -834,12 +845,6 @@ fn detect_moves(
             (from.len() == 1 && to.len() == 1).then(|| (from[0].clone(), to[0].clone()))
         })
         .collect()
-}
-
-fn file_digest(cwd: &Path, path: &str) -> String {
-    fs::read(cwd.join(path))
-        .map(|bytes| digest_of(&bytes))
-        .unwrap_or_default()
 }
 
 /// A symbol's declaration with its own name masked out, so a rename does not

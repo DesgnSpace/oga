@@ -48,7 +48,10 @@ document.documentElement.classList.add("platform-macos");
 
 createRoot(document.getElementById("root")!).render(
   <ChangedFilesFullScreen
-    source="git"
+    source="branch"
+    base="main"
+    onBaseChange={() => {}}
+    branches={["main", "oga/changed-files-picker"]}
     onSourceChange={() => {}}
     groupByTurn={false}
     onGroupByTurn={() => {}}

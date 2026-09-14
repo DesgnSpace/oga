@@ -357,9 +357,9 @@ fn says_when_the_answer_is_outside_the_read_scope() {
     );
 }
 
-/// A route whose file is deleted stops answering, and stops being stored.
+/// A route whose file is deleted stops answering here, without being forgotten.
 #[test]
-fn a_deleted_target_takes_its_route_with_it() {
+fn a_deleted_target_silences_its_route() {
     let project = Project::new();
     project.write(
         "src/auth.ts",
@@ -375,7 +375,9 @@ fn a_deleted_target_takes_its_route_with_it() {
         .reconcile(project.dir.path(), BuildOptions::default())
         .expect("the index reconciles the delete");
     assert_eq!(reconciled.routes_dropped, 1);
-    assert_eq!(project.route_count(), 0);
+    // The route is kept: another branch may still carry the code it names.
+    // What it must not do is keep answering here.
+    assert_eq!(project.route_count(), 1);
 
     let answer = project
         .index()

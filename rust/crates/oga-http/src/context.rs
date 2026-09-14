@@ -7,8 +7,8 @@ use std::{
     collections::HashMap,
     path::Path,
     process::Command,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    sync::{Arc, Mutex, RwLock},
+    time::Instant,
 };
 
 use axum::{
@@ -16,9 +16,11 @@ use axum::{
     extract::{Query, State},
     response::IntoResponse,
 };
-use oga_context::{BuildOptions, ContextError, ContextIndex, ContextTarget, ReconcileResult};
+use oga_context::{
+    BuildOptions, ContextError, ContextIndex, ContextResult, ContextTarget, QuestionOptions,
+};
 use oga_domain::{TaskKind, TaskScope};
-use oga_store::Store;
+use oga_store::{Store, StoreError};
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use serde_json::json;
@@ -75,31 +77,22 @@ pub async fn get_query(
                 },
             )
         }
-        None => {
-            let cwd = require_directory(query.cwd.as_deref())?;
-            match origin_of_worktree(&state.store, &cwd)? {
-                Some(origin) => ContextTarget::worktree(&cwd, &origin, everything()),
-                None => ContextTarget::new(&cwd, everything()),
-            }
-        }
+        None => target_for(&state.store, &require_directory(query.cwd.as_deref())?)?,
     };
     let store = state.store.clone();
-    let debounce = state.reconcile_debounce.clone();
-    let options = oga_context::QuestionOptions {
+    let gate = state.reconcile_debounce.clone();
+    let options = QuestionOptions {
         limit: query.limit.map(|limit| limit as usize),
         code: query.code.unwrap_or(false),
         paths: split_paths(query.in_paths.as_deref()),
     };
     let result = run_blocking(move || {
-        let index = ContextIndex::new(&store);
-        let index_cwd = target
-            .source_cwd
-            .as_deref()
-            .unwrap_or(&target.cwd)
-            .display()
-            .to_string();
-        refresh(&debounce, &index, &index_cwd)?;
-        Ok(index.question_with_options(&target, &question, options)?)
+        let cwd = target.cwd.display().to_string();
+        answer(&gate, &store, &target, &question, options)?.ok_or_else(|| {
+            HttpError::conflict(format!(
+                "{cwd} is not indexed; run 'oga query --init' there to index it"
+            ))
+        })
     })
     .await?;
     Ok(Json(json!({ "markdown": result.markdown })))
@@ -112,6 +105,7 @@ pub async fn init_index(
     let cwd = require_directory(query.cwd.as_deref())?;
     let force = query.force.unwrap_or(false);
     let store = state.store.clone();
+    let gate = state.reconcile_debounce.clone();
     let body = run_blocking(move || {
         let is_repository = Command::new("git")
             .args(["-C", &cwd, "rev-parse", "--show-toplevel"])
@@ -124,6 +118,8 @@ pub async fn init_index(
         }
         let index = ContextIndex::new(&store);
         let started = Instant::now();
+        let project = gate.project(&cwd);
+        let mut walked = project.write().expect("reconcile gate poisoned");
         let (file_count, symbol_count, partial, changed) = if force {
             let built = index.build(&cwd, BuildOptions::default())?;
             (built.file_count, built.symbol_count, built.partial, true)
@@ -136,6 +132,8 @@ pub async fn init_index(
                 reconciled.changed,
             )
         };
+        *walked = Some(started);
+        drop(walked);
         if file_count == 0 {
             return Err(HttpError::bad_request(format!(
                 "no indexable files found in {cwd}; add source files, then run 'oga query --init'"
@@ -153,87 +151,84 @@ pub async fn init_index(
     Ok(Json(body))
 }
 
-/// The origin project a task worktree was cut from, when `cwd` is one.
+/// Where a lookup in `cwd` runs.
 ///
-/// A worktree shares the origin's code, so a lookup run inside one belongs on
-/// the origin's index instead of building a second index per checkout.
-fn origin_of_worktree(store: &Store, cwd: &str) -> Result<Option<String>, HttpError> {
-    store
-        .with_connection(|connection| {
-            Ok(connection
-                .query_row(
-                    "SELECT origin_cwd FROM tasks \
-                     WHERE rtrim(worktree_path, '/')=? AND origin_cwd IS NOT NULL LIMIT 1",
-                    [cwd],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?)
-        })
-        .map_err(HttpError::from)
+/// The answer comes from that checkout's own index, so it reflects the branch
+/// and the edits in front of whoever asked. A task worktree also names the
+/// origin it was cut from, which is where that project's learned routes live.
+pub fn target_for(store: &Store, cwd: &str) -> Result<ContextTarget, StoreError> {
+    let origin = store.with_connection(|connection| {
+        Ok(connection
+            .query_row(
+                "SELECT origin_cwd FROM tasks \
+                 WHERE rtrim(worktree_path, '/')=? AND origin_cwd IS NOT NULL LIMIT 1",
+                [cwd],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    })?;
+    Ok(match origin {
+        Some(origin) => ContextTarget::worktree(cwd, origin, everything()),
+        None => ContextTarget::new(cwd, everything()),
+    })
 }
 
-/// How long a project's reconcile stays valid before the next question walks
-/// its tree again.
-const RECONCILE_DEBOUNCE: Duration = Duration::from_secs(2);
-
-/// The last time each project's tree was walked for a question, so
-/// back-to-back questions against the same project skip repeating the walk.
-/// `oga query --init` never consults this — it always walks.
+/// One entry per project, holding when that project's tree was last walked.
+///
+/// A reconcile takes the entry's write lock, so only one walks a project at a
+/// time and no answer is assembled while one commits. Answers take the read
+/// lock and so never wait on each other.
 #[derive(Clone, Default)]
-pub struct ReconcileDebounce(Arc<Mutex<HashMap<String, Instant>>>);
+pub struct ReconcileDebounce(Arc<Mutex<HashMap<String, Project>>>);
+
+/// When one project's tree was last walked, and the lock that says who may
+/// walk it or read from it.
+type Project = Arc<RwLock<Option<Instant>>>;
 
 impl ReconcileDebounce {
-    fn is_fresh(&self, cwd: &str) -> bool {
+    fn project(&self, cwd: &str) -> Project {
         self.0
             .lock()
-            .expect("reconcile debounce lock poisoned")
-            .get(cwd)
-            .is_some_and(|walked| walked.elapsed() < RECONCILE_DEBOUNCE)
-    }
-
-    fn mark_walked(&self, cwd: &str) {
-        self.0
-            .lock()
-            .expect("reconcile debounce lock poisoned")
-            .insert(cwd.to_owned(), Instant::now());
+            .expect("reconcile gate poisoned")
+            .entry(cwd.to_owned())
+            .or_default()
+            .clone()
     }
 }
 
-/// Walk `cwd`'s tree and reconcile it with the index, unless it was already
-/// walked within the debounce window — in which case nothing runs and `None`
-/// comes back. An empty reconcile (nothing indexed) is never remembered, so
-/// an unindexed `cwd` keeps reporting that on every question.
-pub fn reconcile_if_stale(
-    debounce: &ReconcileDebounce,
-    index: &ContextIndex<'_>,
-    cwd: &str,
-) -> Result<Option<ReconcileResult>, ContextError> {
-    if debounce.is_fresh(cwd) {
-        return Ok(None);
+/// Bring a checkout's index up to date and answer one question from it, or
+/// `None` when nothing there is indexed.
+///
+/// The walk is skipped only when another question's walk *began* after this
+/// one was asked, which is the only case where it cannot have missed anything
+/// this asker could have done. The answer is then assembled under the read
+/// lock, so it reads one committed index state rather than straddling a
+/// reconcile.
+pub fn answer(
+    gate: &ReconcileDebounce,
+    store: &Store,
+    target: &ContextTarget,
+    question: &str,
+    options: QuestionOptions,
+) -> Result<Option<ContextResult>, ContextError> {
+    let asked = Instant::now();
+    let cwd = target.cwd.display().to_string();
+    let index = ContextIndex::new(store);
+    let project = gate.project(&cwd);
+    {
+        let mut walked = project.write().expect("reconcile gate poisoned");
+        if !walked.is_some_and(|began| began >= asked) {
+            let began = Instant::now();
+            if index.reconcile(&cwd, BuildOptions::default())?.file_count == 0 {
+                return Ok(None);
+            }
+            *walked = Some(began);
+        }
     }
-    let reconciled = index.reconcile(cwd, BuildOptions::default())?;
-    if reconciled.file_count > 0 {
-        debounce.mark_walked(cwd);
-    }
-    Ok(Some(reconciled))
-}
-
-/// Bring the index for `cwd` up to date with disk before answering from it,
-/// unless it was already walked within the debounce window.
-fn refresh(
-    debounce: &ReconcileDebounce,
-    index: &ContextIndex<'_>,
-    cwd: &str,
-) -> Result<(), HttpError> {
-    let Some(reconciled) = reconcile_if_stale(debounce, index, cwd)? else {
-        return Ok(());
-    };
-    if reconciled.file_count == 0 {
-        return Err(HttpError::conflict(format!(
-            "{cwd} is not indexed; run 'oga query --init' there to index it"
-        )));
-    }
-    Ok(())
+    let _reading = project.read().expect("reconcile gate poisoned");
+    Ok(Some(
+        index.question_with_options(target, question, options)?,
+    ))
 }
 
 fn split_paths(raw: Option<&str>) -> Vec<String> {

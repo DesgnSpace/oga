@@ -15,7 +15,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 mod diff;
 
-pub use diff::task_diff;
+pub use diff::{BranchChoices, branch_choices, task_diff};
 
 pub const DEFAULT_BRANCH_SLUG_LENGTH: usize = 40;
 
