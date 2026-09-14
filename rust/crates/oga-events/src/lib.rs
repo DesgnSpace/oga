@@ -3977,7 +3977,7 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
                 (None, Some(context)) => Some(context.into()),
             }
         }
-        "steered" => tree_value(payload, &["instruction"]).map(|value| truncate_bytes(&value, 160)),
+        "steered" => tree_value(payload, &["instruction"]),
         "steer_accepted" | "follow_up_queued" | "follow_up_started" | "resumed" => {
             tree_value(payload, &["instruction"]).or_else(|| {
                 (event_type == "resumed")
@@ -3992,7 +3992,7 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
         "run_interrupted" => tree_value(payload, &["reason"]),
         "queued" => tree_value(payload, &["note"]),
         "needs_input" => tree_value(payload, &["question"]),
-        "answered" => tree_value(payload, &["answer"]).map(|value| truncate_bytes(&value, 160)),
+        "answered" => tree_value(payload, &["answer"]),
         "follow_ups_paused" => number_u64(payload.get("waiting"))
             .map(|waiting| format!("{waiting} waiting until this task finishes cleanly")),
         "follow_ups_dropped" => {

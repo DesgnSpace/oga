@@ -63,9 +63,12 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
     return () => observer.disconnect();
   }, [open, full]);
 
-  const collapsed = !open && hasMore === true;
+  // The preview stays capped while closed even when it fits, so a bubble that
+  // grows mid-run is still measured against the cap rather than against itself.
+  const collapsed = !open;
+  const overflowing = collapsed && hasMore === true;
   const expandFromPreview = (event: React.MouseEvent) => {
-    if (!collapsed) return;
+    if (!overflowing) return;
     if (event.target instanceof HTMLElement && event.target.closest("a, button")) return;
     setOpen(true);
   };
@@ -76,7 +79,7 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
       <div className="transcript-bubble">
         <div
           ref={previewRef}
-          className={collapsed ? "transcript-bubble-preview is-clamped" : "transcript-bubble-preview"}
+          className={`transcript-bubble-preview${collapsed ? " is-clamped" : ""}${overflowing ? " is-overflowing" : ""}`}
           onClick={expandFromPreview}
         >
           <MarkdownContent source={full} />

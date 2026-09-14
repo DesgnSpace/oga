@@ -2756,29 +2756,24 @@ h1 {
 
 .transcript-bubble-preview {
     overflow: hidden;
-    max-height: 80rem;
-    transition: max-height 260ms var(--ease-out);
 }
 
 .transcript-bubble-preview.is-clamped {
-    position: relative;
     max-height: 7.5em;
+}
+
+.transcript-bubble-preview.is-overflowing {
+    position: relative;
     cursor: pointer;
 }
 
-.transcript-bubble-preview.is-clamped::after {
+.transcript-bubble-preview.is-overflowing::after {
     content: "";
     position: absolute;
     inset: auto 0 0 0;
     height: 3em;
     background: linear-gradient(to bottom, transparent, var(--color-bg));
     pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .transcript-bubble-preview {
-        transition: none;
-    }
 }
 
 .transcript-bubble-toggle {
