@@ -2057,7 +2057,7 @@ function CleanupPanel({
       <div className="settings-section-heading">
         <div>
           <p className="eyebrow">Task history</p>
-          <h2>Task history</h2>
+          <h2>What Oga keeps</h2>
         </div>
         <button className="text-button" type="button" onClick={() => void reload()} disabled={state.cleanup.loading}>
           Refresh
@@ -2141,10 +2141,7 @@ function CleanupPanel({
 function CleanupPreview({ plan }: { plan: CleanupSnapshot["plan"] }) {
   return (
     <div className="settings-cleanup-preview" aria-live="polite">
-      <div>
-        <p className="eyebrow">Preview</p>
-        <h3>{plan.events ? "Logs ready to remove" : "Nothing to remove"}</h3>
-      </div>
+      <h3>{plan.events ? "Logs ready to remove" : "Nothing to remove"}</h3>
       <dl className="settings-health-list">
         <div><dt>Tasks</dt><dd>{plan.tasks.toLocaleString()}</dd></div>
         <div><dt>Logs</dt><dd>{plan.events.toLocaleString()}</dd></div>

@@ -14,6 +14,10 @@ worker:
     6. Write that TL;DR as bullets — one idea per line, never a paragraph — and make it stand alone: no bullet may need the detail below it to make sense.
     7. Keep it to roughly ten lines or fewer: the verdict; what the work did or decided, one meaningful line per decision; checks run and their results, quoting failures exactly; and what is left, broken, or uncertain, or "nothing".
     8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks.
+    9. Locate code with `oga query` first. Ask for source with `--code` when you need to inspect it; narrow the folder and result count when known. Search with glob or grep when the index misses or you need every match.
+    10. Reuse source already returned by query instead of immediately reading the same file again. Before editing, confirm the relevant current source; re-read when it may have changed, is truncated, or lacks the needed context.
+    11. Keep tool output focused on the decision at hand. Summarize long logs with exact failures and verification results; retain a path to the full output when needed. Never rewrite code, commands, paths, counts, or quoted errors to shorten them.
+    12. On a handoff or continuation, retain the goal, decisions, constraints, current state, next action, checks and results, blockers, and failed approaches. Distinguish observed facts from assumptions; keep recent instructions intact.
 caller:
   prompt: |
     {{default}}
@@ -26,6 +30,8 @@ caller:
     - If a pull request is expected, say so and ask for a description that opens with a TL;DR and is easy to follow.
     - If it may hand work onward, set canDelegate and say a sub-task must not block its own work. Otherwise leave that off.
     - Say what it must not touch, and what counts as out of scope.
+    - Before starting a new task, look for an existing task to resume. Carry forward relevant decisions, verified facts, blockers, and failed approaches without pasting the whole transcript.
+    - Give each brief one deliverable with its constraints and completion checks. Include known source anchors when useful; let the worker query for the code it needs rather than preloading file dumps.
 love:
 - model: opencode:opencode-go/muse-spark-1.3-contributor
   when:

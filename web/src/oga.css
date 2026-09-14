@@ -4281,8 +4281,10 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     gap: var(--space-4);
 }
 
+/* The dialog's close button floats over this corner. */
 .settings-section-heading {
     align-items: flex-start;
+    padding-right: var(--space-5);
 }
 
 .settings-section-heading h2,
@@ -4391,7 +4393,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     background: var(--color-bg);
 }
 
-.settings-option > span,
+.settings-option > span:first-child,
 .settings-message,
 .settings-placeholder,
 .settings-about-card,
@@ -5000,8 +5002,9 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-option-list {
     display: grid;
-    gap: var(--space-2);
     margin-top: var(--space-4);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
 }
 
 .settings-option {
@@ -5009,9 +5012,11 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
-    padding: var(--space-3);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    padding: var(--space-3) var(--space-4);
+}
+
+.settings-option + .settings-option {
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
 }
 
 .settings-option strong {
@@ -5050,7 +5055,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     gap: var(--space-3);
     margin-top: var(--space-5);
     padding: var(--space-4);
-    border: 1px solid var(--color-border);
     border-radius: 6px;
     background: var(--color-bg);
 }
@@ -5062,6 +5066,10 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-cleanup-preview .settings-health-list {
     margin-top: 0;
+}
+
+.settings-storage-section .settings-inline-actions {
+    margin-top: var(--space-4);
 }
 
 .settings-cleanup-actions {
