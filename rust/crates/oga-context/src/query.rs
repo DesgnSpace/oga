@@ -18,7 +18,12 @@ use crate::text::{identifier_words, name_key, words};
 /// Beyond this many candidates the ranking has already decided; the rest are
 /// noise carried by one shared word.
 pub const CANDIDATE_POOL: usize = 200;
-pub const DEFAULT_LIMIT: usize = 10;
+/// How many answers an ordinary lookup returns. Enough to show the runner-up
+/// and the field behind it when the first is not the one.
+pub const DEFAULT_LIMIT: usize = 7;
+/// Whether an ordinary lookup carries the source it points at. It does not: an
+/// answer names the place, and a caller who wants the code asks for it.
+pub const DEFAULT_CODE: bool = false;
 
 /// A place the question named outright. Nothing the parser or a hint found
 /// competes with a path someone typed.

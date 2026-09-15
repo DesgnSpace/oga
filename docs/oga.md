@@ -11,7 +11,7 @@ follow it, or operate without the app open.
 | `oga delegate "<task>"` | Start a task and print its ID. `-` reads the task from stdin. |
 | `oga watch <task-id>...` | Stream task events until a watched task settles. |
 | `oga tail` | Stream events from every task. |
-| `oga query "question"` | Find the place in the code that answers a question. Add `--limit`, `--code`, or `--in` to search only part of the project. |
+| `oga query "question"` | Find the place in the code that answers a question. Add `--code` for the source, `--limit` for how many, `--in` to search only part of the project. |
 | `oga relearn` | Pick up what changed on disk, or save a hint. Add `--force` to read the project again from scratch. |
 | `oga love` | Read or set defaults for unnamed work. |
 | `oga inflight` | List work a restart would interrupt. |
@@ -29,13 +29,23 @@ follow it, or operate without the app open.
 ## Finding code
 
 `oga query` takes a question in plain words and answers with the file, line,
-and name that hold the answer. It returns up to 10 candidates by default.
-Add `--code` when you want the matching source in the answer:
+and name that hold the answer. Seven come back unless `--limit` says otherwise:
 
 ```sh
 oga query "where does the sandbox binary path come from"
-oga query --code --limit 1 "how a saved route survives a rename"
+oga query --limit 1 "how a saved route survives a rename"
 ```
+
+Add `--code` when you want the source with the answer, so a lookup you would
+have followed with a file read is one call instead:
+
+```sh
+oga query --code "how a saved route survives a rename"
+```
+
+Each body is an excerpt rather than the file. Past 120 lines it ends with a
+count of what was left out, and a hit with no name shows the top of its file, so
+open the file when what you need is not in what came back.
 
 A question that is already a place goes straight there. Paste a path, or a path
 and a name, and the answer is that file or that symbol rather than a guess made
@@ -66,6 +76,9 @@ When one place is clearly the answer, you get one line. When several could be,
 you get up to `--limit` of them, each with the words it matched and a few words
 of what it is — its doc comment's first sentence, or its signature when it has
 none. When nothing fits, it says so instead of guessing.
+
+Teaching it is for the answer that came back wrong or empty. A question already
+answered correctly needs nothing.
 
 `oga relearn` picks up whatever changed on disk. Add `--force` to read the
 whole project again. You can also teach it where something lives, so the words

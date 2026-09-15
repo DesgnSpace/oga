@@ -274,7 +274,6 @@ fn reporting_lines(allow_questions: bool) -> Vec<String> {
         } else {
             "Do not ask questions. If required information or authority is missing, report a blocked result.".into()
         },
-        "Before signing off, run `oga relearn '<json>'` exactly once, where `<json>` is an array of `{\"hints\":[...],\"path\":\"<file you actually read>\",\"symbol\":\"<optional symbol in it>\"}`. `hints` are the words that identify each location — order does not matter. Pass every reusable source route learned this run, or `[]` if none. Never pass the placeholder shape itself.".into(),
         "If work cannot be completed, end with: OGA_BLOCKED: <permission_denied|needs_authority|worker_error> | <short reason>".into(),
     ]
 }

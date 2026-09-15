@@ -531,7 +531,7 @@ impl McpServer {
         let question = required_string(args, "q")?;
         let paths = string_or_array(args.get("in"), "in")?;
         let limit = optional_u64(args, "limit")?.map(|limit| limit.clamp(1, 20) as usize);
-        let code = optional_bool(args, "code").unwrap_or(false);
+        let code = optional_bool(args, "code");
         let cwd = if let Some(orchestrator_id) = &self.orchestrator_id {
             let task = self
                 .state

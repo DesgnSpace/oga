@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::query::{self, CANDIDATE_POOL, DEFAULT_LIMIT, Ranking, Scored, TermWeights};
+use crate::query::{
+    self, CANDIDATE_POOL, DEFAULT_CODE, DEFAULT_LIMIT, Ranking, Scored, TermWeights,
+};
 use crate::routes::{self, MAX_HINTS_CHARS, RouteMove, RouteRecord};
 use crate::store::{self as index_store, FileUpdate, INDEX_SCHEME, SymbolRow};
 use crate::symbols::extract_symbols;
@@ -129,10 +131,16 @@ pub struct QuestionCandidate {
     pub code: Option<String>,
 }
 
+/// What a caller asked for beyond the question itself. Every field left unset
+/// falls back to what an ordinary lookup should do, so asking for nothing in
+/// particular still answers with source someone can read.
 #[derive(Debug, Clone, Default)]
 pub struct QuestionOptions {
+    /// How many answers to return. Unset means [`DEFAULT_LIMIT`].
     pub limit: Option<usize>,
-    pub code: bool,
+    /// Whether each answer carries the source it points at. Unset means it
+    /// does; `Some(false)` is a caller who wants anchors alone.
+    pub code: Option<bool>,
     pub paths: Vec<String>,
 }
 
@@ -341,6 +349,7 @@ impl<'a> ContextIndex<'a> {
         let paths = normalize_paths(&options.paths)?;
         let terms = prompt_terms(question);
         let limit = options.limit.unwrap_or(DEFAULT_LIMIT).max(1);
+        let code = options.code.unwrap_or(DEFAULT_CODE);
         let ranked = self.rank(target, question, &terms, &paths, limit)?;
         let cache = FileCache::default();
         let mut reachable = self.reachable(target, &ranked, limit, &cache)?;
@@ -361,18 +370,10 @@ impl<'a> ContextIndex<'a> {
                 path: candidate.symbol.path.clone(),
                 line: candidate.symbol.line.max(1),
                 symbol: (!candidate.symbol.name.is_empty()).then(|| candidate.symbol.name.clone()),
-                code: options
-                    .code
-                    .then(|| source_body(target, &candidate.symbol, &cache)),
+                code: code.then(|| source_body(target, &candidate.symbol, &cache)),
             })
             .collect::<Vec<_>>();
-        let mut lines = answer_lines(
-            &candidates,
-            &reachable.kept,
-            &terms,
-            confident,
-            options.code,
-        );
+        let mut lines = answer_lines(&candidates, &reachable.kept, &terms, confident, code);
         if reachable.outside_scope > 0 {
             lines.push(omitted(
                 reachable.outside_scope,

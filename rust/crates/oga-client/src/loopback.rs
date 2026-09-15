@@ -759,8 +759,9 @@ impl LoopbackClient {
             url.query_pairs_mut()
                 .append_pair("limit", &limit.to_string());
         }
-        if request.code {
-            url.query_pairs_mut().append_pair("code", "true");
+        if let Some(code) = request.code {
+            url.query_pairs_mut()
+                .append_pair("code", if code { "true" } else { "false" });
         }
         if !request.paths.is_empty() {
             url.query_pairs_mut()
@@ -1501,6 +1502,36 @@ mod tests {
                 .iter()
                 .any(|request| request.contains("/api/events?after=1"))
         );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_lookup_sends_the_source_choice_only_when_the_caller_made_one() {
+        let (base_url, state, server) = start_mock(false).await;
+        let client = LoopbackClient::new(base_url).expect("client");
+
+        client
+            .query(&QueryRequest::new("/home/test", "where is auth"))
+            .await
+            .expect("query");
+        client
+            .query(&QueryRequest::new("/home/test", "where is auth").code(true))
+            .await
+            .expect("query with source");
+        client
+            .query(&QueryRequest::new("/home/test", "where is auth").code(false))
+            .await
+            .expect("query without source");
+
+        let requests = state.requests.lock().expect("request lock");
+        let sent = requests
+            .iter()
+            .filter(|request| request.contains("/api/query?"))
+            .collect::<Vec<_>>();
+        assert_eq!(sent.len(), 3);
+        assert!(!sent[0].contains("code="), "{}", sent[0]);
+        assert!(sent[1].contains("code=true"), "{}", sent[1]);
+        assert!(sent[2].contains("code=false"), "{}", sent[2]);
         server.abort();
     }
 

@@ -292,6 +292,33 @@ async fn tasks_schema_exposes_text_search() {
 }
 
 #[tokio::test]
+async fn the_lookup_tool_advertises_optional_source_and_seven_answers() {
+    let (_directory, server) = test_server();
+    let response = post(
+        &server,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+    )
+    .await;
+    let query_tool = response["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "query")
+        .expect("query tool");
+    let properties = &query_tool["inputSchema"]["properties"];
+
+    assert_eq!(properties["code"]["default"], false);
+    assert_eq!(properties["limit"]["default"], 7);
+    assert!(
+        !query_tool["inputSchema"]["required"]
+            .as_array()
+            .expect("required")
+            .iter()
+            .any(|field| field == "code" || field == "limit")
+    );
+}
+
+#[tokio::test]
 async fn tool_call_returns_mcp_content() {
     let (_directory, server) = test_server();
     let response = post(

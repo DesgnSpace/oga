@@ -70,7 +70,8 @@ const MEMORY_DESCRIPTION: &str = concat!(
 const QUERY_DESCRIPTION: &str = concat!(
     "Ask in plain language where something lives in a project, instead of searching the tree for it. ",
     "Answers markdown: one anchor such as `src/adapters.ts#emailDriver` when the index is confident, a few candidates when it is not, and a plain miss when nothing matches, which is the signal to search instead. ",
-    "One call can replace the file reads that usually follow a lookup: `code: true` returns each hit's source with its anchor, `in` keeps the answer to the folders or files that matter, and `limit` caps how many come back. Ask with those set, read the code that came with the answer, then act. ",
+    "An answer names the place. `code: true` brings the source back under each anchor, which is how one call replaces the file read that usually follows a lookup — read what came back rather than reopening the file when it already answers the question. It is an excerpt, not the file: a body over 120 lines ends with a count of what was left out, and a hit with no symbol shows the top of its file. ",
+    "Seven answers come back unless `limit` says otherwise, and `in` holds the answer to the folders or files that matter. ",
     "The index is built from the project on first use and reconciled against disk on every call, but it can still name code that has changed since, so read the source it points at before acting on it. ",
     "A cwd that is not an existing absolute directory, or one holding no indexable files, is an error rather than an empty answer."
 );
@@ -762,15 +763,15 @@ fn shared_tools() -> Vec<Value> {
                 (
                     "code".into(),
                     described(
-                        json!({ "type": "boolean" }),
-                        "Return each hit's source under its anchor, so the code can be read from this answer instead of a file read per hit.",
+                        json!({ "type": "boolean", "default": false }),
+                        "Return the source under each anchor. Off by default: an answer names the place, and this asks for the code in it too.",
                     ),
                 ),
                 (
                     "limit".into(),
                     described(
-                        json!({ "type": "integer", "minimum": 1, "maximum": 20 }),
-                        "How many hits to return at most; leave out for the default.",
+                        json!({ "type": "integer", "minimum": 1, "maximum": 20, "default": 7 }),
+                        "How many hits to return at most. Left out, seven come back.",
                     ),
                 ),
             ]),

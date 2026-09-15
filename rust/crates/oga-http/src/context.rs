@@ -83,7 +83,7 @@ pub async fn get_query(
     let gate = state.reconcile_debounce.clone();
     let options = QuestionOptions {
         limit: query.limit.map(|limit| limit as usize),
-        code: query.code.unwrap_or(false),
+        code: query.code,
         paths: split_paths(query.in_paths.as_deref()),
     };
     let result = run_blocking(move || {

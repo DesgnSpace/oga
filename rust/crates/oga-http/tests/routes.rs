@@ -1618,6 +1618,46 @@ async fn saved_brief_rules_are_returned_and_capped() {
 }
 
 #[tokio::test]
+async fn plain_language_lookup_names_the_place_and_carries_source_when_asked() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    let cwd = fixture.canonical_cwd();
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={cwd}&q=where%20is%20checkAuth%20handled"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let anchors_only = body["markdown"].as_str().expect("markdown");
+    assert!(anchors_only.contains("src/auth.ts:1#checkAuth"));
+    assert!(!anchors_only.contains("return !!token"), "{anchors_only}");
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={cwd}&q=where%20is%20checkAuth%20handled&code=true"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let with_source = body["markdown"].as_str().expect("markdown");
+    assert!(with_source.contains("src/auth.ts:1#checkAuth"));
+    assert!(with_source.contains("return !!token"), "{with_source}");
+}
+
+#[tokio::test]
 async fn plain_language_lookup_indexes_on_first_use_and_follows_edits() {
     let fixture = Fixture::new();
     fixture.write_source(

@@ -648,7 +648,8 @@ pub struct QueryRequest {
     /// runs for one.
     pub task: Option<String>,
     pub limit: Option<u64>,
-    pub code: bool,
+    /// Unset leaves the source decision to the index's own default.
+    pub code: Option<bool>,
     pub paths: Vec<String>,
 }
 
@@ -659,7 +660,7 @@ impl QueryRequest {
             question: question.into(),
             task: None,
             limit: None,
-            code: false,
+            code: None,
             paths: Vec::new(),
         }
     }
@@ -675,7 +676,7 @@ impl QueryRequest {
     }
 
     pub fn code(mut self, code: bool) -> Self {
-        self.code = code;
+        self.code = Some(code);
         self
     }
 

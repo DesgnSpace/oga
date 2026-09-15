@@ -389,7 +389,14 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
     if question.is_empty() {
         return Err(CliError::new("usage: oga query \"<question>\""));
     }
-    let result = if let Some(task_id) = env::var_os("OGA_TASK_ID") {
+    let mut request = QueryRequest::new(cwd.display().to_string(), question).paths(options.paths);
+    if let Some(limit) = options.limit {
+        request = request.limit(limit);
+    }
+    if let Some(code) = options.code {
+        request = request.code(code);
+    }
+    if let Some(task_id) = env::var_os("OGA_TASK_ID") {
         let task_id = task_id.to_string_lossy().into_owned();
         let task = match client.get_task(&task_id).await {
             Ok(task) => task,
@@ -405,26 +412,9 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
                 "unknown task: {task_id} — call tasks to list recent task ids"
             )));
         }
-        client
-            .query(
-                &QueryRequest::new(cwd.display().to_string(), question)
-                    .task(task_id)
-                    .limit(options.limit)
-                    .code(options.code)
-                    .paths(options.paths.clone()),
-            )
-            .await
-    } else {
-        client
-            .query(
-                &QueryRequest::new(cwd.display().to_string(), question)
-                    .limit(options.limit)
-                    .code(options.code)
-                    .paths(options.paths.clone()),
-            )
-            .await
-    };
-    match result {
+        request = request.task(task_id);
+    }
+    match client.query(&request).await {
         Ok(markdown) => {
             println!("{markdown}");
             Ok(0)
@@ -439,33 +429,32 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
     }
 }
 
+/// What the caller spelled out. Anything left unset is the index's own default:
+/// the place without its source, seven answers.
 #[derive(Debug, Default)]
 struct QueryCliOptions {
-    limit: u64,
-    code: bool,
+    limit: Option<u64>,
+    code: Option<bool>,
     paths: Vec<String>,
 }
 
 fn parse_query_options(args: &[String]) -> CliResult<(QueryCliOptions, Vec<String>)> {
-    let mut options = QueryCliOptions {
-        limit: 10,
-        code: false,
-        paths: Vec::new(),
-    };
+    let mut options = QueryCliOptions::default();
     let mut question = Vec::new();
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
-            "--code" => options.code = true,
+            "--code" => options.code = Some(true),
+            "--no-code" => options.code = Some(false),
             "--limit" => {
                 index += 1;
-                options.limit = parse_limit(
+                options.limit = Some(parse_limit(
                     args.get(index)
                         .ok_or_else(|| CliError::new("--limit needs a value"))?,
-                )?;
+                )?);
             }
             value if value.starts_with("--limit=") => {
-                options.limit = parse_limit(value.trim_start_matches("--limit="))?;
+                options.limit = Some(parse_limit(value.trim_start_matches("--limit="))?);
             }
             "--in" => {
                 index += 1;
@@ -744,10 +733,10 @@ Usage: oga <command> [options]
                        task, use watch.
   query "<question>"   Ask in plain words and get the file, line, and name that
                        answer it. Paste a path, or path#name, to go straight
-                       there. --limit N sets how many; --code prints the code.
-                       --in PATH answers only from that folder or file; repeat
-                       it for more than one. Ask with --code and --in together
-                       to read the answer without a second lookup.
+                       there. Add --code for the source under each one. Seven
+                       answers come back; --limit N changes that. --in PATH
+                       answers only from that folder or file; repeat it for
+                       more than one.
   love [worker:model[:effort]]...  Send work that names no model to the first
                         destination that can take it. Add
                         --when ui,review to send only those kinds of
@@ -4009,7 +3998,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_query_limit_and_code() {
+    fn query_options_carry_only_what_the_caller_spelled_out() {
         let args = vec![
             "--code".into(),
             "--limit".into(),
@@ -4017,14 +4006,24 @@ mod tests {
             "where is auth".into(),
         ];
         let (options, question) = parse_query_options(&args).unwrap();
-        assert_eq!(options.limit, 1);
-        assert!(options.code);
+        assert_eq!(options.limit, Some(1));
+        assert_eq!(options.code, Some(true));
         assert_eq!(question, ["where is auth"]);
 
-        let (defaults, question) = parse_query_options(&["where is auth".into()]).unwrap();
-        assert_eq!(defaults.limit, 10);
-        assert!(!defaults.code);
+        let (unset, question) = parse_query_options(&["where is auth".into()]).unwrap();
+        assert_eq!(unset.limit, None);
+        assert_eq!(unset.code, None);
         assert_eq!(question, ["where is auth"]);
+
+        let (compact, question) =
+            parse_query_options(&["--no-code".into(), "where is auth".into()]).unwrap();
+        assert_eq!(compact.code, Some(false));
+        assert_eq!(question, ["where is auth"]);
+
+        let (last_wins, _) =
+            parse_query_options(&["--no-code".into(), "--code".into(), "where is auth".into()])
+                .unwrap();
+        assert_eq!(last_wins.code, Some(true));
     }
 
     #[test]

@@ -9,7 +9,7 @@
 7. Comments describe the code as it stands, never the change history.
 8. Conventional commits. No AI attribution trailers.
 9. Branches are `oga/<slug>`; PRs go to `main` via `gh pr create --base main`.
-10. After the PR, run `oga relearn` with symbols that exist in the diff.
+10. Run `oga relearn` only when a lookup sent you to the wrong place or found nothing and you then located it yourself, or when you are asked to refresh or teach outright. A lookup that already answered needs nothing, and a brief that forbids it wins.
 11. Do small work here: one file, a Makefile target, a config or doc edit, a rename, a constant, a single check. If the brief takes longer to write than the change, make the change.
 12. Delegate only a named deliverable with several files or steps and its own definition of done. A worktree is for that kind of task — one that ends in a branch and a PR. Never open a worktree for a small fix; do it here or delegate it in place.
 13. Resume before you redispatch. A change of brief, a follow-up, a review fix, or a conflict on an existing task goes to `oga resume <id> -m "..."` on that task, in its own checkout. If `steer` is refused, wait for the task to settle and resume it. Cancel and start a new task only when the deliverable itself changes.

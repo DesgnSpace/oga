@@ -850,8 +850,9 @@ fn answer_trims_a_long_summary_to_ninety_characters() {
         .expect("question ranks context");
     let summary = result
         .markdown
-        .split(" — ")
-        .nth(1)
+        .lines()
+        .next()
+        .and_then(|anchor| anchor.split(" — ").nth(1))
         .expect("a summary follows the anchor");
     assert!(summary.ends_with('…'), "{summary}");
     assert_eq!(summary.chars().count(), 90);
@@ -990,7 +991,7 @@ fn limits_question_results_and_reads_current_source_for_code() {
             "where is checkAuth handled",
             QuestionOptions {
                 limit: Some(1),
-                code: true,
+                code: Some(true),
                 paths: Vec::new(),
             },
         )
@@ -1003,6 +1004,127 @@ fn limits_question_results_and_reads_current_source_for_code() {
         )
     );
     assert!(result.markdown.contains("return token.length > 0;"));
+}
+
+/// Asking for nothing in particular answers with the place alone. The source
+/// is what a caller asks for once the place looks right.
+#[test]
+fn an_ordinary_lookup_names_the_place_without_the_source() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "export function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
+    );
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let result = index
+        .question(&fixture.target(), "where is checkAuth handled")
+        .expect("question renders");
+    assert_eq!(result.candidates[0].code, None);
+    assert!(!result.markdown.contains("```"), "{}", result.markdown);
+    assert!(result.markdown.contains("checkAuth"), "{}", result.markdown);
+}
+
+/// A caller who wants the code asks for it and gets it under the anchor.
+#[test]
+fn a_caller_can_ask_for_the_source() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "export function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n",
+    );
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let result = index
+        .question_with_options(
+            &fixture.target(),
+            "where is checkAuth handled",
+            QuestionOptions {
+                code: Some(true),
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("question renders");
+    assert_eq!(
+        result.candidates[0].code.as_deref(),
+        Some(
+            "```text\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n```"
+        )
+    );
+    assert!(result.markdown.contains("return token.length > 0;"));
+}
+
+/// Seven answers is what an ordinary lookup returns, and a caller who names a
+/// number gets that instead.
+#[test]
+fn an_ordinary_lookup_stops_at_seven_answers() {
+    let fixture = Fixture::new();
+    let sources = (0..10)
+        .map(|index| format!("export function retryCharge{index}() {{ return {index}; }}\n"))
+        .collect::<String>();
+    fixture.write_auth(&sources);
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let ordinary = index
+        .question(&fixture.target(), "retryCharge")
+        .expect("question renders");
+    assert_eq!(ordinary.candidates.len(), 7, "{}", ordinary.markdown);
+
+    let asked = index
+        .question_with_options(
+            &fixture.target(),
+            "retryCharge",
+            QuestionOptions {
+                limit: Some(2),
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("question renders");
+    assert_eq!(asked.candidates.len(), 2, "{}", asked.markdown);
+}
+
+/// Source comes back only for files the task may read. Asking for code must not
+/// turn the read scope into a suggestion.
+#[test]
+fn source_stays_inside_the_read_scope() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+    let target = ContextTarget::new(
+        fixture.project.path(),
+        TaskScope {
+            read: vec!["src/auth.ts".into()],
+            write: Vec::new(),
+        },
+    );
+
+    let result = index
+        .question_with_options(
+            &target,
+            "where is other",
+            QuestionOptions {
+                code: Some(true),
+                ..QuestionOptions::default()
+            },
+        )
+        .expect("scoped question answers");
+    assert!(result.candidates.is_empty(), "{}", result.markdown);
+    assert!(
+        !result.markdown.contains("export const other"),
+        "source outside the read scope came back: {}",
+        result.markdown
+    );
 }
 
 #[test]

@@ -11,7 +11,7 @@ pub fn query(
     question: &str,
     paths: &[String],
     limit: Option<usize>,
-    code: bool,
+    code: Option<bool>,
 ) -> Result<String, String> {
     let cwd = canonical_directory(cwd)?;
     let target =

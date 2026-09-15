@@ -311,7 +311,7 @@ fn does_not_present_one_of_two_equal_answers_as_sure() {
             "checkAuth",
             QuestionOptions {
                 limit: Some(1),
-                code: false,
+                code: Some(false),
                 paths: Vec::new(),
             },
         )
