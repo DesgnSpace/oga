@@ -918,10 +918,12 @@ const CATALOG_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 /// How long one provider CLI gets to answer before its catalog call is given up on.
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(150);
 
-static CATALOG_CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<ModelInfo>)>>> = OnceLock::new();
+type CatalogCache = HashMap<String, (Instant, Vec<ModelInfo>)>;
+
+static CATALOG_CACHE: OnceLock<Mutex<CatalogCache>> = OnceLock::new();
 static CATALOG_REFRESHES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-fn catalog_cache() -> &'static Mutex<HashMap<String, (Instant, Vec<ModelInfo>)>> {
+fn catalog_cache() -> &'static Mutex<CatalogCache> {
     CATALOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -1179,8 +1181,7 @@ async fn cached_opencode_models(profile: &Profile) -> Vec<ModelInfo> {
     if let Some((provider, _)) = profile.default_model.split_once('/') {
         providers.insert(provider.into());
     }
-    let models = parse_opencode_cache_models(&raw, profile, &providers);
-    models
+    parse_opencode_cache_models(&raw, profile, &providers)
 }
 
 fn merge_model_catalogs(primary: Vec<ModelInfo>, secondary: Vec<ModelInfo>) -> Vec<ModelInfo> {
@@ -2029,7 +2030,7 @@ mod catalog_tests {
     #[tokio::test]
     async fn a_profile_never_discovered_falls_back_to_its_configured_model() {
         let opencode = profile("fixture-opencode", Provider::OpenCode);
-        let models = cached_catalog(&[opencode.clone()]);
+        let models = cached_catalog(std::slice::from_ref(&opencode));
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "configured-default");
         assert_eq!(models[0].source, ModelInfoSource::Configured);
@@ -2073,7 +2074,7 @@ mod catalog_tests {
 
         // Not refreshing must reuse the cached catalog rather than collapsing
         // back to the single configured-model fallback.
-        let models = discover_catalog(&[opencode.clone()], false).await;
+        let models = discover_catalog(std::slice::from_ref(&opencode), false).await;
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"opencode-go/deepseek-v4-flash"));
@@ -2096,7 +2097,7 @@ mod catalog_tests {
                 only_preferred: Some(false),
                 ..Default::default()
             },
-            &[opencode.clone()],
+            std::slice::from_ref(&opencode),
         );
         assert_eq!(all_rows.len(), 2);
         assert!(all_rows.iter().all(|row| !row.enabled));

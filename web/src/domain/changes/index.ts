@@ -5,6 +5,12 @@
 
 import type { TaskDiffFileStatus, TaskEventView } from "@/bridge/types";
 
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
+
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+
 export type DiffKind = "context" | "added" | "removed" | "skipped";
 
 export interface DiffLine {
@@ -47,13 +53,7 @@ export function fileChangeMayContainEdit(raw: string): boolean {
 }
 
 export function fileChangeFromRaw(raw: string): FileChange | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  return search(value, undefined, false);
+  return search(decodeJson(raw), undefined, false);
 }
 
 export function countDiffLines(change: FileChange, kind: DiffKind): number {
@@ -90,18 +90,30 @@ export function diffLines(oldText: string, newText: string): DiffLine[] {
   return collapse(group(align(before, after)));
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function decodeJson(raw: string): JsonValue | undefined {
+  try {
+    // SAFETY: JSON.parse returns only JSON primitives, arrays, and objects.
+    return JSON.parse(raw) as JsonValue;
+  } catch {
+    return undefined;
+  }
 }
 
-function search(value: unknown, inheritedPath: string | undefined, inInput: boolean): FileChange | undefined {
+function asObject(value: JsonValue | undefined): JsonObject | undefined {
+  if (value === undefined || value === null || Array.isArray(value)) return undefined;
+  if (Object.prototype.toString.call(value) !== "[object Object]") return undefined;
+  // SAFETY: the object tag excludes JSON primitives and arrays.
+  return value as JsonObject;
+}
+
+function search(value: JsonValue | undefined, inheritedPath: string | undefined, inInput: boolean): FileChange | undefined {
   if (Array.isArray(value)) {
     const found = value.map((item) => search(item, inheritedPath, inInput)).filter((item): item is FileChange => item !== undefined);
     return merge(found, inheritedPath);
   }
-  if (!isObject(value)) return undefined;
+  const fields = asObject(value);
+  if (fields === undefined) return undefined;
 
-  const fields = value;
   const path = stringValue(fields, PATH_KEYS) ?? inheritedPath;
 
   const old = rawString(fields, OLD_KEYS);
@@ -148,28 +160,30 @@ function search(value: unknown, inheritedPath: string | undefined, inInput: bool
   return merge(found, path);
 }
 
-function stringValue(fields: Record<string, unknown>, keys: string[]): string | undefined {
+function stringValue(fields: JsonObject, keys: string[]): string | undefined {
   const value = rawString(fields, keys);
   return value === "" ? undefined : value;
 }
 
-function rawString(fields: Record<string, unknown>, keys: string[]): string | undefined {
+function rawString(fields: JsonObject, keys: string[]): string | undefined {
   for (const key of keys) {
     const value = fields[key];
-    if (typeof value === "string") return value;
+    if (value === undefined || Object.prototype.toString.call(value) !== "[object String]") continue;
+    return String(value);
   }
   return undefined;
 }
 
-function structuredPatch(value: unknown, path: string | undefined): FileChange | undefined {
+function structuredPatch(value: JsonValue | undefined, path: string | undefined): FileChange | undefined {
   if (!Array.isArray(value)) return undefined;
   const blocks: DiffLine[][] = [];
   for (const item of value) {
-    if (!isObject(item) || !Array.isArray(item.lines)) continue;
+    const patch = asObject(item);
+    if (patch === undefined || !Array.isArray(patch.lines)) continue;
     const parsed: DiffLine[] = [];
-    for (const line of item.lines) {
-      if (typeof line !== "string") continue;
-      parsed.push(patchLine(line));
+    for (const line of patch.lines) {
+      if (Object.prototype.toString.call(line) !== "[object String]") continue;
+      parsed.push(patchLine(String(line)));
     }
     if (parsed.length > 0) blocks.push(collapse(parsed));
   }

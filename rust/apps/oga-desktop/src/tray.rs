@@ -12,9 +12,11 @@ pub const ACTIVITY_EVENT: &str = "oga-activity-changed";
 const ACTIVITY_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 fn tray_title(counts: ActivityCounts) -> String {
-    (counts.running > 0)
-        .then(|| counts.running.to_string())
-        .unwrap_or_default()
+    if counts.running > 0 {
+        counts.running.to_string()
+    } else {
+        String::new()
+    }
 }
 
 fn accessibility_label(counts: ActivityCounts) -> String {

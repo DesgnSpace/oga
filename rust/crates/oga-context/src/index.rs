@@ -1062,7 +1062,17 @@ fn source_body(target: &ContextTarget, symbol: &SymbolRow, cache: &FileCache) ->
         body.truncate(MAX_FILE_BODY_LINES);
         body.push(format!("… {remaining} more lines"));
     }
-    format!("```text\n{}\n```", body.join("\n"))
+    let language =
+        crate::lang::adapter_for(&symbol.path).map_or(
+            "text",
+            |(adapter, extension)| match extension.as_str() {
+                "js" | "mjs" | "cjs" => "javascript",
+                "jsx" => "jsx",
+                "tsx" => "tsx",
+                _ => adapter.name(),
+            },
+        );
+    format!("```{language}\n{}\n```", body.join("\n"))
 }
 
 fn entry_line(path: &str, symbol: Option<&str>, notes: Vec<String>, line: Option<u64>) -> String {

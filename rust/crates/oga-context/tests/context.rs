@@ -1000,7 +1000,7 @@ fn limits_question_results_and_reads_current_source_for_code() {
     assert_eq!(
         result.candidates[0].code.as_deref(),
         Some(
-            "```text\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n```"
+            "```typescript\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n```"
         )
     );
     assert!(result.markdown.contains("return token.length > 0;"));
@@ -1052,7 +1052,7 @@ fn a_caller_can_ask_for_the_source() {
     assert_eq!(
         result.candidates[0].code.as_deref(),
         Some(
-            "```text\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n```"
+            "```typescript\nexport function checkAuth(token: string): boolean {\n  return token.length > 0;\n}\n```"
         )
     );
     assert!(result.markdown.contains("return token.length > 0;"));

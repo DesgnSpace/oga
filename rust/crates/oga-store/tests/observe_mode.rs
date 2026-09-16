@@ -141,7 +141,7 @@ fn observe_mode_refuses_an_older_schema() {
     drop(raw);
     let message = refusals(Store::open_observe(database.path()));
     assert!(
-        message.contains(&format!("database schema v0 predates this binary")),
+        message.contains("database schema v0 predates this binary"),
         "unexpected refusal: {message}"
     );
 }
