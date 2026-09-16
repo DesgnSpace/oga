@@ -1,15 +1,7 @@
 // Small display helpers shared across the task detail screen.
-// Ported from rust/crates/oga-ui/src/sidebar/view.rs (short_model) and
-// rust/crates/oga-ui/src/state/mod.rs (project_name), which are not yet
-// exposed from a shared module — reimplemented here in one line each.
 
 import type { TaskHoldView } from "@/bridge/types";
 import { absoluteTime, relativeTime } from "@/ui/time";
-
-export function shortModel(model: string): string {
-  const parts = model.split("/");
-  return parts[parts.length - 1] ?? model;
-}
 
 /**
  * The effort chip text: the actual effort when known, else the requested one.
