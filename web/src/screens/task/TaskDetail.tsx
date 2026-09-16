@@ -27,7 +27,7 @@ import {
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
 import { terminalResumeCommand } from "./terminalResume";
 import { ChangedFilesFullScreen, ChangedFilesPanel, type ChangedFilesProps } from "./ChangedFiles";
-import { effortDisplay, shortModel, taskStatusLabel } from "./format";
+import { effortDisplay, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
 import { activityIsSettled, buildTranscript, WorkSegmentCache } from "./transcriptModel";
@@ -177,9 +177,9 @@ function TaskDetailSecondary({
   return (
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
       <span className="task-detail-fact" title={task.model}>
-        {shortModel(task.model)}
+        <span className="task-detail-model">{task.model}</span>
         {effort && (
-          <span title={effort.title}>
+          <span className="task-detail-effort" title={effort.title}>
             {" · "}
             {effort.label.charAt(0).toUpperCase() + effort.label.slice(1)}
           </span>
