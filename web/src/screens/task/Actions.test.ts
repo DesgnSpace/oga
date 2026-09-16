@@ -35,31 +35,31 @@ describe("canCancel / canComplete", () => {
       "cancelled",
     ];
     for (const state of states) {
-      expect(canComplete({ state } as Task)).toBe(true);
+      expect(canComplete({ state })).toBe(true);
     }
-    expect(canComplete({ state: "completed" } as Task)).toBe(false);
+    expect(canComplete({ state: "completed" })).toBe(false);
   });
 
   test("cancellable states exclude answered and completed", () => {
-    expect(canCancel({ state: "running" } as Task)).toBe(true);
-    expect(canCancel({ state: "answered" } as Task)).toBe(false);
-    expect(canCancel({ state: "completed" } as Task)).toBe(false);
+    expect(canCancel({ state: "running" })).toBe(true);
+    expect(canCancel({ state: "answered" })).toBe(false);
+    expect(canCancel({ state: "completed" })).toBe(false);
   });
 });
 
 describe("canPause / canResume", () => {
   test("only a running task can be paused", () => {
-    expect(canPause({ state: "running" } as Task)).toBe(true);
-    expect(canPause({ state: "queued" } as Task)).toBe(false);
-    expect(canPause({ state: "cancelled" } as Task)).toBe(false);
-    expect(canPause({ state: "completed" } as Task)).toBe(false);
+    expect(canPause({ state: "running" })).toBe(true);
+    expect(canPause({ state: "queued" })).toBe(false);
+    expect(canPause({ state: "cancelled" })).toBe(false);
+    expect(canPause({ state: "completed" })).toBe(false);
   });
 
   test("only a paused (cancelled) task can be resumed", () => {
-    expect(canResume({ state: "cancelled" } as Task)).toBe(true);
-    expect(canResume({ state: "running" } as Task)).toBe(false);
-    expect(canResume({ state: "completed" } as Task)).toBe(false);
-    expect(canResume({ state: "failed" } as Task)).toBe(false);
+    expect(canResume({ state: "cancelled" })).toBe(true);
+    expect(canResume({ state: "running" })).toBe(false);
+    expect(canResume({ state: "completed" })).toBe(false);
+    expect(canResume({ state: "failed" })).toBe(false);
   });
 });
 

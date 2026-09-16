@@ -66,14 +66,12 @@ export function executeRemoveFollowUp(taskId: string, index: number) {
 }
 
 export function canCancel(task: TaskLike): boolean {
-  return (["queued", "preparing_checkout", "pending", "running", "needs_input", "blocked"] as string[]).includes(task.state);
+  return ["queued", "preparing_checkout", "pending", "running", "needs_input", "blocked"].includes(task.state);
 }
 
 export function canComplete(task: TaskLike): boolean {
-  return (
-    (["queued", "preparing_checkout", "pending", "running", "needs_input", "answered", "blocked", "failed", "cancelled"] as string[]).includes(
-      task.state,
-    )
+  return ["queued", "preparing_checkout", "pending", "running", "needs_input", "answered", "blocked", "failed", "cancelled"].includes(
+    task.state,
   );
 }
 
@@ -91,10 +89,10 @@ export function canResume(task: TaskLike): boolean {
 }
 
 export function canHandoff(task: TaskLike): boolean {
-  return !(["completed", "preparing_checkout", "removing_checkout"] as TaskState[]).includes(task.state);
+  return !["completed", "preparing_checkout", "removing_checkout"].includes(task.state);
 }
 
-function actionFailure(error: BridgeError, action: string): { title: string; options: { description?: string; detail?: string } } {
+function actionFailure(error: BridgeError, action: string) {
   if (error.status !== undefined) {
     return { title: `Couldn't ${action}`, options: { description: "Try again.", detail: error.message } };
   }
@@ -244,8 +242,7 @@ export function ArchiveBranchDialog({
 }) {
   const [busy, setBusy] = React.useState(false);
   const titleId = React.useId();
-  // SAFETY: task.state is the domain state used by the archive action.
-  const stopsBeforeArchive = !(["completed", "failed", "cancelled", "removing_checkout"] as TaskState[]).includes(task.state);
+  const stopsBeforeArchive = !["completed", "failed", "cancelled", "removing_checkout"].includes(task.state);
 
   const archive = async () => {
     if (busy) return;
@@ -402,6 +399,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
   React.useEffect(() => {
     if (!menuOpen) return;
     const closeOnPointer = (event: PointerEvent) => {
+      // SAFETY: pointer events always target a Node in the DOM tree.
       const target = event.target as Node | null;
       if (target && (triggerRef.current?.contains(target) || panelRef.current?.contains(target))) return;
       setMenuOpen(false);
@@ -572,7 +570,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
           <MoreIcon />
         </button>
       </div>
-      {menuOpen && typeof document !== "undefined" &&
+      {menuOpen && globalThis.document !== undefined &&
         createPortal(
           <div
             ref={panelRef}
