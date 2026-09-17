@@ -12,11 +12,13 @@ use agent_client_protocol_schema::{
         AGENT_METHOD_NAMES, AgentCapabilities, CLIENT_METHOD_NAMES, CancelNotification,
         ClientCapabilities, ContentBlock, CreateTerminalRequest, Error, ErrorCode,
         FileSystemCapabilities, Implementation, InitializeRequest, InitializeResponse,
-        KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest, NewSessionResponse,
-        PromptRequest, PromptResponse, ReadTextFileRequest, ReadTextFileResponse,
-        ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
-        RequestPermissionResponse, ResumeSessionRequest, SelectedPermissionOutcome, SessionId,
-        SessionNotification, TerminalOutputRequest, WaitForTerminalExitRequest,
+        KillTerminalRequest, LoadSessionRequest, LoadSessionResponse, McpServer, NewSessionRequest,
+        NewSessionResponse, PromptRequest, PromptResponse, ReadTextFileRequest,
+        ReadTextFileResponse, ReleaseTerminalRequest, RequestPermissionOutcome,
+        RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
+        ResumeSessionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
+        SessionConfigSelectOptions, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+        SetSessionConfigOptionResponse, TerminalOutputRequest, WaitForTerminalExitRequest,
         WriteTextFileRequest, WriteTextFileResponse,
     },
 };
@@ -87,6 +89,36 @@ pub struct Launch {
     pub additional_directories: Vec<PathBuf>,
     /// MCP servers the agent should connect to.
     pub mcp_servers: Vec<McpServer>,
+    /// Session settings to select, in order, before the prompt.
+    pub settings: Vec<SessionSetting>,
+}
+
+/// A value the session has to hold before the prompt, picked from the choices
+/// the agent advertises for one of its session settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSetting {
+    pub id: String,
+    pub value: String,
+    /// Whether an agent that offers no such choice leaves the session
+    /// unusable. A setting that is not required is left to the agent instead.
+    pub required: bool,
+}
+
+impl SessionSetting {
+    pub fn required(id: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        }
+    }
+
+    pub fn if_offered(id: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            required: false,
+            ..Self::required(id, value)
+        }
+    }
 }
 
 impl Launch {
@@ -97,7 +129,13 @@ impl Launch {
             start,
             additional_directories: Vec::new(),
             mcp_servers: Vec::new(),
+            settings: Vec::new(),
         }
+    }
+
+    pub fn settings(mut self, settings: Vec<SessionSetting>) -> Self {
+        self.settings = settings;
+        self
     }
 
     pub fn additional_directories(mut self, directories: Vec<PathBuf>) -> Self {
@@ -341,17 +379,19 @@ async fn handshake(
         ));
     }
 
-    let session_id = open_session(connection, launch, cwd, &agent, config).await?;
+    let (session_id, offered) = open_session(connection, launch, cwd, &agent, config).await?;
+    configure(connection, &session_id, offered, &launch.settings, config).await?;
     Ok((agent, session_id))
 }
 
+/// Opens the session and returns the settings the agent advertises for it.
 async fn open_session(
     connection: &Connection,
     launch: &Launch,
     cwd: &Path,
     agent: &InitializeResponse,
     config: &AcpConfig,
-) -> Result<SessionId, AcpError> {
+) -> Result<(SessionId, Vec<SessionConfigOption>), AcpError> {
     match &launch.start {
         SessionStart::New => {
             let answer: NewSessionResponse = connection
@@ -364,7 +404,7 @@ async fn open_session(
                 )
                 .await
                 .map_err(|error| classify_handshake(Stage::Session, error))?;
-            Ok(answer.session_id)
+            Ok((answer.session_id, answer.config_options.unwrap_or_default()))
         }
         SessionStart::Load(session_id) => {
             if !agent.agent_capabilities.load_session {
@@ -376,7 +416,7 @@ async fn open_session(
             let request = LoadSessionRequest::new(session_id.clone(), cwd)
                 .additional_directories(launch.additional_directories.clone())
                 .mcp_servers(launch.mcp_servers.clone());
-            connection
+            let answer = connection
                 .request::<_, Value>(
                     AGENT_METHOD_NAMES.session_load,
                     &request,
@@ -384,7 +424,10 @@ async fn open_session(
                 )
                 .await
                 .map_err(|error| classify_handshake(Stage::Session, error))?;
-            Ok(session_id.clone())
+            let offered = serde_json::from_value::<LoadSessionResponse>(answer)
+                .ok()
+                .and_then(|answer| answer.config_options);
+            Ok((session_id.clone(), offered.unwrap_or_default()))
         }
         SessionStart::Resume(session_id) => {
             if agent
@@ -401,7 +444,7 @@ async fn open_session(
             let request = ResumeSessionRequest::new(session_id.clone(), cwd)
                 .additional_directories(launch.additional_directories.clone())
                 .mcp_servers(launch.mcp_servers.clone());
-            connection
+            let answer = connection
                 .request::<_, Value>(
                     AGENT_METHOD_NAMES.session_resume,
                     &request,
@@ -409,8 +452,93 @@ async fn open_session(
                 )
                 .await
                 .map_err(|error| classify_handshake(Stage::Session, error))?;
-            Ok(session_id.clone())
+            let offered = serde_json::from_value::<ResumeSessionResponse>(answer)
+                .ok()
+                .and_then(|answer| answer.config_options);
+            Ok((session_id.clone(), offered.unwrap_or_default()))
         }
+    }
+}
+
+/// Selects each setting in order, answering from the choices the agent last
+/// advertised, since one choice can change what the next one offers. A choice
+/// the agent does not advertise is never guessed at: a required one leaves the
+/// session unusable, and any other is left to the agent.
+async fn configure(
+    connection: &Connection,
+    session_id: &SessionId,
+    mut offered: Vec<SessionConfigOption>,
+    settings: &[SessionSetting],
+    config: &AcpConfig,
+) -> Result<(), AcpError> {
+    for setting in settings {
+        match choice(&offered, setting) {
+            Choice::Held => continue,
+            Choice::Offered => {}
+            Choice::Missing(_) if !setting.required => continue,
+            Choice::Missing(reason) => return Err(AcpError::unavailable(Stage::Configure, reason)),
+        }
+        let answer = connection
+            .request::<_, Value>(
+                AGENT_METHOD_NAMES.session_set_config_option,
+                &SetSessionConfigOptionRequest::new(
+                    session_id.clone(),
+                    setting.id.clone(),
+                    setting.value.as_str(),
+                ),
+                config.handshake_timeout,
+            )
+            .await
+            .map_err(|error| classify_handshake(Stage::Configure, error))?;
+        if let Ok(answer) = serde_json::from_value::<SetSessionConfigOptionResponse>(answer) {
+            offered = answer.config_options;
+        }
+    }
+    Ok(())
+}
+
+enum Choice {
+    /// The session already holds the value.
+    Held,
+    Offered,
+    Missing(String),
+}
+
+fn choice(offered: &[SessionConfigOption], setting: &SessionSetting) -> Choice {
+    let Some(option) = offered
+        .iter()
+        .find(|option| option.id.0.as_ref() == setting.id)
+    else {
+        return Choice::Missing(format!("the agent offers no {} choices", setting.id));
+    };
+    let SessionConfigKind::Select(select) = &option.kind else {
+        return Choice::Missing(format!(
+            "the agent's {} setting isn't a list of choices",
+            setting.id
+        ));
+    };
+    if select.current_value.0.as_ref() == setting.value {
+        return Choice::Held;
+    }
+    let values: Vec<&str> = match &select.options {
+        SessionConfigSelectOptions::Ungrouped(options) => options
+            .iter()
+            .map(|option| option.value.0.as_ref())
+            .collect(),
+        SessionConfigSelectOptions::Grouped(groups) => groups
+            .iter()
+            .flat_map(|group| &group.options)
+            .map(|option| option.value.0.as_ref())
+            .collect(),
+        _ => Vec::new(),
+    };
+    if values.contains(&setting.value.as_str()) {
+        Choice::Offered
+    } else {
+        Choice::Missing(format!(
+            "the agent doesn't offer {} as a {} choice",
+            setting.value, setting.id
+        ))
     }
 }
 

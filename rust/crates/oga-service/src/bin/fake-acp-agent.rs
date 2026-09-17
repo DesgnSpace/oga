@@ -4,6 +4,12 @@
 //! `fake-acp-agent <mode> <log>`: every frame it receives is appended to `log`
 //! as one JSON line, after a first line recording the environment it started
 //! with, so a test can count prompts and check what reached the agent.
+//!
+//! A mode starting `opencode` answers the way `opencode acp` does: it reports
+//! itself as OpenCode, names its session the way OpenCode names sessions, and
+//! offers the model and effort as session settings. The rest of the mode says
+//! how its turns go, or `no-model` for an agent that does not offer the
+//! model a test asks for.
 
 use std::{
     env,
@@ -42,6 +48,42 @@ fn chunk(session: &str, text: &str) {
         session,
         json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}}),
     );
+}
+
+/// OpenCode's settings: a model, and an effort only for the model that has
+/// variants, so choosing the model changes what the effort offers.
+fn opencode_settings(mode: &str, model: &str, effort: &str) -> Value {
+    let models = if mode.ends_with("no-model") {
+        json!([{"value": "opencode/big-pickle", "name": "Big Pickle"}])
+    } else {
+        json!([
+            {"value": "opencode/big-pickle", "name": "Big Pickle"},
+            {"value": "opencode/deep", "name": "Deep"},
+        ])
+    };
+    let mut settings = vec![json!({
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": model,
+        "options": models,
+    })];
+    if model == "opencode/deep" {
+        settings.push(json!({
+            "id": "effort",
+            "name": "Effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": effort,
+            "options": [
+                {"value": "high", "name": "High"},
+                {"value": "max", "name": "Max"},
+                {"value": "default", "name": "Default"},
+            ],
+        }));
+    }
+    Value::Array(settings)
 }
 
 fn capabilities(mode: &str) -> Value {
@@ -202,9 +244,19 @@ fn main() {
             "env": {
                 "OGA_TASK_ID": env::var("OGA_TASK_ID").ok(),
                 "CLAUDE_CONFIG_DIR": env::var("CLAUDE_CONFIG_DIR").ok(),
+                "XDG_DATA_HOME": env::var("XDG_DATA_HOME").ok(),
             },
         }),
     );
+    let opencode = mode.starts_with("opencode");
+    let session_id = if opencode { "ses_acp1" } else { SESSION };
+    let agent_name = if opencode && !mode.ends_with("renamed") {
+        "OpenCode"
+    } else {
+        "fake-acp-agent"
+    };
+    let turns = mode.strip_prefix("opencode-").unwrap_or(&mode).to_owned();
+    let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
 
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines().map_while(Result::ok);
@@ -230,11 +282,32 @@ fn main() {
                 "result": {
                     "protocolVersion": 1,
                     "agentCapabilities": capabilities(&mode),
-                    "agentInfo": {"name": "fake-acp-agent", "version": "2.1.0"},
+                    "agentInfo": {"name": agent_name, "version": "2.1.0"},
+                },
+            })),
+            "session/new" if opencode => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": session_id,
+                    "configOptions": opencode_settings(&mode, &model, &effort),
                 },
             })),
             "session/new" => {
-                emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": SESSION}}))
+                emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session_id}}))
+            }
+            "session/set_config_option" => {
+                let value = params["value"].as_str().unwrap_or_default().to_owned();
+                if params["configId"] == "model" {
+                    model = value;
+                } else {
+                    effort = value;
+                }
+                emit(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {"configOptions": opencode_settings(&mode, &model, &effort)},
+                }));
             }
             "session/load" => {
                 let session = params["sessionId"].as_str().unwrap_or(SESSION);
@@ -247,8 +320,13 @@ fn main() {
                 }
                 emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}}));
             }
+            "session/resume" if opencode => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"configOptions": opencode_settings(&mode, &model, &effort)},
+            })),
             "session/resume" => emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}})),
-            "session/prompt" => prompt(&mode, &id, &params, &mut lines, &log_path),
+            "session/prompt" => prompt(&turns, &id, &params, &mut lines, &log_path),
             "session/cancel" => {}
             other => emit(&json!({
                 "jsonrpc": "2.0",

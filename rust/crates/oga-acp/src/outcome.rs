@@ -10,6 +10,8 @@ pub enum Stage {
     Spawn,
     Initialize,
     Session,
+    /// Choosing the session's settings, after it opened and before any prompt.
+    Configure,
 }
 
 impl Stage {
@@ -18,6 +20,7 @@ impl Stage {
             Self::Spawn => "spawn",
             Self::Initialize => "initialize",
             Self::Session => "session",
+            Self::Configure => "configure",
         }
     }
 }

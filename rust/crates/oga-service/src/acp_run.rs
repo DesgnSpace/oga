@@ -17,7 +17,7 @@ use std::{
 
 use oga_acp::{
     AcpConfig, AcpError, AcpPolicy, AcpSession, Decision, Launch, PolicyFuture, Refusal,
-    SessionStart, Stage,
+    SessionSetting, SessionStart, Stage,
     schema::{
         AgentCapabilities, ContentBlock, HttpHeader, McpServer, McpServerHttp, PermissionOption,
         PermissionOptionKind, RequestPermissionRequest, SessionId, SessionNotification,
@@ -107,14 +107,15 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         adapter,
         ..
     } = &turn;
-    let command = adapter.command(&AcpLaunch {
+    let acp_launch = AcpLaunch {
         profile,
         model: &task.model,
         effort: task.effort.as_deref(),
         cwd: &task.cwd,
-    });
-    let request = RunRequest::from_command(profile.provider, command, &task.cwd)
-        .with_env(worker_env(&task.id, &task.cwd));
+    };
+    let request =
+        RunRequest::from_command(profile.provider, adapter.command(&acp_launch), &task.cwd)
+            .with_env(worker_env(&task.id, &task.cwd));
     let start = match &turn.start {
         AcpStart::New => SessionStart::New,
         AcpStart::Restore {
@@ -126,7 +127,16 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
             how: AcpRestore::Load,
         } => SessionStart::Load(SessionId::new(session_id.as_str())),
     };
-    let mut launch = Launch::new(request, task.scope.clone(), start);
+    let settings = adapter
+        .settings_for(&acp_launch)
+        .into_iter()
+        .map(|setting| SessionSetting {
+            id: setting.id,
+            value: setting.value,
+            required: setting.required,
+        })
+        .collect();
+    let mut launch = Launch::new(request, task.scope.clone(), start).settings(settings);
     if adapter.oga_tools {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);
     }
@@ -292,6 +302,16 @@ fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleE
                     "{} couldn't reopen this task's conversation ({reason}). Resume the task to start a new one from a summary of the work so far.",
                     turn.profile.id
                 )
+            } else if stage == Stage::Configure && restoring {
+                format!(
+                    "{} can't use this task's model or effort over ACP ({reason}). Move the task to another model or worker to continue.",
+                    turn.profile.id
+                )
+            } else if stage == Stage::Configure {
+                format!(
+                    "{} can't use this task's model or effort over ACP ({reason}). Set the worker to use its command line, or move the task to another model or worker.",
+                    turn.profile.id
+                )
             } else {
                 format!(
                     "{} couldn't connect over ACP ({reason}). Resume the task once it can, or move it to another worker.",
@@ -401,7 +421,12 @@ fn record_session(
         broker_pid: std::process::id(),
         started_at: now.clone(),
     };
-    let native_session = turn.adapter.native_session.then(|| acp_session_id.clone());
+    let native_session = turn
+        .adapter
+        .native_sessions_from
+        .as_deref()
+        .filter(|agent| session.agent_info().is_some_and(|info| info.name == *agent))
+        .map(|_| acp_session_id.clone());
     let restored = matches!(turn.start, AcpStart::Restore { .. });
     let (transport_json, worker_json) = (encode(&transport)?, encode(&worker)?);
     turn.store.transaction(|tx| {

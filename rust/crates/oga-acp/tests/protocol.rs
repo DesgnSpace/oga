@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 use oga_acp::{
     AcpConfig, AcpError, AcpPolicy, AcpSession, Decision, DenyAll, Grants, Launch, PolicyFuture,
-    Refusal, SessionStart, Stage,
+    Refusal, SessionSetting, SessionStart, Stage,
     schema::{
         ContentBlock, Error, PermissionOptionId, ReadTextFileRequest, RequestPermissionRequest,
         SessionId, SessionUpdate, StopReason,
@@ -343,6 +343,98 @@ async fn a_loaded_session_keeps_the_agents_own_id() {
 
     assert_eq!(session.session_id(), &SessionId::from("earlier-session"));
     session.shutdown().await;
+}
+
+async fn open_configured(
+    mode: &str,
+    cwd: &Path,
+    settings: Vec<SessionSetting>,
+) -> Result<AcpSession, AcpError> {
+    AcpSession::open(
+        &ProviderRunner::default(),
+        Launch::new(agent(mode, cwd), Default::default(), SessionStart::New).settings(settings),
+        Arc::new(DenyAll),
+        config(),
+    )
+    .await
+}
+
+/// The text of one turn, which a configurable agent spends reporting the
+/// settings it ended up holding.
+async fn answer(session: &AcpSession) -> String {
+    let mut updates = session.take_updates().expect("update stream");
+    session.prompt(ask("hi")).await.expect("prompt answered");
+    let mut text = String::new();
+    while let Ok(Some(update)) =
+        tokio::time::timeout(Duration::from_millis(200), updates.recv()).await
+    {
+        text.push_str(&chunk_text(&update.update));
+    }
+    text
+}
+
+#[tokio::test]
+async fn settings_are_chosen_in_order_from_what_the_agent_offers() {
+    let temp = TempDir::new().expect("temporary directory");
+    let session = open_configured(
+        "configurable",
+        temp.path(),
+        vec![
+            SessionSetting::required("model", "deep"),
+            SessionSetting::required("effort", "high"),
+        ],
+    )
+    .await
+    .expect("session opened");
+
+    assert_eq!(answer(&session).await, "model=deep effort=high changes=2");
+    session.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_setting_already_held_or_not_required_sends_nothing() {
+    let temp = TempDir::new().expect("temporary directory");
+    let session = open_configured(
+        "configurable",
+        temp.path(),
+        vec![
+            SessionSetting::required("model", "fast"),
+            SessionSetting::if_offered("effort", "high"),
+        ],
+    )
+    .await
+    .expect("session opened");
+
+    assert_eq!(
+        answer(&session).await,
+        "model=fast effort=default changes=0"
+    );
+    session.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_required_choice_the_agent_does_not_offer_is_unavailable_before_any_prompt() {
+    let temp = TempDir::new().expect("temporary directory");
+    for (mode, setting) in [
+        ("turn", SessionSetting::required("model", "fast")),
+        ("configurable", SessionSetting::required("model", "huge")),
+        ("configurable", SessionSetting::required("effort", "high")),
+    ] {
+        let error = open_configured(mode, temp.path(), vec![setting.clone()])
+            .await
+            .expect_err("an unoffered choice is never guessed at");
+        assert!(
+            matches!(
+                error,
+                AcpError::Unavailable {
+                    stage: Stage::Configure,
+                    ..
+                }
+            ),
+            "{mode} {setting:?}: {error}"
+        );
+        assert!(error.allows_retry_elsewhere());
+    }
 }
 
 #[tokio::test]

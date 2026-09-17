@@ -62,6 +62,30 @@ fn initialize(mode: &str, id: &Value) {
     }
 }
 
+/// What a configurable agent advertises: a model, and an effort only for the
+/// model that has one, so a choice changes what the next one offers.
+fn config_options(model: &str, effort: &str) -> Value {
+    let mut options = vec![json!({
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": model,
+        "options": [{"value": "fast", "name": "Fast"}, {"value": "deep", "name": "Deep"}],
+    })];
+    if model == "deep" {
+        options.push(json!({
+            "id": "effort",
+            "name": "Effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": effort,
+            "options": [{"value": "high", "name": "High"}, {"value": "default", "name": "Default"}],
+        }));
+    }
+    Value::Array(options)
+}
+
 /// Answers one prompt, in whichever way the mode asks for.
 fn prompt(mode: &str, id: &Value, lines: &mut impl Iterator<Item = String>) {
     match mode {
@@ -188,6 +212,7 @@ fn main() {
         eprintln!("fake agent warning: deprecated flag");
     }
 
+    let (mut model, mut effort, mut changes) = ("fast".to_owned(), "default".to_owned(), 0);
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines().map_while(Result::ok);
     while let Some(line) = lines.next() {
@@ -200,8 +225,29 @@ fn main() {
         let id = message["id"].clone();
         match method {
             "initialize" => initialize(&mode, &id),
+            "session/new" if mode == "configurable" => result(
+                &id,
+                json!({"sessionId": SESSION, "configOptions": config_options(&model, &effort)}),
+            ),
             "session/new" => result(&id, json!({"sessionId": SESSION})),
             "session/load" | "session/resume" => result(&id, json!({})),
+            "session/set_config_option" => {
+                let value = message["params"]["value"].as_str().unwrap_or_default();
+                match message["params"]["configId"].as_str() {
+                    Some("model") => model = value.to_owned(),
+                    Some("effort") => effort = value.to_owned(),
+                    _ => {}
+                }
+                changes += 1;
+                result(
+                    &id,
+                    json!({"configOptions": config_options(&model, &effort)}),
+                );
+            }
+            "session/prompt" if mode == "configurable" => {
+                chunk(&format!("model={model} effort={effort} changes={changes}"));
+                result(&id, json!({"stopReason": "end_turn"}));
+            }
             "session/prompt" => prompt(&mode, &id, &mut lines),
             "session/cancel" => {}
             other => failure(&id, -32601, &format!("unknown method: {other}")),

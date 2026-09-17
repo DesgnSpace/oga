@@ -109,6 +109,86 @@ fn harness_with(mode: &str, agent: &str) -> Harness {
     }
 }
 
+/// Answers `opencode run` the way OpenCode's command line does, after noting
+/// that it ran.
+const OPENCODE_CLI: &str = r#"printf '%s\n' "$@" >> "$PWD/cli-ran"
+printf '%s\n' '{"type":"step_start","sessionID":"ses_cli1"}' '{"type":"text","part":{"text":"ran on the command line\nOGA_RESULT: completed"}}'
+"#;
+
+/// An OpenCode profile on the adapters Oga ships, with `opencode` resolving to
+/// a script: `opencode acp` starts the scripted agent in `mode`, and its
+/// command line records that it ran. `without-acp` is an OpenCode with no ACP
+/// server, and `missing` is no OpenCode at all.
+fn opencode_harness(mode: &str) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    fs::create_dir_all(&bin).expect("bin");
+    let log = directory.path().join("agent.log");
+    let acp = match mode {
+        "without-acp" => "echo 'opencode: unknown command acp' >&2; exit 1".to_owned(),
+        _ => format!(
+            "exec '{}' '{mode}' '{}'",
+            env!("CARGO_BIN_EXE_fake-acp-agent"),
+            log.display()
+        ),
+    };
+    if mode != "missing" {
+        let cli = bin.join("opencode");
+        fs::write(
+            &cli,
+            format!("#!/bin/sh\nif [ \"$1\" = acp ]; then\n  {acp}\nfi\n{OPENCODE_CLI}"),
+        )
+        .expect("fake opencode");
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::OpenCode,
+        default_model: "opencode/deep".into(),
+        enabled: true,
+        env: BTreeMap::from([
+            ("PATH".into(), bin.display().to_string()),
+            (
+                "XDG_DATA_HOME".into(),
+                directory.path().join("account").display().to_string(),
+            ),
+        ]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {"opencode/deep": true}}}})
+                .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
 impl Harness {
     async fn run(&self, prompt: &str) -> Task {
         self.run_with(DispatchRequest::new("work", prompt, &self.cwd))
@@ -678,4 +758,248 @@ async fn a_handoff_to_another_account_leaves_the_acp_conversation_behind() {
         "another account opens its own conversation"
     );
     assert!(harness.received("session/resume").is_empty());
+}
+
+fn methods(harness: &Harness) -> Vec<String> {
+    harness
+        .agent_log()
+        .iter()
+        .filter_map(|entry| entry["received"]["method"].as_str())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn chosen_settings(harness: &Harness) -> Vec<(String, String)> {
+    harness
+        .received("session/set_config_option")
+        .iter()
+        .map(|params| {
+            (
+                params["configId"].as_str().unwrap_or_default().to_owned(),
+                params["value"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn opencode_runs_over_acp_by_default_with_its_model_effort_and_account() {
+    let harness = opencode_harness("opencode");
+    let mut request = DispatchRequest::new("work", "summarise the readme", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    assert_eq!(recorded.acp_session_id.as_deref(), Some("ses_acp1"));
+    assert_eq!(
+        recorded.agent.as_ref().map(|agent| agent.adapter.as_str()),
+        Some("opencode-acp")
+    );
+    assert_eq!(
+        task.session_id.as_deref(),
+        Some("ses_acp1"),
+        "OpenCode's ACP session is the session its terminal resumes"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "session/new",
+            "session/set_config_option",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+        "the model and effort are chosen before the prompt goes out"
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [
+            ("model".to_owned(), "opencode/deep".to_owned()),
+            ("effort".to_owned(), "high".to_owned()),
+        ]
+    );
+    assert_eq!(
+        harness.received("session/new")[0]["mcpServers"],
+        serde_json::json!([]),
+        "OpenCode keeps its own MCP servers and, as on its command line, gets no Oga tools"
+    );
+    assert!(
+        harness.agent_log()[0]["env"]["XDG_DATA_HOME"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/account")),
+        "the agent runs in the profile's own account"
+    );
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn opencode_without_an_acp_server_runs_on_its_command_line_before_any_prompt() {
+    let harness = opencode_harness("without-acp");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
+    assert_eq!(task.session_id.as_deref(), Some("ses_cli1"));
+    let ran = harness.cli_runs();
+    assert!(
+        ran.windows(2)
+            .any(|pair| pair == ["--model", "opencode/deep"]),
+        "{ran:?}"
+    );
+    assert!(
+        harness
+            .events(&task.id)
+            .iter()
+            .any(|event| event.kind == "transport_fallback")
+    );
+
+    let missing = opencode_harness("missing");
+    let task = missing.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
+    assert!(missing.agent_log().is_empty());
+}
+
+#[tokio::test]
+async fn an_opencode_model_it_does_not_offer_never_reaches_the_prompt() {
+    let harness = opencode_harness("opencode-no-model");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert!(
+        recorded
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("opencode/deep")),
+        "{recorded:?}"
+    );
+    assert!(harness.received("session/prompt").is_empty());
+    assert!(chosen_settings(&harness).is_empty());
+    assert!(!harness.cli_runs().is_empty());
+
+    let explicit = opencode_harness("opencode-no-model");
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let task = explicit.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("can't use this task's model or effort")),
+        "{task:?}"
+    );
+    assert!(explicit.received("session/prompt").is_empty());
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn an_opencode_follow_up_continues_its_session_and_a_lost_prompt_is_never_rerun() {
+    let harness = opencode_harness("opencode");
+    let first = harness.run("start").await;
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    let resumed = harness.received("session/resume");
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0]["sessionId"], "ses_acp1");
+    assert_eq!(harness.received("session/new").len(), 1);
+    assert_eq!(harness.received("session/prompt").len(), 2);
+    assert_eq!(
+        chosen_settings(&harness)
+            .iter()
+            .filter(|(id, _)| id == "model")
+            .count(),
+        2,
+        "a resumed session is given the task's model again"
+    );
+    assert!(harness.cli_runs().is_empty());
+
+    let lost = opencode_harness("opencode-exit-after-prompt");
+    let task = lost.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(lost.received("session/prompt").len(), 1);
+    assert!(
+        lost.cli_runs().is_empty(),
+        "a prompt that may have run is never sent through the command line"
+    );
+}
+
+#[tokio::test]
+async fn only_opencode_itself_gives_a_task_a_terminal_session() {
+    let harness = opencode_harness("opencode-renamed");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(transport(&task).acp_session_id.as_deref(), Some("ses_acp1"));
+    assert_eq!(
+        task.session_id, None,
+        "an agent that does not report itself as OpenCode has no session OpenCode can resume"
+    );
+}
+
+#[tokio::test]
+async fn an_opencode_task_from_before_acp_resumes_on_its_command_line() {
+    let harness = opencode_harness("opencode");
+    let task = Task {
+        id: "before-acp".into(),
+        profile_id: "work".into(),
+        model: "opencode/deep".into(),
+        prompt: "old work".into(),
+        cwd: harness.cwd.display().to_string(),
+        state: TaskState::Completed,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        session_id: Some("ses_old".into()),
+        ..Task::default()
+    };
+    harness
+        .store
+        .repositories()
+        .tasks()
+        .insert(&task)
+        .expect("task");
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new("before-acp").instruction("one more thing"),
+    )
+    .await
+    .expect("resumed");
+    let resumed = harness.settle("before-acp").await;
+
+    assert_eq!(resumed.state, TaskState::Completed, "{resumed:?}");
+    assert!(harness.agent_log().is_empty(), "no ACP agent was started");
+    assert!(
+        harness
+            .cli_runs()
+            .windows(2)
+            .any(|pair| pair == ["--session", "ses_old"])
+    );
+    assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
 }
