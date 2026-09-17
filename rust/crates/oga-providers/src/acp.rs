@@ -7,11 +7,16 @@
 //! place the command line gets them, so a profile reaches the same account
 //! whichever transport runs it.
 
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use oga_domain::{Profile, Provider};
 
-use crate::{ProviderCommand, environment_for, unset_environment_for};
+use crate::{ProviderCommand, environment_for, skills_dir, unset_environment_for};
 
 /// What an adapter needs to know to start one agent for one run.
 #[derive(Debug, Clone, Copy)]
@@ -24,6 +29,8 @@ pub struct AcpLaunch<'a> {
 
 type Argv = dyn Fn(&AcpLaunch<'_>) -> Vec<String> + Send + Sync;
 type Settings = dyn Fn(&AcpLaunch<'_>) -> Vec<AcpSetting> + Send + Sync;
+type Environment = dyn Fn(&AcpLaunch<'_>) -> BTreeMap<String, String> + Send + Sync;
+type Directories = dyn Fn(&AcpLaunch<'_>) -> Vec<PathBuf> + Send + Sync;
 
 /// A session setting the agent has to hold before a run's prompt, named the
 /// way the agent names it.
@@ -43,6 +50,8 @@ pub struct AcpAdapter {
     pub id: String,
     argv: Arc<Argv>,
     settings: Arc<Settings>,
+    environment: Arc<Environment>,
+    directories: Arc<Directories>,
     /// The provider's command line gives the worker Oga's own tools, so the
     /// agent must accept Oga's HTTP MCP server. An agent that cannot is
     /// incompatible rather than quietly left without them.
@@ -74,6 +83,8 @@ impl AcpAdapter {
             id: id.into(),
             argv: Arc::new(argv),
             settings: Arc::new(|_| Vec::new()),
+            environment: Arc::new(|_| BTreeMap::new()),
+            directories: Arc::new(|_| Vec::new()),
             oga_tools: false,
             native_sessions_from: None,
         }
@@ -97,16 +108,44 @@ impl AcpAdapter {
         self
     }
 
+    /// Variables this run needs on top of the profile's own, for an agent that
+    /// takes a launch's choices as environment rather than as flags.
+    pub fn environment(
+        mut self,
+        environment: impl Fn(&AcpLaunch<'_>) -> BTreeMap<String, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.environment = Arc::new(environment);
+        self
+    }
+
+    pub fn directories(
+        mut self,
+        directories: impl Fn(&AcpLaunch<'_>) -> Vec<PathBuf> + Send + Sync + 'static,
+    ) -> Self {
+        self.directories = Arc::new(directories);
+        self
+    }
+
     /// The session settings one run selects before its prompt, in order.
     pub fn settings_for(&self, launch: &AcpLaunch<'_>) -> Vec<AcpSetting> {
         (self.settings)(launch)
     }
 
+    /// Workspace roots the session opens beyond the task's own directory, the
+    /// ones the provider's command line reaches with its own flag.
+    pub fn directories_for(&self, launch: &AcpLaunch<'_>) -> Vec<PathBuf> {
+        (self.directories)(launch)
+    }
+
     /// The agent process for one run, with the profile's account environment.
+    /// The launch's own variables are written over that account, the way a
+    /// command-line flag wins over the same choice made in the environment.
     pub fn command(&self, launch: &AcpLaunch<'_>) -> ProviderCommand {
+        let mut env = environment_for(launch.profile);
+        env.extend((self.environment)(launch));
         ProviderCommand {
             argv: (self.argv)(launch),
-            env: environment_for(launch.profile),
+            env,
             env_remove: unset_environment_for(launch.profile),
         }
     }
@@ -123,7 +162,9 @@ impl AcpAdapters {
     /// wired and verified; until then it runs on its command line, and no
     /// provider claims ACP support it does not have.
     pub fn builtin() -> Self {
-        Self::default().register(Provider::OpenCode, opencode())
+        Self::default()
+            .register(Provider::Claude, claude())
+            .register(Provider::OpenCode, opencode())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -134,6 +175,53 @@ impl AcpAdapters {
     pub fn get(&self, provider: Provider) -> Option<&AcpAdapter> {
         self.adapters.get(&provider)
     }
+}
+
+/// Claude's released ACP adapter, `@agentclientprotocol/claude-agent-acp`,
+/// which runs the Claude Agent SDK, verified against 0.78.0. Oga starts the
+/// installed binary; an account without one falls back before any prompt.
+///
+/// The adapter drives the same `claude` executable the command line does, and
+/// reads the user, project, and local settings that executable reads, so the
+/// account, project instructions, hooks, and configured MCP servers are the
+/// ones `CLAUDE_CONFIG_DIR` already names. Oga's own tools ride the session's
+/// HTTP MCP servers, where `--mcp-config` carries them on the command line,
+/// and the skills directory rides the session's workspace roots, where
+/// `--add-dir` carries it. The command line's Oga hooks are not installed
+/// here: an ACP session reports its own tool calls and subagents, so the same
+/// work would arrive twice.
+///
+/// The model is the launch's own `ANTHROPIC_MODEL`, which both the adapter and
+/// the executable behind it resolve the way `--model` resolves a name, since
+/// the session's model choices are the CLI's short aliases rather than the
+/// catalogue ids a task carries. The effort is a session setting, taking the
+/// same level `--effort` does; a run that names none leaves the setting alone,
+/// as a command line without the flag does.
+///
+/// A session it opens is a Claude Code session, created under the id it
+/// answers with, so `claude --resume` reopens the conversation in a terminal.
+/// The Claude Code behind it is the build the adapter ships rather than the
+/// one on the account's path, so the two versions can differ; they write the
+/// same transcripts into the same account, which is what a terminal reopens.
+fn claude() -> AcpAdapter {
+    AcpAdapter::new("claude-agent-acp", |_| vec!["claude-agent-acp".to_owned()])
+        .oga_tools(true)
+        .native_sessions_from("@agentclientprotocol/claude-agent-acp")
+        .environment(|launch| {
+            BTreeMap::from([("ANTHROPIC_MODEL".to_owned(), launch.model.to_owned())])
+        })
+        .directories(|launch| vec![PathBuf::from(skills_dir(launch.profile))])
+        .settings(|launch| {
+            launch
+                .effort
+                .map(|effort| AcpSetting {
+                    id: "effort".into(),
+                    value: effort.to_owned(),
+                    required: true,
+                })
+                .into_iter()
+                .collect()
+        })
 }
 
 /// OpenCode's own `opencode acp` server, verified against OpenCode 1.18.31.
@@ -190,9 +278,10 @@ mod tests {
     #[test]
     fn no_provider_claims_an_adapter_it_does_not_ship() {
         let adapters = AcpAdapters::builtin();
-        assert!(adapters.get(Provider::OpenCode).is_some());
+        for provider in [Provider::Claude, Provider::OpenCode] {
+            assert!(adapters.get(provider).is_some(), "{provider:?}");
+        }
         for provider in [
-            Provider::Claude,
             Provider::Codex,
             Provider::OpenCode2,
             Provider::Antigravity,
@@ -200,6 +289,75 @@ mod tests {
         ] {
             assert!(adapters.get(provider).is_none(), "{provider:?}");
         }
+    }
+
+    #[test]
+    fn claude_starts_its_adapter_in_the_profiles_account_on_the_tasks_model() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Claude).expect("claude adapter");
+        let profile = profile(
+            Provider::Claude,
+            BTreeMap::from([
+                ("CLAUDE_CONFIG_DIR".into(), "~/.claude-work".into()),
+                ("ANTHROPIC_MODEL".into(), "an older pin".into()),
+            ]),
+        );
+        let launch = AcpLaunch {
+            profile: &profile,
+            model: "claude-opus-4-5",
+            effort: Some("high"),
+            cwd: "/repo",
+        };
+
+        let command = adapter.command(&launch);
+        let home = crate::home();
+
+        assert_eq!(command.argv, ["claude-agent-acp"]);
+        assert_eq!(
+            command.env.get("CLAUDE_CONFIG_DIR"),
+            Some(&format!("{home}/.claude-work"))
+        );
+        assert_eq!(
+            command.env.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("claude-opus-4-5"),
+            "the task's model wins over the account's own pin, as --model does"
+        );
+        assert_eq!(
+            adapter.directories_for(&launch),
+            [PathBuf::from(format!("{home}/.claude-work/skills"))],
+            "the directory --add-dir names is opened as a workspace root"
+        );
+        assert!(
+            adapter.oga_tools,
+            "the command line gives Claude Oga's tools with --mcp-config, so this must too"
+        );
+        assert_eq!(
+            adapter.native_sessions_from.as_deref(),
+            Some("@agentclientprotocol/claude-agent-acp")
+        );
+    }
+
+    #[test]
+    fn claude_asks_for_an_effort_only_when_the_run_names_one() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Claude).expect("claude adapter");
+        let profile = profile(Provider::Claude, BTreeMap::new());
+        let launch = |effort| AcpLaunch {
+            profile: &profile,
+            model: "opus",
+            effort,
+            cwd: "/repo",
+        };
+
+        assert_eq!(
+            adapter.settings_for(&launch(Some("xhigh"))),
+            [AcpSetting {
+                id: "effort".into(),
+                value: "xhigh".into(),
+                required: true,
+            }]
+        );
+        assert_eq!(adapter.settings_for(&launch(None)), []);
     }
 
     #[test]

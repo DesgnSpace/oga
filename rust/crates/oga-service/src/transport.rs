@@ -240,6 +240,15 @@ mod tests {
         }
     }
 
+    /// A provider Oga ships no adapter for, so `builtin()` has no way to reach
+    /// it over ACP.
+    fn without_adapter() -> Profile {
+        Profile {
+            provider: Provider::Codex,
+            ..profile(None)
+        }
+    }
+
     fn adapters() -> AcpAdapters {
         AcpAdapters::builtin().register(
             Provider::Claude,
@@ -305,7 +314,7 @@ mod tests {
     fn explicit_acp_without_an_adapter_refuses_instead_of_falling_back() {
         let plan = plan(
             &Task::default(),
-            &profile(None),
+            &without_adapter(),
             TransportPreference::Acp,
             &AcpAdapters::builtin(),
             None,
@@ -318,7 +327,7 @@ mod tests {
     fn auto_without_an_adapter_records_why_it_used_the_command_line() {
         let plan = plan(
             &Task::default(),
-            &profile(None),
+            &without_adapter(),
             TransportPreference::Auto,
             &AcpAdapters::builtin(),
             None,
@@ -408,7 +417,7 @@ mod tests {
 
         let orphaned = plan(
             &acp_task(Some("acp-1")),
-            &profile(None),
+            &without_adapter(),
             TransportPreference::Auto,
             &AcpAdapters::builtin(),
             Some("acp-1"),

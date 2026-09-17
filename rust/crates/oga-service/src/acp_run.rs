@@ -136,7 +136,9 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
             required: setting.required,
         })
         .collect();
-    let mut launch = Launch::new(request, task.scope.clone(), start).settings(settings);
+    let mut launch = Launch::new(request, task.scope.clone(), start)
+        .settings(settings)
+        .additional_directories(adapter.directories_for(&acp_launch));
     if adapter.oga_tools {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);
     }

@@ -10,6 +10,11 @@
 //! offers the model and effort as session settings. The rest of the mode says
 //! how its turns go, or `no-model` for an agent that does not offer the
 //! model a test asks for.
+//!
+//! A mode starting `claude` answers the way `claude-agent-acp` does: it reports
+//! itself as that adapter, names its session the way Claude Code names one, and
+//! offers the effort as a session setting. `no-effort` is the adapter on a model
+//! with no effort levels to offer.
 
 use std::{
     env,
@@ -20,6 +25,9 @@ use std::{
 use serde_json::{Value, json};
 
 const SESSION: &str = "acp-session-1";
+/// Claude Code names a session with a UUID, and `claude-agent-acp` opens the
+/// session under that same id.
+const CLAUDE_SESSION: &str = "9f3c0c10-0e2a-4b47-8f1f-3f0c9a2b7c51";
 
 fn emit(value: &Value) {
     println!("{value}");
@@ -80,6 +88,39 @@ fn opencode_settings(mode: &str, model: &str, effort: &str) -> Value {
                 {"value": "high", "name": "High"},
                 {"value": "max", "name": "Max"},
                 {"value": "default", "name": "Default"},
+            ],
+        }));
+    }
+    Value::Array(settings)
+}
+
+/// `claude-agent-acp`'s settings: an effort ladder for a model that has one,
+/// and the CLI's short model aliases, which Oga leaves alone.
+fn claude_settings(mode: &str, effort: &str) -> Value {
+    let mut settings = vec![json!({
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "opus",
+        "options": [
+            {"value": "default", "name": "Default"},
+            {"value": "opus", "name": "Opus"},
+            {"value": "sonnet", "name": "Sonnet"},
+        ],
+    })];
+    if !mode.ends_with("no-effort") {
+        settings.push(json!({
+            "id": "effort",
+            "name": "Effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": effort,
+            "options": [
+                {"value": "default", "name": "Default"},
+                {"value": "medium", "name": "Medium"},
+                {"value": "high", "name": "High"},
+                {"value": "max", "name": "Max"},
             ],
         }));
     }
@@ -243,19 +284,30 @@ fn main() {
             "mode": mode,
             "env": {
                 "OGA_TASK_ID": env::var("OGA_TASK_ID").ok(),
+                "ANTHROPIC_MODEL": env::var("ANTHROPIC_MODEL").ok(),
                 "CLAUDE_CONFIG_DIR": env::var("CLAUDE_CONFIG_DIR").ok(),
                 "XDG_DATA_HOME": env::var("XDG_DATA_HOME").ok(),
             },
         }),
     );
     let opencode = mode.starts_with("opencode");
-    let session_id = if opencode { "ses_acp1" } else { SESSION };
-    let agent_name = if opencode && !mode.ends_with("renamed") {
-        "OpenCode"
-    } else {
-        "fake-acp-agent"
+    let claude = mode.starts_with("claude");
+    let session_id = match (opencode, claude) {
+        (true, _) => "ses_acp1",
+        (_, true) => CLAUDE_SESSION,
+        _ => SESSION,
     };
-    let turns = mode.strip_prefix("opencode-").unwrap_or(&mode).to_owned();
+    let renamed = mode.ends_with("renamed");
+    let agent_name = match (opencode, claude) {
+        (true, _) if !renamed => "OpenCode",
+        (_, true) if !renamed => "@agentclientprotocol/claude-agent-acp",
+        _ => "fake-acp-agent",
+    };
+    let turns = mode
+        .strip_prefix("opencode-")
+        .or_else(|| mode.strip_prefix("claude-"))
+        .unwrap_or(&mode)
+        .to_owned();
     let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
 
     let stdin = io::stdin();
@@ -293,6 +345,14 @@ fn main() {
                     "configOptions": opencode_settings(&mode, &model, &effort),
                 },
             })),
+            "session/new" if claude => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": session_id,
+                    "configOptions": claude_settings(&mode, &effort),
+                },
+            })),
             "session/new" => {
                 emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session_id}}))
             }
@@ -303,10 +363,15 @@ fn main() {
                 } else {
                     effort = value;
                 }
+                let offered = if claude {
+                    claude_settings(&mode, &effort)
+                } else {
+                    opencode_settings(&mode, &model, &effort)
+                };
                 emit(&json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": {"configOptions": opencode_settings(&mode, &model, &effort)},
+                    "result": {"configOptions": offered},
                 }));
             }
             "session/load" => {
@@ -324,6 +389,11 @@ fn main() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {"configOptions": opencode_settings(&mode, &model, &effort)},
+            })),
+            "session/resume" if claude => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"configOptions": claude_settings(&mode, &effort)},
             })),
             "session/resume" => emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}})),
             "session/prompt" => prompt(&turns, &id, &params, &mut lines, &log_path),

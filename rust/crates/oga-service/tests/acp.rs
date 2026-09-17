@@ -1003,3 +1003,304 @@ async fn an_opencode_task_from_before_acp_resumes_on_its_command_line() {
     );
     assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
 }
+
+/// Answers `claude -p` the way Claude Code's command line does, after noting
+/// that it ran.
+const CLAUDE_CLI: &str = r#"printf '%s\n' "$@" >> "$PWD/cli-ran"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"ran on the command line\nOGA_RESULT: completed","session_id":"cli-session-1"}'
+"#;
+
+/// A Claude profile on the adapters Oga ships, with `claude-agent-acp`
+/// resolving to the scripted agent in `mode` and `claude` to a command line
+/// that records that it ran. `missing` is an account with no adapter installed.
+fn claude_harness(mode: &str) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let account = directory.path().join("account");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    fs::create_dir_all(account.join("skills")).expect("skills");
+    fs::create_dir_all(&bin).expect("bin");
+    let log = directory.path().join("agent.log");
+    if mode != "missing" {
+        let adapter = bin.join("claude-agent-acp");
+        fs::write(
+            &adapter,
+            format!(
+                "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
+                env!("CARGO_BIN_EXE_fake-acp-agent"),
+                log.display()
+            ),
+        )
+        .expect("fake adapter");
+        fs::set_permissions(&adapter, fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+    let cli = bin.join("claude");
+    fs::write(&cli, format!("#!/bin/sh\n{CLAUDE_CLI}")).expect("fake command line");
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("executable");
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::Claude,
+        default_model: "claude-opus-4-5".into(),
+        enabled: true,
+        env: BTreeMap::from([
+            ("PATH".into(), bin.display().to_string()),
+            ("CLAUDE_CONFIG_DIR".into(), account.display().to_string()),
+        ]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {"claude-opus-4-5": true}}}})
+                .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
+#[tokio::test]
+async fn claude_runs_over_acp_by_default_with_its_model_effort_account_and_tools() {
+    let harness = claude_harness("claude");
+    let mut request = DispatchRequest::new("work", "summarise the readme", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    assert_eq!(
+        recorded.agent.as_ref().map(|agent| agent.adapter.as_str()),
+        Some("claude-agent-acp")
+    );
+    assert_eq!(
+        task.session_id.as_deref(),
+        recorded.acp_session_id.as_deref(),
+        "the adapter opens a Claude Code session, so a terminal can resume it"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "session/new",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+        "the effort is chosen before the prompt goes out"
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [("effort".to_owned(), "high".to_owned())],
+        "the model rides the environment, not the session's own aliases"
+    );
+    let opened = &harness.received("session/new")[0];
+    assert_eq!(
+        opened["mcpServers"][0]["name"], "oga",
+        "the tools --mcp-config carries reach the session"
+    );
+    assert_eq!(
+        opened["mcpServers"][0]["headers"][0]["value"], task.id,
+        "Oga's tools answer as this task"
+    );
+    assert!(
+        opened["additionalDirectories"][0]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/account/skills")),
+        "the skills --add-dir names are opened as workspace roots: {opened}"
+    );
+    let started = &harness.agent_log()[0]["env"];
+    assert_eq!(started["ANTHROPIC_MODEL"], "claude-opus-4-5");
+    assert!(
+        started["CLAUDE_CONFIG_DIR"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/account")),
+        "the agent runs in the profile's own account"
+    );
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn claude_without_its_adapter_installed_runs_on_its_command_line_before_any_prompt() {
+    let harness = claude_harness("missing");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
+    assert_eq!(task.session_id.as_deref(), Some("cli-session-1"));
+    assert!(harness.agent_log().is_empty());
+    let ran = harness.cli_runs();
+    assert!(
+        ran.windows(2)
+            .any(|pair| pair == ["--model", "claude-opus-4-5"]),
+        "{ran:?}"
+    );
+    assert!(
+        harness
+            .events(&task.id)
+            .iter()
+            .any(|event| event.kind == "transport_fallback")
+    );
+}
+
+#[tokio::test]
+async fn a_claude_effort_it_cannot_offer_never_reaches_the_prompt() {
+    let harness = claude_harness("claude-no-effort");
+    let mut request = DispatchRequest::new("work", "do the work", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert!(
+        recorded
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("effort")),
+        "{recorded:?}"
+    );
+    assert!(harness.received("session/prompt").is_empty());
+    let ran = harness.cli_runs();
+    assert!(
+        ran.windows(2).any(|pair| pair == ["--effort", "high"]),
+        "{ran:?}"
+    );
+
+    let explicit = claude_harness("claude-no-effort");
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let mut request = DispatchRequest::new("work", "do the work", &explicit.cwd);
+    request.effort = Some("high".into());
+    let task = explicit.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("can't use this task's model or effort")),
+        "{task:?}"
+    );
+    assert!(explicit.received("session/prompt").is_empty());
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn only_claudes_own_adapter_gives_a_task_a_terminal_session() {
+    let harness = claude_harness("claude-renamed");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(transport(&task).acp_session_id.is_some());
+    assert_eq!(
+        task.session_id, None,
+        "another agent behind the same command names no session Claude Code can resume"
+    );
+}
+
+#[tokio::test]
+async fn a_claude_follow_up_continues_its_session_and_a_lost_prompt_is_never_rerun() {
+    let harness = claude_harness("claude");
+    let first = harness.run("start").await;
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    let resumed = harness.received("session/resume");
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(
+        resumed[0]["sessionId"].as_str(),
+        transport(&second).acp_session_id.as_deref()
+    );
+    assert_eq!(harness.received("session/new").len(), 1);
+    assert_eq!(harness.received("session/prompt").len(), 2);
+    assert!(harness.cli_runs().is_empty());
+
+    let lost = claude_harness("claude-exit-after-prompt");
+    let task = lost.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(lost.received("session/prompt").len(), 1);
+    assert!(
+        lost.cli_runs().is_empty(),
+        "a prompt that may have run is never sent through the command line"
+    );
+}
+
+#[tokio::test]
+async fn a_claude_task_from_before_acp_resumes_on_its_command_line() {
+    let harness = claude_harness("claude");
+    let task = Task {
+        id: "before-acp".into(),
+        profile_id: "work".into(),
+        model: "claude-opus-4-5".into(),
+        prompt: "old work".into(),
+        cwd: harness.cwd.display().to_string(),
+        state: TaskState::Completed,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        session_id: Some("claude-session-old".into()),
+        ..Task::default()
+    };
+    harness
+        .store
+        .repositories()
+        .tasks()
+        .insert(&task)
+        .expect("task");
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new("before-acp").instruction("one more thing"),
+    )
+    .await
+    .expect("resumed");
+    let resumed = harness.settle("before-acp").await;
+
+    assert_eq!(resumed.state, TaskState::Completed, "{resumed:?}");
+    assert!(harness.agent_log().is_empty(), "no ACP agent was started");
+    assert!(
+        harness
+            .cli_runs()
+            .windows(2)
+            .any(|pair| pair == ["--resume", "claude-session-old"])
+    );
+    assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
+}
