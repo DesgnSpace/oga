@@ -63,7 +63,7 @@ describe("Transcript", () => {
     expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("uses an action count when a turn title only repeats a child title", () => {
+  it("uses an action count when a turn has nothing the worker said", () => {
     const event: TaskEventView = {
       id: 1,
       taskId: "task",
@@ -73,27 +73,10 @@ describe("Transcript", () => {
       phase: "completed",
       title: "Searched grep -n pattern",
       detail: "pattern",
+      actionId: "call_1",
       createdAt: "2026-07-30T15:00:01Z",
     };
-    const composition: ActivityComposition = {
-      blocks: [{
-        type: "chapter",
-        id: 1,
-        rows: [{
-          type: "group",
-          group: {
-            kind: "turn",
-            anchor: event,
-            children: [{ type: "work", event }],
-            members: [],
-            runLabel: "",
-            turnTitle: event.title,
-            hidden: [event],
-          },
-        }],
-      }],
-      technical: [],
-    };
+    const composition: ActivityComposition = ActivityStory.compose([event]);
 
     render(<Transcript items={[{
       type: "work",

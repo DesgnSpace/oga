@@ -2,7 +2,13 @@
 
 import { describe, expect, it } from "bun:test";
 import type { TaskEventView } from "@/bridge/types";
-import { ActivityStory, chapterRowEvents, normalizeAntigravityEvents, withoutDuplicateHookCalls } from "./index";
+import { ActivityStory, compositionCalls, normalizeAntigravityEvents, withoutDuplicateHookCalls } from "./index";
+import { TraceVisibility, type TraceRow } from "@/domain/trace";
+
+/** The settled row of every call a composition holds, in the order they opened. */
+function callRows(events: TaskEventView[]): TaskEventView[] {
+  return compositionCalls(ActivityStory.compose(events).blocks).map((call) => call.event);
+}
 
 function agentCall(id: number, callId: string, complete: boolean, turnId = 1): TaskEventView {
   return {
@@ -147,31 +153,40 @@ describe("a turn the worker narrates itself", () => {
   });
 
   it("settles an open call into one row when its update arrives", () => {
-    const composition = ActivityStory.compose([agentCall(1, "call_1", false), agentCall(2, "call_1", true)]);
-    const rows = composition.blocks.flatMap((block) => (block.type === "chapter" ? block.rows : []));
+    const rows = callRows([agentCall(1, "call_1", false), agentCall(2, "call_1", true)]);
 
-    expect(rows).toHaveLength(1);
-    expect(rows.flatMap(chapterRowEvents).map((event) => event.phase)).toEqual(["completed"]);
+    expect(rows.map((event) => event.phase)).toEqual(["completed"]);
   });
 
   it("folds a replayed call back into the row it already has", () => {
     const replayed = { ...agentCall(3, "call_1", true), id: 3 };
-    const composition = ActivityStory.compose([
-      agentCall(1, "call_1", false),
-      agentCall(2, "call_1", true),
-      replayed,
-    ]);
-    const rows = composition.blocks.flatMap((block) => (block.type === "chapter" ? block.rows : []));
-
-    expect(rows).toHaveLength(1);
+    expect(callRows([agentCall(1, "call_1", false), agentCall(2, "call_1", true), replayed])).toHaveLength(1);
   });
+  it("patches a settled call from an update that names nothing of its own", () => {
+    // A page boundary separates an update from its opening row, so it arrives
+    // carrying only its own content and no status to settle on.
+    const partial: TaskEventView = {
+      ...agentCall(3, "call_1", false),
+      type: "agent.tool_call_update",
+      title: "Activity",
+      verb: "Using",
+      kind: "tool",
+      detail: undefined,
+      target: undefined,
+      presentation: { type: "tool" },
+      rawText: JSON.stringify({ sessionUpdate: "tool_call_update", toolCallId: "call_1", rawOutput: "done" }),
+    };
+    const events = callRows([agentCall(1, "call_1", false), agentCall(2, "call_1", true), partial]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.title).toBe("Edit file");
+    expect(events[0]?.presentation?.path).toBe("src/main.rs");
+    expect(events[0]?.phase).toBe("completed");
+    expect(events[0]?.complete).toBe(true);
+  });
+
   it("settles a call that reported only how it ended, keeping its subject", () => {
-    const composition = ActivityStory.compose([
-      runningCall(1, "call_2"),
-      callEnded(2, "call_2", "2 tests passed"),
-    ]);
-    const rows = composition.blocks.flatMap((block) => (block.type === "chapter" ? block.rows : []));
-    const events = rows.flatMap(chapterRowEvents);
+    const events = callRows([runningCall(1, "call_2"), callEnded(2, "call_2", "2 tests passed")]);
 
     expect(events).toHaveLength(1);
     expect(events[0]?.phase).toBe("completed");
@@ -182,6 +197,63 @@ describe("a turn the worker narrates itself", () => {
   });
 });
 
+describe("a run that tidies up after it speaks", () => {
+  function row(id: number, overrides: Partial<TaskEventView>): TaskEventView {
+    return {
+      id,
+      taskId: "task",
+      source: "claude",
+      type: "agent.agent_message_chunk",
+      kind: "message",
+      phase: "info",
+      title: "Agent message",
+      createdAt: `2026-09-17T15:28:${String(id).padStart(2, "0")}Z`,
+      turnId: 1,
+      ...overrides,
+    };
+  }
+
+  const answer = row(10, { detail: "## TL;DR\n- The probe file is written." });
+  const context = row(11, {
+    type: "agent.usage_update",
+    kind: "usage",
+    title: "Context",
+    presentation: { type: "usage", tokensIn: 39_344, total: 1_000_000 },
+    minor: true,
+  });
+  const done = row(14, { type: "completed", source: "broker", kind: "lifecycle", phase: "completed", title: "Task completed" });
+
+  function answerStaysInTheTrace(events: TaskEventView[]): boolean {
+    return ActivityStory.composeWithState(events, true, undefined, true).blocks.some(
+      (block) =>
+        block.type === "turn" &&
+        block.turn.segments.some((segment) =>
+          segment.nodes.some((node) => node.type === "message" && node.event.id === answer.id),
+        ),
+    );
+  }
+
+  it("shows the closing answer once, whatever bookkeeping follows it", () => {
+    const stderr = row(13, {
+      type: "worker_stderr",
+      source: "broker",
+      kind: "lifecycle",
+      phase: "started",
+      title: "Worker stderr",
+      detail: "[session/create] phase=validate-cwd",
+    });
+
+    expect(answerStaysInTheTrace([answer, context, done])).toBe(false);
+    expect(answerStaysInTheTrace([answer, context, stderr, done])).toBe(false);
+  });
+
+  it("keeps the answer in place when the run failed after saying it", () => {
+    const failure = row(13, { type: "agent.error", kind: "error", phase: "failed", title: "Error", detail: "the agent stopped" });
+
+    expect(answerStaysInTheTrace([answer, context, failure, done])).toBe(true);
+  });
+});
+
 describe("recorded runs", () => {
   async function recorded(name: string): Promise<TaskEventView[]> {
     // SAFETY: the fixture is rows the broker's own presenter wrote for these runs, keyed by run.
@@ -189,11 +261,7 @@ describe("recorded runs", () => {
     return runs[name];
   }
 
-  function workRows(events: TaskEventView[]): TaskEventView[] {
-    return ActivityStory.compose(events)
-      .blocks.flatMap((block) => (block.type === "chapter" ? block.rows : []))
-      .flatMap(chapterRowEvents);
-  }
+  const workRows = callRows;
 
   it("keeps an OpenCode read naming its file after an update that leaves the kind out", async () => {
     const calls = workRows(await recorded("opencodeAcpRead")).filter((event) => event.actionId !== undefined);
@@ -232,5 +300,56 @@ describe("recorded runs", () => {
     );
 
     expect(calls.map((event) => event.phase)).toEqual(["completed"]);
+  });
+});
+
+/**
+ * Whole runs as the daemon served them, captured with
+ * `bun scripts/dump-task-events.ts <task id> <fixture name>`.
+ */
+describe("whole runs, as the daemon served them", () => {
+  async function run(name: string): Promise<TaskEventView[]> {
+    // SAFETY: the fixture is this task's own `TaskEventView[]`, written by the script above.
+    return (await Bun.file(new URL(`./fixtures/${name}.json`, import.meta.url)).json()) as TaskEventView[];
+  }
+
+  function storyRows(events: TaskEventView[]): TraceRow[] {
+    const composition = ActivityStory.composeWithState(events, true, undefined, true);
+    return TraceVisibility.interleavedRows(composition, "/Users/malico/desgn/oga", false).filter(
+      (row) => !row.isTechnical,
+    );
+  }
+
+  it("reads an Antigravity probe as the three calls it made and nothing else", async () => {
+    const events = await run("antigravity-acp-probe");
+    const composition = ActivityStory.composeWithState(events, true, undefined, true);
+    const calls = compositionCalls(composition.blocks);
+
+    // Both edits carry the same file and the same title; only their call ids
+    // tell them apart, and a reader has to see both.
+    expect(calls.map((call) => call.event.title)).toEqual(["Edit file", "Edit file", "Read file"]);
+    expect(new Set(calls.map((call) => call.actionId)).size).toBe(3);
+
+    // The worker's log and the broker's own bookkeeping are not the story.
+    const bookkeeping = ["worker_stderr", "created", "started", "worker_spawned", "session_captured", "completed"];
+    expect(composition.technical.map((event) => event.type).sort()).toEqual([...bookkeeping].sort());
+    expect(storyRows(events).flatMap((row) => (row.event ? [row.event.type] : []))).not.toContain("worker_stderr");
+  });
+
+  it("reads every command in a resumed Claude run as one call under its final name", async () => {
+    const events = await run("claude-acp-resumed");
+    const calls = compositionCalls(ActivityStory.composeWithState(events, true, undefined, true).blocks);
+    const commands = calls.filter((call) => call.event.kind === "command");
+    const streamed = new Set(
+      events.filter((event) => event.kind === "command" && event.actionId !== undefined).map((event) => event.actionId),
+    );
+
+    expect(commands.length).toBe(streamed.size);
+    // Every one of them opened as "Terminal" and was renamed to the command it
+    // ran; a call that reached an end keeps the name it ended with.
+    expect(commands.every((call) => call.event.title === "Run command")).toBe(true);
+    expect(commands.filter((call) => call.event.target === "Terminal").map((call) => call.status)).toEqual([
+      "interrupted",
+    ]);
   });
 });

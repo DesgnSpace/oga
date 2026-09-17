@@ -302,6 +302,203 @@ describe("RunChangeProjection", () => {
   });
 });
 
+/**
+ * Rows recorded from the write probes each provider ran against this repo:
+ * every one created a two-line file and then changed one of its lines, so a
+ * run that reports its work faithfully projects one file at `+3/-1`.
+ */
+describe("recorded write probes", () => {
+  const PROBE_CWD = "/Users/malico/desgn/oga";
+
+  function acpCall(id: number, title: string, path: string, raw: string): TaskEventView {
+    return {
+      id,
+      taskId: "task",
+      source: "claude",
+      type: "agent.tool_call_update",
+      kind: "file",
+      phase: "completed",
+      title,
+      presentation: { type: "file", path },
+      rawText: raw,
+      createdAt: "2026-09-17T15:28:00Z",
+    };
+  }
+
+  it("counts a Claude write and the edit after it once each", () => {
+    const path = `${PROBE_CWD}/examples/task-event-probes/claude/event-sample.txt`;
+    const set = collectRunChanges(
+      [
+        // The write: the agent's diff names the new body and nothing it replaced.
+        acpCall(1, "Edit file", path, JSON.stringify({
+          content: [{ type: "diff", path, newText: "provider=claude\nphase=created\n" }],
+          rawInput: { file_path: path, content: "provider=claude\nphase=created\n" },
+        })),
+        // Its result repeats the body it created, which is the same two lines.
+        acpCall(2, "Edit file", path, JSON.stringify({
+          _meta: {
+            claudeCode: {
+              toolResponse: { type: "create", filePath: path, content: "provider=claude\nphase=created\n", structuredPatch: [] },
+            },
+          },
+        })),
+        // The edit, as the agent's diff and as the arguments it passed.
+        acpCall(3, "Edit file", path, JSON.stringify({
+          content: [{ type: "diff", path, oldText: "phase=created", newText: "phase=updated" }],
+          rawInput: { file_path: path, old_string: "phase=created", new_string: "phase=updated" },
+        })),
+        // The same edit again, wrapped in a line it did not touch.
+        acpCall(4, "Edit file", path, JSON.stringify({
+          content: [
+            { type: "diff", path, oldText: "provider=claude\nphase=created", newText: "provider=claude\nphase=updated" },
+          ],
+          _meta: {
+            claudeCode: {
+              toolResponse: {
+                filePath: path,
+                oldString: "phase=created",
+                newString: "phase=updated",
+                structuredPatch: [{ lines: [" provider=claude", "-phase=created", "+phase=updated"] }],
+              },
+            },
+          },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(set.files.map((file) => file.path)).toEqual(["examples/task-event-probes/claude/event-sample.txt"]);
+    expect(set.files[0].added).toBe(3);
+    expect(set.files[0].removed).toBe(1);
+  });
+
+  it("reads a Claude write off its result when the row carrying the diff is gone", () => {
+    const path = `${PROBE_CWD}/examples/task-event-probes/claude/event-sample.txt`;
+    const set = collectRunChanges(
+      [
+        acpCall(1, "Edit file", path, JSON.stringify({
+          _meta: {
+            claudeCode: {
+              toolResponse: { type: "create", filePath: path, content: "provider=claude\nphase=created\n", structuredPatch: [] },
+            },
+          },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(set.files[0].added).toBe(2);
+    expect(set.files[0].removed).toBe(0);
+  });
+
+  it("leaves a file Claude only read out of the list, body and all", () => {
+    const path = `${PROBE_CWD}/rust/Cargo.toml`;
+    const set = collectRunChanges(
+      [
+        acpCall(1, "Read file", path, JSON.stringify({
+          _meta: {
+            claudeCode: {
+              toolResponse: { type: "text", file: { filePath: path, content: '[workspace]\nresolver = "2"\n', totalLines: 2 } },
+            },
+          },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(runChangeSetIsEmpty(set)).toBe(true);
+  });
+
+  it("keeps an OpenCode write at one file when its patch and its diff agree", () => {
+    const path = `${PROBE_CWD}/examples/task-event-probes/opencode/event-sample.txt`;
+    const set = collectRunChanges(
+      [
+        acpCall(1, "Edit file", path, JSON.stringify({
+          rawInput: {
+            patchText:
+              "*** Begin Patch\n*** Add File: examples/task-event-probes/opencode/event-sample.txt\n+provider=opencode\n+phase=created\n*** End Patch",
+          },
+        })),
+        acpCall(2, "Edit file", path, JSON.stringify({
+          rawOutput: {
+            metadata: {
+              diff: `--- ${path}\n+++ ${path}\n@@ -0,0 +1,2 @@\n+provider=opencode\n+phase=created\n`,
+            },
+          },
+        })),
+        acpCall(3, "Edit file", path, JSON.stringify({
+          rawInput: {
+            patchText:
+              "*** Begin Patch\n*** Update File: examples/task-event-probes/opencode/event-sample.txt\n@@\n-phase=created\n+phase=updated\n*** End Patch",
+          },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(set.files.length).toBe(1);
+    expect(set.files[0].added).toBe(3);
+    expect(set.files[0].removed).toBe(1);
+  });
+
+  it("lists a file an Antigravity or Codex run names without its lines", () => {
+    const antigravity = `${PROBE_CWD}/examples/task-event-probes/antigravity/event-sample.txt`;
+    const codex = `${PROBE_CWD}/examples/task-event-probes/codex/event-sample.txt`;
+    const set = collectRunChanges(
+      [
+        acpCall(1, "Edit file", antigravity, JSON.stringify({ rawInput: { file_path: antigravity } })),
+        acpCall(2, "Edit file", antigravity, JSON.stringify({ rawOutput: "Create event sample file" })),
+        acpCall(3, "Edit file", codex, JSON.stringify({
+          type: "item.completed",
+          item: { id: "item_1", type: "file_change", changes: [{ path: codex, kind: "add" }] },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(set.files.map((file) => file.path)).toEqual([
+      "examples/task-event-probes/antigravity/event-sample.txt",
+      "examples/task-event-probes/codex/event-sample.txt",
+    ]);
+    expect(set.files.every((file) => file.added === 0 && file.removed === 0)).toBe(true);
+    expect(set.files[0].edits).toBe(1);
+  });
+
+  it("reads a Pi write from the arguments it passed", () => {
+    const path = "examples/task-event-probes/pi/event-sample.txt";
+    const set = collectRunChanges(
+      [
+        acpCall(1, "Write file", path, JSON.stringify({
+          type: "tool_execution_start",
+          toolName: "write",
+          args: { path, content: "provider=pi\nphase=created\n" },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(set.files[0].path).toBe(path);
+    expect(set.files[0].added).toBe(2);
+    expect(set.files[0].removed).toBe(0);
+  });
+
+  it("leaves a file a run only read out of the list", () => {
+    const path = `${PROBE_CWD}/examples/task-event-probes/pi/event-sample.txt`;
+    const set = collectRunChanges(
+      [
+        acpCall(1, "Read file", path, JSON.stringify({
+          type: "tool_execution_start",
+          toolName: "read",
+          args: { path },
+        })),
+      ],
+      PROBE_CWD,
+    );
+
+    expect(runChangeSetIsEmpty(set)).toBe(true);
+  });
+});
+
 describe("relativePath", () => {
   it("does not confuse sibling directories", () => {
     expect(relativePath("/repo-backup/a", "/repo")).toBe("/repo-backup/a");

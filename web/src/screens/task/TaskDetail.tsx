@@ -27,6 +27,7 @@ import {
 import { TaskControls, TaskHeaderActions, WaitNotice } from "./Actions";
 import { terminalResumeCommand } from "./terminalResume";
 import { ChangedFilesFullScreen, ChangedFilesPanel, type ChangedFilesProps } from "./ChangedFiles";
+import { usageTotals } from "./contextUsage";
 import { effortDisplay, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
@@ -110,26 +111,6 @@ function useTaskBranches(taskId: string, active: boolean): BranchChoices {
     };
   }, [taskId, active]);
   return state;
-}
-
-interface UsageTotals {
-  tokensIn: number;
-  tokensOut: number;
-  tokensCached: number;
-}
-
-function usageTotals(events: TaskEventView[]): UsageTotals {
-  let tokensIn = 0;
-  let tokensOut = 0;
-  let tokensCached = 0;
-  for (const event of events) {
-    const presentation = event.presentation;
-    if (!presentation) continue;
-    tokensIn += presentation.tokensIn ?? 0;
-    tokensOut += presentation.tokensOut ?? 0;
-    tokensCached += presentation.tokensCached ?? 0;
-  }
-  return { tokensIn, tokensOut, tokensCached };
 }
 
 interface StatItem {

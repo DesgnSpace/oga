@@ -25,7 +25,24 @@ const PATH_KEYS = ["file_path", "filePath", "path"];
 const OLD_KEYS = ["old_string", "oldString", "old_text", "oldText"];
 const NEW_KEYS = ["new_string", "newString", "new_text", "newText"];
 const CONTENT_KEYS = ["content", "text"];
-const INPUT_KEYS = ["tool_input", "input", "arguments"];
+const INPUT_KEYS = ["tool_input", "input", "arguments", "args"];
+
+/**
+ * Row titles that mean the worker changed a file, in the words the presenter
+ * gives every provider. A worker that reports which file it touched but not
+ * what it wrote is taken at its word only for these — a read names a file too,
+ * and listing it would say the run changed something it only looked at.
+ */
+const CHANGE_TITLES = new Set([
+  "edit file",
+  "edit files",
+  "write file",
+  "write files",
+  "create file",
+  "delete file",
+  "move file",
+  "apply patch",
+]);
 
 const EDIT_MARKER_KEYS = [
   "old_string",
@@ -109,6 +126,7 @@ function search(value: unknown, inheritedPath: string | undefined, inInput: bool
   if (old !== undefined && next !== undefined && (old !== "" || next !== "")) {
     return { path, blocks: [diffLines(old, next)] };
   }
+  if (old === undefined && next !== undefined && next !== "") return addedWholeFile(path, next);
 
   for (const key of INPUT_KEYS) {
     if (key in fields) {
@@ -117,14 +135,12 @@ function search(value: unknown, inheritedPath: string | undefined, inInput: bool
     }
   }
 
-  if (inInput && path !== undefined) {
+  // A body counts as a write only where it is what the worker passed in or what
+  // it says it created. A file it merely read carries a body too, and listing
+  // that would say the run changed something it only looked at.
+  if ((inInput || fields.type === "create") && path !== undefined) {
     const content = stringValue(fields, CONTENT_KEYS);
-    if (content !== undefined) {
-      return {
-        path,
-        blocks: [collapse(splitLines(content).map((text): DiffLine => ({ kind: "added", text })))],
-      };
-    }
+    if (content !== undefined) return addedWholeFile(path, content);
   }
 
   if ("structuredPatch" in fields) {
@@ -146,6 +162,22 @@ function search(value: unknown, inheritedPath: string | undefined, inInput: bool
     .map((key) => search(fields[key], path, inInput))
     .filter((item): item is FileChange => item !== undefined);
   return merge(found, path);
+}
+
+/** A body reported with nothing it replaced, so every line of it is new. */
+function addedWholeFile(path: string | undefined, body: string): FileChange {
+  return { path, blocks: [collapse(splitLines(body).map((text): DiffLine => ({ kind: "added", text })))] };
+}
+
+/**
+ * The file a change row names when its payload carries no diff to read — a
+ * worker that reports only that it wrote something, and where. The lines stay
+ * unknown; comparing against git is what fills them in.
+ */
+function namedFile(event: TaskEventView): FileChange | undefined {
+  if (event.kind !== "file" || !CHANGE_TITLES.has(event.title.trim().toLowerCase())) return undefined;
+  const path = event.presentation?.path;
+  return path !== undefined && path !== "" ? { path, blocks: [] } : undefined;
 }
 
 function stringValue(fields: Record<string, unknown>, keys: string[]): string | undefined {
@@ -261,7 +293,7 @@ function merge(found: FileChange[], inheritedPath: string | undefined): FileChan
   const blocks: DiffLine[][] = [];
   for (const change of found) {
     for (const block of change.blocks) {
-      if (!blocks.some((existing) => blocksEqual(existing, block))) blocks.push(block);
+      if (!blocks.some((existing) => sameChange(existing, block))) blocks.push(block);
     }
   }
   if (blocks.length === 0) return undefined;
@@ -273,6 +305,21 @@ function merge(found: FileChange[], inheritedPath: string | undefined): FileChan
 
 function blocksEqual(a: DiffLine[], b: DiffLine[]): boolean {
   return a.length === b.length && a.every((line, index) => line.kind === b[index].kind && line.text === b[index].text);
+}
+
+/**
+ * The lines a block actually changed, which is what identifies the edit. A
+ * worker reports one edit several ways — its own diff, the arguments it
+ * passed, the patch its tool returned — each wrapping a different amount of
+ * untouched context, and counting them all says it edited the file twice.
+ */
+function changedLines(block: DiffLine[]): DiffLine[] {
+  const changed = block.filter((line) => line.kind === "added" || line.kind === "removed");
+  return changed.length > 0 ? changed : block;
+}
+
+function sameChange(a: DiffLine[], b: DiffLine[]): boolean {
+  return blocksEqual(changedLines(a), changedLines(b));
 }
 
 function splitLines(value: string): string[] {
@@ -474,7 +521,7 @@ export class RunChangeProjection {
     const raw = event.rawText;
     if (raw === undefined) return;
     if (event.kind === "retry" || (event.kind !== "file" && !fileChangeMayContainEdit(raw))) return;
-    const change = fileChangeFromRaw(raw);
+    const change = fileChangeFromRaw(raw) ?? namedFile(event);
     if (!change) return;
     if (change.path === undefined) {
       this.result.unmatched += 1;
@@ -488,10 +535,13 @@ export class RunChangeProjection {
     for (const block of change.blocks) {
       const key = diffBlockKey(block);
       const known = existing?.blocksByKey.get(key);
-      if (known !== undefined && known.some((existing) => blocksEqual(existing, block))) continue;
+      if (known !== undefined && known.some((existing) => sameChange(existing, block))) continue;
       fresh.push(block);
     }
-    if (fresh.length === 0) return;
+    // A file named without its lines still belongs in the list the first time
+    // it is named; naming it again adds nothing.
+    const firstSightingWithoutLines = existing === undefined && change.blocks.length === 0;
+    if (fresh.length === 0 && !firstSightingWithoutLines) return;
 
     const file = existing ?? createMutableRunFile(path);
     if (existing === undefined) {
@@ -558,8 +608,9 @@ function createMutableRunFile(path: string): MutableRunFile {
 }
 
 function diffBlockKey(block: DiffLine[]): string {
+  const lines = changedLines(block);
   let hash = 2_166_136_261;
-  for (const line of block) {
+  for (const line of lines) {
     hash ^= line.kind.charCodeAt(0);
     hash = Math.imul(hash, 16_777_619);
     for (let index = 0; index < line.text.length; index += 1) {
@@ -567,7 +618,7 @@ function diffBlockKey(block: DiffLine[]): string {
       hash = Math.imul(hash, 16_777_619);
     }
   }
-  return `${block.length}:${hash >>> 0}`;
+  return `${lines.length}:${hash >>> 0}`;
 }
 
 function countBlockLines(block: DiffLine[], kind: DiffKind): number {

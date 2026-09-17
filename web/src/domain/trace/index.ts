@@ -7,16 +7,17 @@ import type { EventKind, TaskEventView } from "@/bridge/types";
 import { fileChangeFromRaw, type FileChange } from "@/domain/changes";
 import {
   ActivityBlock,
-  ActivityGroup,
-  ActivityGroupStatus,
-  ChapterRow,
-  chapterCallCount,
-  chapterDurationMs,
-  groupDurationMs,
-  groupId,
-  groupStartsExpanded,
-  groupStatus,
+  ActivityNode,
+  ActivitySegment,
+  ActivityStatus,
+  ActivitySubagent,
+  ActivityTurn,
+  callDurationMs,
+  nodesCallCount,
+  nodesDurationMs,
   ReasoningPulse,
+  turnDurationMs,
+  type ActivityCall,
   type ActivityComposition,
   type HandoffBoundary,
   type HandoffBriefTier,
@@ -24,7 +25,7 @@ import {
 import { ogaResultText } from "@/domain/oga";
 
 export type TraceStyle = "work" | "message" | "notice";
-export type TraceState = "running" | "needs-input" | "failed" | "done";
+export type TraceState = "running" | "needs-input" | "failed" | "interrupted" | "done";
 
 export interface HandoffPresentation {
   fromId: string;
@@ -412,27 +413,25 @@ export function traceRowIsEmpty(row: TraceRow): boolean {
 
 export const TraceRowBuilder = {
   rows(blocks: ActivityBlock[], cwd: string, live: boolean): TraceRow[] {
+    // One turn needs no heading of its own: the rows are already the run.
+    const nested = blocks.filter((block) => block.type === "turn").length > 1;
     return blocks.flatMap((block, index) => {
-      const rows = blockRows(block, cwd, live)
+      const rows = blockRows(block, cwd, live, nested)
         .map((row) => dropEmpty(row))
         .filter((row): row is TraceRow => row !== undefined);
       if (index > 0 && rows[0]) rows[0] = { ...rows[0], isStepStart: true };
       return rows;
     });
   },
-  chapterRows(row: ChapterRow, cwd: string, live: boolean): TraceRow[] {
-    return chapterRows(row, cwd, live);
+  nodeRows(node: ActivityNode, cwd: string, live: boolean): TraceRow[] {
+    return [nodeRow(node, cwd, live)];
   },
 };
 
-function blockRows(block: ActivityBlock, cwd: string, live: boolean): TraceRow[] {
+function blockRows(block: ActivityBlock, cwd: string, live: boolean, nested: boolean): TraceRow[] {
   switch (block.type) {
-    case "chapter":
-      return chapterBlockRows(block, cwd, live);
-    case "reasoning":
-      return [thinkingRow(block.pulse)];
-    case "signal":
-      return [signalRow(block.event, cwd)];
+    case "turn":
+      return turnRows(block.turn, cwd, live, nested);
     case "receipt":
       return [receiptRow(block.event, block.thinkingTokens, block.usageWindow)];
     case "handoff":
@@ -440,52 +439,128 @@ function blockRows(block: ActivityBlock, cwd: string, live: boolean): TraceRow[]
   }
 }
 
-type ChapterBlock = Extract<ActivityBlock, { type: "chapter" }>;
-
 /**
- * A chapter the worker announced becomes one collapsed heading over the work
- * that followed it. A single call needs no heading of its own: the words the
- * worker said label that one row instead of nesting it.
+ * A run with more than one turn folds each into a collapsed heading over the
+ * work it did, labelled with the worker's own opening words. A run with one
+ * turn has nothing to distinguish, so its rows stand on their own.
  */
-function chapterBlockRows(block: ChapterBlock, cwd: string, live: boolean): TraceRow[] {
-  const rows = block.rows.flatMap((row) => chapterRows(row, cwd, live));
-  const title = block.title;
-  if (title === undefined) return rows;
-  if (rows.length === 0) return [narrationRow(block.id, title)];
-  const single = rows.length === 1 && block.rows[0]?.type === "work" ? rows[0] : undefined;
-  if (single) {
-    return [{ ...single, id: block.id, target: title, preview: single.target ?? single.preview }];
+function turnRows(turn: ActivityTurn, cwd: string, live: boolean, nested: boolean): TraceRow[] {
+  if (!nested) {
+    return turn.segments.flatMap((segment) => segmentRows(segment, cwd, live));
   }
-  return [
-    {
-      ...narrationRow(block.id, title),
-      result: chapterSummary(block.rows),
-      state: chapterState(rows, live),
-      children: rows,
-    },
-  ];
+  // The heading already says what the worker opened with; showing that same
+  // message again underneath it would say it twice.
+  const rows = turn.segments.flatMap((segment) =>
+    segmentRows(segment.lead?.id === turn.titleFrom ? { ...segment, lead: undefined, nodes: segment.nodes.slice(1) } : segment, cwd, live),
+  );
+  const nodes = turn.segments.flatMap((segment) => segment.nodes);
+  return [{
+    ...blankRow(nodes.map(nodeAnchorId).find((id) => id !== undefined) ?? 0),
+    style: "notice",
+    target: turn.title ?? "Work step",
+    result: formatDuration(turnDurationMs(turn)),
+    state: topState(turn.status, live),
+    children: rows,
+  }];
 }
 
-function chapterSummary(rows: ChapterRow[]): string | undefined {
-  const calls = chapterCallCount(rows);
-  const duration = formatDuration(chapterDurationMs(rows));
+/**
+ * A stretch the worker announced becomes one collapsed row over the work that
+ * followed it. A single call needs no heading of its own: the words the worker
+ * said label that one row instead of nesting it.
+ */
+function segmentRows(segment: ActivitySegment, cwd: string, live: boolean): TraceRow[] {
+  const rows = segment.nodes.flatMap((node) => [nodeRow(node, cwd, live)]);
+  if (segment.lead === undefined) return rows;
+  const [head, ...rest] = rows;
+  if (head === undefined || rest.length === 0) return rows;
+  return [{
+    ...head,
+    result: nodesSummary(segment.nodes.slice(1)),
+    state: rowsState(rest, live),
+    children: rest,
+  }];
+}
+
+function nodesSummary(nodes: ActivityNode[]): string | undefined {
+  const calls = nodesCallCount(nodes);
+  const duration = formatDuration(nodesDurationMs(nodes));
   const parts = [calls > 0 ? `${calls} call${calls === 1 ? "" : "s"}` : undefined, duration];
   const summary = parts.filter((part): part is string => part !== undefined).join(" · ");
   return summary !== "" ? summary : undefined;
 }
 
-function chapterState(rows: TraceRow[], live: boolean): TraceState {
+function rowsState(rows: TraceRow[], live: boolean): TraceState {
   if (rows.some((row) => row.state === "needs-input")) return "needs-input";
   if (rows.some((row) => row.state === "failed")) return "failed";
   return live && rows.some((row) => row.state === "running") ? "running" : "done";
 }
 
-function narrationRow(id: number, title: string): TraceRow {
+function nodeRow(node: ActivityNode, cwd: string, live: boolean): TraceRow {
+  switch (node.type) {
+    case "call":
+      return callRow(node.call, cwd, live);
+    case "message":
+      return workRow(node.event, cwd, live);
+    case "notice":
+      return isSignal(node.event) ? signalRow(node.event, cwd) : workRow(node.event, cwd, live);
+    case "thinking":
+      return thinkingRow(node.pulse);
+    case "subagent":
+      return subagentRow(node.subagent, cwd, live);
+  }
+}
+
+function nodeAnchorId(node: ActivityNode): number | undefined {
+  switch (node.type) {
+    case "call":
+      return node.call.event.id;
+    case "message":
+    case "notice":
+      return node.event.id;
+    case "thinking":
+      return node.pulse.id;
+    case "subagent":
+      return node.subagent.start.id;
+  }
+}
+
+function callRow(call: ActivityCall, cwd: string, live: boolean): TraceRow {
+  const row = workRow(call.event, cwd, live);
+  return {
+    ...row,
+    state: callState(call, live),
+    result: row.result ?? formatDuration(callDurationMs(call)),
+    children: call.children.map((child) => callRow(child, cwd, live)),
+  };
+}
+
+function callState(call: ActivityCall, live: boolean): TraceState {
+  if (call.status === "failed") return "failed";
+  if (call.status === "interrupted") return "interrupted";
+  return call.status === "running" && live ? "running" : "done";
+}
+
+function subagentRow(subagent: ActivitySubagent, cwd: string, live: boolean): TraceRow {
+  const children = subagent.nodes
+    .map((node) => dropEmpty(nodeRow(node, cwd, live)))
+    .filter((row): row is TraceRow => row !== undefined);
+  return {
+    ...blankRow(subagent.start.id),
+    style: "notice",
+    target: subagent.label,
+    result: nodesSummary(subagent.nodes),
+    state: topState(subagent.status, live),
+    children,
+  };
+}
+
+function blankRow(id: number): TraceRow {
   return {
     id,
     style: "notice",
     verb: undefined,
-    target: title,
+    target: undefined,
     result: undefined,
     state: "done",
     event: undefined,
@@ -498,16 +573,10 @@ function narrationRow(id: number, title: string): TraceRow {
   };
 }
 
-function chapterRows(row: ChapterRow, cwd: string, live: boolean): TraceRow[] {
-  switch (row.type) {
-    case "work":
-      return [workRow(row.event, cwd, live)];
-    case "reasoning":
-      return [thinkingRow(row.pulse)];
-    case "group":
-      return [groupRow(row.group, cwd, live)];
-  }
+function isSignal(event: TaskEventView): boolean {
+  return event.presentation?.type === "signal" || event.kind === "error" || event.type === "needs_input";
 }
+
 
 export const TraceVisibility = {
   interleavedRows,
@@ -515,16 +584,10 @@ export const TraceVisibility = {
 
 function interleavedRows(composition: ActivityComposition, cwd: string, live: boolean): TraceRow[] {
   const main = TraceRowBuilder.rows(composition.blocks, cwd, live);
-  const technicalBlocks: ActivityBlock[] = composition.technical.map((event) => ({
-    type: "chapter",
-    id: event.id,
-    rows: [{ type: "work", event }],
-  }));
-  const technical = TraceRowBuilder.rows(technicalBlocks, cwd, false).map((row) => ({
-    ...row,
-    isTechnical: true,
-    isStepStart: false,
-  }));
+  const technical = composition.technical
+    .map((event) => dropEmpty(workRow(event, cwd, false)))
+    .filter((row): row is TraceRow => row !== undefined)
+    .map((row) => ({ ...row, isTechnical: true, isStepStart: false }));
   return [...main, ...technical].sort((left, right) => left.id - right.id);
 }
 
@@ -562,75 +625,6 @@ export type ExpansionScope = "row" | "group";
 export interface ExpansionKey {
   scope: ExpansionScope;
   id: number;
-}
-
-function groupRow(group: ActivityGroup, cwd: string, live: boolean): TraceRow {
-  let style: TraceStyle;
-  let verb: string | undefined;
-  let target: string | undefined;
-  let result: string | undefined;
-  let event: TaskEventView | undefined;
-  let expansion: EventExpansion | undefined;
-
-  if (group.kind === "run") {
-    style = "work";
-    // The label is already a sentence — "Read 8 files", "Checked lint, tests".
-    verb = undefined;
-    target = group.runLabel;
-    result = formatDuration(groupDurationMs(group));
-    event = undefined;
-    expansion = undefined;
-  } else if (group.kind === "turn") {
-    style = "notice";
-    verb = undefined;
-    target = group.turnTitle ?? "Work step";
-    result = formatDuration(groupDurationMs(group));
-    event = undefined;
-    expansion = undefined;
-  } else if (group.kind === "subagent") {
-    style = "notice";
-    verb = undefined;
-    target = group.runLabel;
-    result = formatDuration(groupDurationMs(group));
-    event = undefined;
-    expansion = undefined;
-  } else {
-    const row = workRow(group.anchor, cwd, live);
-    style = row.style;
-    verb = row.verb;
-    target = row.target;
-    result = row.result;
-    event = row.event;
-    expansion = row.expansion;
-  }
-
-  const children =
-    group.kind === "lifecycle"
-      ? group.members
-          .filter((member) => member.id !== groupId(group))
-          .map((member) => workRow(member, cwd, live))
-          .map((row) => dropEmpty(row))
-          .filter((row): row is TraceRow => row !== undefined)
-      : group.children
-          .flatMap((row) => chapterRows(row, cwd, live))
-          .map((row) => dropEmpty(row))
-          .filter((row): row is TraceRow => row !== undefined);
-
-  return {
-    id: groupId(group),
-    style,
-    verb,
-    target,
-    result,
-    state: topState(groupStatus(group), live),
-    event,
-    expansion,
-    preview: undefined,
-    children,
-    startsExpanded: groupStartsExpanded(group),
-    isStepStart: false,
-    isTechnical: false,
-  };
 }
 
 function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
@@ -812,10 +806,11 @@ function dropEmpty(row: TraceRow): TraceRow | undefined {
   return traceRowIsEmpty(next) ? undefined : next;
 }
 
-function topState(status: ActivityGroupStatus, live: boolean): TraceState {
+function topState(status: ActivityStatus, live: boolean): TraceState {
   if (status === "running" && live) return "running";
   if (status === "needs_input") return "needs-input";
   if (status === "failed") return "failed";
+  if (status === "interrupted") return "interrupted";
   return "done";
 }
 
