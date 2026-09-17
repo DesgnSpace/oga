@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::router::{HttpError, HttpState};
 
-const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate";
+const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json";
 
 #[derive(Debug, Deserialize, Default)]
 pub struct StateQuery {
@@ -701,6 +701,10 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         tldr: row.get(25)?,
         title: row.get(26)?,
         session_id: row.get(27)?,
+        transport: row
+            .get::<_, Option<String>>(37)?
+            .map(|value| decode_json(&value, 37))
+            .transpose()?,
         completion,
         attempts,
         cost_usd: row.get(30)?,

@@ -177,6 +177,10 @@ pub fn router(state: HttpState) -> Router {
             put(profiles::update).delete(profiles::remove),
         )
         .route(
+            "/api/profiles/{id}/transport",
+            get(profiles::get_transport).put(profiles::put_transport),
+        )
+        .route(
             "/api/memories",
             get(settings::get_memories).put(settings::put_memory),
         )

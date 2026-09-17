@@ -227,7 +227,7 @@ impl ReconcileReport {
 fn interrupted_runs(store: &Store) -> Result<Vec<InterruptedRun>, StoreError> {
     let rows: Vec<(String, Option<String>, bool)> = store.with_connection(|connection| {
         let mut statement = connection.prepare(
-            "SELECT id,worker_json,session_id FROM tasks WHERE state IN ('queued','running')",
+            "SELECT id,worker_json,COALESCE(json_extract(transport_json,'$.acpSessionId'),session_id) FROM tasks WHERE state IN ('queued','running')",
         )?;
         Ok(statement
             .query_map([], |row| {

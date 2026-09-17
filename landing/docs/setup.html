@@ -102,6 +102,16 @@
         </ul>
         <p>Each worker can use its own sign-in. Add environment values in the worker settings when a provider needs them.</p>
 
+        <h3 id="connection">How Oga talks to a worker<a class="heading-anchor" href="#connection" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <p>Oga talks to a worker's tool over the Agent Client Protocol (ACP) when it can run that tool this way, and through the tool's own command line otherwise. Either way the work runs on the same account, with the same limits on what it may touch.</p>
+        <ul>
+          <li>A task keeps the connection it started on, so resuming it picks up the same conversation.</li>
+          <li>If ACP can't start before the task begins, Oga runs it through the command line instead and notes why. A worker set to use only ACP stops the task and says why.</li>
+          <li>A sign-in problem is never worked around: the task stops so you can sign in again.</li>
+          <li>If a worker stops partway through, Oga never starts the work over on its own. Resume the task when you're ready.</li>
+          <li>Tasks from before ACP keep running through the command line.</li>
+        </ul>
+
         <h2 id="default-model">Choose who gets work that names nobody<a class="heading-anchor" href="#default-model" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Settings controls which workers and models can receive work. A model has to be turned on before Oga can select it.</p>
         <p><code>oga love</code> pins the worker and model that runs work nobody named an account for. Set it once, and every piece of work that leaves worker and model blank lands there instead of wherever Oga would otherwise guess.</p>

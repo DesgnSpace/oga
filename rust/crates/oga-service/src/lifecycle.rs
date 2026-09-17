@@ -8,18 +8,21 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::acp_run::{self, AcpEnd, AcpRun, AcpTurn};
 use crate::authorization;
 use crate::dependencies;
 use crate::prompt::{
     WorkerOutcome, WorkerPromptInput, assemble_worker_prompt, interpret_worker_outcome,
 };
+use crate::transport::{self, TransportPlan};
 use oga_domain::{
     CompletionCode, FailureCode, HoldArgs, HoldViewKind, Profile, ProfileFailure, ProfileSuccess,
     Provider, Task, TaskAttempt, TaskCompletion, TaskHoldView, TaskKind, TaskScope, TaskState,
-    TaskWorker, TaskWorktree,
+    TaskTransport, TaskWorker, TaskWorktree,
 };
 use oga_providers::{
-    CommandOptions, OgaServer, ParsedEvent, Usage, final_text, resume_command_for_with_options,
+    AcpAdapters, CommandOptions, OgaServer, ParsedEvent, Usage, final_text,
+    resume_command_for_with_options,
 };
 use oga_runner::{ProviderRunner, RunRequest, RunResult, RunnerError, RunningProcess, Termination};
 use oga_store::{Store, StoreError};
@@ -64,25 +67,57 @@ pub struct RunOutcome {
 /// Live provider processes owned by this broker instance.
 #[derive(Clone, Default)]
 pub struct ActiveRuns {
-    processes: Arc<Mutex<HashMap<String, Arc<RunningProcess>>>>,
+    processes: Arc<Mutex<HashMap<String, ActiveRun>>>,
     starting: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+/// One live run, whichever transport it is on.
+#[derive(Clone)]
+pub(crate) enum ActiveRun {
+    Cli(Arc<RunningProcess>),
+    Acp(Arc<AcpRun>),
+}
+
+impl ActiveRun {
+    pub(crate) async fn cancel(&self) {
+        match self {
+            Self::Cli(process) => process.cancel().await,
+            Self::Acp(run) => run.cancel(),
+        }
+    }
+
+    pub(crate) fn cancel_now(&self) {
+        match self {
+            Self::Cli(process) => process.cancel_now(),
+            Self::Acp(run) => run.cancel(),
+        }
+    }
+
+    fn same_as(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Cli(left), Self::Cli(right)) => Arc::ptr_eq(left, right),
+            (Self::Acp(left), Self::Acp(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Default)]
 pub(crate) struct RunOptions {
     pub(crate) session_id: Option<String>,
     pub(crate) active: ActiveRuns,
+    pub(crate) acp: AcpAdapters,
 }
 
 impl ActiveRuns {
-    pub(crate) fn insert(&self, task_id: &str, process: Arc<RunningProcess>) {
+    pub(crate) fn insert(&self, task_id: &str, process: ActiveRun) {
         self.processes
             .lock()
             .expect("active run map is not poisoned")
             .insert(task_id.to_owned(), process);
     }
 
-    pub(crate) fn get(&self, task_id: &str) -> Option<Arc<RunningProcess>> {
+    pub(crate) fn get(&self, task_id: &str) -> Option<ActiveRun> {
         self.processes
             .lock()
             .expect("active run map is not poisoned")
@@ -119,14 +154,14 @@ impl ActiveRuns {
             .contains_key(task_id)
     }
 
-    pub(crate) fn remove(&self, task_id: &str, process: &Arc<RunningProcess>) {
+    pub(crate) fn remove(&self, task_id: &str, process: &ActiveRun) {
         let mut processes = self
             .processes
             .lock()
             .expect("active run map is not poisoned");
         if processes
             .get(task_id)
-            .is_some_and(|current| Arc::ptr_eq(current, process))
+            .is_some_and(|current| current.same_as(process))
         {
             processes.remove(task_id);
         }
@@ -143,7 +178,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
     store.with_connection(|connection| {
         let mut task = connection
             .query_row(
-                "SELECT id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,attachments_json,can_delegate FROM tasks WHERE id=?",
+                "SELECT id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,attachments_json,can_delegate,transport_json FROM tasks WHERE id=?",
                 [task_id],
                 task_from_row,
             )
@@ -249,6 +284,10 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         tldr: row.get(25)?,
         title: row.get(26)?,
         session_id: row.get(27)?,
+        transport: row
+            .get::<_, Option<String>>(38)?
+            .map(|value| decode_json(&value, 38))
+            .transpose()?,
         completion,
         attempts,
         cost_usd: row.get(30)?,
@@ -322,6 +361,7 @@ pub(crate) async fn run_task_and_release_with_active(
     let RunOptions {
         mut session_id,
         active,
+        acp,
     } = options;
     let mut pending = vec![(task, profile, prompt)];
     let mut last = None;
@@ -335,6 +375,7 @@ pub(crate) async fn run_task_and_release_with_active(
             RunOptions {
                 session_id: session_id.take(),
                 active: active.clone(),
+                acp: acp.clone(),
             },
         )
         .await?;
@@ -402,6 +443,52 @@ pub(crate) async fn run_task_with_session_and_active(
     } else {
         assemble_worker_prompt(&prompt)
     };
+    let preference = transport::transport_preference(&store, &profile.id)?;
+    let plan = transport::plan(
+        &task,
+        &profile,
+        preference,
+        &options.acp,
+        options.session_id.as_deref(),
+        &now_iso(),
+    );
+    let (claimed_turn, cli_decision) = match plan {
+        TransportPlan::Cli { decision } => (
+            None,
+            decision.map(|decision| (decision, "transport_chosen")),
+        ),
+        TransportPlan::Refuse { reason } => {
+            return refuse_run(&store, task, &shipped_prompt, reason);
+        }
+        TransportPlan::Acp {
+            adapter,
+            start,
+            may_fall_back,
+        } => {
+            let turn_id = claim_task(&store, &task.id, &shipped_prompt)?;
+            task.state = TaskState::Running;
+            task.shipped_prompt = Some(shipped_prompt.clone());
+            let ended = acp_run::run(AcpTurn {
+                store: &store,
+                runner: &runner,
+                task: &task,
+                profile: &profile,
+                adapter: &adapter,
+                start,
+                may_fall_back,
+                prompt: &shipped_prompt,
+                turn_id,
+                active: &options.active,
+            })
+            .await?;
+            match ended {
+                AcpEnd::Settled(outcome) => return Ok(*outcome),
+                AcpEnd::FallBack(decision) => {
+                    (Some(turn_id), Some((decision, "transport_fallback")))
+                }
+            }
+        }
+    };
     let hook_url = hook_url_for(&task.id);
     let base_url = broker_base_url();
     let command_options = CommandOptions {
@@ -431,9 +518,15 @@ pub(crate) async fn run_task_with_session_and_active(
             command_options,
         )
     };
-    let turn_id = claim_task(&store, &task.id, &shipped_prompt)?;
+    let turn_id = match claimed_turn {
+        Some(turn_id) => turn_id,
+        None => claim_task(&store, &task.id, &shipped_prompt)?,
+    };
     task.state = TaskState::Running;
     task.shipped_prompt = Some(shipped_prompt.clone());
+    if let Some((decision, event)) = &cli_decision {
+        record_cli_transport(&store, &task.id, turn_id, decision, event)?;
+    }
     let mut session_id = options.session_id.clone();
     let mut retries = 0;
     let mut accumulated_usage = Usage::default();
@@ -518,7 +611,8 @@ pub(crate) async fn run_task_with_session_and_active(
             process.cancel().await;
             return Err(error.into());
         }
-        options.active.insert(&task.id, process.clone());
+        let active = ActiveRun::Cli(process.clone());
+        options.active.insert(&task.id, active.clone());
         if load_task(&store, &task.id)?.is_none_or(|current| current.state != TaskState::Running) {
             process.cancel().await;
         }
@@ -535,7 +629,7 @@ pub(crate) async fn run_task_with_session_and_active(
         } else {
             Ok((process.wait().await, LiveEventCapture::default()))
         };
-        options.active.remove(&task.id, &process);
+        options.active.remove(&task.id, &active);
         let (run, live_events) = process_result?;
         let mut run = match run {
             Ok(run) => run,
@@ -591,6 +685,64 @@ pub(crate) async fn run_task_with_session_and_active(
             worker,
         });
     }
+}
+
+/// Settles a run that has no transport it may use, so the reason is on the
+/// task rather than in a log.
+fn refuse_run(
+    store: &Store,
+    mut task: Task,
+    shipped_prompt: &str,
+    reason: String,
+) -> Result<RunOutcome, LifecycleError> {
+    let turn_id = claim_task(store, &task.id, shipped_prompt)?;
+    task.state = TaskState::Running;
+    let worker = WorkerOutcome {
+        state: TaskState::Failed,
+        output: String::new(),
+        question: None,
+        error: Some(reason.clone()),
+        completion: completion(None, true, CompletionCode::WorkerError, Some(reason)),
+    };
+    let settled = settle_task(store, &task, turn_id, None, None, &worker, None)?;
+    Ok(RunOutcome {
+        task: settled,
+        worker,
+    })
+}
+
+/// Writes the command-line decision before the command runs, so a broker that
+/// stops mid-run still finds the task on the transport its session belongs to.
+fn record_cli_transport(
+    store: &Store,
+    task_id: &str,
+    turn_id: i64,
+    decision: &TaskTransport,
+    event: &str,
+) -> Result<(), LifecycleError> {
+    let now = now_iso();
+    let transport_json = encode(decision)?;
+    store.transaction(|tx| {
+        tx.execute(
+            "UPDATE tasks SET transport_json=? WHERE id=?",
+            params![transport_json, task_id],
+        )?;
+        append_event_tx(
+            tx,
+            task_id,
+            event,
+            TaskState::Running,
+            json!({
+                "transport": decision.kind,
+                "reason": decision.reason,
+                "detail": decision.detail,
+            }),
+            &now,
+            Some(turn_id),
+        )?;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 fn interpret_run(profile: &Profile, run: &RunResult, retries: usize) -> WorkerOutcome {
@@ -657,7 +809,7 @@ fn failed_worker(error: &RunnerError) -> WorkerOutcome {
 }
 
 #[derive(Default)]
-struct LiveEventCapture {
+pub(crate) struct LiveEventCapture {
     persisted_provider_events: usize,
     session_event_written: bool,
 }
@@ -800,7 +952,7 @@ fn relative_codex_path(cwd: &Path, raw: &str) -> Option<String> {
         .then(|| relative.to_owned())
 }
 
-fn settle_task(
+pub(crate) fn settle_task(
     store: &Store,
     task: &Task,
     turn_id: i64,
@@ -1185,7 +1337,7 @@ fn event_kind(event: &ParsedEvent) -> &str {
         .unwrap_or("event")
 }
 
-fn record_profile_outcome(
+pub(crate) fn record_profile_outcome(
     store: &Store,
     task: &Task,
     worker: &WorkerOutcome,
@@ -1583,7 +1735,7 @@ fn claim_task(store: &Store, task_id: &str, shipped_prompt: &str) -> Result<i64,
         .map_err(LifecycleError::from)
 }
 
-fn completion(
+pub(crate) fn completion(
     exit_code: Option<i32>,
     blocked: bool,
     code: CompletionCode,
@@ -1623,12 +1775,12 @@ fn event_type(state: TaskState) -> &'static str {
     }
 }
 
-fn encode<T: Serialize>(value: &T) -> Result<String, StoreError> {
+pub(crate) fn encode<T: Serialize>(value: &T) -> Result<String, StoreError> {
     serde_json::to_string(value)
         .map_err(|error| StoreError::Refusal(format!("invalid lifecycle JSON: {error}")))
 }
 
-fn append_event_tx(
+pub(crate) fn append_event_tx(
     tx: &rusqlite::Transaction<'_>,
     task_id: &str,
     kind: &str,
@@ -1690,7 +1842,7 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
-fn broker_base_url() -> String {
+pub(crate) fn broker_base_url() -> String {
     let port = std::env::var("OGA_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -1706,7 +1858,7 @@ fn hook_url_for(task_id: &str) -> String {
 /// relearn` read the task id to scope themselves, and a provider that
 /// stats `PWD` rather than calling `getcwd` probes whatever directory the
 /// broker was launched from unless it is told otherwise.
-fn worker_env(task_id: &str, cwd: &str) -> BTreeMap<String, String> {
+pub(crate) fn worker_env(task_id: &str, cwd: &str) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("OGA_TASK_ID".to_owned(), task_id.to_owned()),
         ("OGA_HOOK_URL".to_owned(), hook_url_for(task_id)),

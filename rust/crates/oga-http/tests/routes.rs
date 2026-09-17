@@ -1895,3 +1895,55 @@ async fn plain_language_lookup_in_an_unindexed_directory_says_so() {
         "unexpected error: {body}"
     );
 }
+
+#[tokio::test]
+async fn transport_preference_routes_report_what_a_new_session_would_use() {
+    let fixture = Fixture::new();
+
+    let (status, current) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/profiles/profile/transport",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        current,
+        json!({
+            "preference": "auto",
+            "transport": "cli",
+            "adapter": null,
+            "reason": "no_adapter",
+        })
+    );
+
+    let (status, required) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/profiles/profile/transport",
+            Body::from(json!({"preference": "acp"}).to_string()),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(required["preference"], "acp");
+    assert_eq!(required["transport"], Value::Null);
+
+    let (status, _) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/profiles/missing/transport",
+            Body::from(json!({"preference": "cli"}).to_string()),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

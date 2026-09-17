@@ -83,6 +83,123 @@ impl TaskState {
     }
 }
 
+/// How Oga talks to a provider: an ACP conversation over stdio, or the
+/// provider's own command line read to exit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport {
+    Acp,
+    Cli,
+}
+
+impl Transport {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Transport::Acp => "acp",
+            Transport::Cli => "cli",
+        }
+    }
+}
+
+/// Which transport a profile asks for. `auto` uses ACP where this provider has
+/// an adapter that starts, and the command line otherwise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportPreference {
+    #[default]
+    Auto,
+    Acp,
+    Cli,
+}
+
+impl TransportPreference {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TransportPreference::Auto => "auto",
+            TransportPreference::Acp => "acp",
+            TransportPreference::Cli => "cli",
+        }
+    }
+}
+
+/// Why a task runs on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportReason {
+    /// The task existed before Oga could run ACP, so its sessions are CLI ones.
+    Legacy,
+    /// The profile replaces the provider's argv, which ACP cannot honour.
+    CustomCommand,
+    /// The profile asks for the command line.
+    Preference,
+    /// No ACP adapter is registered for this provider.
+    NoAdapter,
+    /// The adapter could not be started or spoke an incompatible protocol, and
+    /// no prompt had been sent.
+    Unavailable,
+}
+
+/// The ACP agent that answered a task's session, as it described itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpAgentIdentity {
+    /// The Oga adapter registration that launched it.
+    pub adapter: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub protocol_version: u16,
+}
+
+/// How a session is picked back up on the agent that holds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpRestore {
+    /// `session/resume`: no history replayed.
+    Resume,
+    /// `session/load`: history replayed as notifications, then the turn.
+    Load,
+}
+
+/// The transport a task's runs use, decided when a run first opens a session
+/// and kept from then on. A command-line decision is never revisited, so a
+/// fallback cannot flip a task back and forth between transports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTransport {
+    pub kind: Transport,
+    /// Present on a command-line task: why it is not on ACP.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<TransportReason>,
+    /// What ACP reported when it could not be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// The agent's own conversation id. Never the provider session id, which
+    /// stays in `Task::session_id` for resuming in a terminal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acp_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore: Option<AcpRestore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AcpAgentIdentity>,
+    pub decided_at: String,
+}
+
+impl TaskTransport {
+    pub fn cli(reason: TransportReason, detail: Option<String>, decided_at: &str) -> Self {
+        Self {
+            kind: Transport::Cli,
+            reason: Some(reason),
+            detail,
+            acp_session_id: None,
+            restore: None,
+            agent: None,
+            decided_at: decided_at.to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskKind {
@@ -397,8 +514,12 @@ pub struct Task {
     /// Short label, what a sidebar reads at a glance.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The provider's own session id, the one its command line resumes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Absent until a run decides it; older tasks read as the command line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport: Option<TaskTransport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion: Option<TaskCompletion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -434,6 +555,17 @@ impl Task {
         self.branch
             .as_deref()
             .or_else(|| self.worktree.as_ref().map(|w| w.branch.as_str()))
+    }
+
+    /// The session a continuation reopens: the ACP conversation on an ACP
+    /// task, the provider session otherwise.
+    pub fn continuable_session(&self) -> Option<&str> {
+        match &self.transport {
+            Some(transport) if transport.kind == Transport::Acp => {
+                transport.acp_session_id.as_deref()
+            }
+            _ => self.session_id.as_deref(),
+        }
     }
 }
 

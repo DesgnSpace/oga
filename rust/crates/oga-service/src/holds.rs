@@ -764,6 +764,7 @@ pub(crate) mod tests {
             tldr: None,
             title: None,
             session_id: None,
+            transport: None,
             completion: None,
             attempts: vec![],
             cost_usd: None,

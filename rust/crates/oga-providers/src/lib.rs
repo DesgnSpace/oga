@@ -9,6 +9,10 @@ use oga_domain::{Profile, Provider};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod acp;
+
+pub use acp::{AcpAdapter, AcpAdapters, AcpLaunch};
+
 pub const NO_FINAL_MESSAGE: &str =
     "(no final message: the provider stream carried no assistant text)";
 const WRITE_TOOLS: &[&str] = &[

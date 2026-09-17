@@ -295,11 +295,12 @@ impl Tasks<'_> {
         let scope = encode(&task.scope)?;
         let completion = task.completion.as_ref().map(encode).transpose()?;
         let attempts = encode(&task.attempts)?;
-        self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,bool_value(task.allow_questions),task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at,bool_value(task.can_delegate)])?; Ok(()) })
+        let transport = task.transport.as_ref().map(encode).transpose()?;
+        self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,bool_value(task.allow_questions),task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at,bool_value(task.can_delegate),transport])?; Ok(()) })
     }
     pub fn get(&self, id: &str) -> Result<Option<Task>, StoreError> {
         self.store.with_connection(|c| {
-            let mut task = c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate FROM tasks WHERE id=?", [id], task_from_row).optional()?;
+            let mut task = c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json FROM tasks WHERE id=?", [id], task_from_row).optional()?;
             if let Some(task) = &mut task {
                 attach_task_timing(c, task)?;
             }
@@ -466,6 +467,11 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
         tldr: None,
         title: None,
         session_id: r.get(17)?,
+        transport: r
+            .get::<_, Option<String>>(28)?
+            .map(|v| decode(&v))
+            .transpose()
+            .map_err(store_row_error)?,
         completion,
         attempts,
         cost_usd: r.get(21)?,

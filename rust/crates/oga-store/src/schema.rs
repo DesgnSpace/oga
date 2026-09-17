@@ -73,6 +73,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "per-checkout index",
         run: migrate_v47_to_v48,
     },
+    Migration {
+        version: 49,
+        name: "task transport",
+        run: migrate_v48_to_v49,
+    },
 ];
 
 /// The schema this binary can read.
@@ -187,7 +192,8 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
        attachments_json TEXT CHECK(attachments_json IS NULL OR json_valid(attachments_json)),
        checkout_state TEXT CHECK(checkout_state IS NULL OR checkout_state IN (
         'queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'
-       ))
+       )),
+       transport_json TEXT CHECK(transport_json IS NULL OR json_valid(transport_json))
     );
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
@@ -746,6 +752,28 @@ pub fn migrate_v47_to_v48(conn: &Connection) -> Result<(), StoreError> {
         {ctime}
         {missing}
         INSERT INTO schema_migrations(version, name) VALUES (48, 'per-checkout index');
+        COMMIT;"#
+    ))?;
+    Ok(())
+}
+
+/// Records how each task reaches its provider.
+///
+/// Every task already on disk ran, or will run, through the provider's command
+/// line, and its sessions belong to that command line. Marking them legacy is
+/// what keeps them there once ACP becomes the default for new work.
+pub fn migrate_v48_to_v49(conn: &Connection) -> Result<(), StoreError> {
+    let column = if has_column(conn, "tasks", "transport_json")? {
+        ""
+    } else {
+        "ALTER TABLE tasks ADD COLUMN transport_json TEXT;"
+    };
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        {column}
+        UPDATE tasks SET transport_json=json_object('kind','cli','reason','legacy','decidedAt',strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+          WHERE transport_json IS NULL;
+        INSERT INTO schema_migrations(version, name) VALUES (49, 'task transport');
         COMMIT;"#
     ))?;
     Ok(())

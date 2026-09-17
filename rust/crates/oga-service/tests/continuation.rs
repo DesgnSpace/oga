@@ -68,6 +68,7 @@ fn task(id: &str, cwd: &str, state: TaskState) -> Task {
         tldr: None,
         title: None,
         session_id: None,
+        transport: None,
         completion: (state == TaskState::Failed || state == TaskState::Blocked).then(|| {
             TaskCompletion {
                 exit_code: None,
