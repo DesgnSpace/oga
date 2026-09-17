@@ -45,11 +45,35 @@ pub struct AcpSetting {
 }
 
 /// The released agent an adapter was verified against: the name it reports
-/// and the `major.minor` line whose patch releases Oga accepts.
+/// and the versions of it Oga accepts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpRelease {
     pub agent: String,
-    pub line: String,
+    pub versions: AcpVersions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcpVersions {
+    /// The patch releases of one `major.minor` line.
+    Line(String),
+    /// One build and no other.
+    Build(String),
+}
+
+impl AcpRelease {
+    pub fn line(agent: impl Into<String>, line: impl Into<String>) -> Self {
+        Self {
+            agent: agent.into(),
+            versions: AcpVersions::Line(line.into()),
+        }
+    }
+
+    pub fn build(agent: impl Into<String>, build: impl Into<String>) -> Self {
+        Self {
+            agent: agent.into(),
+            versions: AcpVersions::Build(build.into()),
+        }
+    }
 }
 
 /// How Oga starts one provider's ACP agent.
@@ -106,11 +130,8 @@ impl AcpAdapter {
         }
     }
 
-    pub fn release(mut self, agent: impl Into<String>, line: impl Into<String>) -> Self {
-        self.release = Some(AcpRelease {
-            agent: agent.into(),
-            line: line.into(),
-        });
+    pub fn release(mut self, release: AcpRelease) -> Self {
+        self.release = Some(release);
         self
     }
 
@@ -204,6 +225,7 @@ impl AcpAdapters {
             .register(Provider::Claude, claude())
             .register(Provider::Codex, codex())
             .register(Provider::OpenCode, opencode())
+            .register(Provider::OpenCode2, opencode2())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -297,7 +319,7 @@ fn claude() -> AcpAdapter {
 fn codex() -> AcpAdapter {
     const AGENT: &str = "@agentclientprotocol/codex-acp";
     AcpAdapter::new("codex-acp", |_| vec!["codex-acp".to_owned()])
-        .release(AGENT, "1.12")
+        .release(AcpRelease::line(AGENT, "1.12"))
         .oga_tools(true)
         .native_sessions_from(AGENT)
         .incompatibility(|launch| {
@@ -373,6 +395,42 @@ fn opencode() -> AcpAdapter {
     })
 }
 
+/// OpenCode 2's own `opencode2 acp` server, verified against build
+/// `0.0.0-beta-18999`. OpenCode 2 is published only as numbered builds that
+/// promise nothing between them, so Oga accepts that build alone and turns any
+/// other away before a session opens.
+///
+/// It starts a private OpenCode server with the profile's own environment
+/// rather than joining the shared background service, and loads the
+/// configuration, instructions, skills, and MCP servers of the directory the
+/// session opens in. The session it opens is the OpenCode session itself, so
+/// its id is the one `opencode2 --session` continues. Its command line runs
+/// without Oga's tools, and so does this.
+///
+/// `--model` takes `provider/model#effort`; here the model and the effort are
+/// separate session settings, `model` taking the `provider/model` part and
+/// `effort` the variant after `#`. A run that names no effort leaves the
+/// variant to OpenCode, as `--model` without one does.
+fn opencode2() -> AcpAdapter {
+    AcpAdapter::new("opencode2-acp", |_| {
+        ["opencode2", "acp"].map(str::to_owned).to_vec()
+    })
+    .release(AcpRelease::build("OpenCode", "0.0.0-beta-18999"))
+    .native_sessions_from("OpenCode")
+    .settings(|launch| {
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+        let mut settings = vec![setting("model", launch.model)];
+        if let Some(effort) = launch.effort {
+            settings.push(setting("effort", effort));
+        }
+        settings
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -395,10 +453,15 @@ mod tests {
     #[test]
     fn no_provider_claims_an_adapter_it_does_not_ship() {
         let adapters = AcpAdapters::builtin();
-        for provider in [Provider::Claude, Provider::Codex, Provider::OpenCode] {
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::OpenCode,
+            Provider::OpenCode2,
+        ] {
             assert!(adapters.get(provider).is_some(), "{provider:?}");
         }
-        for provider in [Provider::OpenCode2, Provider::Antigravity, Provider::Pi] {
+        for provider in [Provider::Antigravity, Provider::Pi] {
             assert!(adapters.get(provider).is_none(), "{provider:?}");
         }
     }
@@ -524,10 +587,7 @@ mod tests {
         );
         assert_eq!(
             adapter.release,
-            Some(AcpRelease {
-                agent: "@agentclientprotocol/codex-acp".into(),
-                line: "1.12".into(),
-            })
+            Some(AcpRelease::line("@agentclientprotocol/codex-acp", "1.12"))
         );
         assert_eq!(adapter.incompatibility_for(&launch), None);
     }
@@ -669,6 +729,93 @@ mod tests {
                 setting("model", "opencode/big-pickle", true),
                 setting("effort", "default", false),
             ]
+        );
+    }
+
+    #[test]
+    fn opencode2_starts_its_own_acp_server_in_the_profiles_account() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::OpenCode2)
+            .expect("opencode2 adapter");
+        let profile = profile(
+            Provider::OpenCode2,
+            BTreeMap::from([("XDG_DATA_HOME".into(), "~/.opencode2-work/data".into())]),
+        );
+        let launch = AcpLaunch {
+            profile: &profile,
+            model: "opencode/x-preview-f-free",
+            effort: Some("high"),
+            cwd: "/repo",
+        };
+
+        let command = adapter.command(&launch);
+        let cli = crate::command_for(
+            &profile,
+            "",
+            "/repo",
+            Some(launch.model),
+            Some("high"),
+            None,
+        );
+
+        assert_eq!(
+            command.argv,
+            ["opencode2", "acp"],
+            "the session names its directory, so the server takes no --cwd"
+        );
+        assert_eq!(
+            (&command.env, &command.env_remove),
+            (&cli.env, &cli.env_remove)
+        );
+        assert_eq!(
+            command.env.get("XDG_DATA_HOME"),
+            Some(&format!("{}/.opencode2-work/data", crate::home()))
+        );
+        assert_eq!(
+            adapter.release,
+            Some(AcpRelease::build("OpenCode", "0.0.0-beta-18999")),
+            "OpenCode 1 reports the same name, so only the verified build opens a session"
+        );
+        assert_eq!(adapter.native_sessions_from.as_deref(), Some("OpenCode"));
+        assert!(
+            !adapter.oga_tools,
+            "the command line gives OpenCode 2 no Oga tools either"
+        );
+        assert_eq!(adapter.directories_for(&launch), Vec::<PathBuf>::new());
+        assert_eq!(adapter.incompatibility_for(&launch), None);
+    }
+
+    #[test]
+    fn opencode2_selects_the_model_and_effort_its_command_line_joins_with_a_hash() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::OpenCode2)
+            .expect("opencode2 adapter");
+        let profile = profile(Provider::OpenCode2, BTreeMap::new());
+        let launch = |effort| AcpLaunch {
+            profile: &profile,
+            model: "anthropic/claude-sonnet-4",
+            effort,
+            cwd: "/repo",
+        };
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+
+        assert_eq!(
+            adapter.settings_for(&launch(Some("max"))),
+            [
+                setting("model", "anthropic/claude-sonnet-4"),
+                setting("effort", "max"),
+            ]
+        );
+        assert_eq!(
+            adapter.settings_for(&launch(None)),
+            [setting("model", "anthropic/claude-sonnet-4")],
+            "a run with no effort leaves the variant to OpenCode, as --model without # does"
         );
     }
 

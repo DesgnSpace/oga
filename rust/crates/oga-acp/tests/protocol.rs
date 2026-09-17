@@ -358,15 +358,15 @@ async fn open_release(release: AgentRelease, cwd: &Path) -> Result<AcpSession, A
 #[tokio::test]
 async fn only_the_release_a_launch_was_verified_against_opens_a_session() {
     let temp = TempDir::new().expect("temporary directory");
-    let session = open_release(AgentRelease::new("fake-agent", "1.0"), temp.path())
+    let session = open_release(AgentRelease::line("fake-agent", "1.0"), temp.path())
         .await
         .expect("a patch release of the verified line");
     session.shutdown().await;
 
     for release in [
-        AgentRelease::new("fake-agent", "1.1"),
-        AgentRelease::new("fake-agent", "1"),
-        AgentRelease::new("another-agent", "1.0"),
+        AgentRelease::line("fake-agent", "1.1"),
+        AgentRelease::line("fake-agent", "1"),
+        AgentRelease::line("another-agent", "1.0"),
     ] {
         let error = open_release(release, temp.path())
             .await

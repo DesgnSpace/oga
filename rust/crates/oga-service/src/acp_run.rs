@@ -28,7 +28,7 @@ use oga_domain::{
     AcpAgentIdentity, AcpRestore, CompletionCode, Profile, Task, TaskScope, TaskState,
     TaskTransport, TaskWorker, Transport, TransportReason,
 };
-use oga_providers::{AcpAdapter, AcpLaunch, NO_FINAL_MESSAGE, Usage};
+use oga_providers::{AcpAdapter, AcpLaunch, AcpVersions, NO_FINAL_MESSAGE, Usage};
 use oga_runner::{ProviderRunner, RunRequest, Termination};
 use oga_store::{Store, StoreError};
 use rusqlite::params;
@@ -149,7 +149,10 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         .settings(settings)
         .additional_directories(adapter.directories_for(&acp_launch));
     if let Some(release) = &adapter.release {
-        launch = launch.release(AgentRelease::new(&release.agent, &release.line));
+        launch = launch.release(match &release.versions {
+            AcpVersions::Line(line) => AgentRelease::line(&release.agent, line),
+            AcpVersions::Build(build) => AgentRelease::build(&release.agent, build),
+        });
     }
     if adapter.oga_tools {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);

@@ -11,6 +11,10 @@
 //! how its turns go, or `no-model` for an agent that does not offer the
 //! model a test asks for.
 //!
+//! A mode starting `opencode2` answers the way `opencode2 acp` build
+//! `0.0.0-beta-18999` does: as OpenCode does, under that version. `next` is a
+//! build Oga was not verified against.
+//!
 //! A mode starting `claude` answers the way `claude-agent-acp` does: it reports
 //! itself as that adapter, names its session the way Claude Code names one, and
 //! offers the effort as a session setting. `no-effort` is the adapter on a model
@@ -368,13 +372,17 @@ fn main() {
         (_, _, true) if !renamed => "@agentclientprotocol/codex-acp",
         _ => "fake-acp-agent",
     };
-    let version = match (codex, mode.ends_with("next")) {
-        (true, true) => "1.13.0",
-        (true, false) => "1.12.0",
+    let opencode2 = mode.starts_with("opencode2");
+    let version = match (codex, opencode2, mode.ends_with("next")) {
+        (true, _, true) => "1.13.0",
+        (true, _, false) => "1.12.0",
+        (_, true, true) => "0.0.0-beta-19000",
+        (_, true, false) => "0.0.0-beta-18999",
         _ => "2.1.0",
     };
     let turns = mode
-        .strip_prefix("opencode-")
+        .strip_prefix("opencode2-")
+        .or_else(|| mode.strip_prefix("opencode-"))
         .or_else(|| mode.strip_prefix("claude-"))
         .or_else(|| mode.strip_prefix("codex-"))
         .unwrap_or(&mode)

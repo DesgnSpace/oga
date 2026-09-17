@@ -96,31 +96,61 @@ pub struct Launch {
     pub release: Option<AgentRelease>,
 }
 
-/// A released agent, by the name it reports and the `major.minor` line whose
-/// patch releases share the behaviour a caller relies on.
+/// A released agent, by the name it reports and the versions of it that share
+/// the behaviour a caller relies on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRelease {
     pub name: String,
-    pub line: String,
+    pub versions: AgentVersions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentVersions {
+    /// The patch releases of one `major.minor` line.
+    Line(String),
+    /// One build and no other, for an agent published only as numbered
+    /// builds that promise nothing between them.
+    Build(String),
+}
+
+impl std::fmt::Display for AgentVersions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Line(line) => write!(formatter, "{line}.x"),
+            Self::Build(build) => formatter.write_str(build),
+        }
+    }
 }
 
 impl AgentRelease {
-    pub fn new(name: impl Into<String>, line: impl Into<String>) -> Self {
+    pub fn line(name: impl Into<String>, line: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            line: line.into(),
+            versions: AgentVersions::Line(line.into()),
         }
     }
 
-    /// Whether the agent is a patch release of this line. A pre-release
-    /// carries a suffix after its patch number, so it is never one.
+    pub fn build(name: impl Into<String>, build: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            versions: AgentVersions::Build(build.into()),
+        }
+    }
+
+    /// Whether the agent is one of these versions. A pre-release carries a
+    /// suffix after its patch number, so it is never part of a line.
     fn admits(&self, agent: &Implementation) -> bool {
         agent.name == self.name
-            && agent
-                .version
-                .strip_prefix(self.line.as_str())
-                .and_then(|rest| rest.strip_prefix('.'))
-                .is_some_and(|patch| !patch.is_empty() && patch.bytes().all(|b| b.is_ascii_digit()))
+            && match &self.versions {
+                AgentVersions::Line(line) => agent
+                    .version
+                    .strip_prefix(line.as_str())
+                    .and_then(|rest| rest.strip_prefix('.'))
+                    .is_some_and(|patch| {
+                        !patch.is_empty() && patch.bytes().all(|b| b.is_ascii_digit())
+                    }),
+                AgentVersions::Build(build) => agent.version == *build,
+            }
     }
 }
 
@@ -428,8 +458,8 @@ async fn handshake(
         return Err(AcpError::unavailable(
             Stage::Initialize,
             format!(
-                "Oga works with {} {}.x, not {answered}",
-                release.name, release.line
+                "Oga works with {} {}, not {answered}",
+                release.name, release.versions
             ),
         ));
     }
@@ -732,8 +762,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_build_admits_itself_only() {
+        let build = AgentRelease::build("OpenCode", "0.0.0-beta-18999");
+        let agent = |name: &str, version: &str| Implementation::new(name, version);
+
+        assert!(build.admits(&agent("OpenCode", "0.0.0-beta-18999")));
+        for version in [
+            "0.0.0-beta-19000",
+            "0.0.0-beta-1899",
+            "0.0.0-beta-189990",
+            "1.18.31",
+        ] {
+            assert!(!build.admits(&agent("OpenCode", version)), "{version}");
+        }
+        assert!(!build.admits(&agent("opencode", "0.0.0-beta-18999")));
+    }
+
+    #[test]
     fn a_release_line_admits_its_patch_releases_only() {
-        let line = AgentRelease::new("@agentclientprotocol/codex-acp", "1.12");
+        let line = AgentRelease::line("@agentclientprotocol/codex-acp", "1.12");
         let agent = |name: &str, version: &str| Implementation::new(name, version);
 
         assert!(line.admits(&agent("@agentclientprotocol/codex-acp", "1.12.0")));

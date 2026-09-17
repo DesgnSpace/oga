@@ -25,7 +25,7 @@ pub use agent_client_protocol_schema::{ProtocolVersion, v1 as schema};
 pub use outcome::{AcpError, Refusal, Stage};
 pub use policy::{AcpPolicy, Decision, DenyAll, Grants, PolicyFuture, TerminalCall};
 pub use session::{
-    AcpConfig, AcpSession, AgentRelease, DEFAULT_HANDSHAKE_TIMEOUT, DEFAULT_PROMPT_TIMEOUT, Exit,
-    Launch, SessionSetting, SessionStart,
+    AcpConfig, AcpSession, AgentRelease, AgentVersions, DEFAULT_HANDSHAKE_TIMEOUT,
+    DEFAULT_PROMPT_TIMEOUT, Exit, Launch, SessionSetting, SessionStart,
 };
 pub use transport::{DEFAULT_MAX_FRAME_BYTES, DEFAULT_MAX_STDERR_BYTES, Diagnostics};
