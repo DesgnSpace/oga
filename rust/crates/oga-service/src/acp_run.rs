@@ -42,7 +42,7 @@ use crate::{
         settle_task, worker_env,
     },
     prompt::{WorkerOutcome, interpret_worker_outcome},
-    transport::AcpStart,
+    transport::{self, AcpStart},
 };
 
 /// How long a turn may run when the task names no timeout of its own. The
@@ -67,6 +67,8 @@ pub(crate) struct AcpTurn<'a> {
     pub(crate) profile: &'a Profile,
     pub(crate) adapter: &'a AcpAdapter,
     pub(crate) start: AcpStart,
+    /// Whether this run is one that may hand the work to the command line at
+    /// all, before how far ACP got is weighed.
     pub(crate) may_fall_back: bool,
     pub(crate) prompt: &'a str,
     pub(crate) turn_id: i64,
@@ -339,14 +341,14 @@ async fn wait_for_update(
     tokio::time::timeout(bound, waiting).await.ok().flatten()
 }
 
-/// ACP could not be used for this run. Only an agent that never became usable,
-/// on a run allowed to, moves to the command line; everything else is settled
-/// where a person can see it.
+/// ACP could not be used for this run. Only a run allowed to fall back, that
+/// never reached the agent its adapter was verified against, moves to the
+/// command line; everything else is settled where a person can see it.
 fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleError> {
     let now = now_iso();
     let (worker, forget_session) = match error {
         AcpError::Unavailable { stage, reason } => {
-            if turn.may_fall_back {
+            if turn.may_fall_back && transport::failed_before_a_verified_agent(stage) {
                 return Ok(AcpEnd::FallBack(TaskTransport::cli(
                     TransportReason::Unavailable,
                     Some(format!("{stage}: {reason}")),

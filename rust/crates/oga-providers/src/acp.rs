@@ -260,7 +260,10 @@ pub struct AcpAdapters {
 impl AcpAdapters {
     /// The adapters Oga ships. A provider joins this list when its adapter is
     /// wired and verified; until then it runs on its command line, and no
-    /// provider claims ACP support it does not have.
+    /// provider claims ACP support it does not have. A provider on this list
+    /// runs over ACP: its command line carries a run whose agent cannot be
+    /// reached at all, never a quieter second try once that agent has
+    /// answered.
     pub fn builtin() -> Self {
         Self::default()
             .register(Provider::Claude, claude())

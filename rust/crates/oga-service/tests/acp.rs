@@ -491,6 +491,25 @@ async fn auto_falls_back_to_the_command_line_only_before_any_prompt_and_stays_th
 }
 
 #[tokio::test]
+async fn a_profile_set_to_the_command_line_never_starts_an_agent() {
+    let harness = harness("turn");
+    set_transport_preference(&harness.store, "work", TransportPreference::Cli, NOW)
+        .expect("preference");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(task.output.trim(), "ran on the command line");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(recorded.reason, Some(TransportReason::Preference));
+    assert!(
+        harness.agent_log().is_empty(),
+        "a profile asked for its command line never starts an agent to find out"
+    );
+}
+
+#[tokio::test]
 async fn explicit_acp_fails_visibly_when_the_agent_cannot_start() {
     let harness = harness_with("turn", "/nonexistent/acp-agent");
     set_transport_preference(&harness.store, "work", TransportPreference::Acp, NOW)
@@ -904,39 +923,28 @@ async fn opencode_without_an_acp_server_runs_on_its_command_line_before_any_prom
 }
 
 #[tokio::test]
-async fn an_opencode_model_it_does_not_offer_never_reaches_the_prompt() {
-    let harness = opencode_harness("opencode-no-model");
+async fn an_opencode_model_it_does_not_offer_never_reaches_the_prompt_or_the_command_line() {
+    for preference in [TransportPreference::Auto, TransportPreference::Acp] {
+        let harness = opencode_harness("opencode-no-model");
+        set_transport_preference(&harness.store, "work", preference, NOW).expect("preference");
 
-    let task = harness.run("do the work").await;
+        let task = harness.run("do the work").await;
 
-    assert_eq!(task.state, TaskState::Completed, "{task:?}");
-    let recorded = transport(&task);
-    assert_eq!(recorded.kind, Transport::Cli);
-    assert!(
-        recorded
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains("opencode/deep")),
-        "{recorded:?}"
-    );
-    assert!(harness.received("session/prompt").is_empty());
-    assert!(chosen_settings(&harness).is_empty());
-    assert!(!harness.cli_runs().is_empty());
-
-    let explicit = opencode_harness("opencode-no-model");
-    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
-        .expect("preference");
-    let task = explicit.run("do the work").await;
-
-    assert_eq!(task.state, TaskState::Failed, "{task:?}");
-    assert!(
-        task.error
-            .as_deref()
-            .is_some_and(|error| error.contains("can't use this task's model or effort")),
-        "{task:?}"
-    );
-    assert!(explicit.received("session/prompt").is_empty());
-    assert!(explicit.cli_runs().is_empty());
+        let case = preference.as_str();
+        assert_eq!(task.state, TaskState::Failed, "{case}: {task:?}");
+        assert!(
+            task.error
+                .as_deref()
+                .is_some_and(|error| error.contains("doesn't offer opencode/deep as a model")),
+            "{case}: {task:?}"
+        );
+        assert!(harness.received("session/prompt").is_empty(), "{case}");
+        assert!(chosen_settings(&harness).is_empty(), "{case}");
+        assert!(
+            harness.cli_runs().is_empty(),
+            "{case}: an agent Oga reached is never stepped around through the command line"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1422,46 +1430,29 @@ async fn claude_without_its_adapter_installed_runs_on_its_command_line_before_an
 }
 
 #[tokio::test]
-async fn a_claude_effort_it_cannot_offer_never_reaches_the_prompt() {
-    let harness = claude_harness("claude-no-effort");
-    let mut request = DispatchRequest::new("work", "do the work", &harness.cwd);
-    request.effort = Some("high".into());
+async fn a_claude_effort_it_cannot_offer_never_reaches_the_prompt_or_the_command_line() {
+    for preference in [TransportPreference::Auto, TransportPreference::Acp] {
+        let harness = claude_harness("claude-no-effort");
+        set_transport_preference(&harness.store, "work", preference, NOW).expect("preference");
+        let mut request = DispatchRequest::new("work", "do the work", &harness.cwd);
+        request.effort = Some("high".into());
 
-    let task = harness.run_with(request).await;
+        let task = harness.run_with(request).await;
 
-    assert_eq!(task.state, TaskState::Completed, "{task:?}");
-    let recorded = transport(&task);
-    assert_eq!(recorded.kind, Transport::Cli);
-    assert!(
-        recorded
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains("effort")),
-        "{recorded:?}"
-    );
-    assert!(harness.received("session/prompt").is_empty());
-    let ran = harness.cli_runs();
-    assert!(
-        ran.windows(2).any(|pair| pair == ["--effort", "high"]),
-        "{ran:?}"
-    );
-
-    let explicit = claude_harness("claude-no-effort");
-    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
-        .expect("preference");
-    let mut request = DispatchRequest::new("work", "do the work", &explicit.cwd);
-    request.effort = Some("high".into());
-    let task = explicit.run_with(request).await;
-
-    assert_eq!(task.state, TaskState::Failed, "{task:?}");
-    assert!(
-        task.error
-            .as_deref()
-            .is_some_and(|error| error.contains("can't use this task's model or effort")),
-        "{task:?}"
-    );
-    assert!(explicit.received("session/prompt").is_empty());
-    assert!(explicit.cli_runs().is_empty());
+        let case = preference.as_str();
+        assert_eq!(task.state, TaskState::Failed, "{case}: {task:?}");
+        assert!(
+            task.error
+                .as_deref()
+                .is_some_and(|error| error.contains("can't use this task's model or effort")),
+            "{case}: {task:?}"
+        );
+        assert!(harness.received("session/prompt").is_empty(), "{case}");
+        assert!(
+            harness.cli_runs().is_empty(),
+            "{case}: an agent Oga reached is never stepped around through the command line"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1801,27 +1792,22 @@ async fn a_codex_account_that_signs_in_with_an_api_key_keeps_to_its_command_line
 }
 
 #[tokio::test]
-async fn a_codex_adapter_without_full_access_never_reaches_the_prompt() {
+async fn a_codex_adapter_without_full_access_never_reaches_the_prompt_or_the_command_line() {
     let harness = codex_harness("codex-no-full-access", "");
 
     let task = harness.run("do the work").await;
 
-    assert_eq!(task.state, TaskState::Completed, "{task:?}");
-    let recorded = transport(&task);
-    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
     assert!(
-        recorded
-            .detail
+        task.error
             .as_deref()
-            .is_some_and(|detail| detail.contains("agent-full-access")),
-        "{recorded:?}"
+            .is_some_and(|error| error.contains("agent-full-access")),
+        "{task:?}"
     );
     assert!(harness.received("session/prompt").is_empty());
     assert!(
-        harness
-            .cli_runs()
-            .iter()
-            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+        harness.cli_runs().is_empty(),
+        "an agent Oga reached is never stepped around through the command line"
     );
 }
 
@@ -2071,11 +2057,7 @@ async fn antigravity_runs_over_acp_by_default_with_its_model_and_gemini_home() {
 
 #[tokio::test]
 async fn antigravity_without_a_ready_acp_server_runs_on_its_command_line_before_any_prompt() {
-    for (mode, sign_in) in [
-        ("missing", Some(GOOGLE_SIGN_IN)),
-        ("antigravity", None),
-        ("antigravity-no-model", Some(GOOGLE_SIGN_IN)),
-    ] {
+    for (mode, sign_in) in [("missing", Some(GOOGLE_SIGN_IN)), ("antigravity", None)] {
         let harness = antigravity_harness(mode, sign_in);
 
         let task = harness.run("do the work").await;
@@ -2131,6 +2113,26 @@ async fn antigravity_without_a_ready_acp_server_runs_on_its_command_line_before_
     assert!(
         unsigned.agent_log().is_empty(),
         "a server nobody signed in to is never started, so it cannot open a sign-in page"
+    );
+}
+
+#[tokio::test]
+async fn an_antigravity_model_its_server_does_not_offer_never_reaches_the_prompt_or_the_command_line()
+ {
+    let harness = antigravity_harness("antigravity-no-model", Some(GOOGLE_SIGN_IN));
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error.as_deref().is_some_and(|error| error
+            .contains("doesn't offer gemini-3.6-flash-medium as a model")),
+        "{task:?}"
+    );
+    assert!(harness.received("session/prompt").is_empty());
+    assert!(
+        harness.cli_runs().is_empty(),
+        "a server Oga reached is never stepped around through the command line"
     );
 }
 
@@ -2499,7 +2501,6 @@ async fn a_pi_extension_question_is_declined_and_the_startup_summary_left_out() 
 async fn pi_keeps_to_its_command_line_before_any_prompt_when_acp_cannot_run_it_the_same_way() {
     for (mode, effort, resources) in [
         ("missing", None, &[][..]),
-        ("pi", Some("max"), &[][..]),
         ("pi", None, &[".pi/extensions"][..]),
         ("pi", None, &[".agents/skills"][..]),
     ] {
@@ -2574,6 +2575,28 @@ async fn pi_keeps_to_its_command_line_before_any_prompt_when_acp_cannot_run_it_t
     );
     assert!(explicit.agent_log().is_empty());
     assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_pi_thinking_level_it_does_not_offer_never_reaches_the_prompt_or_the_command_line() {
+    let harness = pi_harness("pi", &[]);
+    let mut request = DispatchRequest::new("work", "do the work", &harness.cwd);
+    request.effort = Some("max".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("doesn't offer max as a thought_level")),
+        "{task:?}"
+    );
+    assert!(harness.received("session/prompt").is_empty());
+    assert!(
+        harness.cli_runs().is_empty(),
+        "an adapter Oga reached is never stepped around through the command line"
+    );
 }
 
 #[tokio::test]

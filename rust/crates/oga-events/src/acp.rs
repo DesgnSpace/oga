@@ -56,8 +56,45 @@ pub(crate) fn acp_event_view(
         "tool_call" | "tool_call_update" => Some(tool_view(event, provider, payload, raw_text)),
         "plan" => Some(plan_view(event, provider, payload, raw_text)),
         "usage_update" => Some(context_view(event, provider, payload, raw_text)),
+        // Session bookkeeping: the agent listing what it can run, and restating
+        // the session's own title. Neither is work, and both arrive around the
+        // agent's closing words, where an ordinary row would compete with them.
+        "available_commands_update" => Some(bookkeeping_view(
+            event,
+            provider,
+            "Commands listed",
+            raw_text,
+        )),
+        "session_info_update" => Some(bookkeeping_view(
+            event,
+            provider,
+            "Session updated",
+            raw_text,
+        )),
         _ => None,
     }
+}
+
+/// A row the record keeps and the story leaves out.
+fn bookkeeping_view(
+    event: &TaskEvent,
+    provider: Provider,
+    title: &str,
+    raw_text: Option<String>,
+) -> TaskEventView {
+    provider_view(
+        event,
+        provider,
+        EventKind::Lifecycle,
+        EventPhase::Info,
+        title,
+        ProviderViewOptions {
+            detail: None,
+            presentation: None,
+            minor: Some(true),
+            raw_text,
+        },
+    )
 }
 
 /// The text of a content chunk, when it is text at all. An image or an
@@ -742,6 +779,74 @@ mod tests {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
         assert_eq!(session_cost(&payload), None);
+    }
+
+    /// Recorded from Antigravity's ACP probe: the call names the file it is
+    /// about, and its completion says only that it finished.
+    #[test]
+    fn a_completion_that_says_only_that_it_finished_keeps_the_call_it_settles() {
+        let views = crate::event_views(
+            &[
+                acp_event(
+                    1,
+                    json!({
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "session:2",
+                        "title": "Running edit_file",
+                        "kind": "edit",
+                        "status": "in_progress",
+                        "locations": [{"path": "/repo/examples/event-sample.txt"}],
+                        "rawInput": {"file_path": "/repo/examples/event-sample.txt"},
+                    }),
+                ),
+                acp_event(
+                    2,
+                    json!({
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "session:2",
+                        "status": "completed",
+                        "rawOutput": "Create event sample file",
+                    }),
+                ),
+            ],
+            Provider::Antigravity,
+        );
+
+        let settled = views.last().expect("the completion");
+        assert_eq!(settled.title, "Edit file");
+        assert_eq!(settled.kind, EventKind::File);
+        assert_eq!(settled.phase, EventPhase::Completed);
+        assert_eq!(
+            settled
+                .presentation
+                .as_ref()
+                .and_then(|value| value.path.as_deref()),
+            Some("/repo/examples/event-sample.txt"),
+            "a completion with no fields of its own still names the file"
+        );
+    }
+
+    #[test]
+    fn session_bookkeeping_stays_out_of_the_story() {
+        for update in [
+            json!({"sessionUpdate": "available_commands_update", "availableCommands": []}),
+            json!({"sessionUpdate": "session_info_update", "title": "Port the runner"}),
+        ] {
+            let view = view(update);
+            assert_eq!(view.minor, Some(true));
+            assert_eq!(view.kind, EventKind::Lifecycle);
+            assert_eq!(
+                view.phase,
+                EventPhase::Info,
+                "{} reads as work in flight",
+                view.title
+            );
+            assert!(
+                !view.title.contains(['.', '_']),
+                "{} leaked its wire name",
+                view.title
+            );
+        }
     }
 
     #[test]

@@ -4,10 +4,12 @@
 //! before any prompt leaves Oga. A task recorded on the command line stays
 //! there; an ACP task keeps continuing its ACP conversation. Only a run that
 //! opens a new session, on a profile set to `auto`, may move to the command
-//! line when ACP cannot start.
+//! line, and only while ACP has yet to reach the agent its adapter was
+//! verified against.
 
 use std::collections::BTreeMap;
 
+use oga_acp::Stage;
 use oga_config::{canonical_cwd, global_cwd};
 use oga_domain::{
     AcpRestore, Profile, Task, TaskTransport, Transport, TransportPreference, TransportReason,
@@ -108,8 +110,8 @@ pub(crate) enum TransportPlan {
     Acp {
         adapter: AcpAdapter,
         start: AcpStart,
-        /// Whether an ACP that never became usable may hand the run to the
-        /// command line. Only a new session on `auto` may.
+        /// Whether this run is one that may hand the work to the command
+        /// line at all: only a new session on `auto` is.
         may_fall_back: bool,
     },
     /// Nothing may run: ACP is required and there is no way to reach it.
@@ -152,6 +154,20 @@ fn plan_new_session(
             may_fall_back: false,
         },
         (TransportPreference::Acp, None) => NewSession::Refuse,
+    }
+}
+
+/// Whether ACP gave up before it reached the agent its adapter was verified
+/// against. The command line is what keeps a provider usable where that agent
+/// cannot run at all: nothing installed to start, an account ACP cannot reach,
+/// a protocol or capability the adapter needs, or an agent that turns out to
+/// be another release. Once it has answered `initialize`, the run holds the
+/// agent Oga verified, and a failure after that is reported where a person can
+/// see it rather than run again on a transport nobody chose.
+pub(crate) fn failed_before_a_verified_agent(stage: Stage) -> bool {
+    match stage {
+        Stage::Spawn | Stage::Initialize => true,
+        Stage::Session | Stage::Configure => false,
     }
 }
 
@@ -280,6 +296,14 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_run_falls_back_only_until_it_reaches_the_agent_it_verified() {
+        assert!(failed_before_a_verified_agent(Stage::Spawn));
+        assert!(failed_before_a_verified_agent(Stage::Initialize));
+        assert!(!failed_before_a_verified_agent(Stage::Session));
+        assert!(!failed_before_a_verified_agent(Stage::Configure));
     }
 
     #[test]

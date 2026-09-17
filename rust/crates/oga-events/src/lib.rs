@@ -783,7 +783,11 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
                 }
             })
         });
-    let title = text_value(event.payload.get("title"))
+    // A permission row carries the title of the call it answered, which names
+    // what the worker wanted rather than what Oga decided.
+    let title = (event.kind != "permission_answered")
+        .then(|| text_value(event.payload.get("title")))
+        .flatten()
         .map(str::to_owned)
         .or_else(|| hook_tool.map(|tool| tool_title_with_input(tool, hook_input)))
         .unwrap_or_else(|| event_title(&event.kind, &event.payload));
@@ -4022,8 +4026,73 @@ fn format_cost(value: f64) -> String {
     }
 }
 
+/// What Oga answered when the worker asked to reach something, and what it was
+/// asking for. Only a `permission_answered` row carries one.
+struct PermissionAnswer<'a> {
+    allowed: bool,
+    writes: bool,
+    subject: Option<&'a str>,
+    outside: Vec<&'a str>,
+    unattended: bool,
+}
+
+fn permission_answer(payload: &BTreeMap<String, Value>) -> Option<PermissionAnswer<'_>> {
+    Some(PermissionAnswer {
+        allowed: payload.get("allowed")?.as_bool()?,
+        writes: text_value(payload.get("access")) == Some("write"),
+        subject: text_value(payload.get("title")),
+        outside: payload
+            .get("outsideScope")
+            .and_then(Value::as_array)
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter_map(|path| text_value(Some(path)))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        unattended: payload
+            .get("unattended")
+            .and_then(Value::as_bool)
+            .unwrap_or_default(),
+    })
+}
+
+fn permission_title(answer: &PermissionAnswer<'_>) -> String {
+    match (answer.writes, answer.allowed) {
+        (true, true) => "Write allowed",
+        (true, false) => "Write refused",
+        (false, true) => "Read allowed",
+        (false, false) => "Read refused",
+    }
+    .to_owned()
+}
+
+/// What the worker wanted, and why it did not get it.
+fn permission_detail(answer: &PermissionAnswer<'_>) -> Option<String> {
+    let subject = answer.subject.map(str::to_owned);
+    if answer.allowed {
+        return subject;
+    }
+    let reason = if !answer.outside.is_empty() {
+        format!("outside this task's scope: {}", answer.outside.join(", "))
+    } else if answer.unattended {
+        "nobody was there to approve it".to_owned()
+    } else {
+        return subject;
+    };
+    Some(match subject {
+        Some(subject) => format!("{subject} · {reason}"),
+        None => reason,
+    })
+}
+
 fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<String> {
     match event_type {
+        "permission_answered" => permission_answer(payload)
+            .as_ref()
+            .and_then(permission_detail),
+        "transport_fallback" => tree_value(payload, &["detail"]),
         "worker_spawned" => {
             let provider = tree_value(payload, &["provider"]).map(|value| humanize(&value));
             let model = tree_value(payload, &["model"]).map(|value| humanize(&value));
@@ -4272,8 +4341,18 @@ fn event_phase(
     state: TaskState,
     payload: &BTreeMap<String, Value>,
 ) -> EventPhase {
-    if matches!(event_type, "agent.system" | "agent.assistant")
-        || (event_type == "agent.hook" && !payload.contains_key("tool_name"))
+    if event_type == "permission_answered" {
+        // The answer is already given, so the row never reads as work in
+        // flight; only a refusal reads as something that went wrong.
+        return match permission_answer(payload) {
+            Some(answer) if !answer.allowed => EventPhase::Failed,
+            _ => EventPhase::Info,
+        };
+    }
+    if matches!(
+        event_type,
+        "agent.system" | "agent.assistant" | "transport_fallback"
+    ) || (event_type == "agent.hook" && !payload.contains_key("tool_name"))
     {
         EventPhase::Info
     } else {
@@ -4440,6 +4519,7 @@ fn lifecycle_title(event_type: &str) -> String {
         "follow_up_started" => "Follow-up started",
         "follow_ups_paused" => "Follow-ups paused",
         "follow_ups_dropped" => "Follow-ups removed",
+        "transport_fallback" => "Using the command line",
         "scope_refusal" => "Write refused by scope",
         "scope_auto_completed" => "Scope expanded",
         "scope_inherited" => "Using approved scope",
@@ -4478,6 +4558,12 @@ fn default_kind(event_type: &str, payload: &BTreeMap<String, Value>) -> EventKin
         | "checkout_preparation_failed"
         | "checkout_removal_failed" => EventKind::Error,
         "scope_refusal" | "hold_expired" | "network_retry_exhausted" => EventKind::Error,
+        // A refusal is why the run stalled; an approval is bookkeeping.
+        "permission_answered"
+            if permission_answer(payload).is_some_and(|answer| !answer.allowed) =>
+        {
+            EventKind::Error
+        }
         // Losing a line of output is a gap in the record, not a failed run;
         // it reads as one notice rather than an error per drop.
         "line_dropped" | "event_dropped" | "events_truncated" => EventKind::Lifecycle,
@@ -4497,6 +4583,9 @@ fn default_kind(event_type: &str, payload: &BTreeMap<String, Value>) -> EventKin
 
 fn event_title(event_type: &str, payload: &BTreeMap<String, Value>) -> String {
     match event_type {
+        "permission_answered" => permission_answer(payload)
+            .as_ref()
+            .map_or_else(|| lifecycle_title(event_type), permission_title),
         "agent.system" => match system_subtype(payload) {
             "init" => "Session started".into(),
             "task_started" => SUBAGENT_STARTED_TITLE.into(),
@@ -4563,6 +4652,12 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
             | "learn_routes_invalid"
     ) {
         return Some(true);
+    }
+
+    // An approval is the ordinary case — the worker works inside its scope all
+    // run long. Only the refusal that stopped it earns a row.
+    if event_type == "permission_answered" {
+        return Some(permission_answer(payload).is_none_or(|answer| answer.allowed));
     }
 
     // Show only when it matters: hidden unless the payload shows the
@@ -7546,6 +7641,159 @@ mod tests {
                 "{event_type} should never reach the trace as a row"
             );
         }
+    }
+
+    /// Recorded from Claude's ACP probe, where every write the worker made was
+    /// answered inside the task's own scope.
+    #[test]
+    fn an_answered_permission_says_what_was_reached_and_whether_it_was_allowed() {
+        let allowed = event_view(
+            &lifecycle_event(
+                "permission_answered",
+                TaskState::Running,
+                serde_json::json!({
+                    "toolCallId": "toolu_01Hy3",
+                    "title": "Write examples/task-event-probes/claude/event-sample.txt",
+                    "kind": "edit",
+                    "access": "write",
+                    "allowed": true,
+                    "outsideScope": [],
+                })
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(allowed.title, "Write allowed");
+        assert_eq!(allowed.minor, Some(true), "an approval is bookkeeping");
+        assert_eq!(
+            allowed.phase,
+            EventPhase::Info,
+            "an answer already given never reads as work in flight"
+        );
+        assert_eq!(
+            allowed.detail.as_deref(),
+            Some("Write examples/task-event-probes/claude/event-sample.txt")
+        );
+
+        let refused = event_view(
+            &lifecycle_event(
+                "permission_answered",
+                TaskState::Running,
+                serde_json::json!({
+                    "toolCallId": "toolu_01Hy3",
+                    "title": "Write /etc/hosts",
+                    "kind": "edit",
+                    "access": "write",
+                    "allowed": false,
+                    "outsideScope": ["/etc/hosts"],
+                })
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(refused.title, "Write refused");
+        assert_eq!(refused.kind, EventKind::Error);
+        assert_eq!(refused.phase, EventPhase::Failed);
+        assert_ne!(refused.minor, Some(true), "a refusal is why a run stalled");
+        assert_eq!(
+            refused.detail.as_deref(),
+            Some("Write /etc/hosts · outside this task's scope: /etc/hosts")
+        );
+    }
+
+    /// Recorded from Codex's and Pi's probes, both of which fell back to their
+    /// command line when ACP could not be reached.
+    #[test]
+    fn falling_back_to_the_command_line_says_so_and_keeps_the_reason() {
+        let view = event_view(
+            &lifecycle_event(
+                "transport_fallback",
+                TaskState::Running,
+                serde_json::json!({
+                    "transport": "cli",
+                    "reason": "unavailable",
+                    "detail": "spawn: could not spawn provider in /repo: No such file or directory (os error 2)",
+                })
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(view.title, "Using the command line");
+        assert_eq!(
+            view.phase,
+            EventPhase::Info,
+            "a decision already taken never reads as work in flight"
+        );
+        assert_eq!(
+            view.detail.as_deref(),
+            Some(
+                "spawn: could not spawn provider in /repo: No such file or directory (os error 2)"
+            )
+        );
+    }
+
+    /// Recorded from the Codex and Pi probes: both name the file they wrote, so
+    /// the changed-files panel can list it even with no diff to read.
+    #[test]
+    fn command_line_writes_name_the_file_they_touched() {
+        let codex = event_view(
+            &provider_event(
+                1,
+                "agent.item.completed",
+                serde_json::json!({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_1",
+                        "type": "file_change",
+                        "changes": [{"path": "/repo/examples/event-sample.txt", "kind": "add"}],
+                        "status": "completed",
+                    },
+                }),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(codex.kind, EventKind::File);
+        assert_eq!(codex.title, "Edit file");
+        assert_eq!(
+            codex
+                .presentation
+                .as_ref()
+                .and_then(|value| value.path.as_deref()),
+            Some("/repo/examples/event-sample.txt")
+        );
+
+        let pi = event_view(
+            &provider_event(
+                2,
+                "agent.tool_execution_start",
+                serde_json::json!({
+                    "type": "tool_execution_start",
+                    "toolCallId": "call_c117ff",
+                    "toolName": "write",
+                    "args": {"path": "examples/event-sample.txt", "content": "provider=pi\n"},
+                }),
+            ),
+            Provider::Pi,
+        );
+        assert_eq!(pi.kind, EventKind::File);
+        assert_eq!(
+            pi.presentation
+                .as_ref()
+                .and_then(|value| value.path.as_deref()),
+            Some("examples/event-sample.txt")
+        );
     }
 
     #[test]
