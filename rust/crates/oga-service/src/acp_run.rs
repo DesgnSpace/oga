@@ -163,6 +163,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         turn_id: turn.turn_id,
         cwd: PathBuf::from(&task.cwd),
         scope: task.scope.clone(),
+        declines_questions: adapter.declines_questions,
     });
     let turn_bound = task.timeout_ms.map_or(LONGEST_TURN, Duration::from_millis);
     let config = AcpConfig {
@@ -171,6 +172,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         prompt_timeout: turn_bound + Duration::from_secs(60),
         ..AcpConfig::default()
     };
+    let opening_bound = config.handshake_timeout;
     let session = match AcpSession::open(runner, launch, policy, config).await {
         Ok(session) => session,
         Err(error) => return open_failed(&turn, error),
@@ -189,13 +191,30 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     let mut updates = session
         .take_updates()
         .expect("a freshly opened session still has its update stream");
-    // `session/load` replays the whole conversation before it answers. None of
-    // that is this turn, so it is counted and dropped rather than recorded.
+    // `session/load` replays the whole conversation before it answers, and an
+    // agent that finishes opening a session later keeps writing to it until it
+    // says so. None of that is this turn, so it is counted and dropped rather
+    // than recorded.
     let mut replayed = 0usize;
+    if let Some(opened) = adapter.opened_with.as_deref() {
+        match wait_for_update(&mut updates, opened, opening_bound).await {
+            Some(dropped) => replayed += dropped,
+            None => {
+                session.shutdown().await;
+                return open_failed(
+                    &turn,
+                    AcpError::Unavailable {
+                        stage: Stage::Session,
+                        reason: "the agent never finished opening the session".into(),
+                    },
+                );
+            }
+        }
+    }
     while updates.try_recv().is_ok() {
         replayed += 1;
     }
-    if let Err(error) = record_session(&turn, &session, replayed) {
+    if let Err(error) = record_session(&turn, &acp_launch, &session, replayed) {
         session.shutdown().await;
         return Err(error);
     }
@@ -297,6 +316,27 @@ async fn converse(
             },
         }
     }
+}
+
+/// Takes updates until one of the `kind` given arrives, and says how many that
+/// took, or `None` when the agent closes or the bound passes first.
+async fn wait_for_update(
+    updates: &mut mpsc::UnboundedReceiver<SessionNotification>,
+    kind: &str,
+    bound: Duration,
+) -> Option<usize> {
+    let waiting = async {
+        let mut taken = 0;
+        while let Some(notification) = updates.recv().await {
+            taken += 1;
+            let update = serde_json::to_value(&notification.update).ok();
+            if update.is_some_and(|update| update["sessionUpdate"] == kind) {
+                return Some(taken);
+            }
+        }
+        None
+    };
+    tokio::time::timeout(bound, waiting).await.ok().flatten()
 }
 
 /// ACP could not be used for this run. Only an agent that never became usable,
@@ -407,6 +447,7 @@ fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleE
 /// the prompt goes out, so a broker that stops mid-turn still finds both.
 fn record_session(
     turn: &AcpTurn<'_>,
+    launch: &AcpLaunch<'_>,
     session: &AcpSession,
     replayed: usize,
 ) -> Result<(), LifecycleError> {
@@ -443,6 +484,7 @@ fn record_session(
         .native_sessions_from
         .as_deref()
         .filter(|agent| session.agent_info().is_some_and(|info| info.name == *agent))
+        .filter(|_| turn.adapter.is_native_session(launch, &acp_session_id))
         .map(|_| acp_session_id.clone());
     let restored = matches!(turn.start, AcpStart::Restore { .. });
     let (transport_json, worker_json) = (encode(&transport)?, encode(&worker)?);
@@ -753,6 +795,8 @@ struct TaskPolicy {
     turn_id: i64,
     cwd: PathBuf,
     scope: TaskScope,
+    /// Every request is a question for a person, and nobody is there to answer.
+    declines_questions: bool,
 }
 
 impl AcpPolicy for TaskPolicy {
@@ -779,9 +823,9 @@ impl AcpPolicy for TaskPolicy {
                 .filter(|path| !scope_covers(&self.cwd, rules, path))
                 .map(|path| path.display().to_string())
                 .collect();
-            let allowed = outside.is_empty();
+            let allowed = outside.is_empty() && !self.declines_questions;
             let decision = choose(&request.options, allowed);
-            let payload = json!({
+            let mut payload = json!({
                 "toolCallId": request.tool_call.tool_call_id.0.as_ref(),
                 "title": fields.title,
                 "kind": fields.kind,
@@ -789,6 +833,9 @@ impl AcpPolicy for TaskPolicy {
                 "allowed": allowed,
                 "outsideScope": outside,
             });
+            if self.declines_questions {
+                payload["unattended"] = json!(true);
+            }
             if let Err(error) = append_turn_event(
                 &self.store,
                 &self.task_id,
@@ -968,6 +1015,7 @@ mod tests {
                 read: rules(&["**"]),
                 write: rules(&["src/**"]),
             },
+            declines_questions: false,
         };
         let request = |path: &str| {
             RequestPermissionRequest::new(

@@ -10,7 +10,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -33,6 +33,7 @@ type Settings = dyn Fn(&AcpLaunch<'_>) -> Vec<AcpSetting> + Send + Sync;
 type Environment = dyn Fn(&AcpLaunch<'_>) -> BTreeMap<String, String> + Send + Sync;
 type Directories = dyn Fn(&AcpLaunch<'_>) -> Vec<PathBuf> + Send + Sync;
 type Incompatibility = dyn Fn(&AcpLaunch<'_>) -> Option<String> + Send + Sync;
+type NativeSession = dyn Fn(&AcpLaunch<'_>, &str) -> bool + Send + Sync;
 
 /// A session setting the agent has to hold before a run's prompt, named the
 /// way the agent names it.
@@ -87,9 +88,18 @@ pub struct AcpAdapter {
     environment: Arc<Environment>,
     directories: Arc<Directories>,
     incompatibility: Arc<Incompatibility>,
+    native_session: Arc<NativeSession>,
     /// The only agent allowed to answer this adapter's command. Any other is
     /// turned away before a session opens.
     pub release: Option<AcpRelease>,
+    /// The `sessionUpdate` kind the agent sends once it has finished opening a
+    /// session, for an agent that keeps writing to the session after it
+    /// answers. Nothing it sends before that belongs to the run's turn.
+    pub opened_with: Option<String>,
+    /// The agent's permission requests are questions its extensions put to a
+    /// person, which the provider's command line runs without anyone to ask,
+    /// so every one is declined rather than answered on someone's behalf.
+    pub declines_questions: bool,
     /// The provider's command line gives the worker Oga's own tools, so the
     /// agent must accept Oga's HTTP MCP server. An agent that cannot is
     /// incompatible rather than quietly left without them.
@@ -109,6 +119,8 @@ impl fmt::Debug for AcpAdapter {
             .field("oga_tools", &self.oga_tools)
             .field("native_sessions_from", &self.native_sessions_from)
             .field("release", &self.release)
+            .field("opened_with", &self.opened_with)
+            .field("declines_questions", &self.declines_questions)
             .finish_non_exhaustive()
     }
 }
@@ -125,10 +137,38 @@ impl AcpAdapter {
             environment: Arc::new(|_| BTreeMap::new()),
             directories: Arc::new(|_| Vec::new()),
             incompatibility: Arc::new(|_| None),
+            native_session: Arc::new(|_, _| true),
             release: None,
+            opened_with: None,
+            declines_questions: false,
             oga_tools: false,
             native_sessions_from: None,
         }
+    }
+
+    pub fn opened_with(mut self, update: impl Into<String>) -> Self {
+        self.opened_with = Some(update.into());
+        self
+    }
+
+    pub fn declines_questions(mut self) -> Self {
+        self.declines_questions = true;
+        self
+    }
+
+    /// Whether a session the agent opened under an id is stored where the
+    /// provider's command line looks that id up, checked before the id is
+    /// recorded for a terminal to resume.
+    pub fn native_session(
+        mut self,
+        check: impl Fn(&AcpLaunch<'_>, &str) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.native_session = Arc::new(check);
+        self
+    }
+
+    pub fn is_native_session(&self, launch: &AcpLaunch<'_>, session_id: &str) -> bool {
+        (self.native_session)(launch, session_id)
     }
 
     pub fn release(mut self, release: AcpRelease) -> Self {
@@ -228,6 +268,7 @@ impl AcpAdapters {
             .register(Provider::OpenCode, opencode())
             .register(Provider::OpenCode2, opencode2())
             .register(Provider::Antigravity, antigravity())
+            .register(Provider::Pi, pi())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -550,6 +591,117 @@ impl GeminiHome {
     }
 }
 
+/// Pi's ACP adapter from the ACP registry, `pi-acp` 0.0.33, which runs the
+/// account's own `pi --mode rpc --no-themes` in the session's directory with
+/// the profile's environment, so the agent directory, sign-in, settings,
+/// extensions, and skills are the ones the command line uses. Its 0.0.x
+/// releases promise nothing between them, so Oga accepts that release alone
+/// and turns any other away before a session opens. Its command line gets no
+/// Oga tools, and so does this.
+///
+/// It cannot pass `--no-approve`, which keeps the command line from loading a
+/// project's own Pi settings, extensions, and skills, so a project that has
+/// any keeps to its command line.
+///
+/// A session it opens is Pi's own session under Pi's own id, the one
+/// `pi --session-id` continues, which it records in its session map. It falls
+/// back to an id of its own when Pi does not report one, so only an id the map
+/// ties to a session file in the profile's session directory is recorded for
+/// a terminal.
+///
+/// The model is the `model` session setting, taking the same `provider/model`
+/// id `--model` does, and the thinking level is `thought_level`, taking the
+/// level `--thinking` does. It does not offer `max`, so a run asking for it
+/// keeps to the command line. It writes a startup summary into a new session
+/// after answering, and announces its commands once the session is ready.
+///
+/// Pi has no permission prompts of its own; the adapter asks only when an
+/// extension wants a person to confirm or choose, which the command line runs
+/// without, so Oga declines. It reports no usage over ACP.
+fn pi() -> AcpAdapter {
+    const AGENT: &str = "pi-acp";
+    AcpAdapter::new(AGENT, |_| vec![AGENT.to_owned()])
+        .release(AcpRelease::build(AGENT, "0.0.33"))
+        .native_sessions_from(AGENT)
+        .native_session(|launch, session_id| pi_session_file(launch.profile, session_id).is_some())
+        .incompatibility(|launch| {
+            pi_project_resource(launch.profile, Path::new(launch.cwd)).map(|resource| {
+                format!(
+                    "this project has Pi files of its own in {}, which only Pi's command line can leave unused",
+                    resource.display()
+                )
+            })
+        })
+        .opened_with("available_commands_update")
+        .declines_questions()
+        .settings(|launch| {
+            let setting = |id: &str, value: &str| AcpSetting {
+                id: id.into(),
+                value: value.into(),
+                required: true,
+            };
+            let mut settings = vec![setting("model", launch.model)];
+            if let Some(effort) = launch.effort {
+                settings.push(setting("thought_level", effort));
+            }
+            settings
+        })
+}
+
+/// The first of a project's own Pi resources that Pi loads only for a trusted
+/// project: `.pi` settings, resources, and system prompts in the directory,
+/// and `.agents/skills` there or above it, up to the repository root. The
+/// account's own `~/.agents/skills` is loaded either way, so it is not one.
+fn pi_project_resource(profile: &Profile, cwd: &Path) -> Option<PathBuf> {
+    const PROJECT: [&str; 7] = [
+        ".pi/settings.json",
+        ".pi/extensions",
+        ".pi/skills",
+        ".pi/prompts",
+        ".pi/themes",
+        ".pi/SYSTEM.md",
+        ".pi/APPEND_SYSTEM.md",
+    ];
+    if let Some(resource) = PROJECT
+        .iter()
+        .map(PathBuf::from)
+        .find(|resource| cwd.join(resource).exists())
+    {
+        return Some(resource);
+    }
+    let home = environment_for(profile)
+        .get("HOME")
+        .cloned()
+        .unwrap_or_else(home);
+    let global = Path::new(&home).join(".agents/skills");
+    for directory in cwd.ancestors() {
+        let skills = directory.join(".agents/skills");
+        if skills.exists() && skills != global {
+            return Some(skills);
+        }
+        if directory.join(".git").exists() {
+            break;
+        }
+    }
+    None
+}
+
+/// The Pi session file `pi-acp` recorded for a session id, when it lies in the
+/// profile's session directory under that id, as `pi --session-id` finds it.
+fn pi_session_file(profile: &Profile, session_id: &str) -> Option<PathBuf> {
+    let env = environment_for(profile);
+    let home = env.get("HOME").cloned().unwrap_or_else(home);
+    let map = std::fs::read_to_string(Path::new(&home).join(".pi/pi-acp/session-map.json")).ok()?;
+    let map: Value = serde_json::from_str(&map).ok()?;
+    let file = PathBuf::from(map["sessions"][session_id]["sessionFile"].as_str()?);
+    let sessions = PathBuf::from(env.get("PI_CODING_AGENT_SESSION_DIR")?);
+    let named = file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(&format!("_{session_id}.jsonl")));
+    (named && file.starts_with(&sessions)).then_some(file)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -570,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn no_provider_claims_an_adapter_it_does_not_ship() {
+    fn every_provider_ships_an_adapter() {
         let adapters = AcpAdapters::builtin();
         for provider in [
             Provider::Claude,
@@ -578,10 +730,193 @@ mod tests {
             Provider::OpenCode,
             Provider::OpenCode2,
             Provider::Antigravity,
+            Provider::Pi,
         ] {
             assert!(adapters.get(provider).is_some(), "{provider:?}");
         }
-        assert!(adapters.get(Provider::Pi).is_none());
+    }
+
+    fn pi_profile(root: &std::path::Path) -> Profile {
+        profile(
+            Provider::Pi,
+            BTreeMap::from([
+                ("HOME".into(), root.join("home").display().to_string()),
+                (
+                    "PI_CODING_AGENT_DIR".into(),
+                    root.join("agent").display().to_string(),
+                ),
+            ]),
+        )
+    }
+
+    #[test]
+    fn pi_starts_the_registry_adapter_in_the_profiles_account() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Pi).expect("pi adapter");
+        let root = tempfile::tempdir().expect("root");
+        let profile = pi_profile(root.path());
+        let project = root.path().join("project");
+        std::fs::create_dir_all(project.join(".git")).expect("project");
+        let cwd = project.display().to_string();
+        let launch = AcpLaunch {
+            profile: &profile,
+            model: "anthropic/claude-sonnet-4-5",
+            effort: Some("high"),
+            cwd: &cwd,
+        };
+
+        let command = adapter.command(&launch);
+        let cli = crate::command_for(&profile, "", &cwd, Some(launch.model), Some("high"), None);
+
+        assert_eq!(command.argv, ["pi-acp"]);
+        assert_eq!(
+            (&command.env, &command.env_remove),
+            (&cli.env, &cli.env_remove),
+            "the adapter's pi reads the agent and session directories the command line does"
+        );
+        assert_eq!(adapter.release, Some(AcpRelease::build("pi-acp", "0.0.33")));
+        assert_eq!(adapter.native_sessions_from.as_deref(), Some("pi-acp"));
+        assert_eq!(
+            adapter.opened_with.as_deref(),
+            Some("available_commands_update")
+        );
+        assert!(
+            adapter.declines_questions,
+            "the command line has no one to put an extension's question to"
+        );
+        assert!(
+            !adapter.oga_tools,
+            "the command line gives Pi no Oga tools either"
+        );
+        assert_eq!(adapter.incompatibility_for(&launch), None);
+    }
+
+    #[test]
+    fn pi_selects_the_model_and_thinking_level_the_command_line_would() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Pi).expect("pi adapter");
+        let profile = profile(Provider::Pi, BTreeMap::new());
+        let launch = |effort| AcpLaunch {
+            profile: &profile,
+            model: "openai/gpt-5.5",
+            effort,
+            cwd: "/repo",
+        };
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+
+        assert_eq!(
+            adapter.settings_for(&launch(Some("xhigh"))),
+            [
+                setting("model", "openai/gpt-5.5"),
+                setting("thought_level", "xhigh"),
+            ]
+        );
+        assert_eq!(
+            adapter.settings_for(&launch(None)),
+            [setting("model", "openai/gpt-5.5")],
+            "a run with no thinking level leaves Pi's own, as the command line does"
+        );
+    }
+
+    #[test]
+    fn a_project_with_its_own_pi_resources_keeps_pi_to_its_command_line() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Pi).expect("pi adapter");
+        let reason = |layout: &[&str], cwd: &str| {
+            let root = tempfile::tempdir().expect("root");
+            for directory in layout {
+                std::fs::create_dir_all(root.path().join(directory)).expect("layout");
+            }
+            let profile = pi_profile(root.path());
+            let cwd = root.path().join(cwd).display().to_string();
+            adapter.incompatibility_for(&AcpLaunch {
+                profile: &profile,
+                model: "openai/gpt-5.5",
+                effort: None,
+                cwd: &cwd,
+            })
+        };
+
+        for (layout, cwd) in [
+            (&["repo/.git", "repo/.pi/extensions"][..], "repo"),
+            (&["repo/.git", "repo/.pi/skills"][..], "repo"),
+            (
+                &["repo/.git", "repo/.agents/skills", "repo/app"][..],
+                "repo/app",
+            ),
+        ] {
+            let reason = reason(layout, cwd);
+            assert!(
+                reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("Pi files of its own")),
+                "{layout:?}: {reason:?}"
+            );
+        }
+        for (layout, cwd) in [
+            (&["repo/.git", "repo/.pi"][..], "repo"),
+            (&["home/.agents/skills", "home/work"][..], "home/work"),
+            (&[".agents/skills", "repo/.git"][..], "repo"),
+        ] {
+            assert_eq!(reason(layout, cwd), None, "{layout:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_pi_session_in_the_profiles_session_directory_is_given_to_a_terminal() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Pi).expect("pi adapter");
+        let root = tempfile::tempdir().expect("root");
+        let profile = pi_profile(root.path());
+        let sessions = root.path().join("agent/sessions/--repo--");
+        let map = root.path().join("home/.pi/pi-acp");
+        std::fs::create_dir_all(&map).expect("session map directory");
+        let recorded = |id: &str, file: PathBuf| {
+            std::fs::write(
+                map.join("session-map.json"),
+                serde_json::json!({
+                    "version": 1,
+                    "sessions": {id: {"sessionId": id, "cwd": "/repo", "sessionFile": file}},
+                })
+                .to_string(),
+            )
+            .expect("session map");
+        };
+        let id = "0b7d4a8e-5c1f-4d2a-9e3b-6f8c1a2d4e5f";
+        let native = |session_id: &str| {
+            adapter.is_native_session(
+                &AcpLaunch {
+                    profile: &profile,
+                    model: "openai/gpt-5.5",
+                    effort: None,
+                    cwd: "/repo",
+                },
+                session_id,
+            )
+        };
+
+        assert!(!native(id), "a session the map does not name");
+        recorded(
+            id,
+            sessions.join(format!("2026-09-17T10-00-00-000Z_{id}.jsonl")),
+        );
+        assert!(native(id));
+        assert!(!native("another-id"));
+        recorded(id, sessions.join("2026-09-17T10-00-00-000Z_other.jsonl"));
+        assert!(!native(id), "a file named for another session");
+        recorded(
+            id,
+            root.path()
+                .join(format!("elsewhere/2026-09-17T10-00-00-000Z_{id}.jsonl")),
+        );
+        assert!(
+            !native(id),
+            "a file outside the profile's session directory"
+        );
     }
 
     /// A Gemini home whose ACP server settings hold `settings`, with the token

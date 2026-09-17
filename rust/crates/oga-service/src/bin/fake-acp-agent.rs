@@ -32,6 +32,15 @@
 //! settings. `next` is a build Oga was not verified against, `no-model` a server
 //! that does not offer the task's model, and `auth` one that refuses the
 //! session until someone signs in.
+//!
+//! A mode starting `pi` answers the way `pi-acp` 0.0.33 does: it reports itself
+//! as that adapter, names its session with Pi's own UUID, records the session
+//! in its session map under the profile's session directory, and offers the
+//! model and thinking level as session settings. It writes a startup summary
+//! into a new session a moment after answering, then announces its commands,
+//! and asks about an extension's question with neither kind nor location.
+//! `next` is a release Oga was not verified against, `unmapped` an adapter that
+//! records no session file, and `ask` a turn that puts a question to a person.
 
 use std::{
     env,
@@ -50,6 +59,8 @@ const CLAUDE_SESSION: &str = "9f3c0c10-0e2a-4b47-8f1f-3f0c9a2b7c51";
 const CODEX_THREAD: &str = "019a4c1e-7b2d-7c30-9e41-5d6f7a8b9c0d";
 /// Antigravity's ACP server names a session with a UUID of its own.
 const ANTIGRAVITY_SESSION: &str = "5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c";
+/// Pi names a session with a UUID, and `pi-acp` opens the session under it.
+const PI_SESSION: &str = "0b7d4a8e-5c1f-4d2a-9e3b-6f8c1a2d4e5f";
 
 fn emit(value: &Value) {
     println!("{value}");
@@ -232,7 +243,72 @@ fn antigravity_settings(mode: &str, model: &str, permissions: &str) -> Value {
     ])
 }
 
+/// `pi-acp`'s settings: the models Pi's account offers, and the thinking
+/// levels it knows, which stop short of `max`.
+fn pi_settings(mode: &str, model: &str, thinking: &str) -> Value {
+    let mut models = vec![
+        json!({"value": "anthropic/claude-sonnet-4-5", "name": "anthropic/Claude Sonnet 4.5"}),
+    ];
+    if !mode.ends_with("no-model") {
+        models.push(json!({"value": "openai/gpt-5.5", "name": "openai/GPT-5.5"}));
+    }
+    let levels: Vec<Value> = ["off", "minimal", "low", "medium", "high", "xhigh"]
+        .iter()
+        .map(|level| json!({"value": level, "name": format!("Thinking: {level}")}))
+        .collect();
+    json!([
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": model,
+            "options": models,
+        },
+        {
+            "id": "thought_level",
+            "name": "Thinking",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": thinking,
+            "options": levels,
+        },
+    ])
+}
+
+/// Records the session the way `pi-acp` does, keyed by its id, with the file
+/// Pi keeps it in under the session directory it was started with.
+fn record_pi_session(session: &str, cwd: &str) {
+    let (Ok(home), Ok(sessions)) = (env::var("HOME"), env::var("PI_CODING_AGENT_SESSION_DIR"))
+    else {
+        return;
+    };
+    let map = std::path::Path::new(&home).join(".pi/pi-acp");
+    std::fs::create_dir_all(&map).expect("session map directory");
+    let file = format!("{sessions}/--project--/2026-09-17T10-00-00-000Z_{session}.jsonl");
+    std::fs::write(
+        map.join("session-map.json"),
+        json!({"version": 1, "sessions": {session: {"sessionId": session, "cwd": cwd, "sessionFile": file}}})
+            .to_string(),
+    )
+    .expect("session map");
+}
+
+fn commands_announced(session: &str) {
+    update(
+        session,
+        json!({"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "compact", "description": "Compact the session"}]}),
+    );
+}
+
 fn capabilities(mode: &str) -> Value {
+    if mode.starts_with("pi") {
+        return json!({
+            "loadSession": true,
+            "mcpCapabilities": {"http": false, "sse": false},
+            "sessionCapabilities": {"list": {}, "delete": {}},
+        });
+    }
     match mode {
         "no-http" => json!({"loadSession": true, "sessionCapabilities": {"resume": {}}}),
         "load-only" => json!({"loadSession": true, "mcpCapabilities": {"http": true}}),
@@ -314,6 +390,39 @@ fn prompt(
                 log(log_path, &json!({"received": line}));
             }
             return;
+        }
+        "ask" => {
+            emit(&json!({
+                "jsonrpc": "2.0",
+                "id": 9003,
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": session,
+                    "toolCall": {"toolCallId": "pi-ui-1", "title": "Run the deploy script?", "kind": "other", "status": "pending"},
+                    "options": [
+                        {"optionId": "yes", "name": "Yes", "kind": "allow_once"},
+                        {"optionId": "no", "name": "No", "kind": "reject_once"},
+                    ],
+                },
+            }));
+            let mut answer = "no answer".to_owned();
+            for line in lines.by_ref() {
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                log(log_path, &json!({"received": message}));
+                if message["id"] == json!(9003) {
+                    answer = message["result"]["outcome"]["optionId"]
+                        .as_str()
+                        .unwrap_or("no answer")
+                        .to_owned();
+                    break;
+                }
+            }
+            chunk(
+                &session,
+                &format!("confirmed: {answer}\nOGA_RESULT: completed"),
+            );
         }
         "permission" => {
             let cwd = env::current_dir().expect("cwd").display().to_string();
@@ -397,6 +506,8 @@ fn main() {
                 "DISABLE_MCP_CONFIG_FILTERING": env::var("DISABLE_MCP_CONFIG_FILTERING").ok(),
                 "GEMINI_HOME": env::var("GEMINI_HOME").ok(),
                 "AGY_ACP_FORCE_FILE_STORAGE": env::var("AGY_ACP_FORCE_FILE_STORAGE").ok(),
+                "PI_CODING_AGENT_DIR": env::var("PI_CODING_AGENT_DIR").ok(),
+                "PI_CODING_AGENT_SESSION_DIR": env::var("PI_CODING_AGENT_SESSION_DIR").ok(),
             },
         }),
     );
@@ -404,30 +515,35 @@ fn main() {
     let claude = mode.starts_with("claude");
     let codex = mode.starts_with("codex");
     let antigravity = mode.starts_with("antigravity");
-    let session_id = match (opencode, claude, codex, antigravity) {
+    let pi = mode.starts_with("pi");
+    let session_id = match (opencode, claude, codex, antigravity, pi) {
         (true, ..) => "ses_acp1",
         (_, true, ..) => CLAUDE_SESSION,
-        (_, _, true, _) => CODEX_THREAD,
-        (.., true) => ANTIGRAVITY_SESSION,
+        (_, _, true, ..) => CODEX_THREAD,
+        (.., true, _) => ANTIGRAVITY_SESSION,
+        (.., true) => PI_SESSION,
         _ => SESSION,
     };
     let renamed = mode.ends_with("renamed");
-    let agent_name = match (opencode, claude, codex, antigravity) {
+    let agent_name = match (opencode, claude, codex, antigravity, pi) {
         (true, ..) if !renamed => "OpenCode",
         (_, true, ..) if !renamed => "@agentclientprotocol/claude-agent-acp",
-        (_, _, true, _) if !renamed => "@agentclientprotocol/codex-acp",
-        (.., true) if !renamed => "antigravity-acp",
+        (_, _, true, ..) if !renamed => "@agentclientprotocol/codex-acp",
+        (.., true, _) if !renamed => "antigravity-acp",
+        (.., true) if !renamed => "pi-acp",
         _ => "fake-acp-agent",
     };
     let opencode2 = mode.starts_with("opencode2");
     let next = mode.ends_with("next");
-    let version = match (codex, opencode2, antigravity) {
+    let version = match (codex, opencode2, antigravity, pi) {
         (true, ..) if next => "1.13.0",
         (true, ..) => "1.12.0",
-        (_, true, _) if next => "0.0.0-beta-19000",
-        (_, true, _) => "0.0.0-beta-18999",
-        (.., true) if next => "agy_acp_server_1.1.2",
-        (.., true) => "agy_acp_server_1.1.1",
+        (_, true, ..) if next => "0.0.0-beta-19000",
+        (_, true, ..) => "0.0.0-beta-18999",
+        (.., true, _) if next => "agy_acp_server_1.1.2",
+        (.., true, _) => "agy_acp_server_1.1.1",
+        (.., true) if next => "0.0.34",
+        (.., true) => "0.0.33",
         _ => "2.1.0",
     };
     let turns = mode
@@ -436,6 +552,7 @@ fn main() {
         .or_else(|| mode.strip_prefix("claude-"))
         .or_else(|| mode.strip_prefix("codex-"))
         .or_else(|| mode.strip_prefix("antigravity-"))
+        .or_else(|| mode.strip_prefix("pi-"))
         .unwrap_or(&mode)
         .to_owned();
     let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
@@ -443,6 +560,10 @@ fn main() {
     if antigravity {
         model = "gemini-3.7-flash-high".to_owned();
         access = "default".to_owned();
+    }
+    if pi {
+        model = "anthropic/claude-sonnet-4-5".to_owned();
+        effort = "medium".to_owned();
     }
     if codex {
         let config: Value = env::var("CODEX_CONFIG")
@@ -520,6 +641,22 @@ fn main() {
                     "configOptions": antigravity_settings(&mode, &model, &access),
                 },
             })),
+            "session/new" if pi => {
+                if !mode.ends_with("unmapped") {
+                    record_pi_session(session_id, params["cwd"].as_str().unwrap_or_default());
+                }
+                emit(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "sessionId": session_id,
+                        "configOptions": pi_settings(&mode, &model, &effort),
+                    },
+                }));
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                chunk(session_id, "pi v0.85.1\n\nSkills: none\n");
+                commands_announced(session_id);
+            }
             "session/new" => {
                 emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session_id}}))
             }
@@ -530,7 +667,9 @@ fn main() {
                     Some("mode") => access = value,
                     _ => effort = value,
                 }
-                let offered = if claude {
+                let offered = if pi {
+                    pi_settings(&mode, &model, &effort)
+                } else if claude {
                     claude_settings(&mode, &effort)
                 } else if antigravity {
                     antigravity_settings(&mode, &model, &access)
@@ -554,7 +693,16 @@ fn main() {
                 ] {
                     chunk(session, text);
                 }
-                emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}}));
+                if pi {
+                    emit(&json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {"configOptions": pi_settings(&mode, &model, &effort)},
+                    }));
+                    commands_announced(session);
+                } else {
+                    emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}}));
+                }
             }
             "session/resume" if opencode => emit(&json!({
                 "jsonrpc": "2.0",

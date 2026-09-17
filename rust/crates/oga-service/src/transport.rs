@@ -124,7 +124,7 @@ pub(crate) enum AcpStart {
 
 enum NewSession {
     Acp {
-        adapter: AcpAdapter,
+        adapter: Box<AcpAdapter>,
         may_fall_back: bool,
     },
     Cli(TransportReason),
@@ -139,7 +139,7 @@ fn plan_new_session(
     if profile.command.is_some() {
         return NewSession::Cli(TransportReason::CustomCommand);
     }
-    let adapter = adapters.get(profile.provider).cloned();
+    let adapter = adapters.get(profile.provider).cloned().map(Box::new);
     match (preference, adapter) {
         (TransportPreference::Cli, _) => NewSession::Cli(TransportReason::Preference),
         (TransportPreference::Auto, Some(adapter)) => NewSession::Acp {
@@ -200,7 +200,7 @@ pub(crate) fn plan(
             adapter,
             may_fall_back,
         } => TransportPlan::Acp {
-            adapter,
+            adapter: *adapter,
             start: AcpStart::New,
             may_fall_back,
         },
@@ -237,15 +237,6 @@ mod tests {
             env: BTreeMap::new(),
             capabilities: vec![],
             command,
-        }
-    }
-
-    /// A provider Oga ships no adapter for, so `builtin()` has no way to reach
-    /// it over ACP.
-    fn without_adapter() -> Profile {
-        Profile {
-            provider: Provider::Pi,
-            ..profile(None)
         }
     }
 
@@ -314,9 +305,9 @@ mod tests {
     fn explicit_acp_without_an_adapter_refuses_instead_of_falling_back() {
         let plan = plan(
             &Task::default(),
-            &without_adapter(),
+            &profile(None),
             TransportPreference::Acp,
-            &AcpAdapters::builtin(),
+            &AcpAdapters::default(),
             None,
             NOW,
         );
@@ -327,9 +318,9 @@ mod tests {
     fn auto_without_an_adapter_records_why_it_used_the_command_line() {
         let plan = plan(
             &Task::default(),
-            &without_adapter(),
+            &profile(None),
             TransportPreference::Auto,
-            &AcpAdapters::builtin(),
+            &AcpAdapters::default(),
             None,
             NOW,
         );
@@ -417,9 +408,9 @@ mod tests {
 
         let orphaned = plan(
             &acp_task(Some("acp-1")),
-            &without_adapter(),
+            &profile(None),
             TransportPreference::Auto,
-            &AcpAdapters::builtin(),
+            &AcpAdapters::default(),
             Some("acp-1"),
             NOW,
         );

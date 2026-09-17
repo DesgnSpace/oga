@@ -1954,25 +1954,32 @@ async fn transport_preference_routes_report_what_a_new_session_would_use() {
         current,
         json!({
             "preference": "auto",
-            "transport": "cli",
-            "adapter": null,
-            "reason": "no_adapter",
+            "transport": "acp",
+            "adapter": "pi-acp",
+            "reason": null,
         })
     );
 
-    let (status, required) = json_response(
+    let (status, chosen) = json_response(
         request(
             &fixture.router,
             Method::PUT,
             "/api/profiles/pi/transport",
-            Body::from(json!({"preference": "acp"}).to_string()),
+            Body::from(json!({"preference": "cli"}).to_string()),
         )
         .await,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(required["preference"], "acp");
-    assert_eq!(required["transport"], Value::Null);
+    assert_eq!(
+        chosen,
+        json!({
+            "preference": "cli",
+            "transport": "cli",
+            "adapter": "pi-acp",
+            "reason": "preference",
+        })
+    );
 
     let (status, _) = json_response(
         request(

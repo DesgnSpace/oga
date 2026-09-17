@@ -2277,3 +2277,419 @@ async fn an_antigravity_task_from_before_acp_resumes_its_conversation_on_the_com
     );
     assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
 }
+
+/// Answers `pi --mode json` the way Pi's command line does, after noting that
+/// it ran.
+const PI_CLI: &str = r#"printf '%s\n' "$@" >> "$PWD/cli-ran"
+printf '%s\n' '{"type":"session","id":"c0ffee00-0000-4000-8000-00000000c1a1"}' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ran on the command line\nOGA_RESULT: completed"}]}}'
+"#;
+
+/// The session id Pi's ACP adapter opens, which is Pi's own.
+const PI_SESSION: &str = "0b7d4a8e-5c1f-4d2a-9e3b-6f8c1a2d4e5f";
+
+/// A Pi profile on the adapters Oga ships, with its own home and agent
+/// directory, `pi-acp` resolving to the scripted adapter in `mode`, and `pi` to
+/// a command line that records that it ran. `missing` is an account without
+/// the adapter installed. Each of `resources` is created in the project.
+fn pi_harness(mode: &str, resources: &[&str]) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    for resource in resources {
+        fs::create_dir_all(cwd.join(resource)).expect("project resource");
+    }
+    fs::create_dir_all(&bin).expect("bin");
+    let log = directory.path().join("agent.log");
+    if mode != "missing" {
+        let adapter = bin.join("pi-acp");
+        fs::write(
+            &adapter,
+            format!(
+                "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
+                env!("CARGO_BIN_EXE_fake-acp-agent"),
+                log.display()
+            ),
+        )
+        .expect("fake adapter");
+        fs::set_permissions(&adapter, fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+    let cli = bin.join("pi");
+    fs::write(&cli, format!("#!/bin/sh\n{PI_CLI}")).expect("fake command line");
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("executable");
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::Pi,
+        default_model: "openai/gpt-5.5".into(),
+        enabled: true,
+        env: BTreeMap::from([
+            ("PATH".into(), bin.display().to_string()),
+            (
+                "HOME".into(),
+                directory.path().join("home").display().to_string(),
+            ),
+            (
+                "PI_CODING_AGENT_DIR".into(),
+                directory.path().join("agent").display().to_string(),
+            ),
+        ]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {
+                "openai/gpt-5.5": true,
+                "anthropic/claude-sonnet-4-5": true,
+            }}}})
+            .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
+#[tokio::test]
+async fn pi_runs_over_acp_by_default_with_its_model_thinking_level_and_account() {
+    let harness = pi_harness("pi", &[]);
+    let mut request = DispatchRequest::new("work", "summarise the readme", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("Done."), "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    let agent = recorded.agent.as_ref().expect("agent identity");
+    assert_eq!(agent.adapter, "pi-acp");
+    assert_eq!(agent.version.as_deref(), Some("0.0.33"));
+    assert_eq!(recorded.acp_session_id.as_deref(), Some(PI_SESSION));
+    assert_eq!(
+        recorded.restore,
+        Some(AcpRestore::Load),
+        "the adapter loads a session but cannot resume one"
+    );
+    assert_eq!(
+        task.session_id.as_deref(),
+        Some(PI_SESSION),
+        "Pi's own session, which `pi --session-id` continues in a terminal"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "session/new",
+            "session/set_config_option",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+        "the model and thinking level are chosen before the prompt goes out"
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [
+            ("model".to_owned(), "openai/gpt-5.5".to_owned()),
+            ("thought_level".to_owned(), "high".to_owned()),
+        ],
+        "the model --model names and the level --thinking names"
+    );
+    let opened = &harness.received("session/new")[0];
+    assert_eq!(opened["cwd"], task.cwd);
+    assert_eq!(
+        opened["mcpServers"],
+        serde_json::json!([]),
+        "as on its command line, Pi gets no Oga tools"
+    );
+    let started = &harness.agent_log()[0]["env"];
+    assert!(
+        started["PI_CODING_AGENT_DIR"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/agent")),
+        "{started}"
+    );
+    assert!(
+        started["PI_CODING_AGENT_SESSION_DIR"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/agent/sessions")),
+        "the adapter's pi keeps sessions where the command line does: {started}"
+    );
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_pi_extension_question_is_declined_and_the_startup_summary_left_out() {
+    let harness = pi_harness("pi-ask", &[]);
+    let mut request = DispatchRequest::new("work", "deploy it", &harness.cwd);
+    request.model = Some("anthropic/claude-sonnet-4-5".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(
+        task.output.trim(),
+        "confirmed: no",
+        "nobody is there to say yes, as on the command line, and the summary Pi writes after opening the session is not the answer"
+    );
+    assert_eq!(
+        methods(&harness),
+        ["initialize", "session/new", "session/prompt"],
+        "the session already holds the model, so nothing stands between opening it and the prompt"
+    );
+    let answered: Vec<Value> = harness
+        .events(&task.id)
+        .into_iter()
+        .filter(|event| event.kind == "permission_answered")
+        .map(|event| Value::Object(event.payload.into_iter().collect()))
+        .collect();
+    assert_eq!(answered.len(), 1, "{answered:?}");
+    assert_eq!(answered[0]["allowed"], false);
+    assert_eq!(answered[0]["unattended"], true);
+    assert!(
+        !harness
+            .events(&task.id)
+            .iter()
+            .any(|event| format!("{:?}", event.payload).contains("pi v0.85.1")),
+        "the startup summary is not recorded as part of the turn"
+    );
+}
+
+#[tokio::test]
+async fn pi_keeps_to_its_command_line_before_any_prompt_when_acp_cannot_run_it_the_same_way() {
+    for (mode, effort, resources) in [
+        ("missing", None, &[][..]),
+        ("pi", Some("max"), &[][..]),
+        ("pi", None, &[".pi/extensions"][..]),
+        ("pi", None, &[".agents/skills"][..]),
+    ] {
+        let harness = pi_harness(mode, resources);
+        let mut request = DispatchRequest::new("work", "do the work", &harness.cwd);
+        request.effort = effort.map(str::to_owned);
+
+        let task = harness.run_with(request).await;
+
+        let case = format!("{mode} {effort:?} {resources:?}");
+        assert_eq!(task.state, TaskState::Completed, "{case}: {task:?}");
+        assert_eq!(task.output.trim(), "ran on the command line", "{case}");
+        let recorded = transport(&task);
+        assert_eq!(recorded.kind, Transport::Cli, "{case}");
+        assert_eq!(
+            recorded.reason,
+            Some(TransportReason::Unavailable),
+            "{case}"
+        );
+        assert_eq!(
+            task.session_id.as_deref(),
+            Some("c0ffee00-0000-4000-8000-00000000c1a1"),
+            "{case}"
+        );
+        assert!(
+            harness.received("session/prompt").is_empty(),
+            "{case}: no prompt reached the adapter"
+        );
+        let ran = harness.cli_runs();
+        assert!(
+            ran.windows(2)
+                .any(|pair| pair == ["--model", "openai/gpt-5.5"]),
+            "{case}: {ran:?}"
+        );
+        assert!(
+            ran.iter().any(|arg| arg == "--no-approve"),
+            "{case}: {ran:?}"
+        );
+        assert!(
+            harness
+                .events(&task.id)
+                .iter()
+                .any(|event| event.kind == "transport_fallback"),
+            "{case}"
+        );
+        if !resources.is_empty() {
+            assert!(
+                recorded
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("Pi files of its own")),
+                "{case}: {recorded:?}"
+            );
+            assert!(
+                harness.agent_log().is_empty(),
+                "{case}: the adapter is never started for a project it would load"
+            );
+        }
+    }
+
+    let explicit = pi_harness("pi", &[".pi/settings.json"]);
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let task = explicit.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("Pi files of its own")),
+        "{task:?}"
+    );
+    assert!(explicit.agent_log().is_empty());
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_pi_adapter_oga_was_not_verified_against_never_opens_a_session() {
+    for mode in ["pi-next", "pi-renamed"] {
+        let harness = pi_harness(mode, &[]);
+
+        let task = harness.run("do the work").await;
+
+        assert_eq!(task.state, TaskState::Completed, "{mode}: {task:?}");
+        let recorded = transport(&task);
+        assert_eq!(recorded.kind, Transport::Cli, "{mode}");
+        assert!(
+            recorded
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("pi-acp 0.0.33")),
+            "{mode}: {recorded:?}"
+        );
+        assert_eq!(methods(&harness), ["initialize"], "{mode}");
+        assert!(!harness.cli_runs().is_empty(), "{mode}");
+    }
+
+    let explicit = pi_harness("pi-next", &[]);
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let task = explicit.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("not pi-acp 0.0.34")),
+        "{task:?}"
+    );
+    assert_eq!(methods(&explicit), ["initialize"]);
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_pi_follow_up_loads_its_session_and_a_lost_prompt_is_never_rerun() {
+    let harness = pi_harness("pi", &[]);
+    let first = harness.run("start").await;
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    assert!(
+        !second.output.contains("an earlier answer"),
+        "the replayed conversation is not this turn's answer: {second:?}"
+    );
+    let loaded = harness.received("session/load");
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0]["sessionId"], PI_SESSION);
+    assert_eq!(harness.received("session/new").len(), 1);
+    assert_eq!(harness.received("session/prompt").len(), 2);
+    assert_eq!(
+        chosen_settings(&harness)
+            .iter()
+            .filter(|(id, value)| id == "model" && value == "openai/gpt-5.5")
+            .count(),
+        2,
+        "a loaded session is put back on the task's model before its prompt"
+    );
+    assert_eq!(second.session_id.as_deref(), Some(PI_SESSION));
+    assert!(harness.cli_runs().is_empty());
+
+    let lost = pi_harness("pi-exit-after-prompt", &[]);
+    let task = lost.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(lost.received("session/prompt").len(), 1);
+    assert!(
+        lost.cli_runs().is_empty(),
+        "a prompt that may have run is never sent through the command line"
+    );
+}
+
+#[tokio::test]
+async fn a_pi_session_the_adapter_did_not_tie_to_a_session_file_is_never_given_to_a_terminal() {
+    let harness = pi_harness("pi-unmapped", &[]);
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(transport(&task).acp_session_id.as_deref(), Some(PI_SESSION));
+    assert_eq!(task.session_id, None);
+}
+
+#[tokio::test]
+async fn a_pi_task_from_before_acp_resumes_on_its_command_line() {
+    let harness = pi_harness("pi", &[]);
+    let task = Task {
+        id: "before-acp".into(),
+        profile_id: "work".into(),
+        model: "openai/gpt-5.5".into(),
+        prompt: "old work".into(),
+        cwd: harness.cwd.display().to_string(),
+        state: TaskState::Completed,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        session_id: Some("c0ffee00-0000-4000-8000-0000000001d0".into()),
+        ..Task::default()
+    };
+    harness
+        .store
+        .repositories()
+        .tasks()
+        .insert(&task)
+        .expect("task");
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new("before-acp").instruction("one more thing"),
+    )
+    .await
+    .expect("resumed");
+    let resumed = harness.settle("before-acp").await;
+
+    assert_eq!(resumed.state, TaskState::Completed, "{resumed:?}");
+    assert!(harness.agent_log().is_empty(), "no ACP adapter was started");
+    assert!(
+        harness
+            .cli_runs()
+            .windows(2)
+            .any(|pair| pair == ["--session-id", "c0ffee00-0000-4000-8000-0000000001d0"])
+    );
+    assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
+}
