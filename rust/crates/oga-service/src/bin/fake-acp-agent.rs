@@ -25,6 +25,13 @@
 //! starts on the model and effort `CODEX_CONFIG` names, and offers its approval
 //! and sandbox preset as a session setting. `next` is a release Oga was not
 //! verified against, and `no-full-access` an adapter without that preset.
+//!
+//! A mode starting `antigravity` answers the way `agy_acp_server.par` 1.1.1
+//! does: it reports itself as `antigravity-acp` under its build label, names its
+//! session with a UUID, and offers the model and its permission mode as session
+//! settings. `next` is a build Oga was not verified against, `no-model` a server
+//! that does not offer the task's model, and `auth` one that refuses the
+//! session until someone signs in.
 
 use std::{
     env,
@@ -41,6 +48,8 @@ const CLAUDE_SESSION: &str = "9f3c0c10-0e2a-4b47-8f1f-3f0c9a2b7c51";
 /// Codex names a thread with a UUID, and `codex-acp` opens the session under
 /// that same id.
 const CODEX_THREAD: &str = "019a4c1e-7b2d-7c30-9e41-5d6f7a8b9c0d";
+/// Antigravity's ACP server names a session with a UUID of its own.
+const ANTIGRAVITY_SESSION: &str = "5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c";
 
 fn emit(value: &Value) {
     println!("{value}");
@@ -185,6 +194,39 @@ fn codex_settings(mode: &str, model: &str, effort: &str, access: &str) -> Value 
                 {"value": "medium", "name": "Medium"},
                 {"value": "high", "name": "High"},
                 {"value": "xhigh", "name": "Xhigh"},
+            ],
+        },
+    ])
+}
+
+/// Antigravity's settings: the Gemini models the account offers, and the
+/// permission modes, starting on the one that asks before every tool call.
+fn antigravity_settings(mode: &str, model: &str, permissions: &str) -> Value {
+    let mut models =
+        vec![json!({"value": "gemini-3.7-flash-high", "name": "Gemini 3.7 Flash (High)"})];
+    if !mode.ends_with("no-model") {
+        models
+            .push(json!({"value": "gemini-3.6-flash-medium", "name": "Gemini 3.6 Flash (Medium)"}));
+    }
+    json!([
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": model,
+            "options": models,
+        },
+        {
+            "id": "mode",
+            "name": "Session Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": permissions,
+            "options": [
+                {"value": "default", "name": "Default"},
+                {"value": "auto_edit", "name": "Auto Edit"},
+                {"value": "yolo", "name": "YOLO"},
             ],
         },
     ])
@@ -353,31 +395,39 @@ fn main() {
                 "CODEX_HOME": env::var("CODEX_HOME").ok(),
                 "CODEX_CONFIG": env::var("CODEX_CONFIG").ok(),
                 "DISABLE_MCP_CONFIG_FILTERING": env::var("DISABLE_MCP_CONFIG_FILTERING").ok(),
+                "GEMINI_HOME": env::var("GEMINI_HOME").ok(),
+                "AGY_ACP_FORCE_FILE_STORAGE": env::var("AGY_ACP_FORCE_FILE_STORAGE").ok(),
             },
         }),
     );
     let opencode = mode.starts_with("opencode");
     let claude = mode.starts_with("claude");
     let codex = mode.starts_with("codex");
-    let session_id = match (opencode, claude, codex) {
-        (true, _, _) => "ses_acp1",
-        (_, true, _) => CLAUDE_SESSION,
-        (_, _, true) => CODEX_THREAD,
+    let antigravity = mode.starts_with("antigravity");
+    let session_id = match (opencode, claude, codex, antigravity) {
+        (true, ..) => "ses_acp1",
+        (_, true, ..) => CLAUDE_SESSION,
+        (_, _, true, _) => CODEX_THREAD,
+        (.., true) => ANTIGRAVITY_SESSION,
         _ => SESSION,
     };
     let renamed = mode.ends_with("renamed");
-    let agent_name = match (opencode, claude, codex) {
-        (true, _, _) if !renamed => "OpenCode",
-        (_, true, _) if !renamed => "@agentclientprotocol/claude-agent-acp",
-        (_, _, true) if !renamed => "@agentclientprotocol/codex-acp",
+    let agent_name = match (opencode, claude, codex, antigravity) {
+        (true, ..) if !renamed => "OpenCode",
+        (_, true, ..) if !renamed => "@agentclientprotocol/claude-agent-acp",
+        (_, _, true, _) if !renamed => "@agentclientprotocol/codex-acp",
+        (.., true) if !renamed => "antigravity-acp",
         _ => "fake-acp-agent",
     };
     let opencode2 = mode.starts_with("opencode2");
-    let version = match (codex, opencode2, mode.ends_with("next")) {
-        (true, _, true) => "1.13.0",
-        (true, _, false) => "1.12.0",
-        (_, true, true) => "0.0.0-beta-19000",
-        (_, true, false) => "0.0.0-beta-18999",
+    let next = mode.ends_with("next");
+    let version = match (codex, opencode2, antigravity) {
+        (true, ..) if next => "1.13.0",
+        (true, ..) => "1.12.0",
+        (_, true, _) if next => "0.0.0-beta-19000",
+        (_, true, _) => "0.0.0-beta-18999",
+        (.., true) if next => "agy_acp_server_1.1.2",
+        (.., true) => "agy_acp_server_1.1.1",
         _ => "2.1.0",
     };
     let turns = mode
@@ -385,10 +435,15 @@ fn main() {
         .or_else(|| mode.strip_prefix("opencode-"))
         .or_else(|| mode.strip_prefix("claude-"))
         .or_else(|| mode.strip_prefix("codex-"))
+        .or_else(|| mode.strip_prefix("antigravity-"))
         .unwrap_or(&mode)
         .to_owned();
     let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
     let mut access = "agent".to_owned();
+    if antigravity {
+        model = "gemini-3.7-flash-high".to_owned();
+        access = "default".to_owned();
+    }
     if codex {
         let config: Value = env::var("CODEX_CONFIG")
             .ok()
@@ -452,6 +507,19 @@ fn main() {
                     "configOptions": codex_settings(&mode, &model, &effort, &access),
                 },
             })),
+            "session/new" if antigravity && mode.ends_with("auth") => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32000, "message": "Authentication required"},
+            })),
+            "session/new" if antigravity => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": session_id,
+                    "configOptions": antigravity_settings(&mode, &model, &access),
+                },
+            })),
             "session/new" => {
                 emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session_id}}))
             }
@@ -464,6 +532,8 @@ fn main() {
                 }
                 let offered = if claude {
                     claude_settings(&mode, &effort)
+                } else if antigravity {
+                    antigravity_settings(&mode, &model, &access)
                 } else if codex {
                     codex_settings(&mode, &model, &effort, &access)
                 } else {
@@ -495,6 +565,11 @@ fn main() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {"configOptions": claude_settings(&mode, &effort)},
+            })),
+            "session/resume" if antigravity => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"configOptions": antigravity_settings(&mode, &model, &access)},
             })),
             "session/resume" if codex => emit(&json!({
                 "jsonrpc": "2.0",

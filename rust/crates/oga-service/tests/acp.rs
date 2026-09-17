@@ -1893,3 +1893,387 @@ async fn a_codex_task_from_before_acp_resumes_on_its_command_line() {
     );
     assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
 }
+
+/// Answers `agy --print` the way Antigravity's command line does, after noting
+/// that it ran.
+const ANTIGRAVITY_CLI: &str = r#"printf '%s\n' "$@" >> "$PWD/cli-ran"
+printf '%s\n' '{"event":"init","conversation_id":"c0ffee00-0000-4000-8000-00000000c11a"}' '{"event":"result","result":{"response":"ran on the command line\nOGA_RESULT: completed","conversation_id":"c0ffee00-0000-4000-8000-00000000c11a"}}'
+"#;
+
+/// A Google sign-in the ACP server keeps in its own Gemini home.
+const GOOGLE_SIGN_IN: &str = r#"{"auth": {"type": "oauth-personal"}}"#;
+
+/// An Antigravity profile on the adapters Oga ships, with its own Gemini home,
+/// `agy_acp_server.par` resolving to the scripted server in `mode`, and `agy`
+/// to a command line that records that it ran. `missing` is an account with no
+/// ACP server installed. `sign_in` is the server's `settings.json`, saved with a
+/// token when it names a Google sign-in; `None` is a server nobody signed in to.
+fn antigravity_harness(mode: &str, sign_in: Option<&str>) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let server_home = directory.path().join("gemini").join("antigravity-acp");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    fs::create_dir_all(&server_home).expect("gemini home");
+    fs::create_dir_all(&bin).expect("bin");
+    if let Some(settings) = sign_in {
+        fs::write(server_home.join("settings.json"), settings).expect("settings");
+        fs::write(server_home.join("acp_token.json"), "{}").expect("token");
+    }
+    let log = directory.path().join("agent.log");
+    if mode != "missing" {
+        let server = bin.join("agy_acp_server.par");
+        fs::write(
+            &server,
+            format!(
+                "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
+                env!("CARGO_BIN_EXE_fake-acp-agent"),
+                log.display()
+            ),
+        )
+        .expect("fake server");
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+    let cli = bin.join("agy");
+    fs::write(&cli, format!("#!/bin/sh\n{ANTIGRAVITY_CLI}")).expect("fake command line");
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("executable");
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::Antigravity,
+        default_model: "gemini-3.6-flash-medium".into(),
+        enabled: true,
+        env: BTreeMap::from([
+            ("PATH".into(), bin.display().to_string()),
+            (
+                "GEMINI_HOME".into(),
+                directory.path().join("gemini").display().to_string(),
+            ),
+        ]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {"gemini-3.6-flash-medium": true}}}})
+                .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
+#[tokio::test]
+async fn antigravity_runs_over_acp_by_default_with_its_model_and_gemini_home() {
+    let harness = antigravity_harness("antigravity", Some(GOOGLE_SIGN_IN));
+    let mut request = DispatchRequest::new("work", "summarise the readme", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("Done."), "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    let agent = recorded.agent.as_ref().expect("agent identity");
+    assert_eq!(agent.adapter, "antigravity-acp");
+    assert_eq!(agent.version.as_deref(), Some("agy_acp_server_1.1.1"));
+    assert_eq!(
+        recorded.acp_session_id.as_deref(),
+        Some("5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c")
+    );
+    assert_eq!(recorded.restore, Some(AcpRestore::Resume));
+    assert_eq!(
+        task.session_id, None,
+        "the server's conversation is not one `agy --conversation` can reopen"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "session/new",
+            "session/set_config_option",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+        "the model and the permission mode are chosen before the prompt goes out"
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [
+            ("model".to_owned(), "gemini-3.6-flash-medium".to_owned()),
+            ("mode".to_owned(), "yolo".to_owned()),
+        ],
+        "the model --model names, approving every tool as --dangerously-skip-permissions does"
+    );
+    let opened = &harness.received("session/new")[0];
+    assert_eq!(opened["cwd"], task.cwd);
+    assert_eq!(
+        opened["mcpServers"],
+        serde_json::json!([]),
+        "as on its command line, Antigravity gets no Oga tools"
+    );
+    let started = &harness.agent_log()[0]["env"];
+    assert!(
+        started["GEMINI_HOME"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/gemini")),
+        "the server runs in the profile's own Gemini home: {started}"
+    );
+    if cfg!(target_os = "macos") {
+        assert_eq!(
+            started["AGY_ACP_FORCE_FILE_STORAGE"], "1",
+            "a home of its own reads its own sign-in, not the shared keychain's"
+        );
+    }
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn antigravity_without_a_ready_acp_server_runs_on_its_command_line_before_any_prompt() {
+    for (mode, sign_in) in [
+        ("missing", Some(GOOGLE_SIGN_IN)),
+        ("antigravity", None),
+        ("antigravity-no-model", Some(GOOGLE_SIGN_IN)),
+    ] {
+        let harness = antigravity_harness(mode, sign_in);
+
+        let task = harness.run("do the work").await;
+
+        assert_eq!(task.state, TaskState::Completed, "{mode}: {task:?}");
+        assert_eq!(task.output.trim(), "ran on the command line", "{mode}");
+        let recorded = transport(&task);
+        assert_eq!(recorded.kind, Transport::Cli, "{mode}");
+        assert_eq!(
+            recorded.reason,
+            Some(TransportReason::Unavailable),
+            "{mode}"
+        );
+        assert_eq!(
+            task.session_id.as_deref(),
+            Some("c0ffee00-0000-4000-8000-00000000c11a"),
+            "{mode}"
+        );
+        assert!(
+            harness.received("session/prompt").is_empty(),
+            "{mode}: no prompt reached the server"
+        );
+        let ran = harness.cli_runs();
+        assert!(
+            ran.windows(2)
+                .any(|pair| pair == ["--model", "gemini-3.6-flash-medium"]),
+            "{mode}: {ran:?}"
+        );
+        assert!(
+            ran.iter()
+                .any(|arg| arg == "--dangerously-skip-permissions"),
+            "{mode}: {ran:?}"
+        );
+        assert!(
+            harness
+                .events(&task.id)
+                .iter()
+                .any(|event| event.kind == "transport_fallback"),
+            "{mode}"
+        );
+    }
+
+    let unsigned = antigravity_harness("antigravity", None);
+    let task = unsigned.run("do the work").await;
+
+    assert!(
+        transport(&task)
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("isn't signed in")),
+        "{task:?}"
+    );
+    assert!(
+        unsigned.agent_log().is_empty(),
+        "a server nobody signed in to is never started, so it cannot open a sign-in page"
+    );
+}
+
+#[tokio::test]
+async fn explicit_acp_on_an_antigravity_server_nobody_signed_in_to_fails_visibly() {
+    let harness = antigravity_harness("antigravity", None);
+    set_transport_preference(&harness.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("isn't signed in")),
+        "{task:?}"
+    );
+    assert!(harness.agent_log().is_empty());
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn an_antigravity_server_that_refuses_the_sign_in_never_falls_back() {
+    let harness = antigravity_harness("antigravity-auth", Some(GOOGLE_SIGN_IN));
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(
+        task.completion.as_ref().map(|completion| completion.code),
+        Some(CompletionCode::Auth),
+        "{task:?}"
+    );
+    assert!(harness.received("session/prompt").is_empty());
+    assert!(
+        harness.cli_runs().is_empty(),
+        "a refused sign-in is never stepped around through the command line"
+    );
+}
+
+#[tokio::test]
+async fn an_antigravity_build_oga_was_not_verified_against_never_opens_a_session() {
+    for mode in ["antigravity-next", "antigravity-renamed"] {
+        let harness = antigravity_harness(mode, Some(GOOGLE_SIGN_IN));
+
+        let task = harness.run("do the work").await;
+
+        assert_eq!(task.state, TaskState::Completed, "{mode}: {task:?}");
+        let recorded = transport(&task);
+        assert_eq!(recorded.kind, Transport::Cli, "{mode}");
+        assert!(
+            recorded
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("antigravity-acp agy_acp_server_1.1.1")),
+            "{mode}: {recorded:?}"
+        );
+        assert_eq!(methods(&harness), ["initialize"], "{mode}");
+        assert!(!harness.cli_runs().is_empty(), "{mode}");
+    }
+
+    let explicit = antigravity_harness("antigravity-next", Some(GOOGLE_SIGN_IN));
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let task = explicit.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("not antigravity-acp agy_acp_server_1.1.2")),
+        "{task:?}"
+    );
+    assert_eq!(methods(&explicit), ["initialize"]);
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn an_antigravity_follow_up_resumes_its_session_and_a_lost_prompt_is_never_rerun() {
+    let harness = antigravity_harness("antigravity", Some(GOOGLE_SIGN_IN));
+    let first = harness.run("start").await;
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    let resumed = harness.received("session/resume");
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(
+        resumed[0]["sessionId"],
+        "5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c"
+    );
+    assert_eq!(harness.received("session/new").len(), 1);
+    assert_eq!(harness.received("session/prompt").len(), 2);
+    assert_eq!(
+        chosen_settings(&harness)
+            .iter()
+            .filter(|(id, value)| id == "mode" && value == "yolo")
+            .count(),
+        2,
+        "a resumed session approves every tool again before its prompt"
+    );
+    assert_eq!(second.session_id, None);
+    assert!(harness.cli_runs().is_empty());
+
+    let lost = antigravity_harness("antigravity-exit-after-prompt", Some(GOOGLE_SIGN_IN));
+    let task = lost.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(lost.received("session/prompt").len(), 1);
+    assert!(
+        lost.cli_runs().is_empty(),
+        "a prompt that may have run is never sent through the command line"
+    );
+}
+
+#[tokio::test]
+async fn an_antigravity_task_from_before_acp_resumes_its_conversation_on_the_command_line() {
+    let harness = antigravity_harness("antigravity", Some(GOOGLE_SIGN_IN));
+    let task = Task {
+        id: "before-acp".into(),
+        profile_id: "work".into(),
+        model: "gemini-3.6-flash-medium".into(),
+        prompt: "old work".into(),
+        cwd: harness.cwd.display().to_string(),
+        state: TaskState::Completed,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        session_id: Some("c0ffee00-0000-4000-8000-0000000001d0".into()),
+        ..Task::default()
+    };
+    harness
+        .store
+        .repositories()
+        .tasks()
+        .insert(&task)
+        .expect("task");
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new("before-acp").instruction("one more thing"),
+    )
+    .await
+    .expect("resumed");
+    let resumed = harness.settle("before-acp").await;
+
+    assert_eq!(resumed.state, TaskState::Completed, "{resumed:?}");
+    assert!(harness.agent_log().is_empty(), "no ACP server was started");
+    assert!(
+        harness
+            .cli_runs()
+            .windows(2)
+            .any(|pair| pair == ["--conversation", "c0ffee00-0000-4000-8000-0000000001d0"])
+    );
+    assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
+}

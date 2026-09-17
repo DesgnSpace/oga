@@ -15,8 +15,9 @@ use std::{
 };
 
 use oga_domain::{Profile, Provider};
+use serde_json::Value;
 
-use crate::{ProviderCommand, environment_for, skills_dir, unset_environment_for};
+use crate::{ProviderCommand, environment_for, home, skills_dir, unset_environment_for};
 
 /// What an adapter needs to know to start one agent for one run.
 #[derive(Debug, Clone, Copy)]
@@ -226,6 +227,7 @@ impl AcpAdapters {
             .register(Provider::Codex, codex())
             .register(Provider::OpenCode, opencode())
             .register(Provider::OpenCode2, opencode2())
+            .register(Provider::Antigravity, antigravity())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -431,6 +433,123 @@ fn opencode2() -> AcpAdapter {
     })
 }
 
+/// Google's Antigravity ACP server, `agy_acp_server.par`, the `antigravity-acp`
+/// release in the ACP registry, verified against 1.1.1. It reports that
+/// release as the build label `agy_acp_server_1.1.1`, so Oga accepts that
+/// build alone and turns any other away before a session opens. Oga starts the
+/// binary from the account's path, where it finds the harness shipped beside
+/// it; an account without it falls back before any prompt.
+///
+/// The server keeps its sign-in, settings, and conversations in
+/// `antigravity-acp/` under the Gemini home, apart from the command line's
+/// `antigravity-cli/`. A session it opens is therefore not a conversation
+/// `agy --conversation` can reopen, and no terminal session is recorded.
+///
+/// It refuses every session until its `settings.json` names a sign-in method,
+/// and a Google sign-in with no saved token opens a browser instead of
+/// answering. An account whose server has neither keeps to its command line,
+/// which signs in on its own. On macOS a Google sign-in lives in the login
+/// keychain, shared by every Gemini home, so a profile with a home of its own
+/// has its server read that home's token file instead of another account's.
+///
+/// The model is a session setting taking the same id `--model` does, and that
+/// id carries its thinking level, so no effort is chosen. `yolo` approves
+/// every tool call, as `--dangerously-skip-permissions` does, leaving
+/// confinement to the runner. Its command line runs without Oga's tools, and so
+/// does this. The server reports no usage over ACP.
+fn antigravity() -> AcpAdapter {
+    const AGENT: &str = "antigravity-acp";
+    AcpAdapter::new(AGENT, |_| {
+        let mut argv = vec!["agy_acp_server.par".to_owned()];
+        // The registry starts the Linux builds with an empty `--uid`.
+        if cfg!(target_os = "linux") {
+            argv.push("--uid=".to_owned());
+        }
+        argv
+    })
+    .release(AcpRelease::build(AGENT, "agy_acp_server_1.1.1"))
+    .incompatibility(|launch| GeminiHome::of(launch.profile).missing_sign_in())
+    .environment(|launch| {
+        let home = GeminiHome::of(launch.profile);
+        if cfg!(target_os = "macos") && home.named_by_profile {
+            BTreeMap::from([(FORCE_FILE_STORAGE.to_owned(), "1".to_owned())])
+        } else {
+            BTreeMap::new()
+        }
+    })
+    .settings(|launch| {
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+        vec![setting("model", launch.model), setting("mode", "yolo")]
+    })
+}
+
+/// Makes Antigravity's ACP server keep its sign-in in the Gemini home's token
+/// file rather than the macOS login keychain.
+const FORCE_FILE_STORAGE: &str = "AGY_ACP_FORCE_FILE_STORAGE";
+
+/// The Gemini home an Antigravity server started for a profile reads.
+struct GeminiHome {
+    path: PathBuf,
+    /// The profile names the home itself, so its sign-in is its own.
+    named_by_profile: bool,
+    /// The server reads a Google sign-in from the home's token file.
+    reads_token_files: bool,
+}
+
+impl GeminiHome {
+    /// `$GEMINI_HOME`, else `~/.gemini`, read the way the server reads them in
+    /// the environment it is started with: the profile's own values over the
+    /// broker's.
+    fn of(profile: &Profile) -> Self {
+        let env = environment_for(profile);
+        let profiles = |key: &str| env.get(key).filter(|value| !value.is_empty()).cloned();
+        let inherited = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
+        let path = profiles("GEMINI_HOME")
+            .or_else(|| inherited("GEMINI_HOME"))
+            .map_or_else(
+                || PathBuf::from(profiles("HOME").unwrap_or_else(home)).join(".gemini"),
+                PathBuf::from,
+            );
+        let named_by_profile = profiles("GEMINI_HOME").is_some() || profiles("HOME").is_some();
+        let forced = profiles(FORCE_FILE_STORAGE)
+            .or_else(|| inherited(FORCE_FILE_STORAGE))
+            .is_some_and(|value| ["1", "true", "yes"].contains(&value.to_lowercase().as_str()));
+        Self {
+            path,
+            named_by_profile,
+            reads_token_files: !cfg!(target_os = "macos") || named_by_profile || forced,
+        }
+    }
+
+    /// Why the server would refuse a session or ask a person to sign in: its
+    /// settings name no sign-in method, or they name a Google sign-in whose
+    /// token file does not exist where the server reads one.
+    fn missing_sign_in(&self) -> Option<String> {
+        let server = self.path.join("antigravity-acp");
+        let method = std::fs::read_to_string(server.join("settings.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .and_then(|settings| settings["auth"]["type"].as_str().map(str::to_owned));
+        let saved = |token: &str| !self.reads_token_files || server.join(token).is_file();
+        let signed_in = match method.as_deref() {
+            None => false,
+            Some("oauth-personal") => saved("acp_token.json"),
+            Some("oauth-business") => saved("acp_business_token.json"),
+            Some(_) => true,
+        };
+        (!signed_in).then(|| {
+            format!(
+                "Antigravity's ACP server isn't signed in for {}",
+                self.path.display()
+            )
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -458,12 +577,182 @@ mod tests {
             Provider::Codex,
             Provider::OpenCode,
             Provider::OpenCode2,
+            Provider::Antigravity,
         ] {
             assert!(adapters.get(provider).is_some(), "{provider:?}");
         }
-        for provider in [Provider::Antigravity, Provider::Pi] {
-            assert!(adapters.get(provider).is_none(), "{provider:?}");
+        assert!(adapters.get(Provider::Pi).is_none());
+    }
+
+    /// A Gemini home whose ACP server settings hold `settings`, with the token
+    /// files named in `tokens`.
+    fn gemini_home(settings: Option<&str>, tokens: &[&str]) -> tempfile::TempDir {
+        let home = tempfile::tempdir().expect("gemini home");
+        let server = home.path().join("antigravity-acp");
+        std::fs::create_dir_all(&server).expect("server directory");
+        if let Some(settings) = settings {
+            std::fs::write(server.join("settings.json"), settings).expect("settings");
         }
+        for token in tokens {
+            std::fs::write(server.join(token), "{}").expect("token");
+        }
+        home
+    }
+
+    fn antigravity_profile(home: &std::path::Path) -> Profile {
+        profile(
+            Provider::Antigravity,
+            BTreeMap::from([("GEMINI_HOME".into(), home.display().to_string())]),
+        )
+    }
+
+    #[test]
+    fn antigravity_starts_googles_server_in_the_profiles_gemini_home() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::Antigravity)
+            .expect("antigravity adapter");
+        let home = gemini_home(Some(r#"{"auth": {"type": "gemini-api-key"}}"#), &[]);
+        let profile = antigravity_profile(home.path());
+        let launch = AcpLaunch {
+            profile: &profile,
+            model: "gemini-3.6-flash-medium",
+            effort: Some("high"),
+            cwd: "/repo",
+        };
+
+        let command = adapter.command(&launch);
+        let cli = crate::command_for(&profile, "", "/repo", Some(launch.model), None, None);
+
+        let mut argv = vec!["agy_acp_server.par"];
+        if cfg!(target_os = "linux") {
+            argv.push("--uid=");
+        }
+        assert_eq!(command.argv, argv);
+        assert_eq!(
+            command.env.get("GEMINI_HOME"),
+            cli.env.get("GEMINI_HOME"),
+            "the server reads the Gemini home the command line runs in"
+        );
+        assert_eq!(command.env_remove, cli.env_remove);
+        assert_eq!(
+            adapter.release,
+            Some(AcpRelease::build("antigravity-acp", "agy_acp_server_1.1.1"))
+        );
+        assert_eq!(
+            adapter.native_sessions_from, None,
+            "the server's conversations are not ones `agy --conversation` can reopen"
+        );
+        assert!(
+            !adapter.oga_tools,
+            "the command line gives Antigravity no Oga tools either"
+        );
+        assert_eq!(adapter.directories_for(&launch), Vec::<PathBuf>::new());
+        assert_eq!(adapter.incompatibility_for(&launch), None);
+    }
+
+    #[test]
+    fn antigravity_selects_the_model_and_approves_tools_as_the_command_line_does() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::Antigravity)
+            .expect("antigravity adapter");
+        let profile = profile(Provider::Antigravity, BTreeMap::new());
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+
+        for effort in [Some("high"), None] {
+            assert_eq!(
+                adapter.settings_for(&AcpLaunch {
+                    profile: &profile,
+                    model: "gemini-3.1-pro-low",
+                    effort,
+                    cwd: "/repo",
+                }),
+                [
+                    setting("model", "gemini-3.1-pro-low"),
+                    setting("mode", "yolo"),
+                ],
+                "the model id carries its thinking level, so no effort is chosen"
+            );
+        }
+    }
+
+    #[test]
+    fn an_antigravity_server_that_cannot_sign_in_on_its_own_is_never_started() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::Antigravity)
+            .expect("antigravity adapter");
+        let reason = |settings: Option<&str>, tokens: &[&str]| {
+            let home = gemini_home(settings, tokens);
+            let profile = antigravity_profile(home.path());
+            adapter.incompatibility_for(&AcpLaunch {
+                profile: &profile,
+                model: "gemini-3.6-flash-medium",
+                effort: None,
+                cwd: "/repo",
+            })
+        };
+        let google = r#"{"auth": {"type": "oauth-personal"}}"#;
+        let business = r#"{"auth": {"type": "oauth-business"}}"#;
+
+        for settings in [
+            None,
+            Some("{}"),
+            Some("not json"),
+            Some(google),
+            Some(business),
+        ] {
+            let reason = reason(settings, &[]);
+            assert!(
+                reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("isn't signed in")),
+                "{settings:?}: {reason:?}"
+            );
+        }
+        assert_eq!(reason(Some(google), &["acp_token.json"]), None);
+        assert_eq!(reason(Some(business), &["acp_business_token.json"]), None);
+        assert_eq!(
+            reason(Some(r#"{"auth": {"type": "agent-platform"}}"#), &[]),
+            None,
+            "a key or project sign-in is the server's own to check"
+        );
+    }
+
+    #[test]
+    fn a_profile_with_its_own_gemini_home_never_borrows_the_shared_keychain_sign_in() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::Antigravity)
+            .expect("antigravity adapter");
+        let launch = |profile| {
+            adapter.command(&AcpLaunch {
+                profile,
+                model: "gemini-3.6-flash-medium",
+                effort: None,
+                cwd: "/repo",
+            })
+        };
+        let home = gemini_home(None, &[]);
+        let own = antigravity_profile(home.path());
+        let shared = profile(Provider::Antigravity, BTreeMap::new());
+
+        let file_storage = |command: ProviderCommand| {
+            command
+                .env
+                .get("AGY_ACP_FORCE_FILE_STORAGE")
+                .map(String::to_owned)
+        };
+        assert_eq!(
+            file_storage(launch(&own)),
+            cfg!(target_os = "macos").then(|| "1".to_owned())
+        );
+        assert_eq!(file_storage(launch(&shared)), None);
     }
 
     #[test]

@@ -1915,6 +1915,45 @@ async fn transport_preference_routes_report_what_a_new_session_would_use() {
         current,
         json!({
             "preference": "auto",
+            "transport": "acp",
+            "adapter": "antigravity-acp",
+            "reason": null,
+        })
+    );
+
+    fixture
+        .store
+        .repositories()
+        .profiles()
+        .insert(
+            &Profile {
+                id: "pi".into(),
+                label: "Pi".into(),
+                provider: Provider::Pi,
+                default_model: "fake".into(),
+                enabled: true,
+                env: BTreeMap::new(),
+                capabilities: vec![],
+                command: None,
+            },
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("profile insert");
+    let (status, current) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/profiles/pi/transport",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        current,
+        json!({
+            "preference": "auto",
             "transport": "cli",
             "adapter": null,
             "reason": "no_adapter",
@@ -1925,7 +1964,7 @@ async fn transport_preference_routes_report_what_a_new_session_would_use() {
         request(
             &fixture.router,
             Method::PUT,
-            "/api/profiles/profile/transport",
+            "/api/profiles/pi/transport",
             Body::from(json!({"preference": "acp"}).to_string()),
         )
         .await,
