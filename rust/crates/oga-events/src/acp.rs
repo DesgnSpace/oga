@@ -10,7 +10,10 @@
 //! surface reports the context window and a session total, never per-call
 //! token counts, so a usage row says how full the window is and nothing more.
 
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
 
 use oga_domain::{
     EventKind, EventPhase, PresentationType, Provider, TaskEvent, TaskEventPresentation,
@@ -270,6 +273,57 @@ fn tool_call_id(payload: &BTreeMap<String, Value>) -> Option<String> {
     text_value(payload.get("toolCallId"))
         .map(str::to_owned)
         .filter(|id| !id.is_empty())
+}
+
+/// The fields that say what a tool call is and where it stands, as opposed to
+/// what it produced.
+const CALL_FIELDS: [&str; 5] = ["kind", "status", "title", "locations", "rawInput"];
+
+/// The tool calls of one task, as far as its recorded updates have described
+/// them.
+///
+/// ACP sends only what changed about a call, so an update that leaves out the
+/// call's kind or files means they stand as they were. Reading the updates in
+/// order lets each one be presented as the call it patched, while its output
+/// stays its own and never repeats on a later row.
+#[derive(Default)]
+pub(crate) struct AcpCalls {
+    known: HashMap<(Option<i64>, String), Map<String, Value>>,
+}
+
+impl AcpCalls {
+    /// The event with the call's earlier fields filled in where it left them
+    /// out, or the event itself when it needs nothing. A call is known only
+    /// within its own turn, and a fresh `tool_call` describes it anew.
+    pub(crate) fn patch<'a>(&mut self, event: &'a TaskEvent) -> Cow<'a, TaskEvent> {
+        let update = text_value(event.payload.get("sessionUpdate"));
+        if !matches!(update, Some("tool_call" | "tool_call_update")) {
+            return Cow::Borrowed(event);
+        }
+        let Some(id) = tool_call_id(&event.payload) else {
+            return Cow::Borrowed(event);
+        };
+        let known = self.known.entry((event.turn_id, id)).or_default();
+        if update == Some("tool_call") {
+            known.clear();
+        }
+        let carried: Vec<(String, Value)> = CALL_FIELDS
+            .into_iter()
+            .filter(|field| !event.payload.contains_key(*field))
+            .filter_map(|field| Some((field.to_owned(), known.get(field)?.clone())))
+            .collect();
+        for field in CALL_FIELDS {
+            if let Some(value) = event.payload.get(field) {
+                known.insert(field.to_owned(), value.clone());
+            }
+        }
+        if carried.is_empty() {
+            return Cow::Borrowed(event);
+        }
+        let mut patched = event.clone();
+        patched.payload.extend(carried);
+        Cow::Owned(patched)
+    }
 }
 
 /// What the call was about, read from the facts ACP publishes in its own

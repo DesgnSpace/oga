@@ -6,7 +6,10 @@ use serde_json::{Map, Value, json};
 use crate::hints;
 
 const GROUPS: &[(&str, &[&str])] = &[
-    ("routing", &["profileId", "model", "effort", "effortActual"]),
+    (
+        "routing",
+        &["profileId", "model", "effort", "effortActual", "transport"],
+    ),
     (
         "context",
         &[
@@ -85,6 +88,13 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
         && let Some(effort) = &task.effort_actual
     {
         view.insert("effortActual".into(), json!(effort));
+    }
+    // Only a task whose run opened a session knows how it connects; an older
+    // task that never recorded it has no answer here rather than a guess.
+    if want.contains("transport")
+        && let Some(transport) = &task.transport
+    {
+        view.insert("transport".into(), json!(transport));
     }
 
     if want.contains("cwd") {
@@ -488,6 +498,30 @@ mod tests {
 
         assert_eq!(value["branch"], "oga/ship-it");
         assert_eq!(value["branchOutcome"], "kept");
+    }
+
+    #[test]
+    fn routing_says_how_a_task_connects_only_once_it_is_known() {
+        let fallback = Task {
+            id: "task".into(),
+            transport: Some(oga_domain::TaskTransport::cli(
+                oga_domain::TransportReason::Unavailable,
+                Some("spawn: could not spawn provider".into()),
+                "2026-09-17T14:18:51.496Z",
+            )),
+            ..Default::default()
+        };
+
+        let known = task_view(&fallback, &default_inspect_fields());
+        let unknown = task_view(&Task::default(), &default_inspect_fields());
+
+        assert_eq!(known["transport"]["kind"], "cli");
+        assert_eq!(known["transport"]["reason"], "unavailable");
+        assert_eq!(
+            known["transport"]["detail"],
+            "spawn: could not spawn provider"
+        );
+        assert!(unknown.get("transport").is_none());
     }
 
     #[test]

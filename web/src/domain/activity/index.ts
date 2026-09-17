@@ -549,18 +549,28 @@ const CALL_KINDS = new Set<TaskEventView["kind"]>(["tool", "command", "file"]);
  */
 export function withoutDuplicateHookCalls(events: TaskEventView[]): TaskEventView[] {
   const agentTurns = new Set<number | undefined>();
+  const agentCalls = new Set<string>();
   for (const event of events) {
-    if (AGENT_CALL_TYPES.has(event.type)) agentTurns.add(event.turnId);
+    if (!AGENT_CALL_TYPES.has(event.type)) continue;
+    agentTurns.add(event.turnId);
+    if (event.actionId !== undefined) agentCalls.add(`${event.turnId}:${event.actionId}`);
   }
   if (agentTurns.size === 0) return events;
-  return events.filter(
-    (event) => !(event.type === "agent.hook" && CALL_KINDS.has(event.kind) && agentTurns.has(event.turnId)),
-  );
+  // A hook is posted without a turn, so it belongs to the turn the task was
+  // last in, and only the agent's own copy of that same call replaces it.
+  let turn: number | undefined;
+  return events.filter((event) => {
+    turn = event.turnId ?? turn;
+    if (event.type !== "agent.hook" || !CALL_KINDS.has(event.kind)) return true;
+    if (event.turnId !== undefined) return !agentTurns.has(event.turnId);
+    return !agentCalls.has(`${turn}:${event.actionId}`);
+  });
 }
 
 /** Converts Antigravity's raw step protocol into the same rows other providers use. */
 export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventView[] {
   const normalized: TaskEventView[] = [];
+  let response: OpenResponse | undefined;
   for (const event of events) {
     if (event.source !== "antigravity") {
       normalized.push(event);
@@ -570,7 +580,11 @@ export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventVi
     const step = payload?.step_update;
     const stepType = stringValue(step?.step_type);
     if (payload?.event === "step_update" && step) {
-      if (stepType === "user_input" || stepType === "system_message" || stepType === "agent_response") continue;
+      if (stepType === "agent_response") {
+        response = streamResponse(normalized, response, event, step);
+        continue;
+      }
+      if (stepType === "user_input" || stepType === "system_message") continue;
       if (stepType === "error_message") {
         const detail = stringValue(step.message) ?? stringValue(step.text) ?? stringValue(step.content) ?? event.detail;
         if (detail === undefined) continue;
@@ -630,6 +644,40 @@ export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventVi
   return normalized;
 }
 
+/** The message row a response step is being written into, by where it sits. */
+interface OpenResponse {
+  step: number | undefined;
+  turnId: number | undefined;
+  index: number;
+}
+
+/**
+ * Writes one piece of a response step into its message row. A response streams
+ * as pieces of one step, which read as one message; the step's finished report
+ * adds its last piece and closes the row.
+ */
+function streamResponse(
+  rows: TaskEventView[],
+  open: OpenResponse | undefined,
+  event: TaskEventView,
+  step: AntigravityStep,
+): OpenResponse | undefined {
+  if (open !== undefined && open.step === step.step_index && open.turnId === event.turnId) {
+    const row = rows[open.index];
+    const text = `${row.presentation?.text ?? ""}${step.text_delta ?? ""}`;
+    rows[open.index] = {
+      ...row,
+      detail: text,
+      presentation: row.presentation && { ...row.presentation, text },
+      complete: event.kind !== "message",
+    };
+    return open;
+  }
+  if (event.kind !== "message") return open;
+  rows.push(event);
+  return { step: step.step_index, turnId: event.turnId, index: rows.length - 1 };
+}
+
 function antigravityToolPresentation(
   name: string,
   parameters: AntigravityParameters,
@@ -671,6 +719,7 @@ interface AntigravityStep {
   step_type?: string;
   step_index?: number;
   state?: string;
+  text_delta?: string;
   tool_name?: string;
   toolName?: string;
   tool_info?: { parameters?: AntigravityParameters; output?: string; error?: { message?: string } };
@@ -1905,6 +1954,7 @@ function replays(row: TaskEventView, event: TaskEventView): boolean {
 }
 
 function settleAction(first: TaskEventView, later: TaskEventView): TaskEventView {
+  if (AGENT_CALL_TYPES.has(later.type) && rawString(later, "kind") === undefined) return settleAgentCall(first, later);
   if (later.minor === true) {
     const merged: TaskEventView = { ...first };
     const outcome = later.presentation?.outcome;
@@ -1957,6 +2007,40 @@ function settleAction(first: TaskEventView, later: TaskEventView): TaskEventView
     merged.presentation = { ...merged.presentation, durationMs: undefined };
   }
   return merged;
+}
+
+/** How an ACP call row reads once it finishes, by how it read while running. */
+const SETTLED_AGENT_VERBS = new Map([
+  ["Deleting", "Deleted"],
+  ["Moving", "Moved"],
+  ["Searching", "Searched"],
+  ["Running", "Ran"],
+  ["Fetching", "Fetched"],
+  ["Changing", "Changed"],
+  ["Using", "Used"],
+]);
+
+/**
+ * An ACP update carries only the fields that changed, so one that does not
+ * name the call's kind leaves the call what it already was: it moves the row
+ * on and reports how it went, and the kind, file, and input stay.
+ */
+function settleAgentCall(first: TaskEventView, later: TaskEventView): TaskEventView {
+  const verb = later.complete === true && first.verb !== undefined
+    ? (SETTLED_AGENT_VERBS.get(first.verb) ?? first.verb)
+    : first.verb;
+  return {
+    ...first,
+    phase: first.phase === "failed" ? "failed" : later.phase,
+    complete: later.complete ?? first.complete,
+    verb,
+    result: later.result ?? first.result,
+    presentation: first.presentation && {
+      ...first.presentation,
+      change: later.presentation?.change ?? first.presentation.change,
+      outcome: later.presentation?.outcome ?? first.presentation.outcome,
+    },
+  };
 }
 
 function restates(detail: string | undefined, outcome: string): boolean {

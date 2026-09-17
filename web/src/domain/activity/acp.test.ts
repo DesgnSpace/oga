@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { TaskEventView } from "@/bridge/types";
-import { ActivityStory, chapterRowEvents, withoutDuplicateHookCalls } from "./index";
+import { ActivityStory, chapterRowEvents, normalizeAntigravityEvents, withoutDuplicateHookCalls } from "./index";
 
 function agentCall(id: number, callId: string, complete: boolean, turnId = 1): TaskEventView {
   return {
@@ -123,6 +123,23 @@ describe("a turn the worker narrates itself", () => {
     expect(withoutDuplicateHookCalls(events)).toEqual(events);
   });
 
+  it("drops a hook posted without a turn when the worker reported that same call", () => {
+    const events = [
+      agentCall(1, "toolu_1", false, 4),
+      { ...hookCall(2, "toolu_1"), turnId: undefined },
+      { ...hookCall(3, "toolu_9"), turnId: undefined },
+      agentCall(4, "toolu_1", true, 4),
+    ];
+
+    expect(withoutDuplicateHookCalls(events).map((event) => event.id)).toEqual([1, 3, 4]);
+  });
+
+  it("keeps a hook posted without a turn when only another turn has its call id", () => {
+    const events = [agentCall(1, "toolu_1", true, 4), { ...hookCall(2, "toolu_2"), turnId: undefined }, agentCall(3, "toolu_2", true, 5)];
+
+    expect(withoutDuplicateHookCalls(events).map((event) => event.id)).toEqual([1, 2, 3]);
+  });
+
   it("only drops hooks from the turns the worker narrated", () => {
     const events = [hookCall(1, "toolu_1", 1), agentCall(2, "call_1", true, 2), hookCall(3, "toolu_2", 2)];
 
@@ -162,5 +179,58 @@ describe("a turn the worker narrates itself", () => {
     expect(events[0]?.verb).toBe("Ran");
     expect(events[0]?.presentation?.command).toBe("cargo test");
     expect(events[0]?.presentation?.outcome).toBe("2 tests passed");
+  });
+});
+
+describe("recorded runs", () => {
+  async function recorded(name: string): Promise<TaskEventView[]> {
+    // SAFETY: the fixture is rows the broker's own presenter wrote for these runs, keyed by run.
+    const runs = (await Bun.file(new URL("./fixtures/probe-rows.json", import.meta.url)).json()) as Record<string, TaskEventView[]>;
+    return runs[name];
+  }
+
+  function workRows(events: TaskEventView[]): TaskEventView[] {
+    return ActivityStory.compose(events)
+      .blocks.flatMap((block) => (block.type === "chapter" ? block.rows : []))
+      .flatMap(chapterRowEvents);
+  }
+
+  it("keeps an OpenCode read naming its file after an update that leaves the kind out", async () => {
+    const calls = workRows(await recorded("opencodeAcpRead")).filter((event) => event.actionId !== undefined);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.title).toBe("Read file");
+    expect(calls[0]?.presentation?.path).toBe("/repo/rust/Cargo.toml");
+    expect(calls[0]?.phase).toBe("completed");
+    expect(calls[0]?.presentation?.outcome).toStartWith("[workspace]");
+  });
+
+  it("keeps an Antigravity read naming its file when it ends with only a status", async () => {
+    const calls = workRows(await recorded("antigravityAcpRead")).filter((event) => event.actionId === "call_860659");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.title).toBe("Read file");
+    expect(calls[0]?.verb).toBe("Read");
+    expect(calls[0]?.presentation?.path).toBe("/repo/rust/Cargo.toml");
+    expect(calls[0]?.phase).toBe("completed");
+  });
+
+  it("reads an Antigravity response streamed in pieces as one answer", async () => {
+    const events = await recorded("antigravityCliResponse");
+    const messages = normalizeAntigravityEvents(events).filter((event) => event.kind === "message");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.complete).toBe(true);
+    expect(ActivityStory.responseEvent(events)?.presentation?.text).toBe(
+      "- PROBE_OK\n- First nonempty line: [workspace]\n- Workspace members: 2\n- Tool used: view_file\n",
+    );
+  });
+
+  it("shows a Claude call once when its transcript repeats a start its hooks already ended", async () => {
+    const calls = workRows(await recorded("claudeCliHooksThenTranscript")).filter(
+      (event) => event.actionId === "toolu_01LcGnWSJx4ZXjmkM4QGSVmn",
+    );
+
+    expect(calls.map((event) => event.phase)).toEqual(["completed"]);
   });
 });

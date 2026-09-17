@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { broker } from "@/bridge/client";
-import type { Task, TaskEventView } from "@/bridge/types";
+import type { Task, TaskEventView, TaskTransportReason, TaskTransportView } from "@/bridge/types";
 import { copyText, shortId } from "@/lib/identifiers";
 import { toast } from "@/state/toast";
 import { CheckIcon, CopyIcon } from "@/ui/icons";
@@ -84,6 +84,7 @@ export function TaskMetadata({
     <div className="task-metadata" aria-label="Task details">
       <CopyableDetail label="Task" value={task.id} shorten />
       {task.sessionId && <CopyableDetail label="Session" value={task.sessionId} shorten />}
+      {task.transport && <ConnectionDetail transport={task.transport} />}
       {branch && (
         <CopyableDetail
           label="Branch"
@@ -108,6 +109,47 @@ export function TaskMetadata({
       <CopyableDetail label="Project" value={task.worktree?.originCwd ?? task.cwd} />
       {usage && <ContextDetail usage={usage} />}
     </div>
+  );
+}
+
+/** Why a task uses its command line instead of ACP. */
+const COMMAND_LINE_REASONS = {
+  unavailable: "ACP wasn't available when this task started",
+  no_adapter: "This worker's tool can't connect over ACP",
+  preference: "This worker is set to use its command line",
+  custom_command: "This worker uses a custom command, which ACP can't run",
+  legacy: "Started before ACP, so it keeps using the command line",
+} satisfies Record<TaskTransportReason, string>;
+
+/**
+ * How Oga talks to the worker. A task that switched to its command line says
+ * why, and what ACP reported stays one copy away rather than on screen.
+ */
+function ConnectionDetail({ transport }: { transport: TaskTransportView }) {
+  if (transport.kind === "acp") {
+    return (
+      <span className="task-metadata-static" title="Oga talks to this worker over the Agent Client Protocol (ACP)">
+        <span className="task-metadata-label">Connection</span>
+        <span className="task-metadata-value">ACP</span>
+      </span>
+    );
+  }
+  const reason = transport.reason && COMMAND_LINE_REASONS[transport.reason];
+  if (transport.detail) {
+    return (
+      <CopyableDetail
+        label="Connection"
+        value={transport.detail}
+        displayValue="Command line"
+        title={reason ? `${reason} · Copy what ACP reported` : "Copy what ACP reported"}
+      />
+    );
+  }
+  return (
+    <span className="task-metadata-static" title={reason}>
+      <span className="task-metadata-label">Connection</span>
+      <span className="task-metadata-value">Command line</span>
+    </span>
   );
 }
 

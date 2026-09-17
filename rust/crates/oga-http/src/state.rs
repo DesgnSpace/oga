@@ -9,10 +9,10 @@ use axum::{
 };
 use oga_domain::{
     ActivityCounts, ArchivedFilter, FailureCode, MemoryProject, ProfileFailure, ProfileView,
-    Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskEventView,
-    TaskHoldView, TaskKind, TaskState, TaskSummary, TaskWorktree,
+    Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskHoldView, TaskKind,
+    TaskState, TaskSummary, TaskWorktree,
 };
-use oga_events::{event_view, mark_repeated_retries};
+use oga_events::{event_views, mark_repeated_retries};
 use oga_store::{Store, attach_task_timing};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -357,12 +357,7 @@ async fn event_response(
         store
             .with_connection(|connection| {
                 let events = read_events_with_connection(connection, &task_id, &query)?;
-                let views = mark_repeated_retries(
-                    events
-                        .iter()
-                        .map(|event| event_view(event, provider))
-                        .collect::<Vec<TaskEventView>>(),
-                );
+                let views = mark_repeated_retries(event_views(&events, provider));
                 let (updated_task, task_updated_at) = if include_task {
                     let updated_at: String = connection.query_row(
                         "SELECT updated_at FROM tasks WHERE id=?",

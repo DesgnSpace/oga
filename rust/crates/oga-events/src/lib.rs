@@ -4,6 +4,7 @@ mod acp;
 pub mod socket;
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap, VecDeque},
     sync::{
         Arc, Mutex,
@@ -651,6 +652,47 @@ pub fn task_to_batch(task: &Task) -> BatchTask {
     }
 }
 
+/// A task's recorded events as rows, read in order.
+///
+/// Read together, the events settle what one alone cannot. An ACP update that
+/// names only what changed reads as the call it patched. A call that already
+/// ended does not open again when a second report of its start follows, as a
+/// Claude transcript repeats a call its hooks reported first. A hook carries no
+/// turn of its own, so it belongs to the turn the task was last in, and a call
+/// id seen again in another turn is another call.
+pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventView> {
+    let mut calls = acp::AcpCalls::default();
+    let mut ended = HashMap::<String, Option<i64>>::new();
+    let mut turn = None;
+    events
+        .iter()
+        .map(|event| {
+            turn = event.turn_id.or(turn);
+            let patched = calls.patch(event);
+            let mut view = event_view(&patched, provider);
+            if matches!(patched, Cow::Owned(_)) {
+                view.raw_text = raw_payload_text(&event.payload);
+            }
+            if let Some(id) = &view.action_id {
+                match view.phase {
+                    EventPhase::Completed | EventPhase::Failed => {
+                        ended.insert(id.clone(), turn);
+                    }
+                    EventPhase::Started if ended.get(id) == Some(&turn) => {
+                        view.minor = Some(true);
+                    }
+                    _ => {}
+                }
+            }
+            view
+        })
+        .collect()
+}
+
+fn raw_payload_text(payload: &BTreeMap<String, Value>) -> Option<String> {
+    (!payload.is_empty()).then(|| serde_json::to_string_pretty(payload).unwrap())
+}
+
 /// Upgrades the third and later retry for one target into a visible failure.
 pub fn mark_repeated_retries(views: Vec<TaskEventView>) -> Vec<TaskEventView> {
     let mut misses = HashMap::<String, usize>::new();
@@ -758,8 +800,7 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
             Some(complete),
         )
     });
-    let raw_text =
-        (!event.payload.is_empty()).then(|| serde_json::to_string_pretty(&event.payload).unwrap());
+    let raw_text = raw_payload_text(&event.payload);
     if event.kind.starts_with("agent.")
         && let Some(view) = provider_event_view(event, provider, raw_text.clone())
     {
@@ -1995,6 +2036,30 @@ fn antigravity_step_view(
     let step_index = number_u64(step.get("step_index"));
     match text_value(step.get("step_type")) {
         Some("tool") => antigravity_tool_step_view(event, provider, step, raw_text),
+        // A response still being written streams its text one piece at a
+        // time; only the finished step carries the usage summary.
+        Some("agent_response")
+            if text_value(step.get("state")) == Some("ACTIVE")
+                && text_value(step.get("text_delta")).is_some() =>
+        {
+            let text = text_value(step.get("text_delta")).map(str::to_owned);
+            let mut view = provider_view(
+                event,
+                provider,
+                EventKind::Message,
+                EventPhase::Info,
+                "Agent message",
+                ProviderViewOptions {
+                    detail: text.clone(),
+                    presentation: text.map(message_presentation),
+                    minor: None,
+                    raw_text,
+                },
+            );
+            view.verb = Some("Said".to_owned());
+            view.complete = Some(false);
+            Some(view)
+        }
         Some("agent_response") => Some(antigravity_usage_step_view(
             event,
             provider,
@@ -7849,6 +7914,179 @@ mod tests {
         assert_eq!(user_input.kind, EventKind::Message);
         assert_eq!(user_input.title, "User input");
         assert_eq!(user_input.detail.as_deref(), Some("step 0"));
+    }
+
+    #[test]
+    fn antigravity_response_text_streams_as_the_agent_speaking() {
+        let step = |id, update: Value| {
+            event_view(
+                &provider_event(
+                    id,
+                    "agent.event",
+                    serde_json::json!({"event": "step_update", "step_update": update}),
+                ),
+                Provider::Antigravity,
+            )
+        };
+        let piece = step(
+            1,
+            serde_json::json!({
+                "conversation_id": "conv-1",
+                "step_index": 3,
+                "state": "ACTIVE",
+                "step_type": "agent_response",
+                "text_delta": "- PROBE_OK"
+            }),
+        );
+        let finished = step(
+            2,
+            serde_json::json!({
+                "conversation_id": "conv-1",
+                "step_index": 3,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "text_delta": "\n",
+                "duration_seconds": 12.6735,
+                "usage": {"input_tokens": 19877, "output_tokens": 772, "thinking_tokens": 743, "cache_read_tokens": 0, "total_tokens": 20649}
+            }),
+        );
+
+        assert_eq!(piece.kind, EventKind::Message);
+        assert_eq!(piece.detail.as_deref(), Some("- PROBE_OK"));
+        assert_eq!(piece.complete, Some(false));
+        assert_eq!(finished.kind, EventKind::Usage);
+        assert_eq!(finished.title, "Assistant responded");
+        assert_eq!(
+            finished
+                .presentation
+                .and_then(|presentation| presentation.tokens_out),
+            Some(772)
+        );
+    }
+
+    fn in_turn(mut event: TaskEvent, turn_id: Option<i64>) -> TaskEvent {
+        event.turn_id = turn_id;
+        event
+    }
+
+    fn acp_update(id: i64, turn_id: i64, update: Value) -> TaskEvent {
+        let kind = format!("agent.{}", update["sessionUpdate"].as_str().unwrap());
+        in_turn(provider_event(id, &kind, update), Some(turn_id))
+    }
+
+    #[test]
+    fn history_reads_an_acp_update_as_the_call_it_patched() {
+        // OpenCode opens the call empty, names the file in an update, then
+        // ends it with a status, a new title, and the output alone.
+        let events = [
+            acp_update(
+                1,
+                7,
+                serde_json::json!({"sessionUpdate": "tool_call", "toolCallId": "call_1", "title": "read", "kind": "read", "rawInput": {}}),
+            ),
+            acp_update(
+                2,
+                7,
+                serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "kind": "read", "status": "in_progress", "title": "read", "locations": [{"path": "/repo/rust/Cargo.toml"}], "rawInput": {"filePath": "/repo/rust/Cargo.toml"}}),
+            ),
+            acp_update(
+                3,
+                7,
+                serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "completed", "title": "rust/Cargo.toml", "content": [{"type": "content", "content": {"type": "text", "text": "[workspace]"}}]}),
+            ),
+        ];
+
+        let views = event_views(&events, Provider::OpenCode);
+        let ended = &views[2];
+
+        assert_eq!(ended.title, "Read file");
+        assert_eq!(ended.phase, EventPhase::Completed);
+        assert_eq!(
+            ended
+                .presentation
+                .as_ref()
+                .and_then(|presentation| presentation.path.as_deref()),
+            Some("/repo/rust/Cargo.toml")
+        );
+        assert_eq!(ended.result.as_deref(), Some("[workspace]"));
+        assert!(
+            !ended.raw_text.as_deref().unwrap().contains("\"kind\""),
+            "the raw text stays the update as it was recorded"
+        );
+    }
+
+    #[test]
+    fn history_keeps_a_call_that_ends_with_only_its_status() {
+        // Antigravity's ACP server ends a call with its id and status alone.
+        let opened = serde_json::json!({"sessionUpdate": "tool_call", "toolCallId": "call_860659", "title": "Running view_file", "kind": "read", "status": "in_progress", "locations": [{"path": "/repo/rust/Cargo.toml"}], "rawInput": {"AbsolutePath": "/repo/rust/Cargo.toml"}});
+        let ended = serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_860659", "status": "completed"});
+        let events = [
+            acp_update(1, 9, opened),
+            acp_update(2, 9, ended.clone()),
+            acp_update(3, 10, ended),
+        ];
+
+        let views = event_views(&events, Provider::Antigravity);
+
+        assert_eq!(views[1].title, "Read file");
+        assert_eq!(views[1].verb.as_deref(), Some("Read"));
+        assert_eq!(
+            views[1]
+                .presentation
+                .as_ref()
+                .and_then(|presentation| presentation.path.as_deref()),
+            Some("/repo/rust/Cargo.toml")
+        );
+        assert_ne!(views[2].title, "Read file", "another turn is another call");
+    }
+
+    #[test]
+    fn history_does_not_reopen_a_call_its_hooks_already_ended() {
+        // Claude posts hooks without a turn, then its transcript repeats the
+        // start of a call the hooks already reported ending.
+        let hook = |id, name: &str, tool_use: &str| {
+            provider_event(
+                id,
+                "agent.hook",
+                serde_json::json!({"hook_event_name": name, "tool_name": "Read", "tool_use_id": tool_use, "tool_input": {"file_path": "/repo/rust/Cargo.toml"}}),
+            )
+        };
+        let transcript = |id, tool_use: &str, turn_id| {
+            in_turn(
+                provider_event(
+                    id,
+                    "agent.assistant",
+                    serde_json::json!({"type": "assistant", "message": {"id": "msg_1", "role": "assistant", "content": [{"type": "tool_use", "id": tool_use, "name": "Read", "input": {"file_path": "/repo/rust/Cargo.toml"}}]}}),
+                ),
+                Some(turn_id),
+            )
+        };
+        let events = [
+            in_turn(
+                provider_event(
+                    1,
+                    "worker_spawned",
+                    serde_json::json!({"provider": "claude"}),
+                ),
+                Some(1293),
+            ),
+            hook(2, "PreToolUse", "toolu_A"),
+            hook(3, "PostToolUse", "toolu_A"),
+            transcript(4, "toolu_A", 1293),
+            hook(5, "PreToolUse", "toolu_B"),
+            transcript(6, "toolu_A", 1294),
+        ];
+
+        let views = event_views(&events, Provider::Claude);
+
+        assert_eq!(views[2].phase, EventPhase::Completed);
+        assert_eq!(views[3].action_id.as_deref(), Some("toolu_A"));
+        assert_eq!(views[3].minor, Some(true));
+        assert_eq!(views[4].minor, None, "a call only its hooks reported stays");
+        assert_eq!(
+            views[5].minor, None,
+            "the same id in another turn is another call"
+        );
     }
 
     #[test]
