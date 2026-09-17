@@ -28,7 +28,7 @@ use oga_domain::{
     AcpAgentIdentity, AcpRestore, CompletionCode, Profile, Task, TaskScope, TaskState,
     TaskTransport, TaskWorker, Transport, TransportReason,
 };
-use oga_providers::{AcpAdapter, AcpLaunch, NO_FINAL_MESSAGE};
+use oga_providers::{AcpAdapter, AcpLaunch, NO_FINAL_MESSAGE, Usage};
 use oga_runner::{ProviderRunner, RunRequest, Termination};
 use oga_store::{Store, StoreError};
 use rusqlite::params;
@@ -37,8 +37,9 @@ use tokio::sync::mpsc;
 
 use crate::{
     lifecycle::{
-        ActiveRun, ActiveRuns, LifecycleError, RunOutcome, append_event_tx, broker_base_url,
-        completion, encode, load_task, now_iso, record_profile_outcome, settle_task, worker_env,
+        ActiveRun, ActiveRuns, LifecycleError, RunOutcome, Settlement, append_event_tx,
+        broker_base_url, completion, encode, load_task, now_iso, record_profile_outcome,
+        settle_task, worker_env,
     },
     prompt::{WorkerOutcome, interpret_worker_outcome},
     transport::AcpStart,
@@ -224,7 +225,14 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         .await?;
     }
     let worker = outcome(ended, run.was_cancelled(), &transcript, &diagnostics.stderr);
-    let settled = settle_task(store, task, turn.turn_id, None, None, &worker, None)?;
+    let usage = transcript.usage(task.cost_usd);
+    let settled = settle_task(
+        store,
+        task,
+        turn.turn_id,
+        Settlement::from_usage(&usage),
+        &worker,
+    )?;
     record_profile_outcome(store, task, &worker)?;
     Ok(AcpEnd::Settled(Box::new(RunOutcome {
         task: settled,
@@ -348,10 +356,8 @@ fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleE
         turn.store,
         turn.task,
         turn.turn_id,
-        None,
-        None,
+        Settlement::default(),
         &worker,
-        None,
     )?;
     record_profile_outcome(turn.store, turn.task, &worker)?;
     Ok(AcpEnd::Settled(Box::new(RunOutcome {
@@ -591,6 +597,8 @@ struct Transcript {
     pending: Option<(&'static str, String)>,
     /// The agent's last message: its text since the last tool call.
     final_message: String,
+    /// The freshest total the agent reported for the whole session, in USD.
+    session_cost: Option<f64>,
 }
 
 impl Transcript {
@@ -624,6 +632,15 @@ impl Transcript {
         }
         if matches!(notification.update, SessionUpdate::ToolCall(_)) {
             self.final_message.clear();
+        }
+        if let SessionUpdate::UsageUpdate(usage) = &notification.update {
+            self.session_cost = usage
+                .cost
+                .as_ref()
+                .filter(|cost| cost.currency.eq_ignore_ascii_case("usd"))
+                .map(|cost| cost.amount)
+                .filter(|amount| amount.is_finite() && *amount >= 0.0)
+                .or(self.session_cost);
         }
         self.flush(store, task_id, turn_id).await?;
         let payload = serde_json::to_value(&notification.update)
@@ -659,6 +676,24 @@ impl Transcript {
             NO_FINAL_MESSAGE.to_owned()
         } else {
             self.final_message.clone()
+        }
+    }
+
+    /// What this turn spent, from the totals the agent reported.
+    ///
+    /// ACP's released protocol publishes the session's own running totals, not
+    /// one turn's share, so the charge is the growth over what the task has
+    /// been charged already and never the whole total a second time. A session
+    /// that counts from zero again — a new conversation after one was
+    /// rejected — charges nothing until it passes what is already recorded.
+    /// Token counts are not part of that surface, so they stay unknown rather
+    /// than being guessed from the context window.
+    fn usage(&self, charged: Option<f64>) -> Usage {
+        Usage {
+            cost_usd: self
+                .session_cost
+                .map(|total| (total - charged.unwrap_or_default()).max(0.0)),
+            ..Usage::default()
         }
     }
 }

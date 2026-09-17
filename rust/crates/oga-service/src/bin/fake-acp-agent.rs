@@ -56,6 +56,19 @@ fn capabilities(mode: &str) -> Value {
     }
 }
 
+/// How many prompts this agent's script has already been given, counted from
+/// the log every run of it appends to. Lets a mode report session totals that
+/// grow across turns the way a real agent's do.
+fn prompts_logged(log_path: &str) -> u64 {
+    std::fs::read_to_string(log_path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry["received"]["method"] == "session/prompt")
+        .count()
+        .max(1) as u64
+}
+
 /// Asks the client for permission and waits for its answer.
 fn ask_permission(
     session: &str,
@@ -134,6 +147,36 @@ fn prompt(
                 &session,
                 &format!("inside: {inside}, outside: {outside}\nOGA_RESULT: completed"),
             );
+        }
+        "usage" => {
+            let turn = prompts_logged(log_path);
+            update(
+                &session,
+                json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": format!("edit-{turn}"),
+                    "title": "Edit src/lib.rs",
+                    "kind": "edit",
+                    "status": "completed",
+                    "content": [{"type": "diff", "path": "src/lib.rs", "oldText": "old", "newText": "new"}],
+                    "locations": [{"path": "src/lib.rs"}],
+                }),
+            );
+            for (used, amount) in [
+                (12_000 * turn, 0.5 * turn as f64),
+                (24_000 * turn, 1.25 * turn as f64),
+            ] {
+                update(
+                    &session,
+                    json!({
+                        "sessionUpdate": "usage_update",
+                        "used": used,
+                        "size": 200_000,
+                        "cost": {"amount": amount, "currency": "USD"},
+                    }),
+                );
+            }
+            chunk(&session, "OGA_RESULT: completed");
         }
         _ => {
             chunk(&session, "Looking at the task");

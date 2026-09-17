@@ -49,6 +49,11 @@ function envPrefix(profile: ProfileView): string {
  * Shell command that continues this task's provider session from a terminal.
  * Null when the task holds no session, its profile is unknown, or the profile
  * runs a custom command with no resumable session behind it.
+ *
+ * Only `sessionId` can open a conversation in the provider's own CLI. A task
+ * whose worker was reached another way holds that worker's conversation id
+ * apart, under `transport`, and it is never a command-line argument: with no
+ * provider session recorded there is nothing to continue from a terminal.
  */
 export function terminalResumeCommand(task: ResumeTask, profile: ProfileView | undefined): string | null {
   const session = task.sessionId?.trim();

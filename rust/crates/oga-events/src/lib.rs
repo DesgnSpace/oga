@@ -1,5 +1,6 @@
 //! Event bounds, normalization, presentation, and wire records.
 
+mod acp;
 pub mod socket;
 
 use std::{
@@ -815,6 +816,11 @@ fn provider_event_view(
     raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let payload = &event.payload;
+    // An ACP update names itself and says nothing about which provider is
+    // behind it, so it is read the same way whoever the agent is.
+    if payload.contains_key("sessionUpdate") {
+        return acp::acp_event_view(event, provider, payload, raw_text);
+    }
     let event_type = text_value(payload.get("type"));
     if let Some("item.started" | "item.updated" | "item.completed") = event_type {
         return item_event_view(event, provider, payload, raw_text);

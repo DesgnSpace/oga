@@ -221,6 +221,52 @@ async fn a_task_completes_a_full_turn_over_acp() {
 }
 
 #[tokio::test]
+async fn a_session_total_is_charged_once_however_often_the_agent_reports_it() {
+    let harness = harness("usage");
+
+    let first = harness.run("edit the library").await;
+
+    assert_eq!(first.state, TaskState::Completed, "{first:?}");
+    assert_eq!(
+        first.cost_usd,
+        Some(1.25),
+        "the freshest session total is the spend, not the sum of every reading"
+    );
+    assert!(!first.cost_usd_estimated);
+    assert_eq!(
+        first.turns, None,
+        "ACP publishes no turn count, so it stays unknown"
+    );
+    let readings: Vec<(u64, f64)> = harness
+        .events(&first.id)
+        .iter()
+        .filter(|event| event.kind == "agent.usage_update")
+        .map(|event| {
+            (
+                event.payload["used"].as_u64().expect("a window fill"),
+                event.payload["cost"]["amount"].as_f64().expect("a total"),
+            )
+        })
+        .collect();
+    assert_eq!(readings, [(12_000, 0.5), (24_000, 1.25)]);
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("again"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    assert_eq!(
+        second.cost_usd,
+        Some(2.5),
+        "a second turn charges what the session grew by, never the whole total again"
+    );
+}
+
+#[tokio::test]
 async fn a_follow_up_resumes_the_same_acp_conversation() {
     let harness = harness("turn");
     let first = harness.run("start").await;

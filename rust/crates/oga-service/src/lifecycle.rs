@@ -553,7 +553,7 @@ pub(crate) async fn run_task_with_session_and_active(
             Ok(run) => run,
             Err(error) => {
                 let worker = failed_worker(&error);
-                let settled = settle_task(&store, &task, turn_id, None, None, &worker, None)?;
+                let settled = settle_task(&store, &task, turn_id, Settlement::default(), &worker)?;
                 record_profile_outcome(&store, &task, &worker)?;
                 return Ok(RunOutcome {
                     task: settled,
@@ -635,7 +635,7 @@ pub(crate) async fn run_task_with_session_and_active(
             Ok(run) => run,
             Err(error) => {
                 let worker = failed_worker(&error);
-                let settled = settle_task(&store, &task, turn_id, None, None, &worker, None)?;
+                let settled = settle_task(&store, &task, turn_id, Settlement::default(), &worker)?;
                 record_profile_outcome(&store, &task, &worker)?;
                 return Ok(RunOutcome {
                     task: settled,
@@ -674,10 +674,8 @@ pub(crate) async fn run_task_with_session_and_active(
             &store,
             &task,
             turn_id,
-            Some(&run),
-            resumed_session,
+            Settlement::from_run(&run, resumed_session, &live_events),
             &worker,
-            Some(&live_events),
         )?;
         record_profile_outcome(&store, &task, &worker)?;
         return Ok(RunOutcome {
@@ -704,7 +702,7 @@ fn refuse_run(
         error: Some(reason.clone()),
         completion: completion(None, true, CompletionCode::WorkerError, Some(reason)),
     };
-    let settled = settle_task(store, &task, turn_id, None, None, &worker, None)?;
+    let settled = settle_task(store, &task, turn_id, Settlement::default(), &worker)?;
     Ok(RunOutcome {
         task: settled,
         worker,
@@ -952,15 +950,56 @@ fn relative_codex_path(cwd: &Path, raw: &str) -> Option<String> {
         .then(|| relative.to_owned())
 }
 
+/// What a finished run adds to settlement beyond the worker's own outcome.
+///
+/// A captured command-line run carries its events, its session id, and the
+/// usage read off its stream. A transport with no captured stream — ACP —
+/// still reports usage, so the two arrive separately.
+#[derive(Default)]
+pub(crate) struct Settlement<'a> {
+    pub(crate) run: Option<&'a RunResult>,
+    /// What this turn spent, when the transport can say. Read from `run` when
+    /// a captured run is the source.
+    pub(crate) usage: Option<&'a Usage>,
+    pub(crate) resumed_session: Option<&'a str>,
+    pub(crate) live_events: Option<&'a LiveEventCapture>,
+}
+
+impl<'a> Settlement<'a> {
+    pub(crate) fn from_run(
+        run: &'a RunResult,
+        resumed_session: Option<&'a str>,
+        live_events: &'a LiveEventCapture,
+    ) -> Self {
+        Self {
+            run: Some(run),
+            usage: Some(&run.usage),
+            resumed_session,
+            live_events: Some(live_events),
+        }
+    }
+
+    pub(crate) fn from_usage(usage: &'a Usage) -> Self {
+        Self {
+            usage: Some(usage),
+            ..Self::default()
+        }
+    }
+}
+
 pub(crate) fn settle_task(
     store: &Store,
     task: &Task,
     turn_id: i64,
-    run: Option<&RunResult>,
-    resumed_session: Option<&str>,
+    settlement: Settlement<'_>,
     worker: &WorkerOutcome,
-    live_events: Option<&LiveEventCapture>,
 ) -> Result<Task, LifecycleError> {
+    let Settlement {
+        run,
+        usage,
+        resumed_session,
+        live_events,
+    } = settlement;
     let now = now_iso();
     let mut worker = worker.clone();
     if worker.state == TaskState::Blocked
@@ -982,7 +1021,6 @@ pub(crate) fn settle_task(
     }
     let completion = encode(&worker.completion)?;
     let session_id = run.and_then(|run| run.session_id.as_deref());
-    let usage = run.map(|run| &run.usage);
     store.transaction(|tx| {
         append_provider_events(
             tx,

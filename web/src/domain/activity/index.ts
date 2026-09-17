@@ -414,6 +414,9 @@ function isActionUpdate(event: TaskEventView): boolean {
 function hasUnsupportedProviderStructure(event: TaskEventView): boolean {
   return (
     event.source === "antigravity" ||
+    // A worker that streams its own calls may also post hooks for them, and
+    // only the full composer knows which copy to keep.
+    AGENT_CALL_TYPES.has(event.type) ||
     parentActionId(event) !== undefined ||
     turnSignal(event) !== undefined ||
     isLifecycleUpdate(event)
@@ -478,7 +481,7 @@ function composeWithState(
   ending: ActivityEnding | undefined,
   showReceipt = settled,
 ): ActivityComposition {
-  rawEvents = normalizeAntigravityEvents(rawEvents);
+  rawEvents = withoutDuplicateHookCalls(normalizeAntigravityEvents(rawEvents));
   const folded = foldActions(rawEvents);
   const events = deriveTurnIds(folded.rows);
   const boundaries = events
@@ -520,6 +523,31 @@ function composeWithState(
     blocks,
     technical: composed.flatMap((composition) => composition.technical),
   };
+}
+
+/** The agent's own record of a call, on a turn that ran over ACP. */
+const AGENT_CALL_TYPES = new Set(["agent.tool_call", "agent.tool_call_update"]);
+
+const CALL_KINDS = new Set<TaskEventView["kind"]>(["tool", "command", "file"]);
+
+/**
+ * Drops the hook copies of calls the worker already reported itself.
+ *
+ * A worker whose hooks post to Oga reports every tool call twice on a turn
+ * that also streams its own: once as a hook, once as the agent's own row. The
+ * agent's row is the fuller one — it carries the diff, the files, and the
+ * agent's own words for the call — so the hook copy goes. Hooks that are not
+ * about a call at all say something no other row does and stay.
+ */
+export function withoutDuplicateHookCalls(events: TaskEventView[]): TaskEventView[] {
+  const agentTurns = new Set<number | undefined>();
+  for (const event of events) {
+    if (AGENT_CALL_TYPES.has(event.type)) agentTurns.add(event.turnId);
+  }
+  if (agentTurns.size === 0) return events;
+  return events.filter(
+    (event) => !(event.type === "agent.hook" && CALL_KINDS.has(event.kind) && agentTurns.has(event.turnId)),
+  );
 }
 
 /** Converts Antigravity's raw step protocol into the same rows other providers use. */
@@ -1888,7 +1916,15 @@ function settleAction(first: TaskEventView, later: TaskEventView): TaskEventView
     if (outcome !== undefined && merged.presentation) {
       merged.presentation = { ...merged.presentation, outcome };
     }
-    if (later.phase === "failed") merged.phase = "failed";
+    if (later.phase === "failed") {
+      merged.phase = "failed";
+    } else if (later.complete === true) {
+      // A worker that reports only how a call ended still ended it: the row
+      // keeps the subject it opened with and stops reading as work in flight.
+      merged.phase = later.phase;
+      merged.complete = true;
+      if (later.verb !== undefined) merged.verb = later.verb;
+    }
     return merged;
   }
   const merged: TaskEventView = { ...later, id: first.id, createdAt: first.createdAt };

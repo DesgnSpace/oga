@@ -85,4 +85,42 @@ describe("terminalResumeCommand", () => {
       `cd /repo && CLAUDE_CONFIG_DIR="$HOME/.claude-me" claude --resume session-1`,
     );
   });
+  test("never continues a worker conversation that no provider CLI can open", () => {
+    const acpOnly = task({
+      sessionId: undefined,
+      transport: {
+        kind: "acp",
+        acpSessionId: "sess_acp_9f2",
+        restore: "resume",
+        agent: { adapter: "claude-code-acp", name: "claude-code-acp", version: "1.0.0", protocolVersion: 1 },
+        decidedAt: "2026-09-17T10:00:00Z",
+      },
+    });
+
+    const command = terminalResumeCommand(acpOnly, profile());
+
+    expect(command).toBeNull();
+  });
+
+  test("continues from the provider's own session when the worker shares it", () => {
+    const shared = task({
+      sessionId: "session-1",
+      transport: {
+        kind: "acp",
+        acpSessionId: "session-1",
+        restore: "resume",
+        decidedAt: "2026-09-17T10:00:00Z",
+      },
+    });
+
+    expect(terminalResumeCommand(shared, profile())).toBe("cd /repo && claude --resume session-1");
+  });
+
+  test("keeps a legacy command-line task resuming as it always did", () => {
+    const legacy = task({
+      transport: { kind: "cli", reason: "legacy", decidedAt: "2026-09-17T10:00:00Z" },
+    });
+
+    expect(terminalResumeCommand(legacy, profile())).toBe("cd /repo && claude --resume session-1");
+  });
 });

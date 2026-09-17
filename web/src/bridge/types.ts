@@ -79,6 +79,37 @@ export interface TaskHoldView {
 
 export type TaskKind = "delegated" | "orchestrator";
 
+/** How a task's runs reach its worker. */
+export type TaskTransportKind = "acp" | "cli";
+
+export type TaskTransportReason = "legacy" | "custom_command" | "preference" | "no_adapter" | "unavailable";
+
+/** How the worker's conversation is picked back up on the agent holding it. */
+export type AcpRestore = "resume" | "load";
+
+export interface AcpAgentIdentity {
+  adapter: string;
+  name?: string;
+  version?: string;
+  protocolVersion: number;
+}
+
+/**
+ * The transport a task's runs use, decided when its first session opened.
+ *
+ * `acpSessionId` is the agent's own conversation id and is never a provider
+ * session id: only `Task.sessionId` can continue a task from a terminal.
+ */
+export interface TaskTransportView {
+  kind: TaskTransportKind;
+  reason?: TaskTransportReason;
+  detail?: string;
+  acpSessionId?: string;
+  restore?: AcpRestore;
+  agent?: AcpAgentIdentity;
+  decidedAt: string;
+}
+
 export interface TaskWorktree {
   originCwd: string;
   path: string;
@@ -118,6 +149,7 @@ export interface Task {
   tldr?: string;
   title?: string;
   sessionId?: string;
+  transport?: TaskTransportView;
   completion?: TaskCompletion;
   attempts?: TaskAttempt[];
   costUsd?: number;

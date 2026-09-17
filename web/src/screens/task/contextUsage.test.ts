@@ -16,6 +16,21 @@ function usageEvent(id: number, tokensIn: number, tokensCached = 0): TaskEventVi
   };
 }
 
+function contextEvent(id: number, used: number, size = 200_000): TaskEventView {
+  return {
+    id,
+    taskId: "task",
+    source: "claude",
+    type: "agent.usage_update",
+    kind: "usage",
+    phase: "info",
+    title: "Context",
+    presentation: { type: "usage", tokensIn: used, total: size },
+    createdAt: "2026-09-06T00:00:00Z",
+    minor: true,
+  };
+}
+
 function boundaryEvent(id: number): TaskEventView {
   return {
     id,
@@ -79,6 +94,19 @@ describe("contextUsage", () => {
       delta: 0,
       deltaPercent: 0,
       compacted: true,
+    });
+  });
+  test("a worker's own readings are the newest fill, never a running sum", () => {
+    const usage = contextUsage([contextEvent(1, 20_000), contextEvent(2, 45_000), contextEvent(3, 61_000)], 200_000);
+
+    expect(usage).toEqual({
+      used: 61_000,
+      window: 200_000,
+      percent: 31,
+      displayPercent: 31,
+      delta: 41_000,
+      deltaPercent: 21,
+      compacted: false,
     });
   });
 });
