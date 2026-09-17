@@ -1304,3 +1304,359 @@ async fn a_claude_task_from_before_acp_resumes_on_its_command_line() {
     );
     assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
 }
+
+/// Answers `codex exec` the way Codex's command line does, after noting that it
+/// ran.
+const CODEX_CLI: &str = r#"printf '%s\n' "$@" >> "$PWD/cli-ran"
+printf '%s\n' '{"type":"thread.started","thread_id":"019a4c1e-0000-7000-8000-00000000c11a"}' '{"type":"item.completed","item":{"type":"agent_message","text":"ran on the command line\nOGA_RESULT: completed"}}'
+"#;
+
+/// A Codex profile on the adapters Oga ships, with `codex-acp` resolving to the
+/// scripted agent in `mode` and `codex` to a command line that records that it
+/// ran. `missing` is an account with no adapter installed. The profile names its
+/// own `CODEX_API_KEY`, blank unless a test signs in with one, so a key the test
+/// process inherits never decides the transport.
+fn codex_harness(mode: &str, api_key: &str) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let account = directory.path().join("account");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    fs::create_dir_all(&account).expect("account");
+    fs::create_dir_all(&bin).expect("bin");
+    let log = directory.path().join("agent.log");
+    if mode != "missing" {
+        let adapter = bin.join("codex-acp");
+        fs::write(
+            &adapter,
+            format!(
+                "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
+                env!("CARGO_BIN_EXE_fake-acp-agent"),
+                log.display()
+            ),
+        )
+        .expect("fake adapter");
+        fs::set_permissions(&adapter, fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+    let cli = bin.join("codex");
+    fs::write(&cli, format!("#!/bin/sh\n{CODEX_CLI}")).expect("fake command line");
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("executable");
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::Codex,
+        default_model: "gpt-5.5".into(),
+        enabled: true,
+        env: BTreeMap::from([
+            ("PATH".into(), bin.display().to_string()),
+            ("CODEX_HOME".into(), account.display().to_string()),
+            ("CODEX_API_KEY".into(), api_key.into()),
+        ]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {"gpt-5.5": true}}}})
+                .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
+#[tokio::test]
+async fn codex_runs_over_acp_by_default_with_its_model_effort_account_and_tools() {
+    let harness = codex_harness("codex", "");
+    let mut request = DispatchRequest::new("work", "summarise the readme", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    let agent = recorded.agent.as_ref().expect("agent identity");
+    assert_eq!(agent.adapter, "codex-acp");
+    assert_eq!(agent.version.as_deref(), Some("1.12.0"));
+    assert_eq!(
+        task.session_id.as_deref(),
+        recorded.acp_session_id.as_deref(),
+        "the adapter opens a Codex thread, so a terminal can resume it"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "session/new",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+        "full access is chosen before the prompt goes out"
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [("mode".to_owned(), "agent-full-access".to_owned())],
+        "the session already holds the model and effort the launch's config named"
+    );
+    let opened = &harness.received("session/new")[0];
+    assert_eq!(
+        opened["mcpServers"][0]["name"], "oga",
+        "the tools -c mcp_servers.oga carries reach the session"
+    );
+    assert_eq!(
+        opened["mcpServers"][0]["headers"][0]["value"], task.id,
+        "Oga's tools answer as this task"
+    );
+    let started = &harness.agent_log()[0]["env"];
+    assert!(
+        started["CODEX_HOME"]
+            .as_str()
+            .is_some_and(|dir| dir.ends_with("/account")),
+        "the agent runs in the profile's own account: {started}"
+    );
+    let config: Value =
+        serde_json::from_str(started["CODEX_CONFIG"].as_str().expect("config overrides"))
+            .expect("config is JSON");
+    assert_eq!(
+        config,
+        serde_json::json!({"model": "gpt-5.5", "model_reasoning_effort": "high"})
+    );
+    assert_eq!(started["DISABLE_MCP_CONFIG_FILTERING"], "true");
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn codex_without_its_adapter_installed_runs_on_its_command_line_before_any_prompt() {
+    let harness = codex_harness("missing", "");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
+    assert_eq!(
+        task.session_id.as_deref(),
+        Some("019a4c1e-0000-7000-8000-00000000c11a")
+    );
+    assert!(harness.agent_log().is_empty());
+    let ran = harness.cli_runs();
+    assert!(
+        ran.windows(2).any(|pair| pair == ["--model", "gpt-5.5"]),
+        "{ran:?}"
+    );
+    assert!(
+        harness
+            .events(&task.id)
+            .iter()
+            .any(|event| event.kind == "transport_fallback")
+    );
+}
+
+#[tokio::test]
+async fn a_codex_adapter_oga_was_not_verified_against_never_opens_a_session() {
+    for mode in ["codex-next", "codex-renamed"] {
+        let harness = codex_harness(mode, "");
+
+        let task = harness.run("do the work").await;
+
+        assert_eq!(task.state, TaskState::Completed, "{mode}: {task:?}");
+        let recorded = transport(&task);
+        assert_eq!(recorded.kind, Transport::Cli, "{mode}");
+        assert!(
+            recorded
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("@agentclientprotocol/codex-acp 1.12.x")),
+            "{mode}: {recorded:?}"
+        );
+        assert_eq!(methods(&harness), ["initialize"], "{mode}");
+        assert!(!harness.cli_runs().is_empty(), "{mode}");
+    }
+
+    let explicit = codex_harness("codex-next", "");
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let task = explicit.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("not @agentclientprotocol/codex-acp 1.13.0")),
+        "{task:?}"
+    );
+    assert_eq!(methods(&explicit), ["initialize"]);
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_codex_account_that_signs_in_with_an_api_key_keeps_to_its_command_line() {
+    let harness = codex_harness("codex", "sk-test");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
+    assert!(
+        recorded
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("CODEX_API_KEY")),
+        "{recorded:?}"
+    );
+    assert!(harness.agent_log().is_empty(), "the adapter never started");
+    assert!(!harness.cli_runs().is_empty());
+
+    let explicit = codex_harness("codex", "sk-test");
+    set_transport_preference(&explicit.store, "work", TransportPreference::Acp, NOW)
+        .expect("preference");
+    let task = explicit.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        task.error
+            .as_deref()
+            .is_some_and(|error| error.contains("CODEX_API_KEY")),
+        "{task:?}"
+    );
+    assert!(explicit.agent_log().is_empty());
+    assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_codex_adapter_without_full_access_never_reaches_the_prompt() {
+    let harness = codex_harness("codex-no-full-access", "");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Cli);
+    assert!(
+        recorded
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("agent-full-access")),
+        "{recorded:?}"
+    );
+    assert!(harness.received("session/prompt").is_empty());
+    assert!(
+        harness
+            .cli_runs()
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+    );
+}
+
+#[tokio::test]
+async fn a_codex_follow_up_continues_its_thread_and_a_lost_prompt_is_never_rerun() {
+    let harness = codex_harness("codex", "");
+    let first = harness.run("start").await;
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    let resumed = harness.received("session/resume");
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(
+        resumed[0]["sessionId"].as_str(),
+        second.session_id.as_deref(),
+        "the thread a terminal would resume is the one the follow-up continues"
+    );
+    assert_eq!(harness.received("session/new").len(), 1);
+    assert_eq!(harness.received("session/prompt").len(), 2);
+    assert_eq!(
+        chosen_settings(&harness),
+        [
+            ("mode".to_owned(), "agent-full-access".to_owned()),
+            ("mode".to_owned(), "agent-full-access".to_owned()),
+        ],
+        "a restored session is given full access again before its prompt"
+    );
+    assert!(harness.cli_runs().is_empty());
+
+    let lost = codex_harness("codex-exit-after-prompt", "");
+    let task = lost.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(lost.received("session/prompt").len(), 1);
+    assert!(
+        lost.cli_runs().is_empty(),
+        "a prompt that may have run is never sent through the command line"
+    );
+}
+
+#[tokio::test]
+async fn a_codex_task_from_before_acp_resumes_on_its_command_line() {
+    let harness = codex_harness("codex", "");
+    let task = Task {
+        id: "before-acp".into(),
+        profile_id: "work".into(),
+        model: "gpt-5.5".into(),
+        prompt: "old work".into(),
+        cwd: harness.cwd.display().to_string(),
+        state: TaskState::Completed,
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        session_id: Some("019a0000-0000-7000-8000-0000000001d0".into()),
+        ..Task::default()
+    };
+    harness
+        .store
+        .repositories()
+        .tasks()
+        .insert(&task)
+        .expect("task");
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new("before-acp").instruction("one more thing"),
+    )
+    .await
+    .expect("resumed");
+    let resumed = harness.settle("before-acp").await;
+
+    assert_eq!(resumed.state, TaskState::Completed, "{resumed:?}");
+    assert!(harness.agent_log().is_empty(), "no ACP agent was started");
+    assert!(
+        harness
+            .cli_runs()
+            .windows(2)
+            .any(|pair| pair == ["resume", "019a0000-0000-7000-8000-0000000001d0"])
+    );
+    assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
+}

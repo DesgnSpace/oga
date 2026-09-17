@@ -91,6 +91,37 @@ pub struct Launch {
     pub mcp_servers: Vec<McpServer>,
     /// Session settings to select, in order, before the prompt.
     pub settings: Vec<SessionSetting>,
+    /// The released agent this launch was verified against. Any other agent
+    /// answering the command is turned away before a session opens.
+    pub release: Option<AgentRelease>,
+}
+
+/// A released agent, by the name it reports and the `major.minor` line whose
+/// patch releases share the behaviour a caller relies on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRelease {
+    pub name: String,
+    pub line: String,
+}
+
+impl AgentRelease {
+    pub fn new(name: impl Into<String>, line: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            line: line.into(),
+        }
+    }
+
+    /// Whether the agent is a patch release of this line. A pre-release
+    /// carries a suffix after its patch number, so it is never one.
+    fn admits(&self, agent: &Implementation) -> bool {
+        agent.name == self.name
+            && agent
+                .version
+                .strip_prefix(self.line.as_str())
+                .and_then(|rest| rest.strip_prefix('.'))
+                .is_some_and(|patch| !patch.is_empty() && patch.bytes().all(|b| b.is_ascii_digit()))
+    }
 }
 
 /// A value the session has to hold before the prompt, picked from the choices
@@ -130,7 +161,13 @@ impl Launch {
             additional_directories: Vec::new(),
             mcp_servers: Vec::new(),
             settings: Vec::new(),
+            release: None,
         }
+    }
+
+    pub fn release(mut self, release: AgentRelease) -> Self {
+        self.release = Some(release);
+        self
     }
 
     pub fn settings(mut self, settings: Vec<SessionSetting>) -> Self {
@@ -375,6 +412,24 @@ async fn handshake(
                 "the agent speaks ACP {} and this client speaks {}",
                 agent.protocol_version.as_u16(),
                 config.protocol_version.as_u16()
+            ),
+        ));
+    }
+    if let Some(release) = &launch.release
+        && !agent
+            .agent_info
+            .as_ref()
+            .is_some_and(|info| release.admits(info))
+    {
+        let answered = agent.agent_info.as_ref().map_or_else(
+            || "an agent that doesn't say which it is".to_owned(),
+            |info| format!("{} {}", info.name, info.version),
+        );
+        return Err(AcpError::unavailable(
+            Stage::Initialize,
+            format!(
+                "Oga works with {} {}.x, not {answered}",
+                release.name, release.line
             ),
         ));
     }
@@ -670,4 +725,32 @@ fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
 #[cfg(not(unix))]
 fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_release_line_admits_its_patch_releases_only() {
+        let line = AgentRelease::new("@agentclientprotocol/codex-acp", "1.12");
+        let agent = |name: &str, version: &str| Implementation::new(name, version);
+
+        assert!(line.admits(&agent("@agentclientprotocol/codex-acp", "1.12.0")));
+        assert!(line.admits(&agent("@agentclientprotocol/codex-acp", "1.12.14")));
+        for version in [
+            "1.13.0",
+            "1.1.20",
+            "1.12",
+            "1.12.",
+            "1.12.1-preview.2",
+            "2.12.0",
+        ] {
+            assert!(
+                !line.admits(&agent("@agentclientprotocol/codex-acp", version)),
+                "{version}"
+            );
+        }
+        assert!(!line.admits(&agent("codex-acp", "1.12.0")));
+    }
 }

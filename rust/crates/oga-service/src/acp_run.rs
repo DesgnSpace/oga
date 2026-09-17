@@ -16,8 +16,8 @@ use std::{
 };
 
 use oga_acp::{
-    AcpConfig, AcpError, AcpPolicy, AcpSession, Decision, Launch, PolicyFuture, Refusal,
-    SessionSetting, SessionStart, Stage,
+    AcpConfig, AcpError, AcpPolicy, AcpSession, AgentRelease, Decision, Launch, PolicyFuture,
+    Refusal, SessionSetting, SessionStart, Stage,
     schema::{
         AgentCapabilities, ContentBlock, HttpHeader, McpServer, McpServerHttp, PermissionOption,
         PermissionOptionKind, RequestPermissionRequest, SessionId, SessionNotification,
@@ -113,6 +113,15 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         effort: task.effort.as_deref(),
         cwd: &task.cwd,
     };
+    if let Some(reason) = adapter.incompatibility_for(&acp_launch) {
+        return open_failed(
+            &turn,
+            AcpError::Unavailable {
+                stage: Stage::Spawn,
+                reason,
+            },
+        );
+    }
     let request =
         RunRequest::from_command(profile.provider, adapter.command(&acp_launch), &task.cwd)
             .with_env(worker_env(&task.id, &task.cwd));
@@ -139,6 +148,9 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     let mut launch = Launch::new(request, task.scope.clone(), start)
         .settings(settings)
         .additional_directories(adapter.directories_for(&acp_launch));
+    if let Some(release) = &adapter.release {
+        launch = launch.release(AgentRelease::new(&release.agent, &release.line));
+    }
     if adapter.oga_tools {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);
     }

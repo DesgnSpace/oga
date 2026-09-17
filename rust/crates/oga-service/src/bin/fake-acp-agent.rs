@@ -15,6 +15,12 @@
 //! itself as that adapter, names its session the way Claude Code names one, and
 //! offers the effort as a session setting. `no-effort` is the adapter on a model
 //! with no effort levels to offer.
+//!
+//! A mode starting `codex` answers the way `codex-acp` 1.12.0 does: it reports
+//! itself as that adapter, names its session the way Codex names a thread,
+//! starts on the model and effort `CODEX_CONFIG` names, and offers its approval
+//! and sandbox preset as a session setting. `next` is a release Oga was not
+//! verified against, and `no-full-access` an adapter without that preset.
 
 use std::{
     env,
@@ -28,6 +34,9 @@ const SESSION: &str = "acp-session-1";
 /// Claude Code names a session with a UUID, and `claude-agent-acp` opens the
 /// session under that same id.
 const CLAUDE_SESSION: &str = "9f3c0c10-0e2a-4b47-8f1f-3f0c9a2b7c51";
+/// Codex names a thread with a UUID, and `codex-acp` opens the session under
+/// that same id.
+const CODEX_THREAD: &str = "019a4c1e-7b2d-7c30-9e41-5d6f7a8b9c0d";
 
 fn emit(value: &Value) {
     println!("{value}");
@@ -125,6 +134,56 @@ fn claude_settings(mode: &str, effort: &str) -> Value {
         }));
     }
     Value::Array(settings)
+}
+
+/// `codex-acp`'s settings: its approval and sandbox preset, Codex's model
+/// catalogue with the session's own model among it, and that model's efforts.
+fn codex_settings(mode: &str, model: &str, effort: &str, access: &str) -> Value {
+    let mut presets = vec![
+        json!({"value": "read-only", "name": "Ask for approval"}),
+        json!({"value": "agent", "name": "Approve for me"}),
+    ];
+    if !mode.ends_with("no-full-access") {
+        presets.push(json!({"value": "agent-full-access", "name": "Full access"}));
+    }
+    let mut models = vec![
+        json!({"value": "gpt-5.5", "name": "5.5"}),
+        json!({"value": "gpt-5.3-codex", "name": "5.3 Codex"}),
+    ];
+    if !["gpt-5.5", "gpt-5.3-codex"].contains(&model) {
+        models.insert(0, json!({"value": model, "name": model}));
+    }
+    json!([
+        {
+            "id": "mode",
+            "name": "Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": access,
+            "options": presets,
+        },
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": model,
+            "options": models,
+        },
+        {
+            "id": "reasoning_effort",
+            "name": "Reasoning effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": effort,
+            "options": [
+                {"value": "low", "name": "Low"},
+                {"value": "medium", "name": "Medium"},
+                {"value": "high", "name": "High"},
+                {"value": "xhigh", "name": "Xhigh"},
+            ],
+        },
+    ])
 }
 
 fn capabilities(mode: &str) -> Value {
@@ -287,28 +346,52 @@ fn main() {
                 "ANTHROPIC_MODEL": env::var("ANTHROPIC_MODEL").ok(),
                 "CLAUDE_CONFIG_DIR": env::var("CLAUDE_CONFIG_DIR").ok(),
                 "XDG_DATA_HOME": env::var("XDG_DATA_HOME").ok(),
+                "CODEX_HOME": env::var("CODEX_HOME").ok(),
+                "CODEX_CONFIG": env::var("CODEX_CONFIG").ok(),
+                "DISABLE_MCP_CONFIG_FILTERING": env::var("DISABLE_MCP_CONFIG_FILTERING").ok(),
             },
         }),
     );
     let opencode = mode.starts_with("opencode");
     let claude = mode.starts_with("claude");
-    let session_id = match (opencode, claude) {
-        (true, _) => "ses_acp1",
-        (_, true) => CLAUDE_SESSION,
+    let codex = mode.starts_with("codex");
+    let session_id = match (opencode, claude, codex) {
+        (true, _, _) => "ses_acp1",
+        (_, true, _) => CLAUDE_SESSION,
+        (_, _, true) => CODEX_THREAD,
         _ => SESSION,
     };
     let renamed = mode.ends_with("renamed");
-    let agent_name = match (opencode, claude) {
-        (true, _) if !renamed => "OpenCode",
-        (_, true) if !renamed => "@agentclientprotocol/claude-agent-acp",
+    let agent_name = match (opencode, claude, codex) {
+        (true, _, _) if !renamed => "OpenCode",
+        (_, true, _) if !renamed => "@agentclientprotocol/claude-agent-acp",
+        (_, _, true) if !renamed => "@agentclientprotocol/codex-acp",
         _ => "fake-acp-agent",
+    };
+    let version = match (codex, mode.ends_with("next")) {
+        (true, true) => "1.13.0",
+        (true, false) => "1.12.0",
+        _ => "2.1.0",
     };
     let turns = mode
         .strip_prefix("opencode-")
         .or_else(|| mode.strip_prefix("claude-"))
+        .or_else(|| mode.strip_prefix("codex-"))
         .unwrap_or(&mode)
         .to_owned();
     let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
+    let mut access = "agent".to_owned();
+    if codex {
+        let config: Value = env::var("CODEX_CONFIG")
+            .ok()
+            .and_then(|config| serde_json::from_str(&config).ok())
+            .unwrap_or_default();
+        model = config["model"].as_str().unwrap_or("gpt-5.5").to_owned();
+        effort = config["model_reasoning_effort"]
+            .as_str()
+            .unwrap_or("medium")
+            .to_owned();
+    }
 
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines().map_while(Result::ok);
@@ -334,7 +417,7 @@ fn main() {
                 "result": {
                     "protocolVersion": 1,
                     "agentCapabilities": capabilities(&mode),
-                    "agentInfo": {"name": agent_name, "version": "2.1.0"},
+                    "agentInfo": {"name": agent_name, "version": version},
                 },
             })),
             "session/new" if opencode => emit(&json!({
@@ -353,18 +436,28 @@ fn main() {
                     "configOptions": claude_settings(&mode, &effort),
                 },
             })),
+            "session/new" if codex => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": session_id,
+                    "configOptions": codex_settings(&mode, &model, &effort, &access),
+                },
+            })),
             "session/new" => {
                 emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"sessionId": session_id}}))
             }
             "session/set_config_option" => {
                 let value = params["value"].as_str().unwrap_or_default().to_owned();
-                if params["configId"] == "model" {
-                    model = value;
-                } else {
-                    effort = value;
+                match params["configId"].as_str() {
+                    Some("model") => model = value,
+                    Some("mode") => access = value,
+                    _ => effort = value,
                 }
                 let offered = if claude {
                     claude_settings(&mode, &effort)
+                } else if codex {
+                    codex_settings(&mode, &model, &effort, &access)
                 } else {
                     opencode_settings(&mode, &model, &effort)
                 };
@@ -394,6 +487,11 @@ fn main() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {"configOptions": claude_settings(&mode, &effort)},
+            })),
+            "session/resume" if codex => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"configOptions": codex_settings(&mode, &model, &effort, &access)},
             })),
             "session/resume" => emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}})),
             "session/prompt" => prompt(&turns, &id, &params, &mut lines, &log_path),

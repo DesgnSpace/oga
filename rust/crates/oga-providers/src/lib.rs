@@ -11,7 +11,7 @@ use serde_json::Value;
 
 mod acp;
 
-pub use acp::{AcpAdapter, AcpAdapters, AcpLaunch, AcpSetting};
+pub use acp::{AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting};
 
 pub const NO_FINAL_MESSAGE: &str =
     "(no final message: the provider stream carried no assistant text)";

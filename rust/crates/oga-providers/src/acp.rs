@@ -31,6 +31,7 @@ type Argv = dyn Fn(&AcpLaunch<'_>) -> Vec<String> + Send + Sync;
 type Settings = dyn Fn(&AcpLaunch<'_>) -> Vec<AcpSetting> + Send + Sync;
 type Environment = dyn Fn(&AcpLaunch<'_>) -> BTreeMap<String, String> + Send + Sync;
 type Directories = dyn Fn(&AcpLaunch<'_>) -> Vec<PathBuf> + Send + Sync;
+type Incompatibility = dyn Fn(&AcpLaunch<'_>) -> Option<String> + Send + Sync;
 
 /// A session setting the agent has to hold before a run's prompt, named the
 /// way the agent names it.
@@ -43,6 +44,14 @@ pub struct AcpSetting {
     pub required: bool,
 }
 
+/// The released agent an adapter was verified against: the name it reports
+/// and the `major.minor` line whose patch releases Oga accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcpRelease {
+    pub agent: String,
+    pub line: String,
+}
+
 /// How Oga starts one provider's ACP agent.
 #[derive(Clone)]
 pub struct AcpAdapter {
@@ -52,6 +61,10 @@ pub struct AcpAdapter {
     settings: Arc<Settings>,
     environment: Arc<Environment>,
     directories: Arc<Directories>,
+    incompatibility: Arc<Incompatibility>,
+    /// The only agent allowed to answer this adapter's command. Any other is
+    /// turned away before a session opens.
+    pub release: Option<AcpRelease>,
     /// The provider's command line gives the worker Oga's own tools, so the
     /// agent must accept Oga's HTTP MCP server. An agent that cannot is
     /// incompatible rather than quietly left without them.
@@ -70,6 +83,7 @@ impl fmt::Debug for AcpAdapter {
             .field("id", &self.id)
             .field("oga_tools", &self.oga_tools)
             .field("native_sessions_from", &self.native_sessions_from)
+            .field("release", &self.release)
             .finish_non_exhaustive()
     }
 }
@@ -85,9 +99,29 @@ impl AcpAdapter {
             settings: Arc::new(|_| Vec::new()),
             environment: Arc::new(|_| BTreeMap::new()),
             directories: Arc::new(|_| Vec::new()),
+            incompatibility: Arc::new(|_| None),
+            release: None,
             oga_tools: false,
             native_sessions_from: None,
         }
+    }
+
+    pub fn release(mut self, agent: impl Into<String>, line: impl Into<String>) -> Self {
+        self.release = Some(AcpRelease {
+            agent: agent.into(),
+            line: line.into(),
+        });
+        self
+    }
+
+    /// Why a launch cannot reach its account over ACP at all, known from the
+    /// profile before any agent starts.
+    pub fn incompatibility(
+        mut self,
+        incompatibility: impl Fn(&AcpLaunch<'_>) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.incompatibility = Arc::new(incompatibility);
+        self
     }
 
     pub fn oga_tools(mut self, required: bool) -> Self {
@@ -124,6 +158,10 @@ impl AcpAdapter {
     ) -> Self {
         self.directories = Arc::new(directories);
         self
+    }
+
+    pub fn incompatibility_for(&self, launch: &AcpLaunch<'_>) -> Option<String> {
+        (self.incompatibility)(launch)
     }
 
     /// The session settings one run selects before its prompt, in order.
@@ -164,6 +202,7 @@ impl AcpAdapters {
     pub fn builtin() -> Self {
         Self::default()
             .register(Provider::Claude, claude())
+            .register(Provider::Codex, codex())
             .register(Provider::OpenCode, opencode())
     }
 
@@ -224,6 +263,84 @@ fn claude() -> AcpAdapter {
         })
 }
 
+/// Codex's released ACP adapter, `@agentclientprotocol/codex-acp`, which drives
+/// Codex's own app server, verified against 1.12.0. Oga starts the installed
+/// binary and accepts only that release line's patch releases; any other agent
+/// is turned away before a session opens, and an account without the adapter
+/// falls back before any prompt.
+///
+/// The adapter runs the Codex build it ships (0.154.0 for 1.12.0) rather than
+/// the `codex` on the account's path, and never changes that one. Both keep
+/// their threads under the profile's `CODEX_HOME`, which is what the command
+/// line and a terminal resume from.
+///
+/// The model and effort ride `CODEX_CONFIG`, which the adapter hands to Codex
+/// as the same config overrides `--model` and `-c model_reasoning_effort` are,
+/// so Codex resolves them the way the command line would. The session settings
+/// then confirm the session holds them, and choose `agent-full-access`: no
+/// approvals and no sandbox of Codex's own, which is what
+/// `--dangerously-bypass-approvals-and-sandbox` asks for, leaving confinement
+/// to the runner.
+///
+/// Oga's own tools ride the session's HTTP MCP servers, where `-c
+/// mcp_servers.oga.*` carries them on the command line. The adapter drops a
+/// session server named like one the account already configures, so
+/// `DISABLE_MCP_CONFIG_FILTERING` merges it into that one instead, the way `-c`
+/// does, rather than losing the header that binds the tools to this task.
+///
+/// A session it opens is a Codex thread under the id it answers with, the
+/// thread id `codex exec --json` reports and `codex exec resume` takes.
+///
+/// `codex exec` signs in with `CODEX_API_KEY` ahead of the account's saved
+/// login, and the app server never reads it, so an account that sets it keeps
+/// to its command line.
+fn codex() -> AcpAdapter {
+    const AGENT: &str = "@agentclientprotocol/codex-acp";
+    AcpAdapter::new("codex-acp", |_| vec!["codex-acp".to_owned()])
+        .release(AGENT, "1.12")
+        .oga_tools(true)
+        .native_sessions_from(AGENT)
+        .incompatibility(|launch| {
+            signs_in_with_codex_api_key(launch.profile).then(|| {
+                "this account signs in with CODEX_API_KEY, which only Codex's command line reads"
+                    .to_owned()
+            })
+        })
+        .environment(|launch| {
+            let mut config = serde_json::json!({ "model": launch.model });
+            if let Some(effort) = launch.effort {
+                config["model_reasoning_effort"] = effort.into();
+            }
+            BTreeMap::from([
+                ("CODEX_CONFIG".to_owned(), config.to_string()),
+                ("DISABLE_MCP_CONFIG_FILTERING".to_owned(), "true".to_owned()),
+            ])
+        })
+        .settings(|launch| {
+            let setting = |id: &str, value: &str| AcpSetting {
+                id: id.into(),
+                value: value.into(),
+                required: true,
+            };
+            let mut settings = vec![setting("model", launch.model)];
+            if let Some(effort) = launch.effort {
+                settings.push(setting("reasoning_effort", effort));
+            }
+            settings.push(setting("mode", "agent-full-access"));
+            settings
+        })
+}
+
+/// Whether a Codex started for this profile sees a `CODEX_API_KEY`: the
+/// profile's own value, or else the broker's, which a worker inherits.
+fn signs_in_with_codex_api_key(profile: &Profile) -> bool {
+    environment_for(profile)
+        .get("CODEX_API_KEY")
+        .cloned()
+        .or_else(|| std::env::var("CODEX_API_KEY").ok())
+        .is_some_and(|key| !key.trim().is_empty())
+}
+
 /// OpenCode's own `opencode acp` server, verified against OpenCode 1.18.31.
 ///
 /// The session it opens is the OpenCode session itself, so its id is the one
@@ -278,15 +395,10 @@ mod tests {
     #[test]
     fn no_provider_claims_an_adapter_it_does_not_ship() {
         let adapters = AcpAdapters::builtin();
-        for provider in [Provider::Claude, Provider::OpenCode] {
+        for provider in [Provider::Claude, Provider::Codex, Provider::OpenCode] {
             assert!(adapters.get(provider).is_some(), "{provider:?}");
         }
-        for provider in [
-            Provider::Codex,
-            Provider::OpenCode2,
-            Provider::Antigravity,
-            Provider::Pi,
-        ] {
+        for provider in [Provider::OpenCode2, Provider::Antigravity, Provider::Pi] {
             assert!(adapters.get(provider).is_none(), "{provider:?}");
         }
     }
@@ -358,6 +470,132 @@ mod tests {
             }]
         );
         assert_eq!(adapter.settings_for(&launch(None)), []);
+    }
+
+    #[test]
+    fn codex_starts_its_adapter_in_the_profiles_account_on_the_tasks_model() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Codex).expect("codex adapter");
+        let profile = profile(
+            Provider::Codex,
+            BTreeMap::from([
+                ("CODEX_HOME".into(), "~/.codex-work".into()),
+                ("CODEX_API_KEY".into(), String::new()),
+            ]),
+        );
+        let launch = AcpLaunch {
+            profile: &profile,
+            model: "gpt-5.5",
+            effort: Some("xhigh"),
+            cwd: "/repo",
+        };
+
+        let command = adapter.command(&launch);
+        let cli = crate::command_for(&profile, "", "/repo", Some("gpt-5.5"), Some("xhigh"), None);
+
+        assert_eq!(command.argv, ["codex-acp"]);
+        assert_eq!(
+            command.env.get("CODEX_HOME"),
+            Some(&format!("{}/.codex-work", crate::home()))
+        );
+        assert_eq!(command.env_remove, cli.env_remove);
+        let config: serde_json::Value =
+            serde_json::from_str(&command.env["CODEX_CONFIG"]).expect("config overrides");
+        assert_eq!(
+            config,
+            serde_json::json!({"model": "gpt-5.5", "model_reasoning_effort": "xhigh"}),
+            "the same overrides --model and -c model_reasoning_effort make"
+        );
+        assert_eq!(
+            command
+                .env
+                .get("DISABLE_MCP_CONFIG_FILTERING")
+                .map(String::as_str),
+            Some("true"),
+            "Oga's server merges into a same-named one, as -c does, instead of being dropped"
+        );
+        assert!(
+            adapter.oga_tools,
+            "the command line gives Codex Oga's tools with -c mcp_servers.oga, so this must too"
+        );
+        assert_eq!(
+            adapter.native_sessions_from.as_deref(),
+            Some("@agentclientprotocol/codex-acp")
+        );
+        assert_eq!(
+            adapter.release,
+            Some(AcpRelease {
+                agent: "@agentclientprotocol/codex-acp".into(),
+                line: "1.12".into(),
+            })
+        );
+        assert_eq!(adapter.incompatibility_for(&launch), None);
+    }
+
+    #[test]
+    fn codex_holds_the_model_effort_and_full_access_the_command_line_asks_for() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Codex).expect("codex adapter");
+        let profile = profile(Provider::Codex, BTreeMap::new());
+        let launch = |effort| AcpLaunch {
+            profile: &profile,
+            model: "gpt-5.3-codex",
+            effort,
+            cwd: "/repo",
+        };
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+
+        assert_eq!(
+            adapter.settings_for(&launch(Some("high"))),
+            [
+                setting("model", "gpt-5.3-codex"),
+                setting("reasoning_effort", "high"),
+                setting("mode", "agent-full-access"),
+            ]
+        );
+        assert_eq!(
+            adapter.settings_for(&launch(None)),
+            [
+                setting("model", "gpt-5.3-codex"),
+                setting("mode", "agent-full-access"),
+            ]
+        );
+        let config: serde_json::Value =
+            serde_json::from_str(&adapter.command(&launch(None)).env["CODEX_CONFIG"])
+                .expect("config overrides");
+        assert_eq!(
+            config,
+            serde_json::json!({"model": "gpt-5.3-codex"}),
+            "a run with no effort leaves it to Codex, as the command line does"
+        );
+    }
+
+    #[test]
+    fn a_codex_account_signed_in_with_an_api_key_cannot_use_acp() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Codex).expect("codex adapter");
+        let profile = profile(
+            Provider::Codex,
+            BTreeMap::from([("CODEX_API_KEY".into(), "sk-test".into())]),
+        );
+
+        let reason = adapter.incompatibility_for(&AcpLaunch {
+            profile: &profile,
+            model: "gpt-5.5",
+            effort: None,
+            cwd: "/repo",
+        });
+
+        assert!(
+            reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("CODEX_API_KEY")),
+            "{reason:?}"
+        );
     }
 
     #[test]

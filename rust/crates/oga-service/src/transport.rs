@@ -244,7 +244,7 @@ mod tests {
     /// it over ACP.
     fn without_adapter() -> Profile {
         Profile {
-            provider: Provider::Codex,
+            provider: Provider::Pi,
             ..profile(None)
         }
     }
