@@ -389,6 +389,7 @@ fn settle(
             _ => CompletionCode::WorkerError,
         },
         reason: Some(reason.to_owned()),
+        stop_reason: None,
         suggested_scope: None,
         resets_at: None,
         asserted_completion: None,

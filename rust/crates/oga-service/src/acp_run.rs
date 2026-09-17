@@ -564,15 +564,23 @@ fn outcome(
     transcript: &Transcript,
     stderr: &str,
 ) -> WorkerOutcome {
-    let answer = match ended {
+    let (answer, stop_reason) = match ended {
         TurnEnd::TimedOut => {
             return failed(CompletionCode::Timeout, "provider run timed out".into());
         }
-        TurnEnd::Answered(_) if was_cancelled => return cancelled(),
-        TurnEnd::Answered(answer) => answer,
+        TurnEnd::Answered(answer) => {
+            let stop_reason = answer
+                .as_ref()
+                .ok()
+                .map(|response| stop_reason_name(&response.stop_reason));
+            (answer, stop_reason)
+        }
     };
-    match answer {
-        Ok(response) => match response.stop_reason {
+    let mut worker = if was_cancelled {
+        cancelled()
+    } else {
+        match answer {
+            Ok(response) => match response.stop_reason {
             StopReason::EndTurn => {
                 interpret_worker_outcome(Some(0), transcript.final_text(), stderr, None)
             }
@@ -595,28 +603,45 @@ fn outcome(
                 CompletionCode::WorkerError,
                 "The worker stopped without saying why. Resume the task to continue.".into(),
             ),
-        },
-        Err(AcpError::Refused {
-            kind: Refusal::Authentication,
-            reason,
-        }) => failed(
-            CompletionCode::Auth,
-            format!(
-                "This worker needs you to sign in again ({reason}). Sign in to that account, then resume the task."
+            },
+            Err(AcpError::Refused {
+                kind: Refusal::Authentication,
+                reason,
+            }) => failed(
+                CompletionCode::Auth,
+                format!(
+                    "This worker needs you to sign in again ({reason}). Sign in to that account, then resume the task."
+                ),
             ),
-        ),
-        Err(AcpError::Refused {
-            kind: Refusal::Permission,
-            reason,
-        }) => failed(
-            CompletionCode::PermissionDenied,
-            format!(
-                "The worker declined part of this task ({reason}). Check what that worker is allowed to do, then resume the task."
+            Err(AcpError::Refused {
+                kind: Refusal::Permission,
+                reason,
+            }) => failed(
+                CompletionCode::PermissionDenied,
+                format!(
+                    "The worker declined part of this task ({reason}). Check what that worker is allowed to do, then resume the task."
+                ),
             ),
-        ),
-        Err(AcpError::Unavailable { reason, .. } | AcpError::PromptInFlight { reason }) => {
-            failed(CompletionCode::WorkerError, stopped_mid_turn(&reason))
+            Err(AcpError::Unavailable { reason, .. } | AcpError::PromptInFlight { reason }) => {
+                failed(CompletionCode::WorkerError, stopped_mid_turn(&reason))
+            }
         }
+    };
+    worker.completion.stop_reason = stop_reason;
+    worker
+}
+
+fn stop_reason_name(reason: &StopReason) -> String {
+    match reason {
+        StopReason::EndTurn => "end_turn".into(),
+        StopReason::Cancelled => "cancelled".into(),
+        StopReason::MaxTokens => "max_tokens".into(),
+        StopReason::MaxTurnRequests => "max_turn_requests".into(),
+        StopReason::Refusal => "refusal".into(),
+        _ => serde_json::to_value(reason)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "unknown".into()),
     }
 }
 

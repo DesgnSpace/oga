@@ -800,7 +800,15 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
             Some(complete),
         )
     });
-    let raw_text = raw_payload_text(&event.payload);
+    let raw_text = if event.kind == "worker_stderr" {
+        event
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    } else {
+        raw_payload_text(&event.payload)
+    };
     if event.kind.starts_with("agent.")
         && let Some(view) = provider_event_view(event, provider, raw_text.clone())
     {
@@ -813,9 +821,19 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
         })
         .or_else(|| hook_lifecycle_detail(&event.payload))
         .or_else(|| event_detail(&event.kind, &event.payload));
+    let phase = if event.kind == "worker_stderr" {
+        EventPhase::Info
+    } else {
+        phase
+    };
     let hook_result = hook_view_presentation
         .as_ref()
         .and_then(|presentation| presentation.outcome.clone());
+    let title = if event.kind == "worker_stderr" {
+        "Worker log".to_owned()
+    } else {
+        title
+    };
     TaskEventView {
         id: event.id,
         task_id: event.task_id.clone(),
@@ -4572,10 +4590,7 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
             let used_by = tree_value(payload, &["usedBy"]);
             Some(approved_for.is_none() || approved_for == used_by)
         }
-        "worker_stderr" => {
-            let empty = tree_value(payload, &["text"]).is_none();
-            Some(empty)
-        }
+        "worker_stderr" => Some(true),
         // A wait nobody asked for — the connection died, the account ran out —
         // is the reader's answer to "why is this task not running", so it shows
         // both when it starts and when it ends. A scheduled start or a
@@ -4643,6 +4658,27 @@ mod tests {
         }
         assert_eq!(event_title("agent.tool_progress", &empty), "Tool progress");
         assert_eq!(event_title("agent.item.started", &empty), "Item started");
+    }
+
+    #[test]
+    fn worker_stderr_is_minor_info_with_full_raw_text() {
+        let text = "worker output ".repeat(30);
+        let view = event_view(
+            &provider_event(1, "worker_stderr", serde_json::json!({"text": text})),
+            Provider::Claude,
+        );
+
+        assert_eq!(view.kind, EventKind::Lifecycle);
+        assert_eq!(view.phase, EventPhase::Info);
+        assert_eq!(view.title, "Worker log");
+        assert_eq!(view.minor, Some(true));
+        assert!(
+            view.detail
+                .as_ref()
+                .is_some_and(|detail| detail.len() < text.len())
+        );
+        assert_eq!(view.raw_text.as_ref().map(String::len), Some(text.len()));
+        assert_eq!(view.raw_text.as_deref(), Some(text.as_str()));
     }
 
     #[test]

@@ -297,8 +297,28 @@ async fn a_task_completes_a_full_turn_over_acp() {
     );
     assert!(harness.cli_runs().is_empty());
 
-    let messages: Vec<String> = harness
-        .events(&task.id)
+    let events = harness.events(&task.id);
+    let turn = harness
+        .store
+        .repositories()
+        .turns()
+        .list(&task.id)
+        .expect("turns")
+        .into_iter()
+        .next()
+        .expect("turn");
+    let started = events
+        .iter()
+        .find(|event| event.kind == "started")
+        .expect("started event");
+    assert_eq!(started.turn_id, Some(turn.id));
+    let completed = events
+        .iter()
+        .find(|event| event.kind == "completed")
+        .expect("completed event");
+    assert_eq!(completed.payload["completion"]["stopReason"], "end_turn");
+
+    let messages: Vec<String> = events
         .iter()
         .filter(|event| event.kind == "agent.agent_message_chunk")
         .map(|event| {

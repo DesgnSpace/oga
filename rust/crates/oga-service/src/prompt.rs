@@ -841,6 +841,7 @@ pub(crate) fn empty_completion() -> TaskCompletion {
         blocked: false,
         code: CompletionCode::WorkerError,
         reason: None,
+        stop_reason: None,
         suggested_scope: None,
         resets_at: None,
         asserted_completion: None,

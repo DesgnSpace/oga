@@ -1766,7 +1766,7 @@ fn claim_task(store: &Store, task_id: &str, shipped_prompt: &str) -> Result<i64,
                 TaskState::Running,
                 json!({}),
                 &now,
-                None,
+                Some(turn_id),
             )?;
             Ok(turn_id)
         })
@@ -1784,6 +1784,7 @@ pub(crate) fn completion(
         blocked,
         code,
         reason,
+        stop_reason: None,
         suggested_scope: None,
         resets_at: None,
         asserted_completion: None,

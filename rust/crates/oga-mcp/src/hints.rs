@@ -366,6 +366,7 @@ mod tests {
             blocked: true,
             code: CompletionCode::RateLimit,
             reason: None,
+            stop_reason: None,
             suggested_scope: None,
             resets_at: Some("2026-09-05T12:00:00.000Z".into()),
             asserted_completion: None,

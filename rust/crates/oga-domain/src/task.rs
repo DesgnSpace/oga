@@ -257,6 +257,8 @@ pub struct TaskCompletion {
     pub code: CompletionCode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
     /// Scope that would have survived the run's sandbox denials; approved by
     /// resuming with it.
     #[serde(skip_serializing_if = "Option::is_none")]
