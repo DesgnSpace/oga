@@ -234,6 +234,62 @@ describe("TraceRows", () => {
     expect(container.querySelectorAll('[data-running="true"]')).toHaveLength(1);
   });
 
+  it("renders a handoff with the destination emphasized and plain context", () => {
+    const { container } = render(
+      <TraceRows
+        rows={[
+          row({
+            style: "notice",
+            marker: "handoff",
+            handoff: {
+              fromId: "opencode-go/union-alpha",
+              toId: "openrouter/stealth/union-alpha",
+              earlierRunCount: 1,
+              context: "rebuilt",
+              briefTier: "verbatim",
+            },
+          }),
+        ]}
+      />,
+    );
+
+    const marker = container.querySelector(".trace-handoff-marker");
+    expect(marker?.querySelector(".trace-handoff-destination")?.tagName).toBe("STRONG");
+    expect(marker?.querySelector(".trace-handoff-destination")?.textContent).toBe("openrouter/stealth/union-alpha");
+    expect(marker?.querySelector(".trace-handoff-source")?.textContent).toBe("from opencode-go/union-alpha");
+    expect(marker?.querySelector(".trace-handoff-context")?.textContent).toBe(
+      "Started with a fresh brief built from 1 earlier run and the earlier run's transcript",
+    );
+    expect(marker?.textContent).toContain("Handed off to");
+    expect(marker?.textContent).not.toContain("verbatim");
+    expect(marker?.textContent).not.toContain("chars");
+    expect(marker?.textContent).not.toContain("events");
+  });
+
+  it("omits empty handoff context and zero counts", () => {
+    const { container } = render(
+      <TraceRows
+        rows={[
+          row({
+            style: "notice",
+            marker: "handoff",
+            handoff: {
+              fromId: "old-worker",
+              toId: "new-worker",
+              earlierRunCount: 0,
+            },
+          }),
+        ]}
+      />,
+    );
+
+    const marker = container.querySelector(".trace-handoff-marker");
+    expect(marker?.querySelector(".trace-handoff-context")).toBeNull();
+    expect(marker?.textContent).not.toContain("0");
+    expect(marker?.textContent).not.toContain("events");
+    expect(marker?.textContent).not.toContain("chars");
+  });
+
   it("renders command output as a terminal with an outcome", () => {
     const commandEvent: TaskEventView = {
       ...fileEvent(1),

@@ -177,10 +177,13 @@ export function groupLabel(group: ActivityGroup): string {
   return `Work step #${group.anchor.id}`;
 }
 
+export type HandoffBriefTier = "verbatim" | "digest";
+
 export interface HandoffBoundary {
   chain: string;
   earlierRuns: HandoffRun[];
   hiddenEventCount: number;
+  briefTier?: HandoffBriefTier;
 }
 
 export interface HandoffRun {
@@ -492,6 +495,11 @@ function composeWithState(
   }
 
   const hops = boundaries.map(([, event]) => hopFromDetail(event.detail));
+  const lastBoundary = boundaries[boundaries.length - 1];
+  const briefTier = events
+    .slice(lastBoundary[0] + 1)
+    .map(handoffBriefTier)
+    .find((tier): tier is HandoffBriefTier => tier !== undefined);
   const segments: TaskEventView[][] = [];
   let start = 0;
   for (const [index] of boundaries) {
@@ -515,7 +523,7 @@ function composeWithState(
     .slice(0, Math.max(segments.length - 1, 0))
     .reduce((sum, segment) => sum + segment.length, 0);
   const blocks: ActivityBlock[] = [
-    { type: "handoff", boundary: { chain: hopChain(hops), earlierRuns, hiddenEventCount } },
+    { type: "handoff", boundary: { chain: hopChain(hops), earlierRuns, hiddenEventCount, briefTier } },
   ];
   const current = composed[composed.length - 1];
   if (current) blocks.push(...current.blocks);
@@ -691,8 +699,19 @@ function parseAntigravityPayload(raw: string | undefined): AntigravityPayload | 
 const SCHEDULING_TITLES = new Set(["Waiting", "Continuing", "Queued"]);
 const HOLD_OUTCOME_TITLES = new Set(["Waiting ended", "Wait timed out"]);
 
+function isHandoffBrief(event: TaskEventView): boolean {
+  return event.type === "handoff_brief" || event.title === "Handoff brief" || event.title === "Handoff brief built";
+}
+
+function handoffBriefTier(event: TaskEventView): HandoffBriefTier | undefined {
+  if (!isHandoffBrief(event)) return undefined;
+  const tier = event.detail?.split(/\s+/, 1)[0];
+  return tier === "verbatim" || tier === "digest" ? tier : undefined;
+}
+
 function isTechnical(event: TaskEventView): boolean {
   if (event.minor === true) return true;
+  if (isHandoffBrief(event)) return true;
   if (event.kind === "raw") {
     return [
       "Step Start",
@@ -729,7 +748,6 @@ function isTechnical(event: TaskEventView): boolean {
     "Session Reused",
     "Session Captured",
     "Archived",
-    "Handoff brief built",
   ].includes(event.title);
 }
 

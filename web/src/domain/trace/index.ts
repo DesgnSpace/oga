@@ -19,11 +19,20 @@ import {
   ReasoningPulse,
   type ActivityComposition,
   type HandoffBoundary,
+  type HandoffBriefTier,
 } from "@/domain/activity";
 import { ogaResultText } from "@/domain/oga";
 
 export type TraceStyle = "work" | "message" | "notice";
 export type TraceState = "running" | "needs-input" | "failed" | "done";
+
+export interface HandoffPresentation {
+  fromId: string;
+  toId: string;
+  earlierRunCount: number;
+  context?: "carried" | "rebuilt";
+  briefTier?: HandoffBriefTier;
+}
 
 /** What kind of turn a row opens or closes: a resumed run, an answer to a
  * question, a mid-run steer, a handoff to another profile, or the worker's
@@ -365,6 +374,7 @@ export interface TraceRow {
   /** Set on rows that open or close a turn boundary — a follow-up, a reply,
    * a steer, a handoff, or the worker's response to one. */
   marker?: TurnMarkerKind;
+  handoff?: HandoffPresentation;
 }
 
 export function traceRowWeight(row: TraceRow): number {
@@ -394,6 +404,7 @@ export function traceRowIsEmpty(row: TraceRow): boolean {
     !row.verb &&
     !row.result &&
     !row.preview &&
+    !row.handoff &&
     row.children.length === 0 &&
     !traceRowOffersExpansion(row)
   );
@@ -758,13 +769,23 @@ function receiptRow(event: TaskEventView, thinkingTokens: number, usageWindow: s
 }
 
 function handoffRow(boundary: HandoffBoundary): TraceRow {
-  const runs = boundary.earlierRuns.length === 1 ? "run" : "runs";
-  const events = boundary.hiddenEventCount === 1 ? "event" : "events";
+  const hops = boundary.earlierRuns.flatMap((run) => run.endedBy ? [run.endedBy] : []);
+  const firstHop = hops[0];
+  const lastHop = hops[hops.length - 1];
+  const handoff = firstHop && lastHop
+    ? {
+        fromId: firstHop.fromId,
+        toId: lastHop.toId,
+        earlierRunCount: boundary.earlierRuns.length,
+        context: handoffContext(lastHop.context),
+        briefTier: boundary.briefTier,
+      }
+    : undefined;
   return {
     id: 0,
     style: "notice",
     verb: undefined,
-    target: `${boundary.chain} · ${boundary.earlierRuns.length} earlier ${runs} · ${boundary.hiddenEventCount} ${events}`,
+    target: handoff === undefined ? boundary.chain : undefined,
     result: undefined,
     state: "done",
     event: undefined,
@@ -775,7 +796,14 @@ function handoffRow(boundary: HandoffBoundary): TraceRow {
     isStepStart: true,
     isTechnical: false,
     marker: "handoff",
+    handoff,
   };
+}
+
+function handoffContext(value: string | undefined): HandoffPresentation["context"] {
+  if (value === "conversation carried") return "carried";
+  if (value === "rebuilt brief") return "rebuilt";
+  return undefined;
 }
 
 function dropEmpty(row: TraceRow): TraceRow | undefined {

@@ -14,6 +14,7 @@ import {
   traceRowOffersExpansion,
   turnMarkerLabel,
   type EventExpansion,
+  type HandoffPresentation,
   type TodoItem,
   type TraceRow,
   type TurnMarkerKind,
@@ -265,6 +266,94 @@ function TraceTurnMarker({ kind }: { kind: TurnMarkerKind }) {
   );
 }
 
+const HANDOFF_MARKER_STYLE: React.CSSProperties = {
+  display: "grid",
+  flex: "1 1 auto",
+  minWidth: 0,
+  gap: "var(--space-1)",
+  color: "var(--color-text-muted)",
+  fontSize: "var(--text-base)",
+  fontWeight: 400,
+  lineHeight: 1.5,
+};
+
+const HANDOFF_MARKER_LINE_STYLE: React.CSSProperties = {
+  display: "flex",
+  minWidth: 0,
+  alignItems: "baseline",
+  flexWrap: "wrap",
+  gap: "var(--space-1)",
+};
+
+const HANDOFF_ICON_STYLE: React.CSSProperties = {
+  flex: "0 0 auto",
+  alignSelf: "center",
+};
+
+const HANDOFF_ID_STYLE: React.CSSProperties = {
+  minWidth: 0,
+  color: "var(--color-text)",
+  fontWeight: 600,
+  overflowWrap: "anywhere",
+};
+
+const HANDOFF_SOURCE_STYLE: React.CSSProperties = {
+  minWidth: 0,
+  color: "var(--color-text-muted)",
+  fontWeight: 400,
+  overflowWrap: "anywhere",
+};
+
+const HANDOFF_CONTEXT_STYLE: React.CSSProperties = {
+  marginLeft: "calc(14px + var(--space-1))",
+  color: "var(--color-text-muted)",
+  fontSize: "var(--text-sm)",
+  lineHeight: 1.5,
+  overflowWrap: "anywhere",
+};
+
+function handoffContextText(handoff: HandoffPresentation): string | undefined {
+  const earlierRuns = handoff.earlierRunCount > 0
+    ? `${handoff.earlierRunCount} earlier run${handoff.earlierRunCount === 1 ? "" : "s"}`
+    : undefined;
+  const transcript = handoff.earlierRunCount === 1 ? "the earlier run's transcript" : "the earlier runs' transcripts";
+  const parts: string[] = [];
+
+  if (handoff.context === "rebuilt") {
+    parts.push(earlierRuns === undefined ? "a fresh brief" : `a fresh brief built from ${earlierRuns}`);
+  } else if (handoff.context === "carried") {
+    parts.push("the earlier conversation");
+  } else if (earlierRuns !== undefined) {
+    parts.push(earlierRuns);
+  }
+
+  if (earlierRuns !== undefined && handoff.briefTier === "verbatim") {
+    parts.push(transcript);
+  } else if (earlierRuns !== undefined && handoff.briefTier === "digest") {
+    parts.push(`a condensed version of ${transcript}`);
+  }
+
+  if (parts.length === 0) return undefined;
+  return `${handoff.context === "carried" ? "Continued" : "Started"} with ${parts.join(" and ")}`;
+}
+
+function TraceHandoffMarker({ handoff }: { handoff: HandoffPresentation }) {
+  const context = handoffContextText(handoff);
+  return (
+    <div className="trace-turn-marker trace-handoff-marker" style={HANDOFF_MARKER_STYLE}>
+      <div className="trace-handoff-line" style={HANDOFF_MARKER_LINE_STYLE}>
+        <HandoffIcon size={14} style={HANDOFF_ICON_STYLE} />
+        <span>Handed off to</span>
+        <strong className="trace-handoff-destination" style={HANDOFF_ID_STYLE}>{handoff.toId}</strong>
+        <span className="trace-handoff-source" style={HANDOFF_SOURCE_STYLE}>from {handoff.fromId}</span>
+      </div>
+      {context !== undefined && (
+        <div className="trace-handoff-context" style={HANDOFF_CONTEXT_STYLE}>{context}</div>
+      )}
+    </div>
+  );
+}
+
 function TraceTarget({ row }: { row: TraceRow }) {
   const prose = row.expansion?.type === "prose" ? row.expansion.text : undefined;
   const source = prose ?? row.target;
@@ -362,7 +451,9 @@ const TraceRowView = React.memo(function TraceRowView({
     row.isStepStart ? " trace-row-step-start" : ""
   }${row.marker !== undefined ? " trace-row-turn-boundary" : ""}`;
 
-  const main = (
+  const main = row.marker === "handoff" && row.handoff !== undefined ? (
+    <TraceHandoffMarker handoff={row.handoff} />
+  ) : (
     <>
       {row.marker !== undefined && <TraceTurnMarker kind={row.marker} />}
       {row.verb !== undefined && <span className="trace-verb">{row.verb}</span>}

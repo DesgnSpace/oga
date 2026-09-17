@@ -232,13 +232,20 @@ describe("ActivityStory.compose", () => {
         type: "handed_off",
         detail: "night-shift → day-shift · rebuilt brief",
       },
-      { ...event(3, "message", "After handoff"), type: "agent.text" },
+      {
+        ...event(3, "lifecycle", "Handoff brief"),
+        type: "handoff_brief",
+        detail: "verbatim carry-over, 7579 chars",
+      },
+      { ...event(4, "message", "After handoff"), type: "agent.text" },
     ]);
 
     const boundary = composition.blocks[0];
     expect(boundary?.type).toBe("handoff");
     if (boundary?.type !== "handoff") throw new Error("expected handoff boundary");
     expect(boundary.boundary.chain).toBe("night-shift → day-shift · rebuilt brief");
+    expect(boundary.boundary.briefTier).toBe("verbatim");
+    expect(composition.technical.some((event) => event.type === "handoff_brief")).toBe(true);
   });
 
   it("folds repeated action updates behind one row", () => {

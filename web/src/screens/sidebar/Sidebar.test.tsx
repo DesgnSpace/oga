@@ -216,6 +216,29 @@ describe("the sidebar", () => {
     expect(projectionFromState).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a task row mounted while live task fields change", async () => {
+    setTransport(transport());
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    const row = await screen.findByText("second task");
+    const link = row.closest("a");
+
+    act(() => {
+      controller.update((state) => ({
+        ...state,
+        tasks: state.tasks.map((entry) => entry.id === "two"
+          ? { ...entry, title: "updated task", state: "completed", updatedAt: "2026-09-16T10:01:00Z" }
+          : entry),
+      }));
+    });
+
+    const updated = await screen.findByText("updated task");
+    expect(updated.closest("a")).toBe(link);
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+  });
+
   it("keeps a newer stream status when the startup read returns late", async () => {
     let resolveStatus: ((status: StreamStatus) => void) | undefined;
     let statusListener: ((status: StreamStatus) => void) | undefined;
