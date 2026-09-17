@@ -402,6 +402,26 @@ describe("trace rows", () => {
     expect(rows[0].target).toBe("Message body");
   });
 
+  it("offers no expansion for a lifecycle row whose detail is already printed", () => {
+    const lifecycleEvent: TaskEventView = {
+      ...event(1, "lifecycle", "Something happened"),
+      detail: "Short detail already on the row",
+    };
+    const rows = traceRows([lifecycleEvent], false);
+    expect(rows[0].target).toBe("Short detail already on the row");
+    expect(rows[0].expansion).toBeUndefined();
+    expect(traceRowOffersExpansion(rows[0])).toBe(false);
+  });
+
+  it("truncates a long lifecycle detail on the row and keeps the full text for expansion", () => {
+    const detail = "line one is quite long on its own\nand keeps going onto a second line entirely";
+    const lifecycleEvent: TaskEventView = { ...event(1, "lifecycle", "Something happened"), detail };
+    const rows = traceRows([lifecycleEvent], false);
+    expect(rows[0].target).toBe(detail.split("\n")[0]);
+    expect(rows[0].expansion).toEqual({ type: "detail", text: detail });
+    expect(traceRowOffersExpansion(rows[0])).toBe(true);
+  });
+
   it("keeps three reads that share a title as three rows", () => {
     const events = Array.from({ length: 3 }, (_, index) => ({
       ...event(index + 1, "file", "Read file"),

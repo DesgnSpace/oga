@@ -411,13 +411,12 @@ export function EventExpansionView({
 
 interface TraceRowViewProps {
   row: TraceRow;
-  /**
-   * Where this row sits in the tree. A run group shares its id with the first
-   * member it contains, so the path is what tells the two of them apart.
-   */
-  path: string;
+  /** The row's composing node id, or its event id when it stands for none —
+   * stable across re-renders, so expansion state survives the row shifting
+   * position as the stream grows. */
+  rowKey: string;
   expanded: Map<string, boolean>;
-  onToggle: (path: string, startsExpanded: boolean) => void;
+  onToggle: (rowKey: string, startsExpanded: boolean) => void;
   onOpenPreview: (expansion: ContentExpansion, filePath: string | undefined, imageDataUrl?: string) => void;
   cwd?: string;
   insideGroup?: boolean;
@@ -428,7 +427,7 @@ interface TraceRowViewProps {
 
 const TraceRowView = React.memo(function TraceRowView({
   row,
-  path,
+  rowKey,
   expanded,
   onToggle,
   onOpenPreview,
@@ -438,7 +437,7 @@ const TraceRowView = React.memo(function TraceRowView({
   traceIndex,
   traceSetSize,
 }: TraceRowViewProps) {
-  const isOpen = expanded.get(path) ?? row.startsExpanded;
+  const isOpen = expanded.get(rowKey) ?? row.startsExpanded;
   const hasControl = traceRowOffersExpansion(row);
   const controlLabel = row.expansion
     ? expansionLabel(row.expansion, isOpen)
@@ -486,7 +485,7 @@ const TraceRowView = React.memo(function TraceRowView({
           type="button"
           aria-expanded={isOpen}
           aria-label={controlLabel}
-          onClick={() => onToggle(path, row.startsExpanded)}
+          onClick={() => onToggle(rowKey, row.startsExpanded)}
         >
           {main}
         </button>
@@ -504,18 +503,21 @@ const TraceRowView = React.memo(function TraceRowView({
       )}
       {isOpen && row.children.length > 0 && (
         <div className="trace-children" role="list">
-          {row.children.map((child) => (
-            <TraceRowView
-              row={child}
-              path={`${path}/${child.id}`}
-              expanded={expanded}
-              onToggle={onToggle}
-              onOpenPreview={onOpenPreview}
-              cwd={cwd}
-              insideGroup
-              key={`${path}/${child.id}`}
-            />
-          ))}
+          {row.children.map((child) => {
+            const childKey = child.nodeId ?? String(child.id);
+            return (
+              <TraceRowView
+                row={child}
+                rowKey={childKey}
+                expanded={expanded}
+                onToggle={onToggle}
+                onOpenPreview={onOpenPreview}
+                cwd={cwd}
+                insideGroup
+                key={childKey}
+              />
+            );
+          })}
         </div>
       )}
     </article>
@@ -899,11 +901,11 @@ export function TraceRows({
   const [expanded, setExpanded] = React.useState<Map<string, boolean>>(new Map());
   const [openPreview, setOpenPreview] = React.useState<OpenFilePreview | null>(null);
   const panelRef = React.useRef<HTMLElement>(null);
-  const toggle = React.useCallback((path: string, startsExpanded: boolean) => {
+  const toggle = React.useCallback((rowKey: string, startsExpanded: boolean) => {
     setExpanded((current) => {
       const next = new Map(current);
-      const value = current.get(path) ?? startsExpanded;
-      next.set(path, !value);
+      const value = current.get(rowKey) ?? startsExpanded;
+      next.set(rowKey, !value);
       return next;
     });
   }, []);
@@ -941,7 +943,7 @@ export function TraceRows({
             return (
               <TraceRowView
                 row={row}
-                path={String(row.id)}
+                rowKey={row.nodeId ?? String(row.id)}
                 expanded={expanded}
                 onToggle={toggle}
                 onOpenPreview={openPreviewFile}

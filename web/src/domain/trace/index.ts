@@ -3,7 +3,7 @@
 // The syntax-highlighted rendering (`ReviewContent`, `CodeLanguage` highlighting) is
 // out of scope here — this module only ports the pure row/expansion composition.
 
-import type { EventKind, TaskEventView } from "@/bridge/types";
+import type { TaskEventView } from "@/bridge/types";
 import { fileChangeFromRaw, type FileChange } from "@/domain/changes";
 import {
   ActivityBlock,
@@ -291,7 +291,7 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
   const failure = failureText(event);
   if (failure !== undefined && isLong(failure)) return { type: "detail", text: failure };
 
-  if (raw && raw !== "" && !designedKind(event.kind)) {
+  if (raw && raw !== "" && event.kind === "raw") {
     return { type: "payload", text: stripTransportMarkup(raw) };
   }
   return undefined;
@@ -358,6 +358,10 @@ export function expansionLabel(expansion: EventExpansion, expanded: boolean): st
 
 export interface TraceRow {
   id: number;
+  /** The composing node's own stable id (`turn:<n>`, `call:<turn>:<action>`, …),
+   * set whenever this row stands for one — the key expansion state survives on
+   * as the stream grows, unlike a row's numeric event id or its position. */
+  nodeId?: string;
   style: TraceStyle;
   verb?: string;
   target?: string;
@@ -456,6 +460,7 @@ function turnRows(turn: ActivityTurn, cwd: string, live: boolean, nested: boolea
   const nodes = turn.segments.flatMap((segment) => segment.nodes);
   return [{
     ...blankRow(nodes.map(nodeAnchorId).find((id) => id !== undefined) ?? 0),
+    nodeId: turn.id,
     style: "notice",
     target: turn.title ?? "Work step",
     result: formatDuration(turnDurationMs(turn)),
@@ -501,11 +506,14 @@ function nodeRow(node: ActivityNode, cwd: string, live: boolean): TraceRow {
     case "call":
       return callRow(node.call, cwd, live);
     case "message":
-      return workRow(node.event, cwd, live);
+      return { ...workRow(node.event, cwd, live), nodeId: node.id };
     case "notice":
-      return isSignal(node.event) ? signalRow(node.event, cwd) : workRow(node.event, cwd, live);
+      return {
+        ...(isSignal(node.event) ? signalRow(node.event, cwd) : workRow(node.event, cwd, live)),
+        nodeId: node.id,
+      };
     case "thinking":
-      return thinkingRow(node.pulse);
+      return { ...thinkingRow(node.pulse), nodeId: node.id };
     case "subagent":
       return subagentRow(node.subagent, cwd, live);
   }
@@ -529,6 +537,7 @@ function callRow(call: ActivityCall, cwd: string, live: boolean): TraceRow {
   const row = workRow(call.event, cwd, live);
   return {
     ...row,
+    nodeId: call.id,
     state: callState(call, live),
     result: row.result ?? formatDuration(callDurationMs(call)),
     children: call.children.map((child) => callRow(child, cwd, live)),
@@ -547,6 +556,7 @@ function subagentRow(subagent: ActivitySubagent, cwd: string, live: boolean): Tr
     .filter((row): row is TraceRow => row !== undefined);
   return {
     ...blankRow(subagent.start.id),
+    nodeId: subagent.id,
     style: "notice",
     target: subagent.label,
     result: nodesSummary(subagent.nodes),
@@ -655,18 +665,18 @@ function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
       event.detail ??
       (event.title.trim() !== "" ? event.title : undefined);
     target = subject !== undefined ? relativePaths(subject, cwd) : undefined;
-    result = workResult(event, cwd);
+    result = workResult(event, cwd, expansion);
   } else if (event.kind === "file" || event.kind === "retry") {
     style = "work";
     const path = event.presentation?.path ?? event.target ?? event.detail;
     target = path !== undefined ? relative(path, cwd) : undefined;
-    result = workResult(event, cwd);
+    result = workResult(event, cwd, expansion);
     preview = undefined;
   } else {
     style = "work";
     const text = event.presentation?.text ?? event.target ?? event.detail ?? (event.title.trim() !== "" ? event.title : undefined);
-    target = text !== undefined ? relativePaths(text, cwd) : undefined;
-    result = workResult(event, cwd);
+    target = text !== undefined ? relativePaths(rowText(text, expansion), cwd) : undefined;
+    result = workResult(event, cwd, expansion);
     preview = undefined;
   }
 
@@ -842,10 +852,10 @@ function singleLine(value: string): string | undefined {
   return lines.length === 1 ? lines[0] : undefined;
 }
 
-function workResult(event: TaskEventView, cwd: string): string | undefined {
+function workResult(event: TaskEventView, cwd: string, expansion: EventExpansion | undefined): string | undefined {
   if (event.phase === "failed") {
     const text = event.result ?? event.presentation?.outcome ?? event.detail;
-    return text !== undefined ? relativePaths(text, cwd) : undefined;
+    return text !== undefined ? relativePaths(rowText(text, expansion), cwd) : undefined;
   }
   if (event.kind === "command") return undefined;
   const outcome = event.result ?? event.presentation?.outcome;
@@ -883,8 +893,12 @@ function isLong(text: string): boolean {
   return lines.length > 1 || Array.from(lines[0] ?? text).length > 140;
 }
 
-function designedKind(kind: EventKind): boolean {
-  return (["file", "command", "tool", "error", "lifecycle", "message", "reasoning"] as EventKind[]).includes(kind);
+/** `text` shown on the row itself, shortened to its first line whenever it is
+ * the very string a `detail` expansion also carries — otherwise the "+" would
+ * open onto the exact text already printed above it. */
+function rowText(text: string, expansion: EventExpansion | undefined): string {
+  if (expansion?.type !== "detail" || expansion.text !== text || !isLong(text)) return text;
+  return middleTruncated(text.split("\n")[0] ?? text, 140);
 }
 
 function stringValue(value: unknown): string | undefined {
