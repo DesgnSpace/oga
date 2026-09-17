@@ -470,7 +470,7 @@ function finishTurn(draft: TurnDraft, closed: boolean): ActivityTurn | undefined
     .map((segment, index) => ({
       id: `segment:${draft.ordinal}:${index}`,
       lead: segment.lead,
-      nodes: nestSubagents(closed ? markInterrupted(segment.nodes) : segment.nodes),
+      nodes: closed ? markInterrupted(nestSubagents(segment.nodes)) : nestSubagents(segment.nodes),
     }))
     .filter((segment) => segment.nodes.length > 0);
   if (segments.length === 0) return undefined;
@@ -648,7 +648,8 @@ function markInterrupted(nodes: ActivityNode[]): ActivityNode[] {
   });
   return nodes.map((node) => {
     if (node.type === "subagent") {
-      return { ...node, subagent: { ...node.subagent, nodes: markInterrupted(node.subagent.nodes) } };
+      const status = node.subagent.status === "running" ? "interrupted" : node.subagent.status;
+      return { ...node, subagent: { ...node.subagent, status, nodes: markInterrupted(node.subagent.nodes) } };
     }
     return node.type === "call" ? { type: "call", call: call(node.call) } : node;
   });
@@ -662,75 +663,78 @@ export const SUBAGENT_STARTED_TITLE = "Subagent started";
 export const SUBAGENT_FINISHED_TITLE = "Subagent finished";
 
 /**
- * Claude Code brackets a subagent run two ways. Hooks give a start/stop pair
- * sharing an `agent_id`, and the stream gives a `task_started` /
- * `task_notification` pair sharing a `task_id`; no other provider streams a
- * subagent's own events into the parent's trace at all. Two subagents can run
- * at once and their rows arrive interleaved, so membership is decided by what
- * each row says it belongs to, never by where it fell. A start with no
- * matching stop is left exactly where it is rather than guessing.
+ * Subagent runs nest by bracketing: a start opens a group, its stop closes it,
+ * and a start that arrives while another group is still open sits inside it.
+ * A row that names the run it belongs to (a hook `agent_id`, or a call whose
+ * parent is the launching call) goes there even when the groups interleave;
+ * any other row goes to the innermost open group. A start that never stops
+ * closes with everything that followed it, still marked as running.
  */
 function nestSubagents(nodes: ActivityNode[]): ActivityNode[] {
-  const starts = new Map<string, number>();
-  nodes.forEach((node, index) => {
-    if (node.type !== "notice") return;
-    const boundary = subagentBoundary(node.event);
-    if (boundary?.role !== "start" || starts.has(boundary.id)) return;
-    starts.set(boundary.id, index);
+  interface Frame {
+    id: string;
+    start: TaskEventView;
+    parent: Frame | undefined;
+    nodes: ActivityNode[];
+    belongs: (event: TaskEventView) => boolean;
+    done: boolean;
+  }
+  const root: ActivityNode[] = [];
+  const open: Frame[] = [];
+  const wrap = (frame: Frame): ActivityNode => ({
+    type: "subagent",
+    subagent: {
+      id: `subagent:${frame.id}`,
+      label: subagentLabel(frame.start),
+      start: frame.start,
+      nodes: frame.nodes,
+      status: frame.done ? "done" : "running",
+    },
   });
-  if (starts.size === 0) return nodes;
+  const close = (frame: Frame) => {
+    const index = open.indexOf(frame);
+    open.splice(index, 1);
+    for (const inner of open.slice(index)) {
+      if (inner.parent === frame) inner.parent = frame.parent;
+    }
+    (frame.parent && open.includes(frame.parent) ? frame.parent.nodes : root).push(wrap(frame));
+  };
 
-  const owned = new Map<number, number[]>();
-  const consumed = new Set<number>();
-  for (const [id, start] of starts) {
-    const node = nodes[start];
-    if (node.type !== "notice") continue;
-    let stop: number | undefined;
-    for (let index = start + 1; index < nodes.length; index++) {
-      const candidate = nodes[index];
-      if (candidate.type !== "notice") continue;
-      const boundary = subagentBoundary(candidate.event);
-      if (boundary?.role === "stop" && boundary.id === id) {
-        stop = index;
-        break;
+  for (const node of nodes) {
+    const boundary = node.type === "notice" ? subagentBoundary(node.event) : undefined;
+    if (node.type === "notice" && boundary?.role === "start" && !open.some((frame) => frame.id === boundary.id)) {
+      open.push({
+        id: boundary.id,
+        start: node.event,
+        parent: open.at(-1),
+        nodes: [],
+        belongs: subagentMembership(node.event, boundary.id),
+        done: false,
+      });
+      continue;
+    }
+    if (boundary?.role === "stop") {
+      const frame = innermost(open, (candidate) => candidate.id === boundary.id);
+      if (frame !== undefined) {
+        frame.nodes.push(node);
+        frame.done = true;
+        close(frame);
+        continue;
       }
     }
-    if (stop === undefined) continue;
-    const belongs = subagentMembership(node.event, id);
-    const members: number[] = [];
-    for (let index = start + 1; index <= stop; index++) {
-      if (index !== stop && !nodeEvents(nodes[index]).some(belongs)) continue;
-      members.push(index);
-      consumed.add(index);
-    }
-    consumed.add(start);
-    owned.set(start, members);
+    const events = nodeEvents(node);
+    const owner = innermost(open, (frame) => events.some(frame.belongs)) ?? open.at(-1);
+    (owner?.nodes ?? root).push(node);
   }
-  if (owned.size === 0) return nodes;
+  while (open.length > 0) close(open[open.length - 1]);
+  return root;
+}
 
-  const result: ActivityNode[] = [];
-  nodes.forEach((node, index) => {
-    const members = owned.get(index);
-    if (members !== undefined) {
-      if (node.type !== "notice") return;
-      result.push({
-        type: "subagent",
-        subagent: {
-          id: `subagent:${subagentBoundary(node.event)?.id ?? node.event.id}`,
-          label: subagentLabel(node.event),
-          start: node.event,
-          nodes: members.map((member) => nodes[member]),
-          status: members.some((member) => nodes[member].type === "notice"
-            && subagentBoundary((nodes[member] as { event: TaskEventView }).event)?.role === "stop")
-            ? "done"
-            : "running",
-        },
-      });
-      return;
-    }
-    if (!consumed.has(index)) result.push(node);
-  });
-  return result;
+function innermost<T>(frames: T[], matches: (frame: T) => boolean): T | undefined {
+  for (let index = frames.length - 1; index >= 0; index--) {
+    if (matches(frames[index])) return frames[index];
+  }
+  return undefined;
 }
 
 function subagentBoundary(event: TaskEventView): { id: string; role: "start" | "stop" } | undefined {
@@ -1250,6 +1254,7 @@ function settleAgentCall(first: TaskEventView, later: TaskEventView): TaskEventV
     complete: reverts ? first.complete : (later.complete ?? first.complete),
     verb,
     result: later.result ?? first.result,
+    rawText: later.rawText ?? first.rawText,
     presentation: first.presentation && {
       ...first.presentation,
       change: later.presentation?.change ?? first.presentation.change,

@@ -479,8 +479,11 @@ function segmentRows(segment: ActivitySegment, cwd: string, live: boolean): Trac
   if (segment.lead === undefined) return rows;
   const [head, ...rest] = rows;
   if (head === undefined || rest.length === 0) return rows;
+  // The row already shows the whole message; opening it reveals the work
+  // under it, not a second copy of the words.
   return [{
     ...head,
+    expansion: head.expansion?.type === "prose" ? undefined : head.expansion,
     result: nodesSummary(segment.nodes.slice(1)),
     state: rowsState(rest, live),
     children: rest,
@@ -1146,7 +1149,7 @@ function parseJson(raw: string): unknown {
 }
 
 function commandOutput(raw: string): string | undefined {
-  return findText(raw, ["stdout", "stderr", "output"]) ?? findText(raw, ["tool_response"]);
+  return findText(raw, ["stdout", "stderr", "output", "rawOutput"]) ?? findText(raw, ["tool_response"]);
 }
 
 function todoItems(raw: string): TodoItem[] | undefined {

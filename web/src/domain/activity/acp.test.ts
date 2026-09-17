@@ -3,7 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import type { TaskEventView } from "@/bridge/types";
 import { ActivityStory, compositionCalls, normalizeAntigravityEvents, withoutDuplicateHookCalls } from "./index";
-import { TraceVisibility, type TraceRow } from "@/domain/trace";
+import { TraceVisibility, expansionFromEvent, type TraceRow } from "@/domain/trace";
 
 /** The settled row of every call a composition holds, in the order they opened. */
 function callRows(events: TaskEventView[]): TaskEventView[] {
@@ -351,5 +351,18 @@ describe("whole runs, as the daemon served them", () => {
     expect(commands.filter((call) => call.event.target === "Terminal").map((call) => call.status)).toEqual([
       "interrupted",
     ]);
+  });
+
+  it("keeps a finished command's output on the call it settles", async () => {
+    const events = await run("claude-acp-resumed");
+    const calls = compositionCalls(ActivityStory.composeWithState(events, true, undefined, true).blocks);
+    const finished = calls.filter((call) => call.event.kind === "command" && call.status === "done");
+
+    expect(finished.length).toBeGreaterThan(0);
+    for (const call of finished) {
+      const expansion = expansionFromEvent(call.event);
+      expect(expansion?.type).toBe("command");
+      expect(expansion?.type === "command" && expansion.output).toBeTruthy();
+    }
   });
 });

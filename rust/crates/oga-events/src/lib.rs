@@ -1641,7 +1641,6 @@ fn item_event_view(
                 raw_text,
             },
         );
-        view.verb = Some("Said".to_owned());
         view.complete = Some(true);
         view.action_id = item_id.clone();
         view.source_id = Some(item_id);
@@ -2078,7 +2077,6 @@ fn antigravity_step_view(
                     raw_text,
                 },
             );
-            view.verb = Some("Said".to_owned());
             view.complete = Some(false);
             Some(view)
         }
@@ -6614,7 +6612,6 @@ mod tests {
             ),
             Provider::Codex,
         );
-        assert_eq!(message.verb.as_deref(), Some("Said"));
         assert_eq!(
             message.detail.as_deref(),
             Some("Loading Laravel, Pest, and refactor guidance")

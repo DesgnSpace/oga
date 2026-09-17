@@ -129,7 +129,6 @@ fn message_view(
             raw_text,
         },
     );
-    view.verb = Some("Said".to_owned());
     view.complete = Some(true);
     view
 }

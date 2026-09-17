@@ -501,13 +501,36 @@ describe("ActivityStory.compose", () => {
     expect(owned(1)).toEqual([3, 6]);
   });
 
-  it("leaves a sub-agent start with no finish flat", () => {
+  it("keeps a sub-agent start with no finish as a group still running", () => {
     const composition = ActivityStory.compose([
       taskStarted(1, "task-a", "toolu_a", "Port the parser"),
       subagentChildTool(2, "toolu_a", "cargo test -p parser"),
     ]);
 
-    expect(subagentsOf(composition)).toHaveLength(0);
+    const [subagent] = subagentsOf(composition);
+    expect(subagent?.status).toBe("running");
+    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([2]);
+  });
+
+  it("nests a sub-agent that starts while another is still open", () => {
+    const composition = ActivityStory.compose([
+      subagentStart(1, "outer"),
+      subagentToolUse(2, "outer", "rg -n allocate rust/"),
+      subagentStart(3, "inner"),
+      subagentToolUse(4, "inner", "wc -l rust/src/alloc.rs"),
+      subagentStop(5, "inner"),
+      subagentToolUse(6, "outer", "cargo test -p alloc"),
+      subagentStop(7, "outer"),
+    ]);
+
+    const top = nodesOf(composition).filter((node) => node.type === "subagent");
+    expect(top).toHaveLength(2);
+    const [outer] = subagentsOf(composition);
+    expect(outer?.start.id).toBe(1);
+    const inner = outer?.nodes.find((node) => node.type === "subagent");
+    expect(inner?.type === "subagent" ? inner.subagent.start.id : undefined).toBe(3);
+    expect(inner?.type === "subagent" ? inner.subagent.status : undefined).toBe("done");
+    expect(outer?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([2, 6, 7]);
   });
 
   it("folds the thinking between two tool calls into one readable stretch", () => {
@@ -582,13 +605,14 @@ describe("ActivityStory.compose", () => {
     expect(looseEvents(composition)).toHaveLength(0);
   });
 
-  it("leaves an unpaired SubagentStart flat instead of guessing where it ends", () => {
+  it("marks an unpaired SubagentStart interrupted once its turn has closed", () => {
     const events: TaskEventView[] = [
       subagentStart(1, "orphan-start"),
       subagentToolUse(2, "orphan-start", "wc -l README.md"),
     ];
 
-    expect(subagentsOf(ActivityStory.compose(events))).toHaveLength(0);
+    const [subagent] = subagentsOf(ActivityStory.composeWithState(events, true, undefined, true));
+    expect(subagent?.status).toBe("interrupted");
   });
 
   it("leaves an unpaired SubagentStop flat instead of guessing where it started", () => {
