@@ -318,7 +318,15 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
     const shell = listShellRef.current;
     if (shell) setViewportHeight((height) => (shell.clientHeight > 0 ? shell.clientHeight : height));
     const row = taskRowRefs.current.values().next().value;
-    if (row) setItemHeight((height) => (row.offsetHeight > 0 ? row.offsetHeight : height));
+    if (!row) return;
+    const measure = () => {
+      const height = row.offsetHeight;
+      if (height > 0) setItemHeight((current) => (current === height ? current : height));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
   });
 
   // A resized window changes how many rows fit without changing any state.

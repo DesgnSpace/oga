@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { EventKind, TaskEventView } from "@/bridge/types";
-import { ActivityStory, groupStatus, type ReasoningPulse } from "@/domain/activity";
+import { ActivityStory, type ReasoningPulse } from "@/domain/activity";
 import {
   expansionFromEvent,
   expansionOffers,
@@ -27,6 +27,10 @@ function event(id: number, kind: EventKind, title: string): TaskEventView {
   };
 }
 
+function traceRows(events: TaskEventView[], live = false, cwd = "/repo"): TraceRow[] {
+  return TraceRowBuilder.rows(ActivityStory.compose(events).blocks, cwd, live);
+}
+
 describe("trace rows", () => {
   it("gives command output a single-line preview", () => {
     const commandEvent: TaskEventView = {
@@ -34,11 +38,7 @@ describe("trace rows", () => {
       presentation: { type: "command", command: "cargo test" },
       rawText: JSON.stringify({ tool_response: { stdout: "clean\n" } }),
     };
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: commandEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([commandEvent], false);
     expect(rows[0].preview).toBe("clean");
     expect(rows[0].children.length === 0 && rows[0].event !== undefined).toBe(true);
   });
@@ -67,11 +67,7 @@ describe("trace rows", () => {
       }),
     };
 
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: commandEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([commandEvent], false);
 
     expect(rows[0].target).toBe("opencode run --format json --model opencode-go/minimax-m2.7");
     expect(rows[0].expansion?.type).toBe("command");
@@ -85,30 +81,18 @@ describe("trace rows", () => {
       verb: "Ran",
       presentation: { type: "command", command },
     };
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: commandEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([commandEvent], false);
     expect(rows[0].target).toBe(command);
   });
 
   it("keeps event targets when presentation is missing", () => {
     const toolEvent: TaskEventView = { ...event(1, "tool", "Read"), verb: "Read", detail: "/repo/src/main.rs" };
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: toolEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([toolEvent], false);
     expect(rows[0].target).toBe("src/main.rs");
   });
 
   it("does not invent a verb when the event has none", () => {
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: event(1, "tool", "Tool call") }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([{ ...event(1, "tool", "Tool call"), detail: "whatever it did" }], false);
     expect(rows[0].verb).toBeUndefined();
   });
 
@@ -118,11 +102,7 @@ describe("trace rows", () => {
       verb: "Searched",
       presentation: { type: "tool", text: "TaskEventView in rust", outcome: "4 matches" },
     };
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: searchEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([searchEvent], false);
     expect(rows[0].target).toBe("TaskEventView in rust");
     expect(rows[0].result).toBe("4 matches");
   });
@@ -304,11 +284,7 @@ describe("trace rows", () => {
     const expansion = expansionFromEvent(skillEvent);
     expect(expansion).toEqual({ type: "skill", text: "# Skill: refactor\n\nImprove code structure." });
 
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: skillEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([skillEvent], false);
     expect(rows[0].target).toBe("refactor");
     expect(rows[0].event?.kind).toBe("tool");
     expect(rows[0].event?.presentation?.type).toBe("tool");
@@ -421,73 +397,77 @@ describe("trace rows", () => {
 
   it("renders agent text as a message with its text as detail", () => {
     const messageEvent: TaskEventView = { ...event(1, "message", "Agent message"), detail: "Message body" };
-    const rows = TraceRowBuilder.rows(
-      [{ type: "chapter", id: 1, rows: [{ type: "work", event: messageEvent }] }],
-      "/repo",
-      false,
-    );
+    const rows = traceRows([messageEvent], false);
     expect(rows[0].style).toBe("message");
     expect(rows[0].target).toBe("Message body");
   });
 
-  it("folds consecutive file work with a count and duration", () => {
+  it("offers no expansion for a lifecycle row whose detail is already printed", () => {
+    const lifecycleEvent: TaskEventView = {
+      ...event(1, "lifecycle", "Something happened"),
+      detail: "Short detail already on the row",
+    };
+    const rows = traceRows([lifecycleEvent], false);
+    expect(rows[0].target).toBe("Short detail already on the row");
+    expect(rows[0].expansion).toBeUndefined();
+    expect(traceRowOffersExpansion(rows[0])).toBe(false);
+  });
+
+  it("truncates a long lifecycle detail on the row and keeps the full text for expansion", () => {
+    const detail = "line one is quite long on its own\nand keeps going onto a second line entirely";
+    const lifecycleEvent: TaskEventView = { ...event(1, "lifecycle", "Something happened"), detail };
+    const rows = traceRows([lifecycleEvent], false);
+    expect(rows[0].target).toBe(detail.split("\n")[0]);
+    expect(rows[0].expansion).toEqual({ type: "detail", text: detail });
+    expect(traceRowOffersExpansion(rows[0])).toBe(true);
+  });
+
+  it("keeps three reads that share a title as three rows", () => {
     const events = Array.from({ length: 3 }, (_, index) => ({
       ...event(index + 1, "file", "Read file"),
       detail: `src/${index}.rs`,
       verb: "Read",
+      actionId: `call_${index}`,
       createdAt: `2026-07-30T15:00:0${index}Z`,
     }));
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const row = block.rows[0];
-    expect(row.type).toBe("group");
-    if (row.type !== "group") throw new Error("expected run group");
-    expect(row.group.kind).toBe("run");
-    expect(row.group.runLabel).toBe("Read 3 files");
+    expect(traceRows(events, false).map((row) => row.target)).toEqual(["src/0.rs", "src/1.rs", "src/2.rs"]);
   });
 
   it("marks a started row as running only while the trace is live", () => {
     const started = { ...event(1, "file", "Read file"), phase: "started" as const, detail: "src/app.ts" };
 
-    expect(TraceRowBuilder.rows([{ type: "chapter", id: 1, rows: [{ type: "work", event: started }] }], "/repo", true)[0].state).toBe("running");
-    expect(TraceRowBuilder.rows([{ type: "chapter", id: 1, rows: [{ type: "work", event: started }] }], "/repo", false)[0].state).toBe("done");
+    expect(traceRows([started], true)[0].state).toBe("running");
+    expect(traceRows([started], false)[0].state).toBe("done");
   });
 
-  it("keeps a group running while a hidden child is started", () => {
-    const anchor = { ...event(1, "tool", "Run"), phase: "completed" as const };
-    const child = { ...event(2, "file", "Read file"), phase: "started" as const };
-    expect(groupStatus({
-      kind: "run",
-      anchor,
-      children: [{ type: "work", event: child }],
-      members: [],
-      runLabel: "Read 1 file",
-      hidden: [child],
-    })).toBe("running");
-    expect(groupStatus({
-      kind: "run",
-      anchor,
-      children: [{ type: "work", event: { ...child, phase: "completed" } }],
-      members: [],
-      runLabel: "Read 1 file",
-      hidden: [{ ...child, phase: "completed" }],
-    })).toBe("done");
+  it("keeps a stretch running while one of its calls is still open", () => {
+    const narration = { ...event(1, "message", "Agent message"), detail: "Reading the two files." };
+    const open = { ...event(2, "file", "Read file"), phase: "started" as const, detail: "a.ts", actionId: "call_a" };
+    const closed = { ...open, id: 3, phase: "completed" as const, detail: "b.ts", actionId: "call_b" };
+
+    expect(traceRows([narration, open, closed], true)[0].state).toBe("running");
+    expect(traceRows([narration, { ...open, phase: "completed" as const }, closed], true)[0].state).toBe("done");
   });
 
-  it("folds ten thousand events into far fewer rows", () => {
+  it("gives ten thousand events one row each and no more", () => {
+    // Every row renames the call it reports. Identity is the call id, so a
+    // rename cannot merge two calls, and it cannot split one either.
     const events = Array.from({ length: 10_000 }, (_, index) => {
       const id = index + 1;
-      return { ...event(id, "file", "Read file"), title: `Read file ${id}` };
+      return {
+        ...event(id, "file", "Read file"),
+        title: `Read file ${id}`,
+        detail: `src/${id}.rs`,
+        actionId: `call_${Math.floor(index / 2)}`,
+      };
     });
     const composition = ActivityStory.compose(events);
     const rows = TraceRowBuilder.rows(composition.blocks, "/repo", false);
     const weight = rows.reduce((sum, row) => sum + traceRowWeight(row), 0);
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.length).toBeLessThan(events.length);
-    expect(weight).toBeGreaterThanOrEqual(rows.length);
+
+    expect(rows.length).toBe(5_000);
+    expect(weight).toBe(5_000);
   });
 
   it("does not match longer workspace names when relativizing paths", () => {
@@ -623,27 +603,47 @@ describe("trace rows", () => {
   });
 });
 
-describe("narration chapters", () => {
-  const rows = (block: Parameters<typeof TraceRowBuilder.rows>[0][number]) =>
-    TraceRowBuilder.rows([block], "/repo", false);
+describe("ACP results", () => {
+  const block = (text: string) => JSON.stringify({ content: [{ type: "content", content: { type: "text", text } }] });
+
+  it("shows a command's output from the content block it arrived in", () => {
+    const run: TaskEventView = {
+      ...event(1, "command", "Run command"),
+      presentation: { type: "command", command: "git status" },
+      rawText: block("```console\nOn branch main\nnothing to commit\n```"),
+    };
+    expect(expansionFromEvent(run)).toEqual({ type: "command", command: "git status", output: "On branch main\nnothing to commit" });
+  });
+
+  it("shows a read file's lines from the content block it arrived in", () => {
+    const read: TaskEventView = {
+      ...event(2, "file", "Read file"),
+      presentation: { type: "file", path: "src/main.rs" },
+      rawText: block("```\n1\tfn main() {}\n```"),
+    };
+    const expansion = expansionFromEvent(read);
+    expect(expansion?.type).toBe("content");
+    expect(expansion?.type === "content" ? expansion.text : undefined).toBe("1\tfn main() {}");
+  });
+});
+
+describe("stretches the worker opened with its own words", () => {
+  const narration = (id: number, text: string): TaskEventView => ({
+    ...event(id, "message", "Agent message"),
+    detail: text,
+  });
 
   it("collapses the work under one heading with its call count and duration", () => {
-    const [row] = rows({
-      type: "chapter",
-      id: 1,
-      title: "Running focused tests, type checks, and the configured linter",
-      rows: [
-        { type: "work", event: { ...event(2, "file", "Read file"), presentation: { type: "file", path: "/repo/a.ts" } } },
-        {
-          type: "work",
-          event: {
-            ...event(3, "command", "Run command"),
-            createdAt: "2026-07-30T15:00:40Z",
-            presentation: { type: "command", command: "bun test" },
-          },
-        },
-      ],
-    });
+    const [row] = traceRows([
+      narration(1, "Running focused tests, type checks, and the configured linter"),
+      { ...event(2, "file", "Read file"), actionId: "call_a", presentation: { type: "file", path: "/repo/a.ts" } },
+      {
+        ...event(3, "command", "Run command"),
+        actionId: "call_b",
+        createdAt: "2026-07-30T15:00:40Z",
+        presentation: { type: "command", command: "bun test" },
+      },
+    ]);
 
     expect(row.target).toBe("Running focused tests, type checks, and the configured linter");
     expect(row.result).toBe("2 calls · 40s");
@@ -651,22 +651,19 @@ describe("narration chapters", () => {
     expect(row.children.length).toBe(2);
   });
 
-  it("labels a lone call with the narration instead of nesting it", () => {
-    const [row] = rows({
-      type: "chapter",
-      id: 1,
-      title: "Raising the global toast layer above every current overlay",
-      rows: [
-        {
-          type: "work",
-          event: { ...event(2, "file", "Edit file"), presentation: { type: "file", path: "/repo/Toast.tsx" } },
-        },
-      ],
-    });
+  it("opens a new stretch each time the worker speaks again", () => {
+    const rows = traceRows([
+      narration(1, "Reading the toast layer"),
+      { ...event(2, "file", "Read file"), actionId: "call_a", presentation: { type: "file", path: "/repo/Toast.tsx" } },
+      narration(3, "Raising it above every current overlay"),
+      { ...event(4, "file", "Edit file"), actionId: "call_b", presentation: { type: "file", path: "/repo/Toast.tsx" } },
+    ]);
 
-    expect(row.target).toBe("Raising the global toast layer above every current overlay");
-    expect(row.preview).toBe("Toast.tsx");
-    expect(row.children.length).toBe(0);
+    expect(rows.map((row) => row.target)).toEqual([
+      "Reading the toast layer",
+      "Raising it above every current overlay",
+    ]);
+    expect(rows.map((row) => row.children.length)).toEqual([1, 1]);
   });
 });
 
@@ -688,7 +685,7 @@ describe("receipt rows", () => {
 
 describe("thinking rows", () => {
   const rows = (pulse: ReasoningPulse) =>
-    TraceRowBuilder.rows([{ type: "reasoning", pulse }], "/repo", false);
+    TraceRowBuilder.nodeRows({ type: "thinking", id: `thinking:${pulse.id}`, pulse }, "/repo", false);
 
   it("previews the first line and keeps the rest behind the row", () => {
     const [row] = rows({ id: 1, seconds: 12, text: "First the shape.\n\nThen the cost." });
@@ -706,25 +703,15 @@ describe("thinking rows", () => {
   });
 
   it("drops thinking rows wherever they sit when the reader has not asked for them", () => {
-    const work = { ...event(2, "file", "Edit file"), presentation: { type: "file" as const, path: "/repo/a.ts" } };
-    const built = TraceRowBuilder.rows(
-      [
-        { type: "reasoning", pulse: { id: 1, text: "Weighing two options" } },
-        {
-          type: "chapter",
-          id: 2,
-          rows: [
-            { type: "reasoning", pulse: { id: 3, text: "Then the cost" } },
-            { type: "work", event: work },
-          ],
-        },
-      ],
-      "/repo",
-      false,
-    );
+    const built = traceRows([
+      { ...event(1, "reasoning", "Thinking"), phase: "info", detail: "Weighing two options" },
+      { ...event(2, "message", "Agent message"), detail: "Rewriting the stylesheet" },
+      { ...event(3, "reasoning", "Thinking"), phase: "info", detail: "Then the cost" },
+      { ...event(4, "file", "Edit file"), actionId: "call_a", presentation: { type: "file" as const, path: "/repo/a.ts" } },
+    ]);
 
     expect(built.some((row) => row.isThinking === true)).toBe(true);
-    expect(withoutThinking(built).flatMap(flatIds)).toEqual([2]);
+    expect(withoutThinking(built).flatMap(flatIds)).toEqual([2, 4]);
   });
 });
 

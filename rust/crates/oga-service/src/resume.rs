@@ -119,7 +119,8 @@ pub async fn resume(
         }
     }
     let profile = require_profile(dispatcher.store(), &old.profile_id)?;
-    if old.session_id.is_some() && profile.command.is_some() {
+    let session = old.continuable_session().map(str::to_owned);
+    if session.is_some() && profile.command.is_some() {
         return Err(ContinuationError::Refusal(format!(
             "profile {} runs a custom command; provider sessions are never captured, so resume cannot continue this task",
             profile.id
@@ -272,7 +273,7 @@ pub async fn resume(
     // No session to reopen: a short "continue" instruction gives the worker
     // nothing to work from, so the full brief — the original task plus a
     // summary of the prior run — is rebuilt and shipped instead.
-    let prompt = if old.session_id.is_none() {
+    let prompt = if session.is_none() {
         let events = dispatcher.store().repositories().events().list(&old.id)?;
         let fresh = handoff_brief(
             &Task {
@@ -332,7 +333,7 @@ pub async fn resume(
             scope: Some(task.scope.clone()),
             ..crate::prompt::WorkerPromptInput::default()
         },
-        old.session_id,
+        session,
     );
     Ok(task)
 }

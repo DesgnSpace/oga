@@ -25,7 +25,7 @@ use oga_providers::{ParsedEvent, ProviderCommand, Usage, parse_stream};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
-    process::{Child, Command},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
     sync::{Notify, broadcast, mpsc, oneshot},
     time::sleep,
 };
@@ -321,11 +321,14 @@ impl ProviderRunner {
         self.spawn_with_scope(request, Default::default()).await
     }
 
-    pub async fn spawn_with_scope(
+    /// Applies confinement, the worker `PATH`, and the request's own
+    /// environment, then starts the child in its own process group.
+    async fn spawn_child(
         &self,
-        request: RunRequest,
+        request: &RunRequest,
         scope: oga_domain::TaskScope,
-    ) -> Result<RunningProcess, RunnerError> {
+        stdin: std::process::Stdio,
+    ) -> Result<(Child, ProcessIdentity), RunnerError> {
         if request.argv.is_empty() {
             return Err(RunnerError::EmptyCommand);
         }
@@ -343,7 +346,7 @@ impl ProviderRunner {
             .args(&prepared.argv[1..])
             .current_dir(&request.cwd)
             .envs(&env)
-            .stdin(std::process::Stdio::null())
+            .stdin(stdin)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         for key in &request.env_remove {
@@ -361,10 +364,23 @@ impl ProviderRunner {
                 source: io::Error::other("spawned provider has no pid"),
             });
         };
-        let identity = ProcessIdentity {
-            pid,
-            pgid: pid as i32,
-        };
+        Ok((
+            child,
+            ProcessIdentity {
+                pid,
+                pgid: pid as i32,
+            },
+        ))
+    }
+
+    pub async fn spawn_with_scope(
+        &self,
+        request: RunRequest,
+        scope: oga_domain::TaskScope,
+    ) -> Result<RunningProcess, RunnerError> {
+        let (mut child, identity) = self
+            .spawn_child(&request, scope, std::process::Stdio::null())
+            .await?;
         let Some(stdout) = child.stdout.take() else {
             let _ = child.kill().await;
             return Err(RunnerError::MissingPipe {
@@ -411,6 +427,44 @@ impl ProviderRunner {
         })
     }
 
+    /// Starts a provider with its stdin open and hands back the pipes, for a
+    /// transport that speaks a protocol to the child rather than reading it to
+    /// exit. Confinement, environment filtering, and the detached process
+    /// group are the same as for a captured run.
+    pub async fn spawn_duplex(
+        &self,
+        request: RunRequest,
+        scope: oga_domain::TaskScope,
+    ) -> Result<DuplexProcess, RunnerError> {
+        let (mut child, identity) = self
+            .spawn_child(&request, scope, std::process::Stdio::piped())
+            .await?;
+        let pipes = child
+            .stdin
+            .take()
+            .zip(child.stdout.take())
+            .zip(child.stderr.take());
+        let Some(((stdin, stdout), stderr)) = pipes else {
+            let _ = child.kill().await;
+            return Err(RunnerError::MissingPipe {
+                stream: OutputStream::Stdout,
+            });
+        };
+        let control = Arc::new(Control::new(
+            identity.clone(),
+            self.config.interrupt_grace,
+            self.config.terminate_grace,
+        ));
+        Ok(DuplexProcess {
+            identity,
+            control,
+            child,
+            stdin: Some(stdin),
+            stdout: Some(stdout),
+            stderr: Some(stderr),
+        })
+    }
+
     pub async fn run(&self, request: RunRequest) -> Result<RunResult, RunnerError> {
         self.run_with_scope(request, Default::default()).await
     }
@@ -422,6 +476,79 @@ impl ProviderRunner {
     ) -> Result<RunResult, RunnerError> {
         let process = self.spawn_with_scope(request, scope).await?;
         process.wait().await
+    }
+}
+
+/// A provider process whose pipes belong to the caller. Dropping it leaves the
+/// child running, so a transport is expected to terminate and reap it.
+pub struct DuplexProcess {
+    identity: ProcessIdentity,
+    control: Arc<Control>,
+    child: Child,
+    stdin: Option<ChildStdin>,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+}
+
+impl fmt::Debug for DuplexProcess {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DuplexProcess")
+            .field("identity", &self.identity)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DuplexProcess {
+    pub fn identity(&self) -> &ProcessIdentity {
+        &self.identity
+    }
+
+    /// A handle that can signal the process from somewhere other than whoever
+    /// owns the child and is waiting on it.
+    pub fn control(&self) -> ProcessControl {
+        ProcessControl {
+            identity: self.identity.clone(),
+            control: Arc::clone(&self.control),
+        }
+    }
+
+    /// Hands over the three pipes. A second call yields `None`, so a transport
+    /// cannot end up with two readers on one stream.
+    pub fn take_pipes(&mut self) -> Option<(ChildStdin, ChildStdout, ChildStderr)> {
+        let stdin = self.stdin.take()?;
+        let stdout = self.stdout.take()?;
+        let stderr = self.stderr.take()?;
+        Some((stdin, stdout, stderr))
+    }
+
+    pub async fn wait(&mut self) -> io::Result<ExitStatus> {
+        let status = self.child.wait().await;
+        self.control.mark_finished();
+        status
+    }
+}
+
+/// Signals a running provider without owning it.
+#[derive(Debug, Clone)]
+pub struct ProcessControl {
+    identity: ProcessIdentity,
+    control: Arc<Control>,
+}
+
+impl ProcessControl {
+    pub fn identity(&self) -> &ProcessIdentity {
+        &self.identity
+    }
+
+    pub fn liveness(&self) -> Liveness {
+        self.identity.liveness()
+    }
+
+    /// Signals the whole process group, escalating through `SIGTERM` and
+    /// `SIGKILL` on the runner's configured grace periods.
+    pub fn terminate(&self, reason: Termination) {
+        self.control.request(reason);
     }
 }
 
@@ -487,6 +614,7 @@ impl RunningProcess {
     }
 }
 
+#[derive(Debug)]
 struct Control {
     identity: ProcessIdentity,
     interrupt_grace: Duration,

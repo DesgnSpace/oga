@@ -166,7 +166,7 @@ function workSummary(segment: WorkSegment, rows: TraceRow[]): string {
 
 function segmentNarration(composition: ActivityComposition): string | undefined {
   for (const block of composition.blocks) {
-    if (block.type === "chapter" && block.title !== undefined) return block.title.replace(/\s+/g, " ").trim();
+    if (block.type === "turn" && block.turn.title !== undefined) return block.turn.title.replace(/\s+/g, " ").trim();
   }
   return undefined;
 }

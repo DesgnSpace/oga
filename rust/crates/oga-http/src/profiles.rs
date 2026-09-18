@@ -10,8 +10,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use oga_config::{default_model, mask_secret_env};
-use oga_domain::{Profile, ProfileView, Provider};
+use oga_domain::{Profile, ProfileView, Provider, TransportPreference};
 use oga_routing::{format_rfc3339_ms, now_ms};
+use oga_service::{
+    EffectiveTransport, effective_transport, set_transport_preference, transport_preference,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -95,6 +98,51 @@ pub async fn update(
         ));
     }
     Ok(Json(public_profile(&profile)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TransportUpdate {
+    preference: TransportPreference,
+}
+
+fn existing_profile(state: &HttpState, id: &str) -> Result<Profile, HttpError> {
+    state
+        .store
+        .repositories()
+        .profiles()
+        .get(id)?
+        .ok_or_else(|| HttpError::not_found("unknown profile"))
+}
+
+fn transport_view(state: &HttpState, profile: &Profile) -> Result<EffectiveTransport, HttpError> {
+    let preference = transport_preference(&state.store, &profile.id)?;
+    Ok(effective_transport(
+        profile,
+        preference,
+        state.dispatcher.acp_adapters(),
+    ))
+}
+
+pub async fn get_transport(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, HttpError> {
+    let profile = existing_profile(&state, &id)?;
+    Ok(Json(transport_view(&state, &profile)?))
+}
+
+/// Sets which transport new sessions on this profile use. Tasks that already
+/// decided keep the transport their sessions belong to.
+pub async fn put_transport(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, HttpError> {
+    let body: TransportUpdate = parse_json(&body)?;
+    let profile = existing_profile(&state, &id)?;
+    set_transport_preference(&state.store, &profile.id, body.preference, &now_iso())?;
+    Ok(Json(transport_view(&state, &profile)?))
 }
 
 pub async fn remove(

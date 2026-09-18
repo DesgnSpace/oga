@@ -1,0 +1,20 @@
+[package]
+name = "oga-acp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+agent-client-protocol-schema = { version = "1.7", default-features = false }
+oga-domain = { path = "../oga-domain" }
+oga-runner = { path = "../oga-runner" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

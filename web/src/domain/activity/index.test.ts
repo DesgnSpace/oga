@@ -3,16 +3,19 @@
 import { describe, expect, it } from "bun:test";
 import type { EventKind, TaskEventView } from "@/bridge/types";
 import {
-  type ActivityBlock,
+  type ActivityCall,
+  type ActivityComposition,
+  type ActivityNode,
   ActivityStory,
   ActivityStoryProjection,
-  chapterCallCount,
-  chapterDurationMs,
-  groupDurationMs,
-  groupStatus,
+  type ActivitySegment,
+  type ActivityTurn,
+  compositionCalls,
+  nodesCallCount,
+  nodesDurationMs,
   normalizeAntigravityEvents,
-  narrationTitle,
   type ReasoningPulse,
+  turnDurationMs,
 } from "./index";
 
 /**
@@ -99,6 +102,8 @@ function subagentChildTool(id: number, parentToolUseId: string, command: string)
 function skippedNotice(id: number, detail: string): TaskEventView {
   return {
     ...event(id, "lifecycle", "Some activity was not recorded"),
+    type: "line_dropped",
+    source: "broker",
     phase: "info",
     detail,
     presentation: { type: "signal", text: `Some activity was not recorded — ${detail}`, level: "warning" },
@@ -149,12 +154,35 @@ function receipt(id: number): TaskEventView {
   return { ...event(id, "usage", "Run summary"), presentation: { type: "usage", turns: 1 } };
 }
 
-function reasoningPulses(blocks: ActivityBlock[]): ReasoningPulse[] {
-  return blocks.flatMap((block) => {
-    if (block.type === "reasoning") return [block.pulse];
-    if (block.type !== "chapter") return [];
-    return block.rows.flatMap((row) => (row.type === "reasoning" ? [row.pulse] : []));
-  });
+function turnsOf(composition: ActivityComposition): ActivityTurn[] {
+  return composition.blocks.flatMap((block) => (block.type === "turn" ? [block.turn] : []));
+}
+
+function segmentsOf(composition: ActivityComposition): ActivitySegment[] {
+  return turnsOf(composition).flatMap((turn) => turn.segments);
+}
+
+function nodesOf(composition: ActivityComposition): ActivityNode[] {
+  const flatten = (nodes: ActivityNode[]): ActivityNode[] =>
+    nodes.flatMap((node) => (node.type === "subagent" ? [node, ...flatten(node.subagent.nodes)] : [node]));
+  return flatten(segmentsOf(composition).flatMap((segment) => segment.nodes));
+}
+
+function callsOf(composition: ActivityComposition): ActivityCall[] {
+  return compositionCalls(composition.blocks);
+}
+
+function subagentsOf(composition: ActivityComposition) {
+  return nodesOf(composition).flatMap((node) => (node.type === "subagent" ? [node.subagent] : []));
+}
+
+/** What a reader sees where a call has no id of its own to fold on. */
+function looseEvents(composition: ActivityComposition): TaskEventView[] {
+  return nodesOf(composition).flatMap((node) => (node.type === "notice" ? [node.event] : []));
+}
+
+function reasoningPulses(composition: ActivityComposition): ReasoningPulse[] {
+  return nodesOf(composition).flatMap((node) => (node.type === "thinking" ? [node.pulse] : []));
 }
 
 type LookupTitle = "Search code" | "Find files" | "Inspect changes";
@@ -165,6 +193,7 @@ function lookupEvent(id: number, title: LookupTitle, target: string): TaskEventV
     ...event(id, "tool", title),
     source: "opencode",
     type: "agent.tool_use",
+    actionId: `call_${id}`,
     verb: title === "Find files" ? "Found" : title === "Inspect changes" ? "Inspected" : "Searched",
     detail: target,
     presentation: { type: "tool", text: target },
@@ -232,16 +261,23 @@ describe("ActivityStory.compose", () => {
         type: "handed_off",
         detail: "night-shift → day-shift · rebuilt brief",
       },
-      { ...event(3, "message", "After handoff"), type: "agent.text" },
+      {
+        ...event(3, "lifecycle", "Handoff brief"),
+        type: "handoff_brief",
+        detail: "verbatim carry-over, 7579 chars",
+      },
+      { ...event(4, "message", "After handoff"), type: "agent.text" },
     ]);
 
     const boundary = composition.blocks[0];
     expect(boundary?.type).toBe("handoff");
     if (boundary?.type !== "handoff") throw new Error("expected handoff boundary");
     expect(boundary.boundary.chain).toBe("night-shift → day-shift · rebuilt brief");
+    expect(boundary.boundary.briefTier).toBe("verbatim");
+    expect(composition.technical.some((event) => event.type === "handoff_brief")).toBe(true);
   });
 
-  it("folds repeated action updates behind one row", () => {
+  it("folds every update a call sent into that one call", () => {
     const start: TaskEventView = {
       ...event(1, "command", "Bash"),
       phase: "started",
@@ -251,138 +287,79 @@ describe("ActivityStory.compose", () => {
     const update: TaskEventView = { ...start, id: 2, rawText: JSON.stringify({ type: "tool_execution_update" }) };
     const end: TaskEventView = { ...start, id: 3, phase: "completed", rawText: JSON.stringify({ type: "tool_execution_end" }) };
 
-    const composition = ActivityStory.compose([start, update, end]);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const row = block.rows[0];
-    expect(row.type).toBe("group");
-    if (row.type !== "group") throw new Error("expected lifecycle group");
-    expect(row.group.kind).toBe("lifecycle");
-    expect(row.group.members.length).toBe(3);
-    expect(groupStatus(row.group)).toBe("done");
+    const calls = callsOf(ActivityStory.compose([start, update, end]));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].events.map((value) => value.id)).toEqual([1, 2, 3]);
+    expect(calls[0].status).toBe("done");
   });
 
-  it("folds consecutive file work with a count and duration", () => {
+  it("keeps three reads that share a title as three calls", () => {
     const events = Array.from({ length: 3 }, (_, index) => ({
       ...event(index + 1, "file", "Read file"),
       detail: `src/${index}.rs`,
       verb: "Read",
+      actionId: `call_${index}`,
       createdAt: `2026-07-30T15:00:0${index}Z`,
     }));
 
     const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const row = block.rows[0];
-    expect(row.type).toBe("group");
-    if (row.type !== "group") throw new Error("expected run group");
 
-    expect(row.group.kind).toBe("run");
-    expect(row.group.runLabel).toBe("Read 3 files");
-    expect(groupDurationMs(row.group)).toBe(2_000);
+    expect(callsOf(composition).map((call) => call.event.detail)).toEqual(["src/0.rs", "src/1.rs", "src/2.rs"]);
+    expect(turnDurationMs(turnsOf(composition)[0])).toBe(2_000);
   });
 
-  it("groups consecutive code searches with their own count", () => {
+  it("keeps a stretch of lookups as one call each", () => {
     const events = [
       lookupEvent(1, "Search code", "TaskEventView in rust"),
       lookupEvent(2, "Search code", "ActivityStory in web"),
-      lookupEvent(3, "Search code", "SidebarPreferences { in rust"),
-    ];
-
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const row = block.rows[0];
-    expect(row.type).toBe("group");
-    if (row.type !== "group") throw new Error("expected lookup group");
-    expect(row.group.runLabel).toBe("Ran 3 searches");
-    expect(row.group.children).toHaveLength(3);
-  });
-
-  it("folds a mixed stretch of looking around into one row", () => {
-    const events = [
-      lookupEvent(1, "Search code", "TaskEventView in rust"),
-      { ...event(2, "file", "Read file"), detail: "src/main.rs", verb: "Read" },
       lookupEvent(3, "Find files", "web/src/**/*.css"),
       lookupEvent(4, "Inspect changes", "git diff --stat"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows).toHaveLength(1);
-    if (block.rows[0]?.type !== "group") throw new Error("expected a lookup group");
-    expect(block.rows[0].group.runLabel).toBe("Ran 4 lookups");
+    const calls = callsOf(ActivityStory.compose(events));
+
+    expect(calls.map((call) => call.actionId)).toEqual(["call_1", "call_2", "call_3", "call_4"]);
   });
 
-  it("never folds a change into a stretch of lookups", () => {
+  it("keeps an edit between two lookups where the worker made it", () => {
     const events = [
       lookupEvent(1, "Search code", "TaskEventView in rust"),
-      { ...event(2, "file", "Edit file"), detail: "src/main.rs", target: "src/main.rs", verb: "Edited" },
+      { ...event(2, "file", "Edit file"), detail: "src/main.rs", target: "src/main.rs", verb: "Edited", actionId: "call_edit" },
       lookupEvent(3, "Search code", "ActivityStory in web"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.every((row) => row.type === "work")).toBe(true);
-    expect(block.rows).toHaveLength(3);
+    const calls = callsOf(ActivityStory.compose(events));
+
+    expect(calls.map((call) => call.event.title)).toEqual(["Search code", "Edit file", "Search code"]);
   });
 
-  it("folds repeated passes over one file into a single row", () => {
+  /** The bug this model exists to fix: six edits read as "Edited oga.css ×2". */
+  it("keeps six passes over one file as six calls", () => {
     const events = Array.from({ length: 6 }, (_, index) => ({
       ...event(index + 1, "file", "Edit file"),
       detail: `web/src/oga.css · rule ${index + 1}`,
       target: "web/src/oga.css",
       verb: "Edited",
+      actionId: `call_${index}`,
     }));
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows).toHaveLength(1);
-    if (block.rows[0]?.type !== "group") throw new Error("expected an edit group");
-    expect(block.rows[0].group.runLabel).toBe("Edited oga.css ×6");
-    expect(block.rows[0].group.children).toHaveLength(6);
+    const calls = callsOf(ActivityStory.compose(events));
+
+    expect(calls).toHaveLength(6);
+    expect(new Set(calls.map((call) => call.id)).size).toBe(6);
   });
 
-  it("names every verification in one checked row", () => {
-    const events = [
-      { ...event(1, "command", "Check lint"), detail: "bun run lint", target: "bun run lint", verb: "Checked" },
-      { ...event(2, "command", "Check types"), detail: "bun run typecheck", target: "bun run typecheck", verb: "Checked" },
-      { ...event(3, "command", "Check tests"), detail: "bun test", target: "bun test", verb: "Checked" },
-    ];
-
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows).toHaveLength(1);
-    if (block.rows[0]?.type !== "group") throw new Error("expected a check group");
-    expect(block.rows[0].group.runLabel).toBe("Checked lint, types, tests");
-  });
-
-  it("collapses a loop that keeps coming round", () => {
+  it("keeps a loop that comes round four times as every pass it made", () => {
     const cycle = (round: number): TaskEventView[] => [
-      { ...event(round * 3 + 1, "file", "Edit file"), detail: "src/app.ts", target: "src/app.ts", verb: "Edited" },
-      { ...event(round * 3 + 2, "command", "Check lint"), detail: "bun run lint", target: "bun run lint", verb: "Checked" },
-      { ...event(round * 3 + 3, "command", "Check tests"), detail: "bun test", target: "bun test", verb: "Checked" },
+      { ...event(round * 3 + 1, "file", "Edit file"), detail: "src/app.ts", target: "src/app.ts", verb: "Edited", actionId: `edit_${round}` },
+      { ...event(round * 3 + 2, "command", "Check lint"), detail: "bun run lint", target: "bun run lint", verb: "Checked", actionId: `lint_${round}` },
+      { ...event(round * 3 + 3, "command", "Check tests"), detail: "bun test", target: "bun test", verb: "Checked", actionId: `test_${round}` },
     ];
-    const events = [0, 1, 2, 3].flatMap(cycle);
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows).toHaveLength(1);
-    if (block.rows[0]?.type !== "group") throw new Error("expected a repeat group");
-    expect(block.rows[0].group.runLabel).toBe("Repeated 2 steps ×4");
+    const calls = callsOf(ActivityStory.compose([0, 1, 2, 3].flatMap(cycle)));
+
+    expect(calls).toHaveLength(12);
   });
 
   it("counts a replayed call once when a resumed session repeats it", () => {
@@ -394,22 +371,43 @@ describe("ActivityStory.compose", () => {
       detail: "bun run dev",
       actionId: "toolu_1",
     });
-    const events = [call(1, "started"), call(2, "completed"), call(3, "started")];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows).toHaveLength(1);
-    expect(block.rows[0]?.type === "work" ? block.rows[0].event.phase : undefined).toBe("completed");
+    const calls = callsOf(ActivityStory.compose([call(1, "started"), call(2, "completed"), call(3, "started")]));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].event.phase).toBe("completed");
   });
 
-  it("leaves one lookup ungrouped", () => {
-    const composition = ActivityStory.compose([lookupEvent(1, "Search code", "TaskEventView in rust")]);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows[0]?.type).toBe("work");
+  it("keeps one call as one row, whatever its title said last", () => {
+    const opened: TaskEventView = {
+      ...event(1, "command", "Run command"),
+      phase: "started",
+      title: "Terminal",
+      target: "Terminal",
+      actionId: "toolu_1",
+    };
+    const settled: TaskEventView = { ...opened, id: 2, phase: "completed", title: "Run command", target: "bun test" };
+
+    const calls = callsOf(ActivityStory.compose([opened, settled]));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].event.title).toBe("Run command");
+    expect(calls[0].event.target).toBe("bun test");
+  });
+
+  it("leaves a call the turn never closed as interrupted, not running", () => {
+    const opened: TaskEventView = {
+      ...event(1, "command", "Run command"),
+      phase: "started",
+      target: "bun test",
+      actionId: "toolu_1",
+      turnId: 1,
+    };
+    const next = { ...event(2, "message", "Agent message"), detail: "Picking up again.", turnId: 2 };
+
+    const calls = callsOf(ActivityStory.compose([opened, next]));
+
+    expect(calls.map((call) => call.status)).toEqual(["interrupted"]);
   });
 
   it("nests a subagent's work under a collapsible group keyed by agent_id", () => {
@@ -423,21 +421,15 @@ describe("ActivityStory.compose", () => {
     ];
 
     const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const rows = block.rows;
-    const subagentRow = rows.find((row) => row.type === "group" && row.group.kind === "subagent");
-    expect(subagentRow).toBeDefined();
-    if (subagentRow?.type !== "group") throw new Error("expected subagent group");
-    expect(subagentRow.group.anchor.id).toBe(2);
-    expect(subagentRow.group.runLabel).toBe("Subagent · general-purpose");
+    const [subagent] = subagentsOf(composition);
+
+    expect(subagent?.start.id).toBe(2);
+    expect(subagent?.label).toBe("Subagent · general-purpose");
     // Every event between the pair, and the stop itself, stays reachable
     // behind the group instead of being dropped.
-    expect(subagentRow.group.hidden.map((e) => e.id)).toEqual([3, 4, 5]);
+    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([3, 4, 5]);
     // Nothing outside the pair is swallowed into it.
-    expect(rows.some((row) => row.type === "work" && row.event.id === 1)).toBe(true);
-    expect(rows.some((row) => row.type === "work" && row.event.id === 6)).toBe(true);
+    expect(segmentsOf(composition).flatMap((segment) => segment.lead ? [segment.lead.id] : [])).toEqual([1, 6]);
   });
 
   it("nests a hook subagent run under normalized started/finished titles keyed by agent_id", () => {
@@ -463,14 +455,11 @@ describe("ActivityStory.compose", () => {
       event(6, "message", "Response"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const subagentRow = block.rows.find((row) => row.type === "group" && row.group.kind === "subagent");
-    if (subagentRow?.type !== "group") throw new Error("expected subagent group");
-    expect(subagentRow.group.anchor.id).toBe(2);
-    expect(subagentRow.group.runLabel).toBe("Subagent · general-purpose");
-    expect(subagentRow.group.hidden.map((e) => e.id)).toEqual([3, 4, 5]);
+    const [subagent] = subagentsOf(ActivityStory.compose(events));
+
+    expect(subagent?.start.id).toBe(2);
+    expect(subagent?.label).toBe("Subagent · general-purpose");
+    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([3, 4, 5]);
   });
 
   it("nests a streamed sub-agent's work under its description", () => {
@@ -484,16 +473,13 @@ describe("ActivityStory.compose", () => {
     ];
 
     const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const subagentRow = block.rows.find((row) => row.type === "group" && row.group.kind === "subagent");
-    if (subagentRow?.type !== "group") throw new Error("expected subagent group");
-    expect(subagentRow.group.anchor.id).toBe(2);
-    expect(subagentRow.group.runLabel).toBe("Subagent · Audit the allocation path");
-    expect(subagentRow.group.hidden.map((e) => e.id)).toEqual([3, 4, 5]);
-    expect(groupStatus(subagentRow.group)).toBe("done");
-    expect(block.rows.some((row) => row.type === "work" && row.event.id === 1)).toBe(true);
-    expect(block.rows.some((row) => row.type === "work" && row.event.id === 6)).toBe(true);
+    const [subagent] = subagentsOf(composition);
+
+    expect(subagent?.start.id).toBe(2);
+    expect(subagent?.label).toBe("Subagent · Audit the allocation path");
+    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([3, 4, 5]);
+    expect(subagent?.status).toBe("done");
+    expect(segmentsOf(composition).flatMap((segment) => segment.lead ? [segment.lead.id] : [])).toEqual([1, 6]);
   });
 
   it("keeps two streamed sub-agents' interleaved tool calls correlated by their parent call", () => {
@@ -506,25 +492,45 @@ describe("ActivityStory.compose", () => {
       taskNotification(6, "task-b", "failed"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const groups = block.rows.filter((row) => row.type === "group" && row.group.kind === "subagent");
-    expect(groups.length).toBe(2);
-    if (groups[0]?.type !== "group" || groups[1]?.type !== "group") throw new Error("expected two groups");
-    expect(groups[0].group.hidden.map((e) => e.id)).toEqual([4, 5]);
-    expect(groups[1].group.hidden.map((e) => e.id)).toEqual([3, 6]);
-    expect(groupStatus(groups[1].group)).toBe("failed");
+    const subagents = subagentsOf(ActivityStory.compose(events));
+    const owned = (index: number) =>
+      subagents[index].nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []));
+
+    expect(subagents).toHaveLength(2);
+    expect(owned(0)).toEqual([4, 5]);
+    expect(owned(1)).toEqual([3, 6]);
   });
 
-  it("leaves a sub-agent start with no finish flat", () => {
+  it("keeps a sub-agent start with no finish as a group still running", () => {
     const composition = ActivityStory.compose([
       taskStarted(1, "task-a", "toolu_a", "Port the parser"),
       subagentChildTool(2, "toolu_a", "cargo test -p parser"),
     ]);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.some((row) => row.type === "group" && row.group.kind === "subagent")).toBe(false);
+
+    const [subagent] = subagentsOf(composition);
+    expect(subagent?.status).toBe("running");
+    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([2]);
+  });
+
+  it("nests a sub-agent that starts while another is still open", () => {
+    const composition = ActivityStory.compose([
+      subagentStart(1, "outer"),
+      subagentToolUse(2, "outer", "rg -n allocate rust/"),
+      subagentStart(3, "inner"),
+      subagentToolUse(4, "inner", "wc -l rust/src/alloc.rs"),
+      subagentStop(5, "inner"),
+      subagentToolUse(6, "outer", "cargo test -p alloc"),
+      subagentStop(7, "outer"),
+    ]);
+
+    const top = nodesOf(composition).filter((node) => node.type === "subagent");
+    expect(top).toHaveLength(2);
+    const [outer] = subagentsOf(composition);
+    expect(outer?.start.id).toBe(1);
+    const inner = outer?.nodes.find((node) => node.type === "subagent");
+    expect(inner?.type === "subagent" ? inner.subagent.start.id : undefined).toBe(3);
+    expect(inner?.type === "subagent" ? inner.subagent.status : undefined).toBe("done");
+    expect(outer?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([2, 6, 7]);
   });
 
   it("folds the thinking between two tool calls into one readable stretch", () => {
@@ -534,7 +540,7 @@ describe("ActivityStory.compose", () => {
       { ...event(3, "tool", "Bash"), detail: "bun test" },
       thinking(4, "Now the write."),
     ]);
-    expect(reasoningPulses(composition.blocks).map((pulse) => pulse.text)).toEqual([
+    expect(reasoningPulses(composition).map((pulse) => pulse.text)).toEqual([
       "First the shape.\n\nThen the cost.",
       "Now the write.",
     ]);
@@ -542,7 +548,7 @@ describe("ActivityStory.compose", () => {
 
   it("keeps a stretch the provider redacted, with nothing to read", () => {
     const composition = ActivityStory.compose([thinking(1), thinking(2), event(3, "message", "Response")]);
-    const [pulse] = reasoningPulses(composition.blocks);
+    const [pulse] = reasoningPulses(composition);
     expect(pulse?.text).toBeUndefined();
   });
 
@@ -552,7 +558,7 @@ describe("ActivityStory.compose", () => {
       thinking(2, "First the"),
       thinking(3, "First the shape."),
     ]);
-    expect(reasoningPulses(composition.blocks).map((pulse) => pulse.text)).toEqual(["First the shape."]);
+    expect(reasoningPulses(composition).map((pulse) => pulse.text)).toEqual(["First the shape."]);
   });
 
   it("counts reasoning tokens onto the stretch they arrived during and the receipt", () => {
@@ -563,14 +569,14 @@ describe("ActivityStory.compose", () => {
       { ...event(4, "tool", "Bash"), detail: "bun test" },
       receipt(5),
     ]);
-    expect(reasoningPulses(composition.blocks).map((pulse) => pulse.tokens)).toEqual([79]);
+    expect(reasoningPulses(composition).map((pulse) => pulse.tokens)).toEqual([79]);
     const block = composition.blocks.find((value) => value.type === "receipt");
     expect(block?.type === "receipt" ? block.thinkingTokens : undefined).toBe(79);
   });
 
   it("gives a token counter no stretch of its own", () => {
     const composition = ActivityStory.compose([{ ...event(1, "tool", "Bash"), detail: "bun test" }, thinkingTokens(2, 50)]);
-    expect(reasoningPulses(composition.blocks)).toEqual([]);
+    expect(reasoningPulses(composition)).toEqual([]);
   });
 
   it("reports every skipped line as one notice with the total", () => {
@@ -580,12 +586,10 @@ describe("ActivityStory.compose", () => {
       skippedNotice(3, "4 lines skipped"),
       skippedNotice(4, "1 event skipped"),
     ]);
-    const notices = composition.blocks.filter(
-      (block) => block.type === "signal" && block.event.title === "Some activity was not recorded",
-    );
-    expect(notices.length).toBe(1);
-    if (notices[0]?.type !== "signal") throw new Error("expected a notice");
-    expect(notices[0].event.presentation?.text).toBe(
+    const notices = looseEvents(composition).filter((value) => value.type === "line_dropped");
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0].presentation?.text).toBe(
       "Some activity was not recorded — 7 lines skipped · 1 event skipped",
     );
   });
@@ -598,19 +602,17 @@ describe("ActivityStory.compose", () => {
     const receipt = composition.blocks.find((block) => block.type === "receipt");
     if (receipt?.type !== "receipt") throw new Error("expected a receipt");
     expect(receipt.usageWindow).toStartWith("Usage window 13% · resets ");
-    expect(composition.blocks.some((block) => block.type === "signal")).toBe(false);
+    expect(looseEvents(composition)).toHaveLength(0);
   });
 
-  it("leaves an unpaired SubagentStart flat instead of guessing where it ends", () => {
+  it("marks an unpaired SubagentStart interrupted once its turn has closed", () => {
     const events: TaskEventView[] = [
       subagentStart(1, "orphan-start"),
       subagentToolUse(2, "orphan-start", "wc -l README.md"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.some((row) => row.type === "group" && row.group.kind === "subagent")).toBe(false);
+    const [subagent] = subagentsOf(ActivityStory.composeWithState(events, true, undefined, true));
+    expect(subagent?.status).toBe("interrupted");
   });
 
   it("leaves an unpaired SubagentStop flat instead of guessing where it started", () => {
@@ -619,10 +621,7 @@ describe("ActivityStory.compose", () => {
       subagentStop(2, "orphan-stop"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.some((row) => row.type === "group" && row.group.kind === "subagent")).toBe(false);
+    expect(subagentsOf(ActivityStory.compose(events))).toHaveLength(0);
   });
 
   it("keeps two concurrent subagents' interleaved events correlated by their own agent_id", () => {
@@ -638,14 +637,13 @@ describe("ActivityStory.compose", () => {
       subagentStop(6, "agent-b"),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    const groups = block.rows.filter((row) => row.type === "group" && row.group.kind === "subagent");
-    expect(groups.length).toBe(2);
-    if (groups[0]?.type !== "group" || groups[1]?.type !== "group") throw new Error("expected subagent groups");
-    expect(groups[0].group.hidden.map((e) => e.id)).toEqual([3, 5]);
-    expect(groups[1].group.hidden.map((e) => e.id)).toEqual([4, 6]);
+    const subagents = subagentsOf(ActivityStory.compose(events));
+    const owned = (index: number) =>
+      subagents[index].nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []));
+
+    expect(subagents).toHaveLength(2);
+    expect(owned(0)).toEqual([3, 5]);
+    expect(owned(1)).toEqual([4, 6]);
   });
 
   it("keeps every one of ten thousand events now that nothing is windowed away", () => {
@@ -654,12 +652,7 @@ describe("ActivityStory.compose", () => {
       const kind: EventKind = id % 2 === 0 ? "tool" : "file";
       return { ...event(id, kind, "Read"), detail: `file-${id}` };
     });
-    const composition = ActivityStory.compose(events);
-    const rows = composition.blocks.reduce(
-      (sum, block) => sum + (block.type === "chapter" ? block.rows.length : 1),
-      0,
-    );
-    expect(rows).toBe(events.length);
+    expect(nodesOf(ActivityStory.compose(events))).toHaveLength(events.length);
   });
 });
 
@@ -732,8 +725,7 @@ describe("ActivityStoryProjection", () => {
     events.push(rich(2, "read-2", "/repo/two.ts"));
 
     expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
-    expect(projection.incrementalCount).toBe(1);
-    expect(projection.fallbackCount).toBe(0);
+    expect(projection.update(events, false, undefined)).toBe(projection.update(events, false, undefined));
   });
 
   it("settles a rich action incrementally when its provider update is adjacent", () => {
@@ -753,8 +745,7 @@ describe("ActivityStoryProjection", () => {
     events.push(rich(2, "completed"));
 
     expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
-    expect(projection.incrementalCount).toBe(1);
-    expect(projection.fallbackCount).toBe(0);
+    expect(projection.update(events, false, undefined)).toBe(projection.update(events, false, undefined));
   });
 
   it("keeps repeated rich Codex actions equivalent while appending", () => {
@@ -780,8 +771,7 @@ describe("ActivityStoryProjection", () => {
     events.push(codex(3), codex(4));
 
     expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
-    expect(projection.incrementalCount).toBe(1);
-    expect(projection.fallbackCount).toBe(0);
+    expect(projection.update(events, false, undefined)).toBe(projection.update(events, false, undefined));
   });
 
   it("falls back when a rich action reopens or changes turns", () => {
@@ -803,7 +793,7 @@ describe("ActivityStoryProjection", () => {
 
     events.push({ ...rich(4, "completed", 2), actionId: "command-2" });
     expect(projection.update(events, false, undefined)).toEqual(ActivityStory.composeWithState(events, false, undefined));
-    expect(projection.fallbackCount).toBe(2);
+    expect(projection.fallbackCount).toBe(3);
   });
 });
 
@@ -848,25 +838,19 @@ describe("Codex item pairing", () => {
       }),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.length).toBe(1);
-    const row = block.rows[0];
-    expect(row.type === "work" ? row.event.verb : undefined).toBe("Ran");
+    const calls = callsOf(ActivityStory.compose(events));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].event.verb).toBe("Ran");
   });
 
   it("still renders a row for an item that started but never completed", () => {
     const events = [codexItem(1, "item_9")];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.length).toBe(1);
-    const row = block.rows[0];
-    expect(row.type === "work" ? row.event.phase : undefined).toBe("started");
+    const calls = callsOf(ActivityStory.compose(events));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].event.phase).toBe("started");
   });
 
   it("keeps two different items separate even when they arrive interleaved", () => {
@@ -882,11 +866,7 @@ describe("Codex item pairing", () => {
       }),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.length).toBe(2);
+    expect(callsOf(ActivityStory.compose(events)).map((call) => call.actionId)).toEqual(["item_2", "item_3"]);
   });
 });
 
@@ -894,7 +874,7 @@ describe("Codex item pairing", () => {
  * Pi reports one message as `message_start` → [`message_update`*] → `message_end`,
  * but unlike Codex's items or its own `toolCallId`, none of those three carry an id
  * in the payload. The Rust mapper (`pi_message_view` in `oga-events`) papers over
- * that with a fixed action id shared by the whole stream; `foldActions` merges each
+ * that with a fixed action id shared by the whole stream; `foldCalls` merges each
  * later event's own title/detail over the open row (role never changes mid-stream,
  * so the title stays stable) and an update with nothing new falls back to whatever
  * the row already had. This is the fold that keeps 35,000 streamed deltas from
@@ -929,26 +909,21 @@ describe("Pi message-stream pairing", () => {
       }),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const block = composition.blocks[0];
-    expect(block.type).toBe("chapter");
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(block.rows.length).toBe(1);
-    const row = block.rows[0];
-    expect(row.type === "work" ? row.event.detail : undefined).toBe("## Resume flag\n\n`--session-id`.");
-    expect(row.type === "work" ? row.event.phase : undefined).toBe("completed");
+    const calls = callsOf(ActivityStory.compose(events));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].event.detail).toBe("## Resume flag\n\n`--session-id`.");
+    expect(calls[0].event.phase).toBe("completed");
   });
 
-  it("opens a fresh chapter for the next message instead of reopening the one message_end closed", () => {
+  it("opens a fresh call for the next message instead of reopening the one message_end closed", () => {
     const events = [
       piMessage(1),
       piMessage(2, { type: "agent.message_end", phase: "completed", detail: "first", complete: true }),
       piMessage(3, { title: "User message", detail: "second" }),
     ];
 
-    const composition = ActivityStory.compose(events);
-    const titles = composition.blocks.map((block) => (block.type === "chapter" ? block.title : undefined));
-    expect(titles).toEqual(["first", "second"]);
+    expect(callsOf(ActivityStory.compose(events)).map((call) => call.event.detail)).toEqual(["first", "second"]);
   });
 });
 
@@ -957,56 +932,67 @@ describe("Pi message-stream pairing", () => {
  * 4611be7e (opencode, `agent.text` parts) and 749deccd (claude, `agent.assistant`
  * text blocks).
  */
-describe("narration chapters", () => {
+describe("stretches the worker opened with its own words", () => {
   function narration(id: number, text: string): TaskEventView {
     return { ...event(id, "message", "Agent message"), type: "agent.text", detail: text };
   }
 
-  it("opens a chapter per narration line and holds the work that follows", () => {
+  function call(id: number, kind: "file" | "command", title: string): TaskEventView {
+    return { ...event(id, kind, title), detail: `subject ${id}`, actionId: `call_${id}` };
+  }
+
+  it("opens a stretch each time the worker speaks and holds the work that follows", () => {
     const composition = ActivityStory.compose([
       narration(1, "Locating the toast implementation and reference behavior"),
-      event(2, "file", "Read file"),
-      event(3, "command", "Run command"),
+      call(2, "file", "Read file"),
+      call(3, "command", "Run command"),
       narration(4, "Raising the global toast layer above every current overlay"),
-      event(5, "file", "Edit file"),
-      event(6, "command", "Run command"),
+      call(5, "file", "Edit file"),
+      call(6, "command", "Run command"),
     ]);
 
-    const titles = composition.blocks.map((block) => (block.type === "chapter" ? block.title : undefined));
-    expect(titles).toEqual([
+    const segments = segmentsOf(composition);
+    expect(segments.map((segment) => segment.lead?.detail)).toEqual([
       "Locating the toast implementation and reference behavior",
       "Raising the global toast layer above every current overlay",
     ]);
-    expect(composition.blocks.every((block) => block.type === "chapter" && block.rows.length === 2)).toBe(true);
+    expect(segments.map((segment) => nodesCallCount(segment.nodes))).toEqual([2, 2]);
   });
 
-  it("leaves a long closing answer as the response instead of a chapter", () => {
-    const answer = "## TL;DR\n- **Choice**: Keep one global toast layer above overlays.";
-    const composition = ActivityStory.compose([event(1, "command", "Run command"), narration(2, answer)]);
+  it("names the turn after the first thing the worker said", () => {
+    const composition = ActivityStory.composeWithState(
+      [narration(1, "Root cause found. Applying fixes."), call(2, "file", "Edit file")],
+      false,
+      undefined,
+      false,
+    );
 
-    const chapters = composition.blocks.filter((block) => block.type === "chapter");
-    expect(chapters.every((block) => block.type === "chapter" && block.title === undefined)).toBe(true);
+    expect(turnsOf(composition)[0].title).toBe("Root cause found. Applying fixes.");
+    expect(turnsOf(composition)[0].titleFrom).toBe(1);
+  });
+
+  it("leaves a settled run's closing answer to the response instead of the trace", () => {
+    const answer = "## TL;DR\n- **Choice**: Keep one global toast layer above overlays.";
+    const composition = ActivityStory.composeWithState(
+      [call(1, "command", "Run command"), narration(2, answer)],
+      true,
+      undefined,
+      false,
+    );
+
+    expect(segmentsOf(composition).some((segment) => segment.lead !== undefined)).toBe(false);
     expect(ActivityStory.responseEvent([narration(2, answer)])?.id).toBe(2);
   });
 
-  it("counts the calls and the elapsed time a chapter covers", () => {
+  it("counts the calls and the elapsed time a stretch covers", () => {
     const composition = ActivityStory.compose([
       narration(1, "Running focused tests, type checks, and the configured linter"),
-      { ...event(2, "command", "Run command"), createdAt: "2026-07-30T15:00:00Z" },
-      { ...event(3, "file", "Read file"), createdAt: "2026-07-30T15:00:40Z" },
+      { ...call(2, "command", "Run command"), createdAt: "2026-07-30T15:00:00Z" },
+      { ...call(3, "file", "Read file"), createdAt: "2026-07-30T15:00:40Z" },
     ]);
 
-    const block = composition.blocks[0];
-    if (block.type !== "chapter") throw new Error("expected chapter");
-    expect(chapterCallCount(block.rows)).toBe(2);
-    expect(chapterDurationMs(block.rows)).toBe(40_000);
-  });
-
-  it("keeps a narration line out of the title when it is a list or a heading", () => {
-    expect(narrationTitle(narration(1, "- **Checking**: current tree"))).toBeUndefined();
-    expect(narrationTitle(narration(2, "## TL;DR"))).toBeUndefined();
-    expect(narrationTitle(narration(3, "Root cause found. Applying fixes."))).toBe(
-      "Root cause found. Applying fixes.",
-    );
+    const worked = segmentsOf(composition)[0].nodes.slice(1);
+    expect(nodesCallCount(worked)).toBe(2);
+    expect(nodesDurationMs(worked)).toBe(40_000);
   });
 });

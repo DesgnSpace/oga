@@ -1,7 +1,12 @@
 // Pure activity composition for the task detail trace.
-// Ported from rust/crates/oga-ui/src/activity/mod.rs — keep behavior identical.
+//
+// The timeline is keyed by what the broker already knows about a run's shape:
+// a turn id, a tool call id, a parent call id, an agent id. Nothing here reads
+// a row's words to decide where it belongs, so a provider that renames a call
+// halfway through ("Terminal" → the command it ran, "Preparing file…" → the
+// file it wrote) still gets exactly one row for it.
 
-import type { EventKind, TaskEventPresentation, TaskEventView, TaskState } from "@/bridge/types";
+import type { TaskEventPresentation, TaskEventView, TaskState } from "@/bridge/types";
 import {
   ogaCall,
   ogaResultSummary,
@@ -35,152 +40,151 @@ export interface ReasoningPulse {
   seconds?: number;
 }
 
+/**
+ * How a node ended. `interrupted` is a call the worker opened and never
+ * closed on a turn that has since settled — it did not finish, and it is not
+ * still running either.
+ */
+export type ActivityStatus = "running" | "needs_input" | "failed" | "interrupted" | "done";
+
+/** The timeline's top level: the run's turns, plus what sits outside them. */
 export type ActivityBlock =
-  | { type: "chapter"; id: number; rows: ChapterRow[]; title?: string }
-  | { type: "reasoning"; pulse: ReasoningPulse }
-  | { type: "signal"; event: TaskEventView }
+  | { type: "turn"; turn: ActivityTurn }
   | { type: "receipt"; event: TaskEventView; thinkingTokens: number; usageWindow?: string }
   | { type: "handoff"; boundary: HandoffBoundary };
 
-export function blockId(block: ActivityBlock): number {
-  switch (block.type) {
-    case "chapter":
-      return block.id;
-    case "reasoning":
-      return block.pulse.id;
-    case "signal":
-    case "receipt":
-      return block.event.id;
-    case "handoff":
-      return 0;
-  }
+/** One round of work, keyed by the broker's turn id. */
+export interface ActivityTurn {
+  /** `turn:<ordinal>` — stable across rebuilds and never an event id. */
+  id: string;
+  turnId?: number;
+  /** 0-based position among the composition's turns. */
+  ordinal: number;
+  /** The first thing the worker said this turn, as one line. */
+  title?: string;
+  /** The message `title` was read off, so a heading never repeats a row. */
+  titleFrom?: number;
+  segments: ActivitySegment[];
+  events: TaskEventView[];
+  status: ActivityStatus;
 }
 
-export type ChapterRow =
-  | { type: "work"; event: TaskEventView }
-  | { type: "reasoning"; pulse: ReasoningPulse }
-  | { type: "group"; group: ActivityGroup };
-
-export function chapterRowId(row: ChapterRow): number {
-  switch (row.type) {
-    case "work":
-      return row.event.id;
-    case "reasoning":
-      return row.pulse.id;
-    case "group":
-      return groupId(row.group);
-  }
+/** A stretch of work inside a turn, opened by the worker saying something. */
+export interface ActivitySegment {
+  /** `segment:<turn ordinal>:<index>`. */
+  id: string;
+  /** The words this stretch opened with, and the first of `nodes` when set. */
+  lead?: TaskEventView;
+  nodes: ActivityNode[];
 }
 
-export function chapterRowEvents(row: ChapterRow): TaskEventView[] {
-  switch (row.type) {
-    case "work":
-      return [row.event];
-    case "reasoning":
+export type ActivityNode =
+  | { type: "call"; call: ActivityCall }
+  | { type: "message"; id: string; event: TaskEventView }
+  | { type: "thinking"; id: string; pulse: ReasoningPulse }
+  | { type: "notice"; id: string; event: TaskEventView }
+  | { type: "subagent"; subagent: ActivitySubagent };
+
+/** One tool call, however many rows the provider sent for it. */
+export interface ActivityCall {
+  /** `call:<turn ordinal>:<action id>`. */
+  id: string;
+  actionId: string;
+  /** The call as it last described itself. */
+  event: TaskEventView;
+  /** Every row that carried this call's id, in arrival order. */
+  events: TaskEventView[];
+  /** Calls the provider reported as this one's children. */
+  children: ActivityCall[];
+  status: ActivityStatus;
+  startedAt: string;
+  endedAt?: string;
+}
+
+/** A subagent run, bracketed by the pair of rows that share its agent id. */
+export interface ActivitySubagent {
+  /** `subagent:<agent id>`. */
+  id: string;
+  label: string;
+  start: TaskEventView;
+  nodes: ActivityNode[];
+  status: ActivityStatus;
+}
+
+/** The rows a node stands for — what a reader would count as its activity. */
+function nodeEvents(node: ActivityNode): TaskEventView[] {
+  switch (node.type) {
+    case "call":
+      return callEvents(node.call);
+    case "message":
+    case "notice":
+      return [node.event];
+    case "thinking":
       return [];
-    case "group":
-      return row.group.kind === "turn"
-        ? row.group.hidden.slice()
-        : [row.group.anchor, ...row.group.hidden];
+    case "subagent":
+      return [node.subagent.start, ...node.subagent.nodes.flatMap(nodeEvents)];
   }
 }
 
-export type ActivityGroupKind = "delegation" | "lifecycle" | "run" | "turn" | "subagent";
-export type ActivityGroupStatus = "running" | "needs_input" | "failed" | "done";
-
-export interface ActivityGroup {
-  kind: ActivityGroupKind;
-  anchor: TaskEventView;
-  children: ChapterRow[];
-  members: TaskEventView[];
-  runLabel: string;
-  turnTitle?: string;
-  hidden: TaskEventView[];
+function callEvents(call: ActivityCall): TaskEventView[] {
+  return [call.event, ...call.children.flatMap(callEvents)];
 }
 
-function makeActivityGroup(
-  kind: ActivityGroupKind,
-  anchor: TaskEventView,
-  children: ChapterRow[],
-  members: TaskEventView[],
-  runLabel: string,
-  turnTitle: string | undefined,
-): ActivityGroup {
-  const hidden = kind === "lifecycle" ? members.slice() : children.flatMap(chapterRowEvents);
-  return { kind, anchor, children, members, runLabel, turnTitle, hidden };
+/** Every call in a turn, including the ones nested under another call. */
+function turnCalls(turn: ActivityTurn): ActivityCall[] {
+  const withChildren = (call: ActivityCall): ActivityCall[] => [call, ...call.children.flatMap(withChildren)];
+  const collect = (nodes: ActivityNode[]): ActivityCall[] =>
+    nodes.flatMap((node) => {
+      if (node.type === "call") return withChildren(node.call);
+      if (node.type === "subagent") return collect(node.subagent.nodes);
+      return [];
+    });
+  return turn.segments.flatMap((segment) => collect(segment.nodes));
 }
 
-export function groupId(group: ActivityGroup): number {
-  return group.anchor.id;
+/** Every call in a composition, in the order the worker opened them. */
+export function compositionCalls(blocks: ActivityBlock[]): ActivityCall[] {
+  return blocks.flatMap((block) => (block.type === "turn" ? turnCalls(block.turn) : []));
 }
 
-export function groupStatus(group: ActivityGroup): ActivityGroupStatus {
-  const hasQuestion = (event: TaskEventView) => event.title === "Worker needs input";
-  if (hasQuestion(group.anchor) || group.hidden.some(hasQuestion)) return "needs_input";
-  if (group.anchor.phase === "failed" || group.hidden.some((event) => event.phase === "failed")) {
-    return "failed";
-  }
-  if (group.kind === "turn") {
-    return group.anchor.phase === "started" || group.children.some(chapterRowIsRunning) ? "running" : "done";
-  }
-  if (group.kind === "subagent") {
-    return group.hidden.some((event) => subagentBoundary(event)?.role === "stop") ? "done" : "running";
-  }
-  return group.anchor.phase === "started" || group.children.some(chapterRowIsRunning) ? "running" : "done";
+/** How much work a stretch holds: the tool calls a reader would have counted. */
+export function nodesCallCount(nodes: ActivityNode[]): number {
+  const countCall = (call: ActivityCall): number => 1 + call.children.reduce((sum, child) => sum + countCall(child), 0);
+  return nodes.reduce((count, node) => {
+    if (node.type === "call") return count + countCall(node.call);
+    if (node.type === "subagent") return count + nodesCallCount(node.subagent.nodes);
+    return count;
+  }, 0);
 }
 
-function chapterRowIsRunning(row: ChapterRow): boolean {
-  if (row.type === "work") return row.event.phase === "started";
-  if (row.type === "reasoning") return false;
-  return groupStatus(row.group) === "running";
+export function nodesDurationMs(nodes: ActivityNode[]): number | undefined {
+  const events = nodes.flatMap(nodeEvents);
+  return spanMs(events[0]?.createdAt, events[events.length - 1]?.createdAt);
 }
 
-export function groupStartsExpanded(group: ActivityGroup): boolean {
-  if (group.kind === "lifecycle" || group.kind === "run" || group.kind === "turn" || group.kind === "subagent") {
-    return false;
-  }
-  return groupStatus(group) !== "done";
+export function turnDurationMs(turn: ActivityTurn): number | undefined {
+  return spanMs(turn.events[0]?.createdAt, turn.events[turn.events.length - 1]?.createdAt);
 }
 
-export function groupDurationMs(group: ActivityGroup): number | undefined {
-  const last = group.hidden[group.hidden.length - 1];
-  if (!last) return undefined;
-  const from = eventTime(group.anchor.createdAt);
-  const to = eventTime(last.createdAt);
+export function callDurationMs(call: ActivityCall): number | undefined {
+  return spanMs(call.startedAt, call.endedAt);
+}
+
+function spanMs(start: string | undefined, end: string | undefined): number | undefined {
+  if (start === undefined || end === undefined) return undefined;
+  const from = eventTime(start);
+  const to = eventTime(end);
   if (from === undefined || to === undefined) return undefined;
-  const duration = to - from;
-  return duration > 0 ? duration : undefined;
+  return to - from > 0 ? to - from : undefined;
 }
 
-export function groupLabel(group: ActivityGroup): string {
-  if (group.kind === "turn" && group.turnTitle !== undefined) {
-    if (group.turnTitle === "Work step") return `Work step #${group.anchor.id}`;
-    if (group.children.length === 0) {
-      return `Message #${group.anchor.id}: ${clip(group.turnTitle, 64)}`;
-    }
-    return group.turnTitle;
-  }
-  for (const child of group.children) {
-    const event = firstMeaningful(child);
-    if (event) {
-      const title = event.title.trim();
-      if (title !== "") return title;
-    }
-  }
-  for (const child of group.children) {
-    const prose = firstProse(child);
-    if (prose !== undefined) {
-      const line = (prose.split("\n")[0] ?? prose).trim();
-      if (line !== "") return `Message #${group.anchor.id}: ${clip(line, 64)}`;
-    }
-  }
-  return `Work step #${group.anchor.id}`;
-}
+export type HandoffBriefTier = "verbatim" | "digest";
 
 export interface HandoffBoundary {
   chain: string;
   earlierRuns: HandoffRun[];
   hiddenEventCount: number;
+  briefTier?: HandoffBriefTier;
 }
 
 export interface HandoffRun {
@@ -239,25 +243,24 @@ export const ActivityStory = {
 };
 
 /**
- * Keeps a live segment's simple action run incremental. Complex boundaries
- * still use the canonical composer, so replay and grouping semantics retain a
- * single source of truth.
+ * Holds the composition a segment last produced, so a rebuild that saw no new
+ * activity hands back the same object instead of walking the run again.
  */
 export class ActivityStoryProjection {
   private events: TaskEventView[] | undefined;
-  private eventLength = 0;
-  private simple: SimpleAppendState | undefined;
-  private settled = false;
-  private showReceipt = false;
-  private incrementalUpdates = 0;
-  private fallbackUpdates = 0;
+  private composition: ActivityComposition | undefined;
+  private key = "";
+  private reused = 0;
+  private composed = 0;
 
+  /** Updates served straight from the held composition. */
   get incrementalCount(): number {
-    return this.incrementalUpdates;
+    return this.reused;
   }
 
+  /** Updates that had to walk the run again. */
   get fallbackCount(): number {
-    return this.fallbackUpdates;
+    return this.composed;
   }
 
   update(
@@ -266,210 +269,24 @@ export class ActivityStoryProjection {
     ending: ActivityEnding | undefined,
     showReceipt = settled,
   ): ActivityComposition {
-    const canAppend = this.isAppend(events, settled, showReceipt, ending);
-    if (canAppend && this.simple !== undefined) {
-      for (let index = this.eventLength; index < events.length; index += 1) {
-        if (!appendProjectedEvent(this.simple, events[index])) {
-          this.simple = undefined;
-          break;
-        }
-      }
-      if (this.simple !== undefined) {
-        this.simple.events = events;
-        this.events = events;
-        this.eventLength = events.length;
-        this.incrementalUpdates += 1;
-        return simpleComposition(this.simple);
-      }
+    const key = `${settled}|${showReceipt}|${ending === undefined ? "" : JSON.stringify(ending)}`;
+    if (this.composition !== undefined && this.key === key && sameEvents(this.events, events)) {
+      this.reused += 1;
+      return this.composition;
     }
-
-    if (this.events !== undefined && events.length > this.eventLength) this.fallbackUpdates += 1;
-    const composition = ActivityStory.composeWithState(events, settled, ending, showReceipt);
-    this.events = events;
-    this.eventLength = events.length;
-    this.settled = settled;
-    this.showReceipt = showReceipt;
-    this.simple = simpleAppendState(events);
-    return composition;
-  }
-
-  private isAppend(
-    events: TaskEventView[],
-    settled: boolean,
-    showReceipt: boolean,
-    ending: ActivityEnding | undefined,
-  ): boolean {
-    const previous = this.events;
-    if (previous === undefined || events.length <= this.eventLength || this.settled !== settled || this.showReceipt !== showReceipt) {
-      return false;
-    }
-    if (ending !== undefined) return false;
-    return events[0] === previous[0] && events[this.eventLength - 1] === previous[this.eventLength - 1];
+    this.composed += 1;
+    this.composition = ActivityStory.composeWithState(events, settled, ending, showReceipt);
+    // A caller appends to the array it handed over, so the held copy is what
+    // makes "nothing new arrived" answerable at all.
+    this.events = events.slice();
+    this.key = key;
+    return this.composition;
   }
 }
 
-interface SimpleAppendState {
-  events: TaskEventView[];
-  key: string;
-  turnId?: number;
-  actionRows: Map<string, number>;
-  repeatSignature?: string;
-  lastEvent: TaskEventView;
-  rows: ChapterRow[];
-  hidden: TaskEventView[];
-  count: number;
-  checkNames: string[];
-  titles: Set<string>;
-}
-
-function simpleAppendState(events: TaskEventView[]): SimpleAppendState | undefined {
-  const first = events[0];
-  if (first === undefined || !isProjectableEvent(first)) return undefined;
-  const state: SimpleAppendState = {
-    events,
-    key: runKey(first),
-    turnId: first.turnId,
-    actionRows: new Map(),
-    lastEvent: first,
-    rows: [],
-    hidden: [],
-    count: 0,
-    checkNames: [],
-    titles: new Set(),
-  };
-  for (const event of events) {
-    if (!appendProjectedEvent(state, event)) return undefined;
-  }
-  return state;
-}
-
-function appendProjectedEvent(state: SimpleAppendState, event: TaskEventView): boolean {
-  const action = actionKey(event);
-  const existingRow = action === undefined ? undefined : state.actionRows.get(action);
-  if (existingRow !== undefined) {
-    return settleProjectedAction(state, event, existingRow);
-  }
-
-  const signature = simpleSignature(event);
-  const firstEvent = state.rows[0]?.type === "work" ? state.rows[0].event : undefined;
-  const repeatsLast = state.rows.length > 0 && simpleSignature(state.lastEvent) === signature;
-  if (
-    !isProjectableEvent(event) ||
-    runKey(event) !== state.key ||
-    event.turnId !== state.turnId ||
-    (state.rows.length > 0 && sameShape(state.lastEvent, event)) ||
-    exceedsGap(state.lastEvent, event, RUN_GAP_SECONDS) ||
-    (state.repeatSignature !== undefined && state.repeatSignature !== signature) ||
-    (repeatsLast && firstEvent !== undefined && simpleSignature(firstEvent) !== signature)
-  ) return false;
-
-  if (repeatsLast) state.repeatSignature = signature;
-  state.rows.push({ type: "work", event });
-  state.hidden.push(event);
-  if (action !== undefined) state.actionRows.set(action, state.rows.length - 1);
-  const checkName = CHECK_NAMES.get(eventTitleKey(event));
-  if (checkName !== undefined && !state.checkNames.includes(checkName)) state.checkNames.push(checkName);
-  state.titles.add(eventTitleKey(event));
-  state.count = state.rows.length;
-  state.lastEvent = event;
-  return true;
-}
-
-function settleProjectedAction(state: SimpleAppendState, event: TaskEventView, rowIndex: number): boolean {
-  if (!isActionUpdate(event) || rowIndex !== state.rows.length - 1) return false;
-  const row = state.rows[rowIndex];
-  if (row.type !== "work" || replays(row.event, event) || reopens(row.event, event)) return false;
-  const merged = settleAction(row.event, event);
-  const previous = state.rows[rowIndex - 1];
-  if (
-    runKey(merged) !== state.key ||
-    merged.turnId !== state.turnId ||
-    eventTitleKey(merged) !== eventTitleKey(row.event) ||
-    eventSubject(merged) !== eventSubject(row.event) ||
-    (previous?.type === "work" && sameShape(previous.event, merged))
-  ) return false;
-  state.rows[rowIndex] = { type: "work", event: merged };
-  state.hidden[rowIndex] = merged;
-  state.lastEvent = merged;
-  return true;
-}
-
-function isProjectableEvent(event: TaskEventView): boolean {
-  return (
-    (event.kind === "tool" || event.kind === "command" || event.kind === "file") &&
-    event.title !== "API retry" &&
-    !event.title.startsWith("Auto Retry ") &&
-    event.title !== "Turn Failed" &&
-    event.minor !== true &&
-    !isSignal(event) &&
-    !isTechnical(event) &&
-    !hasUnsupportedProviderStructure(event)
-  );
-}
-
-function isActionUpdate(event: TaskEventView): boolean {
-  return actionKey(event) !== undefined && !event.title.includes("Tool progress") && !hasUnsupportedProviderStructure(event);
-}
-
-function hasUnsupportedProviderStructure(event: TaskEventView): boolean {
-  return (
-    event.source === "antigravity" ||
-    parentActionId(event) !== undefined ||
-    turnSignal(event) !== undefined ||
-    isLifecycleUpdate(event)
-  );
-}
-
-function actionKey(event: TaskEventView): string | undefined {
-  return event.actionId === undefined || event.actionId === "" ? undefined : event.actionId;
-}
-
-function simpleSignature(event: TaskEventView): string {
-  return `${event.kind}|${event.title}|${event.target ?? event.detail ?? ""}`;
-}
-
-function simpleComposition(state: SimpleAppendState): ActivityComposition {
-  const first = state.events[0];
-  if (first === undefined) return { blocks: [], technical: [] };
-  const anchor = state.rows[0]?.type === "work" ? state.rows[0].event : first;
-  const floor = runFloor(anchor);
-  const grouped = state.count >= floor || state.repeatSignature !== undefined
-    ? [{
-        type: "group" as const,
-        group: {
-          kind: "run" as const,
-          anchor,
-          children: state.rows,
-          members: [],
-          runLabel: simpleRunLabel(state),
-          turnTitle: undefined,
-          hidden: state.hidden,
-        },
-      }]
-    : state.rows;
-  return { blocks: [{ type: "chapter", id: first.id, rows: grouped }], technical: [] };
-}
-
-function simpleRunLabel(state: SimpleAppendState): string {
-  const first = state.rows[0]?.type === "work" ? state.rows[0].event : state.events[0];
-  if (first === undefined) return "";
-  if (state.repeatSignature !== undefined && state.count < runFloor(first)) {
-    const subject = first.kind === "file" ? fileName(eventSubject(first)) : eventSubject(first);
-    return `${first.verb ?? "Ran"} ${clip(subject, 48)} ×${state.count}`;
-  }
-  if (state.key === "check") {
-    return state.checkNames.length > 0 ? `Checked ${state.checkNames.join(", ")}` : `Ran ${state.count} checks`;
-  }
-  if (state.key.startsWith("edit:")) return `Edited ${fileName(eventSubject(first))} ×${state.count}`;
-  if (state.key === "lookup") {
-    if (state.titles.size > 1) return `Ran ${state.count} lookups`;
-    const title = eventTitleKey(first);
-    if (title === "read file") return `Read ${state.count} files`;
-    return `Ran ${state.count} ${LOOKUP_NOUNS.get(title)}`;
-  }
-  if (first.kind === "command") return `Ran ${state.count} commands`;
-  if (first.kind === "file") return `Changed ${state.count} files`;
-  return `Ran ${state.count} calls`;
+function sameEvents(left: TaskEventView[] | undefined, right: TaskEventView[]): boolean {
+  if (left === undefined || left.length !== right.length) return false;
+  return left.every((event, index) => event === right[index]);
 }
 
 function composeWithState(
@@ -478,17 +295,20 @@ function composeWithState(
   ending: ActivityEnding | undefined,
   showReceipt = settled,
 ): ActivityComposition {
-  rawEvents = normalizeAntigravityEvents(rawEvents);
-  const folded = foldActions(rawEvents);
-  const events = deriveTurnIds(folded.rows);
+  const events = deriveTurnIds(withoutDuplicateHookCalls(normalizeAntigravityEvents(rawEvents)));
   const boundaries = events
     .map((event, index) => [index, event] as const)
-    .filter(([, event]) => event.type === "handed_off" || event.title === "Handed off to another profile");
+    .filter(([, event]) => event.type === "handed_off");
   if (boundaries.length === 0) {
-    return composeFlat(events, folded.members, settled, ending, showReceipt);
+    return composeTimeline(events, settled, ending, showReceipt);
   }
 
   const hops = boundaries.map(([, event]) => hopFromDetail(event.detail));
+  const lastBoundary = boundaries[boundaries.length - 1];
+  const briefTier = events
+    .slice(lastBoundary[0] + 1)
+    .map(handoffBriefTier)
+    .find((tier): tier is HandoffBriefTier => tier !== undefined);
   const segments: TaskEventView[][] = [];
   let start = 0;
   for (const [index] of boundaries) {
@@ -497,9 +317,8 @@ function composeWithState(
   }
   segments.push(events.slice(start));
   const composed = segments.map((segment, index) =>
-    composeFlat(
+    composeTimeline(
       segment,
-      folded.members,
       index + 1 !== segments.length || settled,
       index + 1 === segments.length ? ending : undefined,
       showReceipt,
@@ -512,7 +331,7 @@ function composeWithState(
     .slice(0, Math.max(segments.length - 1, 0))
     .reduce((sum, segment) => sum + segment.length, 0);
   const blocks: ActivityBlock[] = [
-    { type: "handoff", boundary: { chain: hopChain(hops), earlierRuns, hiddenEventCount } },
+    { type: "handoff", boundary: { chain: hopChain(hops), earlierRuns, hiddenEventCount, briefTier } },
   ];
   const current = composed[composed.length - 1];
   if (current) blocks.push(...current.blocks);
@@ -522,9 +341,628 @@ function composeWithState(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Building the timeline
+// ---------------------------------------------------------------------------
+
+interface TurnDraft {
+  turnId?: number;
+  ordinal: number;
+  segments: SegmentDraft[];
+  events: TaskEventView[];
+}
+
+interface SegmentDraft {
+  lead?: TaskEventView;
+  nodes: ActivityNode[];
+}
+
+function composeTimeline(
+  rawEvents: TaskEventView[],
+  settled: boolean,
+  ending: ActivityEnding | undefined,
+  showReceipt: boolean,
+): ActivityComposition {
+  const events = mergeSkipNotices(
+    terminalOutcome(withoutRedundantTurnFailure(rawEvents.map(retryMessage)), ending),
+  );
+  const usageWindow = usageWindowSummary(events);
+  const receiptId = showReceipt ? findLast(events, (event) => event.kind === "usage")?.id : undefined;
+  const responseId = settled ? closingMessageId(events) : undefined;
+  const calls = foldCalls(events);
+
+  const technical: TaskEventView[] = [];
+  const drafts: TurnDraft[] = [];
+  let current: TurnDraft | undefined;
+  let receipt: TaskEventView | undefined;
+  let thinkingTokens = 0;
+  let pulseTokens = 0;
+  let pulse: TaskEventView[] = [];
+
+  const turnFor = (event: TaskEventView): TurnDraft => {
+    if (current !== undefined && (event.turnId === undefined || event.turnId === current.turnId)) {
+      return current;
+    }
+    current = { turnId: event.turnId, ordinal: drafts.length, segments: [], events: [] };
+    drafts.push(current);
+    return current;
+  };
+  const place = (event: TaskEventView, node: ActivityNode) => {
+    const turn = turnFor(event);
+    const segment = turn.segments[turn.segments.length - 1];
+    if (segment === undefined) turn.segments.push({ nodes: [node] });
+    else segment.nodes.push(node);
+  };
+  const flushPulse = () => {
+    const first = pulse[0];
+    if (!first) return;
+    const last = pulse[pulse.length - 1];
+    const text = mergeReasoning(pulse);
+    const tokens = pulseTokens;
+    pulse = [];
+    pulseTokens = 0;
+    place(first, {
+      type: "thinking",
+      id: `thinking:${first.id}`,
+      pulse: {
+        id: first.id,
+        text,
+        tokens: tokens > 0 ? tokens : undefined,
+        seconds: eventDurationSeconds(first.createdAt, last.createdAt),
+      },
+    });
+  };
+
+  for (const event of events) {
+    const tokens = event.presentation?.tokensThinking ?? 0;
+    thinkingTokens += tokens;
+    pulseTokens += tokens;
+    if (event.id === receiptId) {
+      flushPulse();
+      receipt = event;
+      continue;
+    }
+    const fold = calls.byEvent.get(event.id);
+    if (fold !== undefined && fold.opener !== event.id) continue;
+    if (isTechnical(fold?.row ?? event)) {
+      technical.push(fold?.row ?? event);
+      continue;
+    }
+    if (isThinkingPulse(event)) {
+      pulse.push(event);
+      continue;
+    }
+    flushPulse();
+    if (event.id === responseId) continue;
+
+    if (fold !== undefined) {
+      turnFor(event).events.push(event);
+      if (calls.nested.has(fold.key)) continue;
+      place(event, { type: "call", call: builtCall(fold, calls) });
+      continue;
+    }
+
+    const turn = turnFor(event);
+    turn.events.push(event);
+    if (event.kind === "message") {
+      turn.segments.push({ lead: event, nodes: [{ type: "message", id: `message:${event.id}`, event }] });
+      continue;
+    }
+    place(event, { type: "notice", id: `notice:${event.id}`, event });
+  }
+  flushPulse();
+
+  const blocks: ActivityBlock[] = drafts
+    .map((draft, index) => finishTurn(draft, settled || index + 1 < drafts.length))
+    .filter((turn): turn is ActivityTurn => turn !== undefined)
+    .map((turn) => ({ type: "turn" as const, turn }));
+  if (receipt) blocks.push({ type: "receipt", event: receipt, thinkingTokens, usageWindow });
+  return { blocks, technical };
+}
+
+/**
+ * Closes a turn: a subagent's stretch moves under the row that started it,
+ * and once the turn itself has closed, a call it never ended reads as
+ * interrupted rather than as work still in flight.
+ */
+function finishTurn(draft: TurnDraft, closed: boolean): ActivityTurn | undefined {
+  const segments = draft.segments
+    .map((segment, index) => ({
+      id: `segment:${draft.ordinal}:${index}`,
+      lead: segment.lead,
+      nodes: closed ? markInterrupted(nestSubagents(segment.nodes)) : nestSubagents(segment.nodes),
+    }))
+    .filter((segment) => segment.nodes.length > 0);
+  if (segments.length === 0) return undefined;
+  const named = turnTitle(segments);
+  return {
+    id: `turn:${draft.ordinal}`,
+    turnId: draft.turnId,
+    ordinal: draft.ordinal,
+    title: named?.title,
+    titleFrom: named?.id,
+    segments,
+    events: draft.events,
+    status: turnStatus(segments, closed),
+  };
+}
+
+/** A turn is named by the first thing the worker said while running it. */
+function turnTitle(segments: ActivitySegment[]): { title: string; id: number } | undefined {
+  for (const segment of segments) {
+    for (const node of segment.nodes) {
+      if (node.type !== "message") continue;
+      const title = titleFromMessage(node.event);
+      if (title !== undefined) return { title, id: node.event.id };
+    }
+  }
+  return undefined;
+}
+
+function titleFromMessage(event: TaskEventView): string | undefined {
+  const text = eventText(event);
+  if (text === undefined) return undefined;
+  const line = (text.split("\n").find((value) => value.trim() !== "") ?? "").trim();
+  return line === "" ? undefined : clip(line, 80);
+}
+
+function turnStatus(segments: ActivitySegment[], closed: boolean): ActivityStatus {
+  const flatten = (nodes: ActivityNode[]): ActivityNode[] =>
+    nodes.flatMap((node) => (node.type === "subagent" ? [node, ...flatten(node.subagent.nodes)] : [node]));
+  const nodes = flatten(segments.flatMap((segment) => segment.nodes));
+  if (nodes.some((node) => node.type === "notice" && node.event.type === "needs_input")) return "needs_input";
+  if (nodes.some(nodeFailed)) return "failed";
+  if (!closed && nodes.some(nodeRunning)) return "running";
+  return "done";
+}
+
+function nodeFailed(node: ActivityNode): boolean {
+  if (node.type === "call") return node.call.status === "failed";
+  if (node.type === "notice") return node.event.phase === "failed";
+  return false;
+}
+
+function nodeRunning(node: ActivityNode): boolean {
+  return node.type === "call" && node.call.status === "running";
+}
+
+// ---------------------------------------------------------------------------
+// Calls
+// ---------------------------------------------------------------------------
+
+/** The agent's own record of a call, on a turn that ran over ACP. */
+const AGENT_CALL_TYPES = new Set(["agent.tool_call", "agent.tool_call_update"]);
+
+const CALL_KINDS = new Set<TaskEventView["kind"]>(["tool", "command", "file"]);
+
+/** A heartbeat that only says a call is still going; its row already says so. */
+const TOOL_PROGRESS_TYPE = "agent.tool_progress";
+
+interface CallFold {
+  key: string;
+  actionId: string;
+  turnId?: number;
+  /** The id of the row that opened this call. */
+  opener: number;
+  row: TaskEventView;
+  events: TaskEventView[];
+}
+
+interface CallFolds {
+  /** Every row that carried a call id, pointed at the call it belongs to. */
+  byEvent: Map<number, CallFold>;
+  /** The calls a delegating call reported as its own, by the parent's key. */
+  childrenOf: Map<string, CallFold[]>;
+  /** The keys of calls that hang under another call rather than on their own. */
+  nested: Set<string>;
+}
+
+function callId(event: TaskEventView): string | undefined {
+  return event.actionId === undefined || event.actionId === "" ? undefined : event.actionId;
+}
+
+/**
+ * Whether a row belongs to a call already open. A provider posts some rows
+ * before it has told us which turn it is on, and an unknown turn is not a
+ * different turn — it is the same call still reporting.
+ */
+function sameCall(fold: CallFold, event: TaskEventView): boolean {
+  return fold.turnId === undefined || event.turnId === undefined || fold.turnId === event.turnId;
+}
+
+/**
+ * Folds every row a provider sent for one tool call into a single record,
+ * keyed by that call's own id. A resumed session replays the whole prior
+ * transcript, so a call that already finished arrives again as a fresh start
+ * under its original id; that replay lands back on the record it already has
+ * rather than opening a second one.
+ */
+function foldCalls(events: TaskEventView[]): CallFolds {
+  const byEvent = new Map<number, CallFold>();
+  const byAction = new Map<string, CallFold>();
+  const opened: CallFold[] = [];
+  for (const event of events) {
+    const actionId = callId(event);
+    if (actionId === undefined) continue;
+    const fold = byAction.get(actionId);
+    if (fold !== undefined && sameCall(fold, event) && !reopens(fold.row, event)) {
+      fold.events.push(event);
+      fold.turnId = fold.turnId ?? event.turnId;
+      byEvent.set(event.id, fold);
+      if (!replays(fold.row, event)) fold.row = settleAction(fold.row, event);
+      continue;
+    }
+    // A heartbeat only says a call is still going; it never opens one.
+    if (event.type === TOOL_PROGRESS_TYPE) continue;
+    const call: CallFold = {
+      key: `${actionId}#${event.id}`,
+      actionId,
+      turnId: event.turnId,
+      opener: event.id,
+      row: event,
+      events: [event],
+    };
+    byAction.set(actionId, call);
+    byEvent.set(event.id, call);
+    opened.push(call);
+  }
+
+  const childrenOf = new Map<string, CallFold[]>();
+  const nested = new Set<string>();
+  const first = new Map<string, CallFold>();
+  for (const call of opened) if (!first.has(call.actionId)) first.set(call.actionId, call);
+  for (const call of opened) {
+    const parent = parentActionId(call.row);
+    const owner = parent === undefined ? undefined : first.get(parent);
+    if (owner === undefined || owner === call) continue;
+    childrenOf.set(owner.key, [...(childrenOf.get(owner.key) ?? []), call]);
+    nested.add(call.key);
+  }
+  return { byEvent, childrenOf, nested };
+}
+
+function builtCall(fold: CallFold, folds: CallFolds): ActivityCall {
+  const last = fold.events[fold.events.length - 1] ?? fold.row;
+  const terminal = fold.row.phase === "completed" || fold.row.phase === "failed";
+  return {
+    id: `call:${fold.turnId ?? 0}:${fold.actionId}`,
+    actionId: fold.actionId,
+    event: fold.row,
+    events: fold.events,
+    children: (folds.childrenOf.get(fold.key) ?? []).map((child) => builtCall(child, folds)),
+    status: fold.row.phase === "failed" ? "failed" : terminal ? "done" : "running",
+    startedAt: fold.events[0]?.createdAt ?? fold.row.createdAt,
+    endedAt: terminal ? last.createdAt : undefined,
+  };
+}
+
+/**
+ * A call that has not reported a terminal phase on a turn that already closed
+ * never finished; it did not keep running either.
+ */
+function markInterrupted(nodes: ActivityNode[]): ActivityNode[] {
+  const call = (value: ActivityCall): ActivityCall => ({
+    ...value,
+    status: value.status === "running" ? "interrupted" : value.status,
+    children: value.children.map(call),
+  });
+  return nodes.map((node) => {
+    if (node.type === "subagent") {
+      const status = node.subagent.status === "running" ? "interrupted" : node.subagent.status;
+      return { ...node, subagent: { ...node.subagent, status, nodes: markInterrupted(node.subagent.nodes) } };
+    }
+    return node.type === "call" ? { type: "call", call: call(node.call) } : node;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Subagents
+// ---------------------------------------------------------------------------
+
+export const SUBAGENT_STARTED_TITLE = "Subagent started";
+export const SUBAGENT_FINISHED_TITLE = "Subagent finished";
+
+/**
+ * Subagent runs nest by bracketing: a start opens a group, its stop closes it,
+ * and a start that arrives while another group is still open sits inside it.
+ * A row that names the run it belongs to (a hook `agent_id`, or a call whose
+ * parent is the launching call) goes there even when the groups interleave;
+ * any other row goes to the innermost open group. A start that never stops
+ * closes with everything that followed it, still marked as running.
+ */
+function nestSubagents(nodes: ActivityNode[]): ActivityNode[] {
+  interface Frame {
+    id: string;
+    start: TaskEventView;
+    parent: Frame | undefined;
+    nodes: ActivityNode[];
+    belongs: (event: TaskEventView) => boolean;
+    done: boolean;
+  }
+  const root: ActivityNode[] = [];
+  const open: Frame[] = [];
+  const wrap = (frame: Frame): ActivityNode => ({
+    type: "subagent",
+    subagent: {
+      id: `subagent:${frame.id}`,
+      label: subagentLabel(frame.start),
+      start: frame.start,
+      nodes: frame.nodes,
+      status: frame.done ? "done" : "running",
+    },
+  });
+  const close = (frame: Frame) => {
+    const index = open.indexOf(frame);
+    open.splice(index, 1);
+    for (const inner of open.slice(index)) {
+      if (inner.parent === frame) inner.parent = frame.parent;
+    }
+    (frame.parent && open.includes(frame.parent) ? frame.parent.nodes : root).push(wrap(frame));
+  };
+
+  for (const node of nodes) {
+    const boundary = node.type === "notice" ? subagentBoundary(node.event) : undefined;
+    if (node.type === "notice" && boundary?.role === "start" && !open.some((frame) => frame.id === boundary.id)) {
+      open.push({
+        id: boundary.id,
+        start: node.event,
+        parent: open.at(-1),
+        nodes: [],
+        belongs: subagentMembership(node.event, boundary.id),
+        done: false,
+      });
+      continue;
+    }
+    if (boundary?.role === "stop") {
+      const frame = innermost(open, (candidate) => candidate.id === boundary.id);
+      if (frame !== undefined) {
+        frame.nodes.push(node);
+        frame.done = true;
+        close(frame);
+        continue;
+      }
+    }
+    const events = nodeEvents(node);
+    const owner = innermost(open, (frame) => events.some(frame.belongs)) ?? open.at(-1);
+    (owner?.nodes ?? root).push(node);
+  }
+  while (open.length > 0) close(open[open.length - 1]);
+  return root;
+}
+
+function innermost<T>(frames: T[], matches: (frame: T) => boolean): T | undefined {
+  for (let index = frames.length - 1; index >= 0; index--) {
+    if (matches(frames[index])) return frames[index];
+  }
+  return undefined;
+}
+
+function subagentBoundary(event: TaskEventView): { id: string; role: "start" | "stop" } | undefined {
+  if (event.title === "SubagentStart" || event.title === "SubagentStop" || event.title === "Spawned subagent") {
+    const id = rawString(event, "agent_id");
+    if (id === undefined) return undefined;
+    return { id, role: event.title === "SubagentStop" ? "stop" : "start" };
+  }
+  if (event.title === SUBAGENT_STARTED_TITLE || event.title === SUBAGENT_FINISHED_TITLE) {
+    // The streamed pair shares `task_id`; the hook pair shares `agent_id`
+    // under the same normalized titles since Rust aligns them.
+    const id = rawString(event, "task_id") ?? rawString(event, "agent_id");
+    return id === undefined ? undefined : { id, role: event.title === SUBAGENT_STARTED_TITLE ? "start" : "stop" };
+  }
+  return undefined;
+}
+
+/**
+ * A hook pair stamps every row it owns with the same `agent_id`. A streamed
+ * pair does not: it names the tool call that launched the subagent, and the
+ * subagent's own calls point back at it as their parent.
+ */
+function subagentMembership(start: TaskEventView, id: string): (event: TaskEventView) => boolean {
+  if (rawString(start, "agent_id") !== undefined) {
+    return (event) => rawString(event, "agent_id") === id;
+  }
+  const toolUseId = rawString(start, "tool_use_id");
+  return (event) => toolUseId !== undefined && parentActionId(event) === toolUseId;
+}
+
+function subagentLabel(event: TaskEventView): string {
+  const name = rawString(event, "agent_type") ?? (event.title === SUBAGENT_STARTED_TITLE ? event.detail : undefined);
+  return name !== undefined && name !== "" ? `Subagent · ${name}` : "Subagent";
+}
+
+// ---------------------------------------------------------------------------
+// What belongs in the story, and what is bookkeeping
+// ---------------------------------------------------------------------------
+
+export const ACTIVITY_SKIPPED_TITLE = "Some activity was not recorded";
+/** Every provider's reasoning blocks share this title; it is how they fold. */
+export const REASONING_TITLE = "Thinking";
+const USAGE_WINDOW_TITLE = "Usage window";
+
+/** Broker rows that record how a run was managed, not what it did. */
+const BOOKKEEPING_TYPES = new Set([
+  "created",
+  "queued",
+  "started",
+  "worker_spawned",
+  "completed",
+  "archived",
+  "unarchived",
+  "session_captured",
+  "session_reused",
+  "worker_stderr",
+  "heartbeat",
+  "handoff_brief",
+]);
+
+/** The broker's own record of output it could not keep. */
+const SKIPPED_TYPES = new Set(["line_dropped", "event_dropped", "events_truncated"]);
+
+function isTechnical(event: TaskEventView): boolean {
+  if (event.minor === true) return true;
+  if (BOOKKEEPING_TYPES.has(event.type) || event.type === TOOL_PROGRESS_TYPE) return true;
+  // A raw payload has no words a reader can use; it stays behind the toggle.
+  if (event.kind === "raw") return true;
+  if (event.kind === "usage") return true;
+  // A usage-window notice earns its place only when it says what was limited
+  // and for how long; the bare marker repeats without telling a reader
+  // anything.
+  if (event.title === USAGE_WINDOW_TITLE && (event.detail === undefined || event.detail === event.title)) {
+    return true;
+  }
+  return event.kind === "tool" && event.detail === undefined && event.presentation === undefined;
+}
+
+function handoffBriefTier(event: TaskEventView): HandoffBriefTier | undefined {
+  if (event.type !== "handoff_brief") return undefined;
+  const tier = event.detail?.split(/\s+/, 1)[0];
+  return tier === "verbatim" || tier === "digest" ? tier : undefined;
+}
+
+function isThinkingPulse(event: TaskEventView): boolean {
+  return event.kind === "reasoning" && event.title === REASONING_TITLE;
+}
+
+/**
+ * The readable part of one stretch of thinking.
+ *
+ * Providers that stream reasoning resend the whole block on every update, so a
+ * block that starts with the one before it replaces that one instead of piling
+ * up beside it. Blocks the provider redacted contribute nothing here — they
+ * still lengthen the stretch, they just cannot be read.
+ */
+function mergeReasoning(events: TaskEventView[]): string | undefined {
+  const blocks: string[] = [];
+  for (const event of events) {
+    const text = event.detail?.trim();
+    if (text === undefined || text === "") continue;
+    const previous = blocks[blocks.length - 1];
+    if (previous !== undefined && text.startsWith(previous)) blocks[blocks.length - 1] = text;
+    else blocks.push(text);
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : undefined;
+}
+
+/** Whether anything in this run is worth turning "Show thinking" on for. */
+export function compositionHasThinking(composition: ActivityComposition): boolean {
+  const inNodes = (nodes: ActivityNode[]): boolean =>
+    nodes.some((node) => (node.type === "subagent" ? inNodes(node.subagent.nodes) : node.type === "thinking"));
+  return composition.blocks.some(
+    (block) => block.type === "turn" && block.turn.segments.some((segment) => inNodes(segment.nodes)),
+  );
+}
+
+/**
+ * Output goes missing a line at a time, so a lossy run can raise the notice
+ * dozens of times. A reader needs to know once, with the total.
+ */
+function mergeSkipNotices(events: TaskEventView[]): TaskEventView[] {
+  const counts = new Map<string, number>();
+  let first: number | undefined;
+  events.forEach((event, index) => {
+    if (!SKIPPED_TYPES.has(event.type)) return;
+    if (first === undefined) first = index;
+    const skipped = parseSkipped(event.detail);
+    if (skipped) counts.set(skipped.noun, (counts.get(skipped.noun) ?? 0) + skipped.count);
+  });
+  if (first === undefined) return events;
+
+  const totals = [...counts]
+    .map(([noun, count]) => `${count} ${noun}${count === 1 ? "" : "s"} skipped`)
+    .join(" · ");
+  const text = totals === "" ? ACTIVITY_SKIPPED_TITLE : `${ACTIVITY_SKIPPED_TITLE} — ${totals}`;
+  return events.flatMap((event, index) => {
+    if (!SKIPPED_TYPES.has(event.type)) return [event];
+    if (index !== first) return [];
+    return [{
+      ...event,
+      detail: totals === "" ? undefined : totals,
+      presentation: { type: "signal" as const, text, level: "warning" as const },
+    }];
+  });
+}
+
+function parseSkipped(detail: string | undefined): { count: number; noun: string } | undefined {
+  const match = detail?.match(/^(\d+) (line|event)s? skipped$/);
+  return match ? { count: Number(match[1]), noun: match[2] } : undefined;
+}
+
+/**
+ * The window a run is closest to filling, read off the last notice the provider
+ * sent, so the receipt says how much headroom is left before the next run.
+ */
+function usageWindowSummary(events: TaskEventView[]): string | undefined {
+  const notice = findLast(events, (event) => event.title === USAGE_WINDOW_TITLE);
+  const windows = rawObject(rawObject(rawObject(notice && rawValue(notice))?.rate_limit_info)?.unifiedWindows);
+  if (!windows) return undefined;
+  let busiest: { utilization: number; resetsAt?: number } | undefined;
+  for (const value of Object.values(windows)) {
+    const window = rawObject(value);
+    const utilization = window?.utilization;
+    if (typeof utilization !== "number") continue;
+    if (busiest && busiest.utilization >= utilization) continue;
+    const resetsAt = window?.resetsAt;
+    busiest = { utilization, resetsAt: typeof resetsAt === "number" ? resetsAt : undefined };
+  }
+  if (!busiest) return undefined;
+  const percent = `${USAGE_WINDOW_TITLE} ${Math.round(busiest.utilization * 100)}%`;
+  const resets = busiest.resetsAt === undefined ? undefined : absoluteTime(new Date(busiest.resetsAt * 1000));
+  return resets === undefined ? percent : `${percent} · resets ${resets}`;
+}
+
+function closingMessageId(events: TaskEventView[]): number | undefined {
+  const index = findLastIndex(
+    events,
+    (event) => event.kind === "message" && event.minor !== true && eventText(event) !== undefined,
+  );
+  if (index === -1) return undefined;
+  const rest = events.slice(index + 1);
+  // A run tidies up after it speaks — session bookkeeping, the worker's own
+  // logging, the row that closes the task — and none of that makes the words
+  // before it something other than the closing answer. A failure does, and
+  // keeps the answer in the trace where it happened.
+  return rest.every((event) => isTechnical(event) || event.kind === "usage" || event.kind === "lifecycle")
+    ? events[index].id
+    : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Normalizing what providers send
+// ---------------------------------------------------------------------------
+
+/**
+ * Drops the hook copies of calls the worker already reported itself.
+ *
+ * A worker whose hooks post to Oga reports every tool call twice on a turn
+ * that also streams its own: once as a hook, once as the agent's own row. The
+ * agent's row is the fuller one — it carries the diff, the files, and the
+ * agent's own words for the call — so the hook copy goes. Hooks that are not
+ * about a call at all say something no other row does and stay.
+ */
+export function withoutDuplicateHookCalls(events: TaskEventView[]): TaskEventView[] {
+  const agentTurns = new Set<number | undefined>();
+  const agentCalls = new Set<string>();
+  for (const event of events) {
+    if (!AGENT_CALL_TYPES.has(event.type)) continue;
+    agentTurns.add(event.turnId);
+    if (event.actionId !== undefined) agentCalls.add(`${event.turnId}:${event.actionId}`);
+  }
+  if (agentTurns.size === 0) return events;
+  // A hook is posted without a turn, so it belongs to the turn the task was
+  // last in, and only the agent's own copy of that same call replaces it.
+  let turn: number | undefined;
+  return events.filter((event) => {
+    turn = event.turnId ?? turn;
+    if (event.type !== "agent.hook" || !CALL_KINDS.has(event.kind)) return true;
+    if (event.turnId !== undefined) return !agentTurns.has(event.turnId);
+    return !agentCalls.has(`${turn}:${event.actionId}`);
+  });
+}
+
 /** Converts Antigravity's raw step protocol into the same rows other providers use. */
 export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventView[] {
   const normalized: TaskEventView[] = [];
+  let response: OpenResponse | undefined;
   for (const event of events) {
     if (event.source !== "antigravity") {
       normalized.push(event);
@@ -534,7 +972,11 @@ export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventVi
     const step = payload?.step_update;
     const stepType = stringValue(step?.step_type);
     if (payload?.event === "step_update" && step) {
-      if (stepType === "user_input" || stepType === "system_message" || stepType === "agent_response") continue;
+      if (stepType === "agent_response") {
+        response = streamResponse(normalized, response, event, step);
+        continue;
+      }
+      if (stepType === "user_input" || stepType === "system_message") continue;
       if (stepType === "error_message") {
         const detail = stringValue(step.message) ?? stringValue(step.text) ?? stringValue(step.content) ?? event.detail;
         if (detail === undefined) continue;
@@ -594,6 +1036,40 @@ export function normalizeAntigravityEvents(events: TaskEventView[]): TaskEventVi
   return normalized;
 }
 
+/** The message row a response step is being written into, by where it sits. */
+interface OpenResponse {
+  step: number | undefined;
+  turnId: number | undefined;
+  index: number;
+}
+
+/**
+ * Writes one piece of a response step into its message row. A response streams
+ * as pieces of one step, which read as one message; the step's finished report
+ * adds its last piece and closes the row.
+ */
+function streamResponse(
+  rows: TaskEventView[],
+  open: OpenResponse | undefined,
+  event: TaskEventView,
+  step: AntigravityStep,
+): OpenResponse | undefined {
+  if (open !== undefined && open.step === step.step_index && open.turnId === event.turnId) {
+    const row = rows[open.index];
+    const text = `${row.presentation?.text ?? ""}${step.text_delta ?? ""}`;
+    rows[open.index] = {
+      ...row,
+      detail: text,
+      presentation: row.presentation && { ...row.presentation, text },
+      complete: event.kind !== "message",
+    };
+    return open;
+  }
+  if (event.kind !== "message") return open;
+  rows.push(event);
+  return { step: step.step_index, turnId: event.turnId, index: rows.length - 1 };
+}
+
 function antigravityToolPresentation(
   name: string,
   parameters: AntigravityParameters,
@@ -635,6 +1111,7 @@ interface AntigravityStep {
   step_type?: string;
   step_index?: number;
   state?: string;
+  text_delta?: string;
   tool_name?: string;
   toolName?: string;
   tool_info?: { parameters?: AntigravityParameters; output?: string; error?: { message?: string } };
@@ -660,1006 +1137,187 @@ function parseAntigravityPayload(raw: string | undefined): AntigravityPayload | 
   }
 }
 
-const SCHEDULING_TITLES = new Set(["Waiting", "Continuing", "Queued"]);
-const HOLD_OUTCOME_TITLES = new Set(["Waiting ended", "Wait timed out"]);
-
-function isTechnical(event: TaskEventView): boolean {
-  if (event.minor === true) return true;
-  if (event.kind === "raw") {
-    return [
-      "Step Start",
-      "Step Finish",
-      "Tool result",
-      "Hook Started",
-      "Hook Response",
-      // An unnamed agent hook: a raw payload with no label a reader can use.
-      "Event",
-      "Status",
-      "Commands Changed",
-    ].includes(event.title);
-  }
-  if (event.title === "Heartbeat") return true;
-  if (SCHEDULING_TITLES.has(event.title)) return true;
-  // A usage-window notice earns its place only when it says what was limited
-  // and for how long; the bare marker repeats without telling a reader
-  // anything.
-  if (event.title === USAGE_WINDOW_TITLE && (event.detail === undefined || event.detail === event.title)) {
-    return true;
-  }
-  // A hold that came and went says nothing a reader can act on. It stays only
-  // when it carries the reason a run never started.
-  if (HOLD_OUTCOME_TITLES.has(event.title) && !event.detail) return true;
-  if (event.kind === "tool" && event.detail === undefined && event.presentation === undefined) {
-    return true;
-  }
-  return [
-    "Task queued",
-    "Worker started",
-    "Worker spawned",
-    "Task completed",
-    "Session started",
-    "Session Reused",
-    "Session Captured",
-    "Archived",
-    "Handoff brief built",
-  ].includes(event.title);
-}
-
-export const ActivityGrouping = {
-  group(
-    rows: ChapterRow[],
-    members: Map<number, TaskEventView[]>,
-    turns: Map<number, number>,
-    splitTurns = true,
-  ): ChapterRow[] {
-    const nested = nestDelegations(nestSubagents(rows, members, turns)).map((row) => foldLifecycle(row, members));
-    const folded = foldRepeats(foldRuns(nested));
-    return splitTurns ? groupTurns(folded, turns) : folded;
-  },
-};
-
-export const SUBAGENT_STARTED_TITLE = "Subagent started";
-export const SUBAGENT_FINISHED_TITLE = "Subagent finished";
-
 /**
- * The words an agent says before it starts working — "Checking types, lint,
- * and Rust command compilation" — are the only section titles the trace has,
- * and every provider streams them as an ordinary message. One short line is a
- * heading; a paragraph, a list, or a long line is the worker's actual answer
- * and stays a message of its own.
+ * An ACP update carries only the fields that changed, so one that names no
+ * kind of its own is describing the call the row already holds. A page
+ * boundary or a replay separates such an update from its opening row, which
+ * leaves it looking like a call that never started — and opening a second row
+ * for it would show the same work twice.
  */
-const NARRATION_WORD_LIMIT = 16;
-
-export function narrationTitle(event: TaskEventView): string | undefined {
-  if (event.kind !== "message" || isTechnical(event)) return undefined;
-  const text = eventText(event);
-  if (text === undefined) return undefined;
-  const lines = text.split("\n").map((line) => line.trim()).filter((line) => line !== "");
-  if (lines.length !== 1) return undefined;
-  const line = lines[0];
-  if (/^[#>*\-|`]/.test(line)) return undefined;
-  return line.split(/\s+/).length <= NARRATION_WORD_LIMIT ? line : undefined;
+function isPartialAgentUpdate(event: TaskEventView): boolean {
+  return event.type === "agent.tool_call_update" && rawString(event, "kind") === undefined;
 }
 
-/** How much work a chapter holds: the tool calls a reader would have counted. */
-export function chapterCallCount(rows: ChapterRow[]): number {
-  return rows.flatMap(chapterRowEvents).filter(meaningful).length;
-}
-
-export function chapterDurationMs(rows: ChapterRow[]): number | undefined {
-  const events = rows.flatMap(chapterRowEvents);
-  const first = events[0];
-  const last = events[events.length - 1];
-  if (!first || !last) return undefined;
-  const from = eventTime(first.createdAt);
-  const to = eventTime(last.createdAt);
-  if (from === undefined || to === undefined) return undefined;
-  const duration = to - from;
-  return duration > 0 ? duration : undefined;
+function reopens(row: TaskEventView, event: TaskEventView): boolean {
+  if (isPartialAgentUpdate(event) || replays(row, event)) return false;
+  return (row.phase === "completed" || row.phase === "failed") && event.phase === "started" && event.minor !== true;
 }
 
 /**
- * Claude Code brackets a subagent run two ways. Hooks give a start/stop pair
- * sharing an `agent_id` (normalized to the same started/finished titles as
- * the streamed pair, with wire names kept as a fallback), and the stream
- * gives a `task_started` / `task_notification` pair sharing a `task_id`; no
- * other provider streams a subagent's own events into the parent's trace at
- * all, so there is nothing else to nest. Everything a matched pair owns moves
- * under it, reprocessed through the same grouping pipeline so its runs and
- * turns fold the same way the top-level trace does. A start with no matching
- * stop is left exactly where it fell rather than guessing where the subagent
- * ended.
+ * Resuming a session replays the whole prior transcript, so every tool call
+ * that already finished arrives a second time as a fresh start under its
+ * original id. It is the same call, and merging its replay back in would undo
+ * the outcome the row already carries.
  */
-function nestSubagents(
-  rows: ChapterRow[],
-  members: Map<number, TaskEventView[]>,
-  turns: Map<number, number>,
-): ChapterRow[] {
-  const starts = new Map<string, { index: number; event: TaskEventView }>();
-  rows.forEach((row, index) => {
-    if (row.type !== "work") return;
-    const boundary = subagentBoundary(row.event);
-    if (boundary?.role !== "start") return;
-    if (!starts.has(boundary.id)) starts.set(boundary.id, { index, event: row.event });
-  });
-  if (starts.size === 0) return rows;
-
-  const pairs: { owns: (event: TaskEventView) => boolean; start: number; stop: number }[] = [];
-  for (const [id, { index: start, event }] of starts) {
-    let stop: number | undefined;
-    for (let index = start + 1; index < rows.length; index++) {
-      const row = rows[index];
-      if (row.type !== "work") continue;
-      const boundary = subagentBoundary(row.event);
-      if (boundary?.role === "stop" && boundary.id === id) {
-        stop = index;
-        break;
-      }
-    }
-    if (stop !== undefined) pairs.push({ owns: subagentMembership(event, id), start, stop });
-  }
-  if (pairs.length === 0) return rows;
-
-  // Two subagents can run at once, and their rows arrive interleaved — real
-  // runs have shown five at a time — so membership between a pair's start and
-  // stop is decided by what each row says it belongs to, never by index range:
-  // a range can span rows that belong to a different subagent entirely.
-  const childrenOf = new Map<number, number[]>();
-  const consumed = new Set<number>();
-  for (const { owns, start, stop } of pairs) {
-    consumed.add(start);
-    const owned: number[] = [];
-    for (let index = start + 1; index <= stop; index++) {
-      const row = rows[index];
-      if (row.type === "work" && (index === stop || owns(row.event))) {
-        owned.push(index);
-        consumed.add(index);
-      }
-    }
-    childrenOf.set(start, owned);
-  }
-
-  const result: ChapterRow[] = [];
-  rows.forEach((row, index) => {
-    const owned = childrenOf.get(index);
-    if (owned) {
-      if (row.type !== "work") return;
-      const rawChildren = owned.map((childIndex) => rows[childIndex]);
-      const children = ActivityGrouping.group(rawChildren, members, turns);
-      result.push({
-        type: "group",
-        group: makeActivityGroup("subagent", row.event, children, [], subagentLabel(row.event), undefined),
-      });
-      return;
-    }
-    if (!consumed.has(index)) result.push(row);
-  });
-  return result;
-}
-
-function subagentBoundary(event: TaskEventView): { id: string; role: "start" | "stop" } | undefined {
-  if (event.title === "SubagentStart" || event.title === "SubagentStop" || event.title === "Spawned subagent") {
-    const id = rawString(event, "agent_id");
-    if (id === undefined) return undefined;
-    const role = event.title === "SubagentStop" ? "stop" : "start";
-    return { id, role };
-  }
-  if (event.title === SUBAGENT_STARTED_TITLE || event.title === SUBAGENT_FINISHED_TITLE) {
-    // The streamed pair shares `task_id`; the hook pair shares `agent_id`
-    // under the same normalized titles since Rust aligns them.
-    const id = rawString(event, "task_id") ?? rawString(event, "agent_id");
-    return id === undefined ? undefined : { id, role: event.title === SUBAGENT_STARTED_TITLE ? "start" : "stop" };
-  }
-  return undefined;
-}
-
-/**
- * A hook pair stamps every row it owns with the same `agent_id`. A streamed
- * pair does not: it names the tool call that launched the subagent, and the
- * subagent's own calls point back at it as their parent.
- */
-function subagentMembership(start: TaskEventView, id: string): (event: TaskEventView) => boolean {
-  if (rawString(start, "agent_id") !== undefined) {
-    return (event) => rawString(event, "agent_id") === id;
-  }
-  const toolUseId = rawString(start, "tool_use_id");
-  return (event) => toolUseId !== undefined && parentActionId(event) === toolUseId;
-}
-
-function subagentLabel(event: TaskEventView): string {
-  const name = rawString(event, "agent_type") ?? (event.title === SUBAGENT_STARTED_TITLE ? event.detail : undefined);
-  return name !== undefined && name !== "" ? `Subagent · ${name}` : "Subagent";
-}
-
-function rawString(event: TaskEventView, key: string): string | undefined {
-  const found = rawObject(rawValue(event))?.[key];
-  return typeof found === "string" && found !== "" ? found : undefined;
-}
-
-/** SAFETY: guarded on the value being a non-null, non-array object. */
-function rawObject(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function composeFlat(
-  rawEvents: TaskEventView[],
-  members: Map<number, TaskEventView[]>,
-  settled: boolean,
-  ending: ActivityEnding | undefined,
-  showReceipt: boolean,
-): ActivityComposition {
-  const events = terminalOutcome(
-    withoutRedundantTurnFailure(rawEvents.map(retryMessage)),
-    ending,
+function replays(row: TaskEventView, event: TaskEventView): boolean {
+  return (
+    (row.phase === "completed" || row.phase === "failed") &&
+    event.phase === "started" &&
+    row.title === event.title &&
+    eventSubject(row) === eventSubject(event)
   );
-  const usageWindow = usageWindowSummary(events);
-  const turns = new Map<number, number>();
-  for (const event of events) if (event.turnId !== undefined) turns.set(event.id, event.turnId);
-  const receiptId = showReceipt ? [...events].reverse().find((event) => event.kind === "usage")?.id : undefined;
-  const responseId = settled ? closingMessageId(events) : undefined;
+}
 
-  const blocks: ActivityBlock[] = [];
-  const technical: TaskEventView[] = [];
-  let chapter: ChapterRow[] = [];
-  let chapterTitle: { id: number; text: string } | undefined;
-  let pulse: TaskEventView[] = [];
-  let thinkingTokens = 0;
-  // Counters tick out between blocks, so they belong to the stretch of
-  // thinking they land in rather than to any one event.
-  let pulseTokens = 0;
-  let receiptIndex: number | undefined;
-
-  const flushPulse = () => {
-    const first = pulse[0];
-    if (!first) return;
-    const last = pulse[pulse.length - 1] ?? first;
-    const pulseValue: ReasoningPulse = {
-      id: first.id,
-      text: mergeReasoning(pulse),
-      tokens: pulseTokens > 0 ? pulseTokens : undefined,
-      seconds: eventDurationSeconds(first.createdAt, last.createdAt),
-    };
-    pulseTokens = 0;
-    if (chapter.length === 0) blocks.push({ type: "reasoning", pulse: pulseValue });
-    else chapter.push({ type: "reasoning", pulse: pulseValue });
-    pulse = [];
-  };
-  const flushChapter = () => {
-    const title = chapterTitle;
-    chapterTitle = undefined;
-    if (chapter.length === 0 && title === undefined) return;
-    const id = title?.id ?? chapterRowId(chapter[0]);
-    // A titled chapter already marks where one stretch of work ends and the
-    // next begins, so nesting its turns underneath would only add a level.
-    const rows = ActivityGrouping.group(chapter, members, turns, title === undefined);
-    chapter = [];
-    blocks.push({ type: "chapter", id, rows, title: title?.text });
-  };
-
-  for (const event of events) {
-    const tokens = event.presentation?.tokensThinking ?? 0;
-    thinkingTokens += tokens;
-    pulseTokens += tokens;
-    if (isTechnical(event) && event.id !== receiptId) {
-      technical.push(event);
-      continue;
-    }
-    if (isThinkingPulse(event)) {
-      pulse.push(event);
-      continue;
-    }
-    flushPulse();
-    if (event.id === responseId) continue;
-    const narration = narrationTitle(event);
-    if (narration !== undefined) {
-      flushChapter();
-      chapterTitle = { id: event.id, text: narration };
-      continue;
-    }
-    if (event.kind === "usage") {
-      if (event.id === receiptId) {
-        flushChapter();
-        receiptIndex = blocks.length;
-        blocks.push({ type: "receipt", event, thinkingTokens, usageWindow });
+function settleAction(first: TaskEventView, later: TaskEventView): TaskEventView {
+  if (AGENT_CALL_TYPES.has(later.type) && rawString(later, "kind") === undefined) return settleAgentCall(first, later);
+  if (later.minor === true) {
+    const merged: TaskEventView = { ...first };
+    const outcome = later.presentation?.outcome;
+    if (outcome !== undefined && !restates(merged.detail, outcome) && merged.presentation?.outcome !== outcome) {
+      if (merged.presentation) {
+        merged.presentation = { ...merged.presentation, outcome };
       } else {
-        technical.push(event);
+        merged.detail = [merged.detail, outcome].filter((value): value is string => value !== undefined).join(" · ");
       }
-      continue;
     }
-    if (isSignal(event)) {
-      flushChapter();
-      blocks.push({ type: "signal", event });
-      continue;
+    if (later.phase === "failed") merged.phase = "failed";
+    if (
+      later.type === TOOL_PROGRESS_TYPE &&
+      merged.phase === "started" &&
+      later.presentation?.durationMs !== undefined
+    ) {
+      const durationMs = later.presentation.durationMs;
+      merged.presentation = merged.presentation
+        ? { ...merged.presentation, durationMs }
+        : { type: "tool", durationMs };
     }
-    const previousRow = chapter[chapter.length - 1];
-    if (previousRow?.type === "work" && sameShape(previousRow.event, event)) {
-      chapter.pop();
-      chapter.push({ type: "work", event: { ...event, id: previousRow.event.id } });
-    } else {
-      chapter.push({ type: "work", event });
-    }
+    return merged;
   }
-  flushPulse();
-  flushChapter();
-
-  if (receiptIndex !== undefined) {
-    const block = blocks[receiptIndex];
-    if (block.type === "receipt" && thinkingTokens > block.thinkingTokens) {
-      blocks[receiptIndex] = { ...block, thinkingTokens };
+  if (isOutcomeOnly(later.presentation) && isSubject(first.presentation)) {
+    const merged: TaskEventView = { ...first };
+    const outcome = later.presentation?.outcome;
+    if (outcome !== undefined && merged.presentation) {
+      merged.presentation = { ...merged.presentation, outcome };
     }
+    if (later.phase === "failed") {
+      merged.phase = "failed";
+    } else if (later.complete === true) {
+      // A worker that reports only how a call ended still ended it: the row
+      // keeps the subject it opened with and stops reading as work in flight.
+      merged.phase = later.phase;
+      merged.complete = true;
+      if (later.verb !== undefined) merged.verb = later.verb;
+    }
+    return merged;
   }
-
-  return { blocks: mergeSkipNotices(collapseWaits(blocks)), technical };
-}
-
-export const ACTIVITY_SKIPPED_TITLE = "Some activity was not recorded";
-/** Every provider's reasoning blocks share this title; it is how they fold. */
-export const REASONING_TITLE = "Thinking";
-const USAGE_WINDOW_TITLE = "Usage window";
-
-/**
- * The readable part of one stretch of thinking.
- *
- * Providers that stream reasoning resend the whole block on every update, so a
- * block that starts with the one before it replaces that one instead of piling
- * up beside it. Blocks the provider redacted contribute nothing here — they
- * still lengthen the stretch, they just cannot be read.
- */
-function mergeReasoning(events: TaskEventView[]): string | undefined {
-  const blocks: string[] = [];
-  for (const event of events) {
-    const text = event.detail?.trim();
-    if (text === undefined || text === "") continue;
-    const previous = blocks[blocks.length - 1];
-    if (previous !== undefined && text.startsWith(previous)) blocks[blocks.length - 1] = text;
-    else blocks.push(text);
+  const merged: TaskEventView = { ...later, id: first.id, createdAt: first.createdAt };
+  if (merged.detail === undefined) merged.detail = first.detail;
+  if (merged.presentation === undefined) merged.presentation = first.presentation;
+  if (merged.rawText === undefined) merged.rawText = first.rawText;
+  if (merged.presentation?.outcome === undefined && first.presentation?.outcome !== undefined && merged.presentation) {
+    merged.presentation = { ...merged.presentation, outcome: first.presentation.outcome };
   }
-  return blocks.length > 0 ? blocks.join("\n\n") : undefined;
-}
-
-/** Whether anything in this run is worth turning "Show thinking" on for. */
-export function compositionHasThinking(composition: ActivityComposition): boolean {
-  const inRows = (rows: ChapterRow[]): boolean =>
-    rows.some((row) => (row.type === "group" ? inRows(row.group.children) : row.type === "reasoning"));
-  return composition.blocks.some((block) =>
-    block.type === "reasoning" ? true : block.type === "chapter" && inRows(block.rows),
-  );
+  if (first.phase === "failed") merged.phase = "failed";
+  if ((merged.phase === "completed" || merged.phase === "failed") && merged.presentation) {
+    merged.presentation = { ...merged.presentation, durationMs: undefined };
+  }
+  return merged;
 }
 
 /**
- * Output goes missing a line at a time, so a lossy run can raise the notice
- * dozens of times. A reader needs to know once, with the total.
+ * Whether an update brought the call's diff, output, or result along, or only
+ * moved its status: a status-only update must not replace the payload the
+ * row expands into.
  */
-function mergeSkipNotices(blocks: ActivityBlock[]): ActivityBlock[] {
-  const counts = new Map<string, number>();
-  let first: number | undefined;
-  blocks.forEach((block, index) => {
-    if (block.type !== "signal" || block.event.title !== ACTIVITY_SKIPPED_TITLE) return;
-    if (first === undefined) first = index;
-    const skipped = parseSkipped(block.event.detail);
-    if (skipped) counts.set(skipped.noun, (counts.get(skipped.noun) ?? 0) + skipped.count);
-  });
-  if (first === undefined) return blocks;
-
-  const totals = [...counts]
-    .map(([noun, count]) => `${count} ${noun}${count === 1 ? "" : "s"} skipped`)
-    .join(" · ");
-  const text = totals === "" ? ACTIVITY_SKIPPED_TITLE : `${ACTIVITY_SKIPPED_TITLE} — ${totals}`;
-  return blocks.flatMap((block, index) => {
-    if (block.type !== "signal" || block.event.title !== ACTIVITY_SKIPPED_TITLE) return [block];
-    if (index !== first) return [];
-    return [
-      {
-        type: "signal" as const,
-        event: {
-          ...block.event,
-          detail: totals === "" ? undefined : totals,
-          presentation: { type: "signal" as const, text, level: "warning" as const },
-        },
-      },
-    ];
-  });
+function carriesPayload(update: TaskEventView): boolean {
+  return update.result !== undefined
+    || update.presentation?.change !== undefined
+    || update.presentation?.outcome !== undefined;
 }
 
-function parseSkipped(detail: string | undefined): { count: number; noun: string } | undefined {
-  const match = detail?.match(/^(\d+) (line|event)s? skipped$/);
-  return match ? { count: Number(match[1]), noun: match[2] } : undefined;
-}
+/** How an ACP call row reads once it finishes, by how it read while running. */
+const SETTLED_AGENT_VERBS = new Map([
+  ["Deleting", "Deleted"],
+  ["Moving", "Moved"],
+  ["Searching", "Searched"],
+  ["Running", "Ran"],
+  ["Fetching", "Fetched"],
+  ["Changing", "Changed"],
+  ["Using", "Used"],
+]);
 
 /**
- * The window a run is closest to filling, read off the last notice the provider
- * sent, so the receipt says how much headroom is left before the next run.
+ * An ACP update carries only the fields that changed, so one that does not
+ * name the call's kind leaves the call what it already was: it moves the row
+ * on and reports how it went, and the kind, file, and input stay.
  */
-function usageWindowSummary(events: TaskEventView[]): string | undefined {
-  const index = findLastIndex(events, (event) => event.title === USAGE_WINDOW_TITLE);
-  if (index === -1) return undefined;
-  const windows = rawObject(rawObject(rawObject(rawValue(events[index]))?.rate_limit_info)?.unifiedWindows);
-  if (!windows) return undefined;
-  let busiest: { utilization: number; resetsAt?: number } | undefined;
-  for (const value of Object.values(windows)) {
-    const window = rawObject(value);
-    const utilization = window?.utilization;
-    if (typeof utilization !== "number") continue;
-    if (busiest && busiest.utilization >= utilization) continue;
-    const resetsAt = window?.resetsAt;
-    busiest = { utilization, resetsAt: typeof resetsAt === "number" ? resetsAt : undefined };
-  }
-  if (!busiest) return undefined;
-  const percent = `${USAGE_WINDOW_TITLE} ${Math.round(busiest.utilization * 100)}%`;
-  const resets = busiest.resetsAt === undefined ? undefined : absoluteTime(new Date(busiest.resetsAt * 1000));
-  return resets === undefined ? percent : `${percent} · resets ${resets}`;
-}
-
-const WAIT_TITLES = new Set(["Waiting", "Waiting ended", "Continuing", "Wait timed out", "Task blocked"]);
-
-function collapseWaits(blocks: ActivityBlock[]): ActivityBlock[] {
-  const output: ActivityBlock[] = [];
-  const seen = new Map<string, number>();
-  const counts = new Map<string, number>();
-  for (const block of blocks) {
-    if (block.type !== "signal") {
-      output.push(block);
-      continue;
-    }
-    const event = block.event;
-    if (!WAIT_TITLES.has(event.title)) {
-      output.push(block);
-      continue;
-    }
-    const base = stripWaitCount(event.detail ?? event.title);
-    const key = `${event.title}|${base}`;
-    const index = seen.get(key);
-    if (index === undefined) {
-      seen.set(key, output.length);
-      counts.set(key, 1);
-      output.push(block);
-      continue;
-    }
-    const count = (counts.get(key) ?? 1) + 1;
-    counts.set(key, count);
-    const previous = output[index];
-    if (previous.type === "signal") {
-      const text = `${base} · ×${count}`;
-      output[index] = {
-        type: "signal",
-        event: {
-          ...previous.event,
-          detail: text,
-          presentation: { type: "signal", text, level: "info" },
-        },
-      };
-    }
-  }
-  return output;
-}
-
-function stripWaitCount(value: string): string {
-  const marker = " · ×";
-  const index = value.lastIndexOf(marker);
-  if (index === -1) return value;
-  const rest = value.slice(index + marker.length);
-  return /^[0-9]+$/.test(rest) ? value.slice(0, index) : value;
-}
-
-function nestDelegations(rows: ChapterRow[]): ChapterRow[] {
-  const anchorAt = new Map<string, number>();
-  rows.forEach((row, index) => {
-    if (row.type !== "work") return;
-    const action = row.event.actionId;
-    if (!action) return;
-    if (!anchorAt.has(action)) anchorAt.set(action, index);
-  });
-  const childrenOf = new Map<number, number[]>();
-  const nested = new Set<number>();
-  rows.forEach((row, index) => {
-    if (row.type !== "work") return;
-    const parent = parentActionId(row.event);
-    if (parent === undefined) return;
-    const anchor = anchorAt.get(parent);
-    if (anchor === undefined || anchor >= index) return;
-    const list = childrenOf.get(anchor) ?? [];
-    list.push(index);
-    childrenOf.set(anchor, list);
-    nested.add(index);
-  });
-  if (nested.size === 0) return rows;
-  const build = (index: number): ChapterRow => {
-    const row = rows[index];
-    if (row.type !== "work") return row;
-    const children = childrenOf.get(index);
-    if (!children) return row;
-    return {
-      type: "group",
-      group: makeActivityGroup("delegation", row.event, children.map(build), [], "", undefined),
-    };
-  };
-  return rows.map((_, index) => index).filter((index) => !nested.has(index)).map(build);
-}
-
-function foldLifecycle(row: ChapterRow, members: Map<number, TaskEventView[]>): ChapterRow {
-  if (row.type === "work") {
-    const events = members.get(row.event.id);
-    if (!events) return row;
-    return { type: "group", group: makeActivityGroup("lifecycle", row.event, [], events, "", undefined) };
-  }
-  if (row.type === "reasoning") return row;
+function settleAgentCall(first: TaskEventView, later: TaskEventView): TaskEventView {
+  const verb = later.complete === true && first.verb !== undefined
+    ? (SETTLED_AGENT_VERBS.get(first.verb) ?? first.verb)
+    : first.verb;
+  // An update that says nothing about how the call is going leaves it where it
+  // was; a call that already finished never goes back to running.
+  const settled = first.phase === "completed" || first.phase === "failed";
+  const reverts = settled && later.phase === "started";
   return {
-    type: "group",
-    group: makeActivityGroup(
-      row.group.kind,
-      row.group.anchor,
-      row.group.children.map((child) => foldLifecycle(child, members)),
-      row.group.members,
-      row.group.runLabel,
-      row.group.turnTitle,
-    ),
+    ...first,
+    phase: first.phase === "failed" || reverts ? first.phase : later.phase,
+    complete: reverts ? first.complete : (later.complete ?? first.complete),
+    verb,
+    result: later.result ?? first.result,
+    rawText: carriesPayload(later) ? (later.rawText ?? first.rawText) : first.rawText,
+    presentation: first.presentation && {
+      ...first.presentation,
+      change: later.presentation?.change ?? first.presentation.change,
+      outcome: later.presentation?.outcome ?? first.presentation.outcome,
+    },
   };
 }
 
-const RUN_FLOOR = 3;
-const NAMED_RUN_FLOOR = 2;
-const RUN_GAP_SECONDS = 5 * 60;
-const REPEAT_BLOCK_MAX = 4;
-
-/**
- * Every way a run has of going to look something up, whatever tool or shell
- * command it reached for. They share one run key, so a stretch of looking
- * around folds into one row even when it mixed reading, grepping and listing.
- */
-const LOOKUP_NOUNS = new Map<string, string>([
-  ["read file", "files"],
-  ["search code", "searches"],
-  ["find files", "file searches"],
-  ["list directory", "directory listings"],
-  ["inspect changes", "change checks"],
-  ["web search", "web searches"],
-  ["fetch page", "page fetches"],
-  ["task status", "task checks"],
-  ["check permissions", "permission checks"],
-  ["schedule check", "schedule checks"],
-]);
-
-/** What each verification step proves, for the row that names a whole batch. */
-const CHECK_NAMES = new Map<string, string>([
-  ["check lint", "lint"],
-  ["check types", "types"],
-  ["check tests", "tests"],
-  ["check build", "build"],
-]);
-
-/** A verification whose command does not say what it proves. */
-const UNNAMED_CHECK = "run checks";
-
-const EDIT_TITLES = new Set([
-  "edit file",
-  "edit files",
-  "write file",
-  "write files",
-  "delete file",
-  "create file",
-  "apply patch",
-]);
-
-function foldRuns(rows: ChapterRow[]): ChapterRow[] {
-  const mapped = rows.map((row): ChapterRow => {
-    if (row.type === "group" && row.group.kind === "delegation") {
-      return {
-        type: "group",
-        group: makeActivityGroup(
-          row.group.kind,
-          row.group.anchor,
-          foldRuns(row.group.children),
-          row.group.members,
-          row.group.runLabel,
-          row.group.turnTitle,
-        ),
-      };
-    }
-    return row;
-  });
-
-  const folded: ChapterRow[] = [];
-  let run: ChapterRow[] = [];
-  let calls = 0;
-  let lastCall: number | undefined;
-
-  const flush = () => {
-    const anchor = run[0] ? callEvent(run[0]) : undefined;
-    if (!anchor || calls < runFloor(anchor)) {
-      folded.push(...run);
-      run = [];
-      calls = 0;
-      lastCall = undefined;
-      return;
-    }
-    const split = lastCall ?? 0;
-    const children = run.slice(0, split + 1);
-    const trailing = run.slice(split + 1);
-    const label = runLabel(children.map(callEvent).filter((event): event is TaskEventView => event !== undefined));
-    folded.push({
-      type: "group",
-      group: makeActivityGroup("run", anchor, children, [], label, undefined),
-    });
-    folded.push(...trailing);
-    run = [];
-    calls = 0;
-    lastCall = undefined;
-  };
-
-  for (const row of mapped) {
-    const event = callEvent(row);
-    if (event) {
-      const previous = [...run].reverse().map(callEvent).find((candidate) => candidate !== undefined);
-      const open = run[0] ? callEvent(run[0]) : undefined;
-      if (
-        open &&
-        (runKey(open) !== runKey(event) ||
-          open.turnId !== event.turnId ||
-          exceedsGap(previous, event, RUN_GAP_SECONDS))
-      ) {
-        flush();
-      }
-      run.push(row);
-      calls += 1;
-      lastCall = run.length - 1;
-    } else if (isThought(row) && run.length > 0) {
-      run.push(row);
-    } else {
-      flush();
-      folded.push(row);
-    }
-  }
-  flush();
-  return folded;
+function restates(detail: string | undefined, outcome: string): boolean {
+  if (detail === undefined) return false;
+  const stripped = outcome.startsWith("Error: ") ? outcome.slice("Error: ".length) : outcome;
+  const core = trimChars(stripped, "… ");
+  const opening = Array.from(core).slice(0, 40).join("");
+  return core.length >= 16 && detail.includes(opening);
 }
 
-/**
- * A run that is stuck in a loop — edit, lint, test, edit, lint, test — spends
- * most of the trace saying the same thing again. The repeated stretch collapses
- * to one row carrying how many times it came round; the passes themselves stay
- * inside it.
- */
-function foldRepeats(rows: ChapterRow[]): ChapterRow[] {
-  const signatures = rows.map(rowSignature);
-  const folded: ChapterRow[] = [];
-  let index = 0;
-  while (index < rows.length) {
-    const repeat = repeatAt(signatures, index);
-    const anchor = repeat && rowAnchor(rows[index]);
-    if (!repeat || !anchor) {
-      folded.push(rows[index]);
-      index += 1;
-      continue;
-    }
-    const members = rows.slice(index, index + repeat.size * repeat.count);
-    folded.push({
-      type: "group",
-      group: makeActivityGroup("run", anchor, members, [], repeatLabel(anchor, members[0], repeat), undefined),
-    });
-    index += members.length;
-  }
-  return folded;
+function trimChars(value: string, chars: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && chars.includes(value[start])) start++;
+  while (end > start && chars.includes(value[end - 1])) end--;
+  return value.slice(start, end);
 }
 
-function rowAnchor(row: ChapterRow): TaskEventView | undefined {
-  if (row.type === "work") return row.event;
-  if (row.type === "group") return row.group.anchor;
-  return undefined;
-}
-
-interface Repeat {
-  size: number;
-  count: number;
-}
-
-function repeatAt(signatures: (string | undefined)[], start: number): Repeat | undefined {
-  for (let size = 1; size <= REPEAT_BLOCK_MAX; size++) {
-    if (start + size * 2 > signatures.length) return undefined;
-    if (signatures.slice(start, start + size).some((signature) => signature === undefined)) {
-      return undefined;
-    }
-    let count = 1;
-    while (blockRepeats(signatures, start, start + count * size, size)) count += 1;
-    if (count > 1) return { size, count };
-  }
-  return undefined;
-}
-
-function blockRepeats(
-  signatures: (string | undefined)[],
-  first: number,
-  next: number,
-  size: number,
-): boolean {
-  if (next + size > signatures.length) return false;
-  for (let offset = 0; offset < size; offset++) {
-    if (signatures[first + offset] !== signatures[next + offset]) return false;
-  }
-  return true;
-}
-
-function repeatLabel(anchor: TaskEventView, first: ChapterRow, repeat: Repeat): string {
-  if (repeat.size > 1) return `Repeated ${repeat.size} steps ×${repeat.count}`;
-  if (first.type === "group") return `${first.group.runLabel} ×${repeat.count}`;
-  const subject = anchor.kind === "file" ? fileName(eventSubject(anchor)) : eventSubject(anchor);
-  return `${anchor.verb ?? "Ran"} ${clip(subject, 48)} ×${repeat.count}`;
-}
-
-const REPEATABLE_KINDS: EventKind[] = ["tool", "file", "command"];
-
-/**
- * Two rows repeat when they say the same thing in the same turn. Prose and
- * lifecycle rows have no signature: a second "Rate limit" notice is not the run
- * doing the same work twice, and folding it would say it was.
- */
-function rowSignature(row: ChapterRow): string | undefined {
-  if (row.type === "group") {
-    return row.group.kind === "run" ? `run|${row.group.runLabel}` : undefined;
-  }
-  if (row.type !== "work") return undefined;
-  const event = row.event;
-  if (!REPEATABLE_KINDS.includes(event.kind)) return undefined;
-  const subject = eventSubject(event);
-  if (subject === "") return undefined;
-  return `${event.turnId ?? ""}|${eventTitleKey(event)}|${subject}`;
-}
-
-function groupTurns(rows: ChapterRow[], turns: Map<number, number>): ChapterRow[] {
-  const distinct = new Set(
-    rows.map((row) => chapterRowTurnId(row, turns)).filter((value): value is number => value !== undefined),
+function isOutcomeOnly(presentation: TaskEventPresentation | undefined): boolean {
+  if (!presentation) return false;
+  return (
+    presentation.type === "tool" &&
+    presentation.path === undefined &&
+    presentation.change === undefined &&
+    presentation.command === undefined &&
+    presentation.status === undefined &&
+    presentation.exitCode === undefined &&
+    presentation.text === undefined &&
+    presentation.completed === undefined &&
+    presentation.total === undefined &&
+    presentation.costUsd === undefined &&
+    presentation.tokensIn === undefined &&
+    presentation.tokensOut === undefined &&
+    presentation.tokensCached === undefined &&
+    presentation.tokensThinking === undefined &&
+    presentation.turns === undefined &&
+    presentation.durationMs === undefined &&
+    presentation.level === undefined
   );
-  if (distinct.size <= 1) return rows;
-
-  const grouped: ChapterRow[] = [];
-  let active: { turn: number; rows: ChapterRow[] } | undefined;
-  const flush = () => {
-    if (!active) return;
-    const rows = active.rows;
-    active = undefined;
-    const anchor = rows.flatMap(chapterRowEvents)[0];
-    if (!anchor) return;
-    const [title, children] = turnTitleAndRows(rows);
-    grouped.push({ type: "group", group: makeActivityGroup("turn", anchor, children, [], "", title) });
-  };
-  for (const row of rows) {
-    const turn = chapterRowTurnId(row, turns);
-    if (turn === undefined) {
-      flush();
-      grouped.push(row);
-      continue;
-    }
-    if (active && active.turn === turn) active.rows.push(row);
-    else {
-      flush();
-      active = { turn, rows: [row] };
-    }
-  }
-  flush();
-  return grouped;
 }
 
-function turnTitleAndRows(rows: ChapterRow[]): [string, ChapterRow[]] {
-  for (let index = 0; index < rows.length; index++) {
-    const row = rows[index];
-    if (row.type !== "work") continue;
-    const event = row.event;
-    if (event.kind !== "message" || isTechnical(event)) continue;
-    const text = eventText(event);
-    if (text === undefined) continue;
-    const line = (text.split("\n")[0] ?? text).trim();
-    if (line === "") continue;
-    const filtered = [...rows.slice(0, index), ...rows.slice(index + 1)];
-    return [clip(line, 80), filtered];
-  }
-  for (const row of rows) {
-    const event = meaningfulRowEvent(row);
-    if (event) {
-      const title = event.title.trim();
-      if (title !== "") return [title, rows];
-    }
-  }
-  // A turn led by a nested message still has words to show; "Work step" is
-  // what is left when the turn genuinely said nothing.
-  for (const row of rows) {
-    const prose = firstProse(row);
-    if (prose === undefined) continue;
-    const line = (prose.split("\n")[0] ?? prose).trim();
-    if (line !== "") return [clip(line, 80), rows];
-  }
-  return ["Work step", rows];
-}
-
-function meaningfulRowEvent(row: ChapterRow): TaskEventView | undefined {
-  if (row.type === "work" && meaningful(row.event)) return row.event;
-  if (row.type === "group" && meaningful(row.group.anchor)) return row.group.anchor;
-  return undefined;
-}
-
-function firstMeaningful(row: ChapterRow): TaskEventView | undefined {
-  if (row.type === "work") return meaningful(row.event) ? row.event : undefined;
-  if (row.type === "group") {
-    if (meaningful(row.group.anchor)) return row.group.anchor;
-    for (const child of row.group.children) {
-      const found = firstMeaningful(child);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
-function firstProse(row: ChapterRow): string | undefined {
-  if (row.type === "work" && row.event.kind === "message" && !isTechnical(row.event)) {
-    return eventText(row.event);
-  }
-  if (row.type === "group") {
-    for (const child of row.group.children) {
-      const found = firstProse(child);
-      if (found !== undefined) return found;
-    }
-  }
-  return undefined;
-}
-
-function meaningful(event: TaskEventView): boolean {
-  return !isTechnical(event) && (["tool", "file", "command", "retry"] as EventKind[]).includes(event.kind);
-}
-
-function callEvent(row: ChapterRow): TaskEventView | undefined {
-  if (row.type === "work" && row.event.kind !== "reasoning") return row.event;
-  if (row.type === "group" && row.group.kind === "lifecycle") return row.group.anchor;
-  return undefined;
-}
-
-function isThought(row: ChapterRow): boolean {
-  if (row.type === "reasoning") return true;
-  if (row.type === "work") return row.event.kind === "reasoning";
+function isSubject(presentation: TaskEventPresentation | undefined): boolean {
+  if (!presentation) return false;
+  if (presentation.type === "file") return presentation.path !== undefined;
+  if (presentation.type === "command") return presentation.command !== undefined;
   return false;
-}
-
-function exceedsGap(previous: TaskEventView | undefined, current: TaskEventView, gapSeconds: number): boolean {
-  if (!previous) return false;
-  const from = eventTime(previous.createdAt);
-  const to = eventTime(current.createdAt);
-  if (from === undefined || to === undefined) return false;
-  return Math.trunc((to - from) / 1000) > gapSeconds;
-}
-
-function chapterRowTurnId(row: ChapterRow, turns: Map<number, number>): number | undefined {
-  switch (row.type) {
-    case "work":
-      return row.event.turnId;
-    case "reasoning":
-      return turns.get(row.pulse.id);
-    case "group":
-      return row.group.anchor.turnId;
-  }
-}
-
-function eventTitleKey(event: TaskEventView): string {
-  return event.title.trim().toLowerCase();
-}
-
-function eventSubject(event: TaskEventView): string {
-  return event.target ?? event.detail ?? "";
-}
-
-/**
- * What makes two neighbouring rows one run. A run has to be homogeneous —
- * folding an edit into "Read 3 files" hides the edit — so looking things up,
- * verifying, and changing a file each key differently, and edits key on the
- * file they touch so six passes over one stylesheet read as one row.
- */
-function runKey(event: TaskEventView): string {
-  const title = eventTitleKey(event);
-  if (CHECK_NAMES.has(title) || title === UNNAMED_CHECK) return "check";
-  if (LOOKUP_NOUNS.has(title)) return "lookup";
-  if (EDIT_TITLES.has(title)) return `edit:${eventSubject(event)}`;
-  return event.kind;
-}
-
-/**
- * A stretch of the same named work is worth folding at two rows; a stretch of
- * rows that share only their event kind needs three before the fold says
- * anything.
- */
-function runFloor(event: TaskEventView): number {
-  return runKey(event) === event.kind ? RUN_FLOOR : NAMED_RUN_FLOOR;
-}
-
-/** A run's row says what the run did; it carries no verb of its own. */
-function runLabel(events: TaskEventView[]): string {
-  const anchor = events[0];
-  const count = events.length;
-  const key = runKey(anchor);
-  if (key === "check") {
-    const names = [
-      ...new Set(events.map((event) => CHECK_NAMES.get(eventTitleKey(event))).filter((name) => name !== undefined)),
-    ];
-    return names.length > 0 ? `Checked ${names.join(", ")}` : `Ran ${count} checks`;
-  }
-  if (key.startsWith("edit:")) {
-    return `Edited ${fileName(eventSubject(anchor))} ×${count}`;
-  }
-  if (key === "lookup") {
-    const titles = new Set(events.map(eventTitleKey));
-    if (titles.size > 1) return `Ran ${count} lookups`;
-    const title = eventTitleKey(anchor);
-    if (title === "read file") return `Read ${count} files`;
-    return `Ran ${count} ${LOOKUP_NOUNS.get(title)}`;
-  }
-  if (anchor.kind === "command") return `Ran ${count} commands`;
-  if (anchor.kind === "file") return `Changed ${count} files`;
-  return `Ran ${count} calls`;
-}
-
-function fileName(path: string): string {
-  const name = path.split("/").at(-1);
-  return name === undefined || name === "" ? path : name;
-}
-
-function eventText(event: TaskEventView): string | undefined {
-  const text = event.presentation?.text ?? event.detail;
-  return text !== undefined && text.trim() !== "" ? text : undefined;
-}
-
-function eventTime(value: string): number | undefined {
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? undefined : parsed;
-}
-
-function eventDurationSeconds(start: string, end: string): number | undefined {
-  const from = eventTime(start);
-  const to = eventTime(end);
-  if (from === undefined || to === undefined) return undefined;
-  const duration = Math.trunc((to - from) / 1000);
-  return duration > 0 ? duration : undefined;
-}
-
-function isThinkingPulse(event: TaskEventView): boolean {
-  return event.kind === "reasoning" && event.title === REASONING_TITLE;
-}
-
-function isSignal(event: TaskEventView): boolean {
-  return (
-    event.presentation?.type === "signal" ||
-    event.kind === "error" ||
-    event.title === "Worker needs input" ||
-    event.title === ACTIVITY_SKIPPED_TITLE
-  );
-}
-
-const SUBAGENT_BOUNDARY_TITLES = new Set([
-  "SubagentStart",
-  "SubagentStop",
-  "Spawned subagent",
-  SUBAGENT_STARTED_TITLE,
-  SUBAGENT_FINISHED_TITLE,
-]);
-
-function sameShape(left: TaskEventView, right: TaskEventView): boolean {
-  // A subagent boundary's identity lives in its payload, not its title/detail —
-  // two subagents of the same type starting back to back would otherwise
-  // collapse into one marker and the second subagent would vanish.
-  if (SUBAGENT_BOUNDARY_TITLES.has(left.title)) return false;
-  return (
-    left.actionId === undefined &&
-    right.actionId === undefined &&
-    left.kind === right.kind &&
-    left.title === right.title &&
-    left.detail === right.detail
-  );
-}
-
-function closingMessageId(events: TaskEventView[]): number | undefined {
-  const index = findLastIndex(
-    events,
-    (event) => event.kind === "message" && event.minor !== true && eventText(event) !== undefined,
-  );
-  if (index === -1) return undefined;
-  const rest = events.slice(index + 1);
-  return rest.every((event) => isTechnical(event) || event.kind === "usage") ? events[index].id : undefined;
 }
 
 function retryMessage(event: TaskEventView): TaskEventView {
@@ -1754,7 +1412,8 @@ function terminalOutcome(events: TaskEventView[], ending: ActivityEnding | undef
     title = "Run stopped before finishing";
     action = "Resume this task to continue.";
   }
-  const found = [...events].reverse().find((event) => event.source === "broker" && event.title === brokerTitle);
+  const isOutcome = (event: TaskEventView) => event.source === "broker" && event.title === brokerTitle;
+  const found = findLast(events, isOutcome);
   const outcome: TaskEventView = found
     ? { ...found }
     : {
@@ -1781,203 +1440,15 @@ function terminalOutcome(events: TaskEventView[], ending: ActivityEnding | undef
   outcome.presentation = { type: "signal", status: "terminal", text: detail, level: "error" };
 
   const result = events.slice();
-  const index = findLastIndex(result, (event) => event.source === "broker" && event.title === brokerTitle);
+  const index = findLastIndex(result, isOutcome);
   if (index !== -1) result[index] = outcome;
   else result.push(outcome);
   return result;
 }
 
-function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
-  for (let index = items.length - 1; index >= 0; index--) {
-    if (predicate(items[index])) return index;
-  }
-  return -1;
-}
-
-interface FoldedActions {
-  rows: TaskEventView[];
-  members: Map<number, TaskEventView[]>;
-}
-
-function foldActions(events: TaskEventView[]): FoldedActions {
-  const slots = new Map<string, number>();
-  const rows: TaskEventView[] = [];
-  const members = new Map<number, TaskEventView[]>();
-  for (const event of events) {
-    const action = event.actionId && event.actionId !== "" ? event.actionId : undefined;
-    if (action === undefined) {
-      rows.push(event);
-      continue;
-    }
-    const index = slots.get(action);
-    if (index !== undefined && replays(rows[index], event)) {
-      const list = members.get(rows[index].id) ?? [];
-      list.push(event);
-      members.set(rows[index].id, list);
-      continue;
-    }
-    if (index !== undefined && !reopens(rows[index], event)) {
-      const list = members.get(rows[index].id) ?? [];
-      list.push(event);
-      members.set(rows[index].id, list);
-      rows[index] = settleAction(rows[index], event);
-      continue;
-    }
-    if (event.title === "Tool progress") continue;
-    if (isTechnical(event)) {
-      rows.push(event);
-      continue;
-    }
-    slots.set(action, rows.length);
-    members.set(event.id, [event]);
-    rows.push(event);
-  }
-  const filteredMembers = new Map<number, TaskEventView[]>();
-  for (const [id, memberEvents] of members) {
-    if (memberEvents.length > 1 && memberEvents.some(isLifecycleUpdate)) filteredMembers.set(id, memberEvents);
-  }
-  return { rows, members: filteredMembers };
-}
-
-function reopens(row: TaskEventView, event: TaskEventView): boolean {
-  return (row.phase === "completed" || row.phase === "failed") && event.phase === "started" && event.minor !== true;
-}
-
-/**
- * Resuming a session replays the whole prior transcript, so every tool call
- * that already finished arrives a second time as a fresh start under its
- * original id. It is the same call, and opening a second row for it doubles the
- * trace.
- */
-function replays(row: TaskEventView, event: TaskEventView): boolean {
-  return (
-    (row.phase === "completed" || row.phase === "failed") &&
-    event.phase === "started" &&
-    row.title === event.title &&
-    eventSubject(row) === eventSubject(event)
-  );
-}
-
-function settleAction(first: TaskEventView, later: TaskEventView): TaskEventView {
-  if (later.minor === true) {
-    const merged: TaskEventView = { ...first };
-    const outcome = later.presentation?.outcome;
-    if (outcome !== undefined && !restates(merged.detail, outcome) && merged.presentation?.outcome !== outcome) {
-      if (merged.presentation) {
-        merged.presentation = { ...merged.presentation, outcome };
-      } else {
-        merged.detail = [merged.detail, outcome].filter((value): value is string => value !== undefined).join(" · ");
-      }
-    }
-    if (later.phase === "failed") merged.phase = "failed";
-    if (
-      later.title === "Tool progress" &&
-      merged.phase === "started" &&
-      later.presentation?.durationMs !== undefined
-    ) {
-      const durationMs = later.presentation.durationMs;
-      merged.presentation = merged.presentation
-        ? { ...merged.presentation, durationMs }
-        : { type: "tool", durationMs };
-    }
-    return merged;
-  }
-  if (isOutcomeOnly(later.presentation) && isSubject(first.presentation)) {
-    const merged: TaskEventView = { ...first };
-    const outcome = later.presentation?.outcome;
-    if (outcome !== undefined && merged.presentation) {
-      merged.presentation = { ...merged.presentation, outcome };
-    }
-    if (later.phase === "failed") merged.phase = "failed";
-    return merged;
-  }
-  const merged: TaskEventView = { ...later, id: first.id, createdAt: first.createdAt };
-  if (merged.detail === undefined) merged.detail = first.detail;
-  if (merged.presentation === undefined) merged.presentation = first.presentation;
-  if (merged.rawText === undefined) merged.rawText = first.rawText;
-  if (merged.presentation?.outcome === undefined && first.presentation?.outcome !== undefined && merged.presentation) {
-    merged.presentation = { ...merged.presentation, outcome: first.presentation.outcome };
-  }
-  if (first.phase === "failed") merged.phase = "failed";
-  if ((merged.phase === "completed" || merged.phase === "failed") && merged.presentation) {
-    merged.presentation = { ...merged.presentation, durationMs: undefined };
-  }
-  return merged;
-}
-
-function restates(detail: string | undefined, outcome: string): boolean {
-  if (detail === undefined) return false;
-  const stripped = outcome.startsWith("Error: ") ? outcome.slice("Error: ".length) : outcome;
-  const core = trimChars(stripped, "… ");
-  const opening = Array.from(core).slice(0, 40).join("");
-  return core.length >= 16 && detail.includes(opening);
-}
-
-function trimChars(value: string, chars: string): string {
-  let start = 0;
-  let end = value.length;
-  while (start < end && chars.includes(value[start])) start++;
-  while (end > start && chars.includes(value[end - 1])) end--;
-  return value.slice(start, end);
-}
-
-function isOutcomeOnly(presentation: TaskEventPresentation | undefined): boolean {
-  if (!presentation) return false;
-  return (
-    presentation.type === "tool" &&
-    presentation.path === undefined &&
-    presentation.change === undefined &&
-    presentation.command === undefined &&
-    presentation.status === undefined &&
-    presentation.exitCode === undefined &&
-    presentation.text === undefined &&
-    presentation.completed === undefined &&
-    presentation.total === undefined &&
-    presentation.costUsd === undefined &&
-    presentation.tokensIn === undefined &&
-    presentation.tokensOut === undefined &&
-    presentation.tokensCached === undefined &&
-    presentation.tokensThinking === undefined &&
-    presentation.turns === undefined &&
-    presentation.durationMs === undefined &&
-    presentation.level === undefined
-  );
-}
-
-function isSubject(presentation: TaskEventPresentation | undefined): boolean {
-  if (!presentation) return false;
-  if (presentation.type === "file") return presentation.path !== undefined;
-  if (presentation.type === "command") return presentation.command !== undefined;
-  return false;
-}
-
-function isLifecycleUpdate(event: TaskEventView): boolean {
-  const value = rawValue(event);
-  if (typeof value !== "object" || value === null) return false;
-  const type = (value as Record<string, unknown>).type;
-  return type === "tool_execution_update" || type === "item.updated";
-}
-
-function parentActionId(event: TaskEventView): string | undefined {
-  if (event.parentActionId) return event.parentActionId;
-  const value = rawValue(event);
-  if (typeof value !== "object" || value === null) return undefined;
-  const object = value as Record<string, unknown>;
-  for (const key of ["parent_tool_use_id", "parentToolUseId"]) {
-    const candidate = object[key];
-    if (typeof candidate === "string" && candidate !== "") return candidate;
-  }
-  return undefined;
-}
-
-function rawValue(event: TaskEventView): unknown {
-  if (!event.rawText) return undefined;
-  try {
-    return JSON.parse(event.rawText);
-  } catch {
-    return undefined;
-  }
-}
+// ---------------------------------------------------------------------------
+// Turn ids
+// ---------------------------------------------------------------------------
 
 type TurnSignal =
   | { type: "started" }
@@ -2061,6 +1532,73 @@ export function deriveTurnIds(events: TaskEventView[]): TaskEventView[] {
     }
     return event;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Small shared helpers
+// ---------------------------------------------------------------------------
+
+function parentActionId(event: TaskEventView): string | undefined {
+  if (event.parentActionId) return event.parentActionId;
+  const object = rawObject(rawValue(event));
+  if (object === undefined) return undefined;
+  for (const key of ["parent_tool_use_id", "parentToolUseId"]) {
+    const candidate = object[key];
+    if (typeof candidate === "string" && candidate !== "") return candidate;
+  }
+  return undefined;
+}
+
+function rawValue(event: TaskEventView): unknown {
+  if (!event.rawText) return undefined;
+  try {
+    return JSON.parse(event.rawText);
+  } catch {
+    return undefined;
+  }
+}
+
+function rawString(event: TaskEventView, key: string): string | undefined {
+  const found = rawObject(rawValue(event))?.[key];
+  return typeof found === "string" && found !== "" ? found : undefined;
+}
+
+/** SAFETY: guarded on the value being a non-null, non-array object. */
+function rawObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function eventSubject(event: TaskEventView): string {
+  return event.target ?? event.detail ?? "";
+}
+
+function eventText(event: TaskEventView): string | undefined {
+  const text = event.presentation?.text ?? event.detail;
+  return text !== undefined && text.trim() !== "" ? text : undefined;
+}
+
+function eventTime(value: string): number | undefined {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function eventDurationSeconds(start: string, end: string): number | undefined {
+  const duration = spanMs(start, end);
+  return duration === undefined ? undefined : Math.trunc(duration / 1000) || undefined;
+}
+
+function findLast<T>(items: T[], predicate: (item: T) => boolean): T | undefined {
+  const index = findLastIndex(items, predicate);
+  return index === -1 ? undefined : items[index];
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (predicate(items[index])) return index;
+  }
+  return -1;
 }
 
 function providerLabel(value: string): string {

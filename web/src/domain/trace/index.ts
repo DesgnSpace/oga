@@ -3,27 +3,37 @@
 // The syntax-highlighted rendering (`ReviewContent`, `CodeLanguage` highlighting) is
 // out of scope here — this module only ports the pure row/expansion composition.
 
-import type { EventKind, TaskEventView } from "@/bridge/types";
+import type { TaskEventView } from "@/bridge/types";
 import { fileChangeFromRaw, type FileChange } from "@/domain/changes";
 import {
   ActivityBlock,
-  ActivityGroup,
-  ActivityGroupStatus,
-  ChapterRow,
-  chapterCallCount,
-  chapterDurationMs,
-  groupDurationMs,
-  groupId,
-  groupStartsExpanded,
-  groupStatus,
+  ActivityNode,
+  ActivitySegment,
+  ActivityStatus,
+  ActivitySubagent,
+  ActivityTurn,
+  callDurationMs,
+  nodesCallCount,
+  nodesDurationMs,
   ReasoningPulse,
+  turnDurationMs,
+  type ActivityCall,
   type ActivityComposition,
   type HandoffBoundary,
+  type HandoffBriefTier,
 } from "@/domain/activity";
 import { ogaResultText } from "@/domain/oga";
 
 export type TraceStyle = "work" | "message" | "notice";
-export type TraceState = "running" | "needs-input" | "failed" | "done";
+export type TraceState = "running" | "needs-input" | "failed" | "interrupted" | "done";
+
+export interface HandoffPresentation {
+  fromId: string;
+  toId: string;
+  earlierRunCount: number;
+  context?: "carried" | "rebuilt";
+  briefTier?: HandoffBriefTier;
+}
 
 /** What kind of turn a row opens or closes: a resumed run, an answer to a
  * question, a mid-run steer, a handoff to another profile, or the worker's
@@ -254,7 +264,7 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
     // A hook-driven tool call nests its output one level down, under
     // `tool_response`; only fall back to that wrapper itself once none of the
     // keys above turned up anywhere inside it.
-    let text = findText(raw, keys) ?? (event.kind === "file" ? undefined : findText(raw, ["tool_response"]));
+    let text = acpContentText(raw) ?? findText(raw, keys) ?? (event.kind === "file" ? undefined : findText(raw, ["tool_response"]));
     if (isSearch && (text === undefined || text.trim() === "")) {
       text = event.verb === "Found" ? "No files found." : "No matches found.";
     }
@@ -281,7 +291,7 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
   const failure = failureText(event);
   if (failure !== undefined && isLong(failure)) return { type: "detail", text: failure };
 
-  if (raw && raw !== "" && !designedKind(event.kind)) {
+  if (raw && raw !== "" && event.kind === "raw") {
     return { type: "payload", text: stripTransportMarkup(raw) };
   }
   return undefined;
@@ -348,6 +358,10 @@ export function expansionLabel(expansion: EventExpansion, expanded: boolean): st
 
 export interface TraceRow {
   id: number;
+  /** The composing node's own stable id (`turn:<n>`, `call:<turn>:<action>`, …),
+   * set whenever this row stands for one — the key expansion state survives on
+   * as the stream grows, unlike a row's numeric event id or its position. */
+  nodeId?: string;
   style: TraceStyle;
   verb?: string;
   target?: string;
@@ -365,6 +379,7 @@ export interface TraceRow {
   /** Set on rows that open or close a turn boundary — a follow-up, a reply,
    * a steer, a handoff, or the worker's response to one. */
   marker?: TurnMarkerKind;
+  handoff?: HandoffPresentation;
 }
 
 export function traceRowWeight(row: TraceRow): number {
@@ -394,6 +409,7 @@ export function traceRowIsEmpty(row: TraceRow): boolean {
     !row.verb &&
     !row.result &&
     !row.preview &&
+    !row.handoff &&
     row.children.length === 0 &&
     !traceRowOffersExpansion(row)
   );
@@ -401,27 +417,25 @@ export function traceRowIsEmpty(row: TraceRow): boolean {
 
 export const TraceRowBuilder = {
   rows(blocks: ActivityBlock[], cwd: string, live: boolean): TraceRow[] {
+    // One turn needs no heading of its own: the rows are already the run.
+    const nested = blocks.filter((block) => block.type === "turn").length > 1;
     return blocks.flatMap((block, index) => {
-      const rows = blockRows(block, cwd, live)
+      const rows = blockRows(block, cwd, live, nested)
         .map((row) => dropEmpty(row))
         .filter((row): row is TraceRow => row !== undefined);
       if (index > 0 && rows[0]) rows[0] = { ...rows[0], isStepStart: true };
       return rows;
     });
   },
-  chapterRows(row: ChapterRow, cwd: string, live: boolean): TraceRow[] {
-    return chapterRows(row, cwd, live);
+  nodeRows(node: ActivityNode, cwd: string, live: boolean): TraceRow[] {
+    return [nodeRow(node, cwd, live)];
   },
 };
 
-function blockRows(block: ActivityBlock, cwd: string, live: boolean): TraceRow[] {
+function blockRows(block: ActivityBlock, cwd: string, live: boolean, nested: boolean): TraceRow[] {
   switch (block.type) {
-    case "chapter":
-      return chapterBlockRows(block, cwd, live);
-    case "reasoning":
-      return [thinkingRow(block.pulse)];
-    case "signal":
-      return [signalRow(block.event, cwd)];
+    case "turn":
+      return turnRows(block.turn, cwd, live, nested);
     case "receipt":
       return [receiptRow(block.event, block.thinkingTokens, block.usageWindow)];
     case "handoff":
@@ -429,52 +443,137 @@ function blockRows(block: ActivityBlock, cwd: string, live: boolean): TraceRow[]
   }
 }
 
-type ChapterBlock = Extract<ActivityBlock, { type: "chapter" }>;
-
 /**
- * A chapter the worker announced becomes one collapsed heading over the work
- * that followed it. A single call needs no heading of its own: the words the
- * worker said label that one row instead of nesting it.
+ * A run with more than one turn folds each into a collapsed heading over the
+ * work it did, labelled with the worker's own opening words. A run with one
+ * turn has nothing to distinguish, so its rows stand on their own.
  */
-function chapterBlockRows(block: ChapterBlock, cwd: string, live: boolean): TraceRow[] {
-  const rows = block.rows.flatMap((row) => chapterRows(row, cwd, live));
-  const title = block.title;
-  if (title === undefined) return rows;
-  if (rows.length === 0) return [narrationRow(block.id, title)];
-  const single = rows.length === 1 && block.rows[0]?.type === "work" ? rows[0] : undefined;
-  if (single) {
-    return [{ ...single, id: block.id, target: title, preview: single.target ?? single.preview }];
+function turnRows(turn: ActivityTurn, cwd: string, live: boolean, nested: boolean): TraceRow[] {
+  if (!nested) {
+    return turn.segments.flatMap((segment) => segmentRows(segment, cwd, live));
   }
-  return [
-    {
-      ...narrationRow(block.id, title),
-      result: chapterSummary(block.rows),
-      state: chapterState(rows, live),
-      children: rows,
-    },
-  ];
+  // The heading already says what the worker opened with; showing that same
+  // message again underneath it would say it twice.
+  const rows = turn.segments.flatMap((segment) =>
+    segmentRows(segment.lead?.id === turn.titleFrom ? { ...segment, lead: undefined, nodes: segment.nodes.slice(1) } : segment, cwd, live),
+  );
+  const nodes = turn.segments.flatMap((segment) => segment.nodes);
+  return [{
+    ...blankRow(nodes.map(nodeAnchorId).find((id) => id !== undefined) ?? 0),
+    nodeId: turn.id,
+    style: "notice",
+    target: turn.title ?? "Work step",
+    result: formatDuration(turnDurationMs(turn)),
+    state: topState(turn.status, live),
+    children: rows,
+  }];
 }
 
-function chapterSummary(rows: ChapterRow[]): string | undefined {
-  const calls = chapterCallCount(rows);
-  const duration = formatDuration(chapterDurationMs(rows));
+/**
+ * A stretch the worker announced becomes one collapsed row over the work that
+ * followed it. A single call needs no heading of its own: the words the worker
+ * said label that one row instead of nesting it.
+ */
+function segmentRows(segment: ActivitySegment, cwd: string, live: boolean): TraceRow[] {
+  const rows = segment.nodes.flatMap((node) => [nodeRow(node, cwd, live)]);
+  if (segment.lead === undefined) return rows;
+  const [head, ...rest] = rows;
+  if (head === undefined || rest.length === 0) return rows;
+  // The row already shows the whole message; opening it reveals the work
+  // under it, not a second copy of the words.
+  return [{
+    ...head,
+    expansion: head.expansion?.type === "prose" ? undefined : head.expansion,
+    result: nodesSummary(segment.nodes.slice(1)),
+    state: rowsState(rest, live),
+    children: rest,
+  }];
+}
+
+function nodesSummary(nodes: ActivityNode[]): string | undefined {
+  const calls = nodesCallCount(nodes);
+  const duration = formatDuration(nodesDurationMs(nodes));
   const parts = [calls > 0 ? `${calls} call${calls === 1 ? "" : "s"}` : undefined, duration];
   const summary = parts.filter((part): part is string => part !== undefined).join(" · ");
   return summary !== "" ? summary : undefined;
 }
 
-function chapterState(rows: TraceRow[], live: boolean): TraceState {
+function rowsState(rows: TraceRow[], live: boolean): TraceState {
   if (rows.some((row) => row.state === "needs-input")) return "needs-input";
   if (rows.some((row) => row.state === "failed")) return "failed";
   return live && rows.some((row) => row.state === "running") ? "running" : "done";
 }
 
-function narrationRow(id: number, title: string): TraceRow {
+function nodeRow(node: ActivityNode, cwd: string, live: boolean): TraceRow {
+  switch (node.type) {
+    case "call":
+      return callRow(node.call, cwd, live);
+    case "message":
+      return { ...workRow(node.event, cwd, live), nodeId: node.id };
+    case "notice":
+      return {
+        ...(isSignal(node.event) ? signalRow(node.event, cwd) : workRow(node.event, cwd, live)),
+        nodeId: node.id,
+      };
+    case "thinking":
+      return { ...thinkingRow(node.pulse), nodeId: node.id };
+    case "subagent":
+      return subagentRow(node.subagent, cwd, live);
+  }
+}
+
+function nodeAnchorId(node: ActivityNode): number | undefined {
+  switch (node.type) {
+    case "call":
+      return node.call.event.id;
+    case "message":
+    case "notice":
+      return node.event.id;
+    case "thinking":
+      return node.pulse.id;
+    case "subagent":
+      return node.subagent.start.id;
+  }
+}
+
+function callRow(call: ActivityCall, cwd: string, live: boolean): TraceRow {
+  const row = workRow(call.event, cwd, live);
+  return {
+    ...row,
+    nodeId: call.id,
+    state: callState(call, live),
+    result: row.result ?? formatDuration(callDurationMs(call)),
+    children: call.children.map((child) => callRow(child, cwd, live)),
+  };
+}
+
+function callState(call: ActivityCall, live: boolean): TraceState {
+  if (call.status === "failed") return "failed";
+  if (call.status === "interrupted") return "interrupted";
+  return call.status === "running" && live ? "running" : "done";
+}
+
+function subagentRow(subagent: ActivitySubagent, cwd: string, live: boolean): TraceRow {
+  const children = subagent.nodes
+    .map((node) => dropEmpty(nodeRow(node, cwd, live)))
+    .filter((row): row is TraceRow => row !== undefined);
+  return {
+    ...blankRow(subagent.start.id),
+    nodeId: subagent.id,
+    style: "notice",
+    target: subagent.label,
+    result: nodesSummary(subagent.nodes),
+    state: topState(subagent.status, live),
+    children,
+  };
+}
+
+function blankRow(id: number): TraceRow {
   return {
     id,
     style: "notice",
     verb: undefined,
-    target: title,
+    target: undefined,
     result: undefined,
     state: "done",
     event: undefined,
@@ -487,16 +586,10 @@ function narrationRow(id: number, title: string): TraceRow {
   };
 }
 
-function chapterRows(row: ChapterRow, cwd: string, live: boolean): TraceRow[] {
-  switch (row.type) {
-    case "work":
-      return [workRow(row.event, cwd, live)];
-    case "reasoning":
-      return [thinkingRow(row.pulse)];
-    case "group":
-      return [groupRow(row.group, cwd, live)];
-  }
+function isSignal(event: TaskEventView): boolean {
+  return event.presentation?.type === "signal" || event.kind === "error" || event.type === "needs_input";
 }
+
 
 export const TraceVisibility = {
   interleavedRows,
@@ -504,16 +597,10 @@ export const TraceVisibility = {
 
 function interleavedRows(composition: ActivityComposition, cwd: string, live: boolean): TraceRow[] {
   const main = TraceRowBuilder.rows(composition.blocks, cwd, live);
-  const technicalBlocks: ActivityBlock[] = composition.technical.map((event) => ({
-    type: "chapter",
-    id: event.id,
-    rows: [{ type: "work", event }],
-  }));
-  const technical = TraceRowBuilder.rows(technicalBlocks, cwd, false).map((row) => ({
-    ...row,
-    isTechnical: true,
-    isStepStart: false,
-  }));
+  const technical = composition.technical
+    .map((event) => dropEmpty(workRow(event, cwd, false)))
+    .filter((row): row is TraceRow => row !== undefined)
+    .map((row) => ({ ...row, isTechnical: true, isStepStart: false }));
   return [...main, ...technical].sort((left, right) => left.id - right.id);
 }
 
@@ -553,75 +640,6 @@ export interface ExpansionKey {
   id: number;
 }
 
-function groupRow(group: ActivityGroup, cwd: string, live: boolean): TraceRow {
-  let style: TraceStyle;
-  let verb: string | undefined;
-  let target: string | undefined;
-  let result: string | undefined;
-  let event: TaskEventView | undefined;
-  let expansion: EventExpansion | undefined;
-
-  if (group.kind === "run") {
-    style = "work";
-    // The label is already a sentence — "Read 8 files", "Checked lint, tests".
-    verb = undefined;
-    target = group.runLabel;
-    result = formatDuration(groupDurationMs(group));
-    event = undefined;
-    expansion = undefined;
-  } else if (group.kind === "turn") {
-    style = "notice";
-    verb = undefined;
-    target = group.turnTitle ?? "Work step";
-    result = formatDuration(groupDurationMs(group));
-    event = undefined;
-    expansion = undefined;
-  } else if (group.kind === "subagent") {
-    style = "notice";
-    verb = undefined;
-    target = group.runLabel;
-    result = formatDuration(groupDurationMs(group));
-    event = undefined;
-    expansion = undefined;
-  } else {
-    const row = workRow(group.anchor, cwd, live);
-    style = row.style;
-    verb = row.verb;
-    target = row.target;
-    result = row.result;
-    event = row.event;
-    expansion = row.expansion;
-  }
-
-  const children =
-    group.kind === "lifecycle"
-      ? group.members
-          .filter((member) => member.id !== groupId(group))
-          .map((member) => workRow(member, cwd, live))
-          .map((row) => dropEmpty(row))
-          .filter((row): row is TraceRow => row !== undefined)
-      : group.children
-          .flatMap((row) => chapterRows(row, cwd, live))
-          .map((row) => dropEmpty(row))
-          .filter((row): row is TraceRow => row !== undefined);
-
-  return {
-    id: groupId(group),
-    style,
-    verb,
-    target,
-    result,
-    state: topState(groupStatus(group), live),
-    event,
-    expansion,
-    preview: undefined,
-    children,
-    startsExpanded: groupStartsExpanded(group),
-    isStepStart: false,
-    isTechnical: false,
-  };
-}
-
 function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
   const expansion = expansionFromEvent(event);
   const verb = inferVerb(event);
@@ -650,18 +668,18 @@ function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
       event.detail ??
       (event.title.trim() !== "" ? event.title : undefined);
     target = subject !== undefined ? relativePaths(subject, cwd) : undefined;
-    result = workResult(event, cwd);
+    result = workResult(event, cwd, expansion);
   } else if (event.kind === "file" || event.kind === "retry") {
     style = "work";
     const path = event.presentation?.path ?? event.target ?? event.detail;
     target = path !== undefined ? relative(path, cwd) : undefined;
-    result = workResult(event, cwd);
+    result = workResult(event, cwd, expansion);
     preview = undefined;
   } else {
     style = "work";
     const text = event.presentation?.text ?? event.target ?? event.detail ?? (event.title.trim() !== "" ? event.title : undefined);
-    target = text !== undefined ? relativePaths(text, cwd) : undefined;
-    result = workResult(event, cwd);
+    target = text !== undefined ? relativePaths(rowText(text, expansion), cwd) : undefined;
+    result = workResult(event, cwd, expansion);
     preview = undefined;
   }
 
@@ -758,13 +776,23 @@ function receiptRow(event: TaskEventView, thinkingTokens: number, usageWindow: s
 }
 
 function handoffRow(boundary: HandoffBoundary): TraceRow {
-  const runs = boundary.earlierRuns.length === 1 ? "run" : "runs";
-  const events = boundary.hiddenEventCount === 1 ? "event" : "events";
+  const hops = boundary.earlierRuns.flatMap((run) => run.endedBy ? [run.endedBy] : []);
+  const firstHop = hops[0];
+  const lastHop = hops[hops.length - 1];
+  const handoff = firstHop && lastHop
+    ? {
+        fromId: firstHop.fromId,
+        toId: lastHop.toId,
+        earlierRunCount: boundary.earlierRuns.length,
+        context: handoffContext(lastHop.context),
+        briefTier: boundary.briefTier,
+      }
+    : undefined;
   return {
     id: 0,
     style: "notice",
     verb: undefined,
-    target: `${boundary.chain} · ${boundary.earlierRuns.length} earlier ${runs} · ${boundary.hiddenEventCount} ${events}`,
+    target: handoff === undefined ? boundary.chain : undefined,
     result: undefined,
     state: "done",
     event: undefined,
@@ -775,7 +803,14 @@ function handoffRow(boundary: HandoffBoundary): TraceRow {
     isStepStart: true,
     isTechnical: false,
     marker: "handoff",
+    handoff,
   };
+}
+
+function handoffContext(value: string | undefined): HandoffPresentation["context"] {
+  if (value === "conversation carried") return "carried";
+  if (value === "rebuilt brief") return "rebuilt";
+  return undefined;
 }
 
 function dropEmpty(row: TraceRow): TraceRow | undefined {
@@ -784,10 +819,11 @@ function dropEmpty(row: TraceRow): TraceRow | undefined {
   return traceRowIsEmpty(next) ? undefined : next;
 }
 
-function topState(status: ActivityGroupStatus, live: boolean): TraceState {
+function topState(status: ActivityStatus, live: boolean): TraceState {
   if (status === "running" && live) return "running";
   if (status === "needs_input") return "needs-input";
   if (status === "failed") return "failed";
+  if (status === "interrupted") return "interrupted";
   return "done";
 }
 
@@ -819,10 +855,10 @@ function singleLine(value: string): string | undefined {
   return lines.length === 1 ? lines[0] : undefined;
 }
 
-function workResult(event: TaskEventView, cwd: string): string | undefined {
+function workResult(event: TaskEventView, cwd: string, expansion: EventExpansion | undefined): string | undefined {
   if (event.phase === "failed") {
     const text = event.result ?? event.presentation?.outcome ?? event.detail;
-    return text !== undefined ? relativePaths(text, cwd) : undefined;
+    return text !== undefined ? relativePaths(rowText(text, expansion), cwd) : undefined;
   }
   if (event.kind === "command") return undefined;
   const outcome = event.result ?? event.presentation?.outcome;
@@ -860,8 +896,12 @@ function isLong(text: string): boolean {
   return lines.length > 1 || Array.from(lines[0] ?? text).length > 140;
 }
 
-function designedKind(kind: EventKind): boolean {
-  return (["file", "command", "tool", "error", "lifecycle", "message", "reasoning"] as EventKind[]).includes(kind);
+/** `text` shown on the row itself, shortened to its first line whenever it is
+ * the very string a `detail` expansion also carries — otherwise the "+" would
+ * open onto the exact text already printed above it. */
+function rowText(text: string, expansion: EventExpansion | undefined): string {
+  if (expansion?.type !== "detail" || expansion.text !== text || !isLong(text)) return text;
+  return middleTruncated(text.split("\n")[0] ?? text, 140);
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -1109,7 +1149,33 @@ function parseJson(raw: string): unknown {
 }
 
 function commandOutput(raw: string): string | undefined {
-  return findText(raw, ["stdout", "stderr", "output"]) ?? findText(raw, ["tool_response"]);
+  return findText(raw, ["stdout", "stderr", "output", "rawOutput"]) ?? acpContentText(raw) ?? findText(raw, ["tool_response"]);
+}
+
+/**
+ * An ACP call reports its result as `content` blocks, each wrapping a text
+ * block; a shell result usually arrives fenced as a console block.
+ */
+function acpContentText(raw: string): string | undefined {
+  const value = parseJson(raw);
+  if (typeof value !== "object" || value === null || !("content" in value)) return undefined;
+  const blocks = (value as { content: unknown }).content;
+  if (!Array.isArray(blocks)) return undefined;
+  const texts: string[] = [];
+  for (const block of blocks) {
+    if (typeof block !== "object" || block === null) continue;
+    const inner = (block as { type?: unknown; content?: unknown }).content;
+    if ((block as { type?: unknown }).type !== "content" || typeof inner !== "object" || inner === null) continue;
+    const text = (inner as { type?: unknown; text?: unknown }).text;
+    if ((inner as { type?: unknown }).type === "text" && typeof text === "string") texts.push(text);
+  }
+  if (texts.length === 0) return undefined;
+  return unfenced(texts.join("\n"));
+}
+
+function unfenced(text: string): string {
+  const match = /^```[^\n]*\n([\s\S]*?)\n?```\s*$/.exec(text.trim());
+  return match?.[1] ?? text;
 }
 
 function todoItems(raw: string): TodoItem[] | undefined {

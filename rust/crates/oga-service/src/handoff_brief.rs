@@ -6,6 +6,7 @@
 use oga_domain::{EventPhase, Provider, Task, TaskEvent, TaskState};
 use oga_events::event_view;
 use oga_providers::write_targets_from;
+use serde_json::Value;
 
 /// How much of the previous run's transcript may be carried verbatim.
 pub const VERBATIM_CAP: usize = 24_000;
@@ -235,7 +236,11 @@ fn written_section(task: &Task, events: &[TaskEvent]) -> Vec<String> {
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect(),
         );
-        for target in write_targets_from(&payload) {
+        let targets = match acp_write_targets(&payload) {
+            Some(targets) => targets,
+            None => write_targets_from(&payload),
+        };
+        for target in targets {
             let path = relativize(&target, &task.cwd);
             if !written.contains(&path) {
                 written.push(path);
@@ -254,6 +259,49 @@ fn written_section(task: &Task, events: &[TaskEvent]) -> Vec<String> {
     lines.push("Check these on disk before rewriting them; a run that died mid-write may have left one partial.".into());
     lines.push(String::new());
     lines
+}
+
+/// The files an ACP tool call wrote, or `None` when the row is not an ACP
+/// update and the provider readers should have it.
+///
+/// An ACP agent never names its tools, so a write is recognised from what the
+/// protocol does say: a diff the call produced, or a call the agent classified
+/// as changing a file. A call with neither wrote nothing.
+fn acp_write_targets(payload: &Value) -> Option<Vec<String>> {
+    let update = payload.get("sessionUpdate")?.as_str()?;
+    if !matches!(update, "tool_call" | "tool_call_update") {
+        return Some(Vec::new());
+    }
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    let diffs = content
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("diff"))
+        .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if !diffs.is_empty() {
+        return Some(diffs);
+    }
+    let writes = matches!(
+        payload.get("kind").and_then(Value::as_str),
+        Some("edit" | "delete" | "move")
+    );
+    if !writes {
+        return Some(Vec::new());
+    }
+    Some(
+        payload
+            .get("locations")
+            .and_then(Value::as_array)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter_map(|location| location.get("path").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 fn transcript(events: &[TaskEvent], provider: Provider) -> Vec<TranscriptLine> {
@@ -509,6 +557,129 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             turn_id: None,
         }
+    }
+
+    fn acp_event(id: i64, update: serde_json::Value) -> TaskEvent {
+        let kind = update["sessionUpdate"]
+            .as_str()
+            .expect("an update names itself");
+        TaskEvent {
+            id,
+            task_id: "task-1".into(),
+            kind: format!("agent.{kind}"),
+            state: TaskState::Running,
+            payload: update
+                .as_object()
+                .expect("an update is an object")
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            turn_id: Some(1),
+        }
+    }
+
+    fn brief_of(events: &[TaskEvent]) -> String {
+        handoff_brief(
+            &base_task(),
+            events,
+            Provider::Claude,
+            &HandoffBriefOptions {
+                same_account: true,
+                fresh_session_cause: Some(FreshSessionCause::SessionNotCaptured),
+                ..HandoffBriefOptions::default()
+            },
+        )
+        .prompt
+    }
+
+    #[test]
+    fn a_worker_that_streams_its_own_calls_still_reports_what_it_wrote() {
+        let events = vec![
+            acp_event(
+                1,
+                serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "read-1",
+                    "title": "Read the runner",
+                    "kind": "read",
+                    "status": "completed",
+                    "locations": [{"path": "/repo/src/runner.rs"}],
+                }),
+            ),
+            acp_event(
+                2,
+                serde_json::json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "edit-1",
+                    "kind": "edit",
+                    "status": "completed",
+                    "content": [{"type": "diff", "path": "/repo/src/lib.rs", "oldText": "old", "newText": "new"}],
+                }),
+            ),
+            acp_event(
+                3,
+                serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "move-1",
+                    "title": "Move the module",
+                    "kind": "move",
+                    "status": "completed",
+                    "locations": [{"path": "/repo/src/old.rs"}],
+                }),
+            ),
+        ];
+
+        let prompt = brief_of(&events);
+
+        assert!(prompt.contains("- src/lib.rs"), "{prompt}");
+        assert!(prompt.contains("- src/old.rs"), "{prompt}");
+        assert!(
+            !prompt.contains("- src/runner.rs"),
+            "a file the run only read is not a file it wrote: {prompt}"
+        );
+        assert!(
+            prompt.contains("[tool] Read file: /repo/src/runner.rs"),
+            "the transcript still says what the run read: {prompt}"
+        );
+    }
+
+    #[test]
+    fn a_command_line_run_in_the_same_history_still_reports_its_own_writes() {
+        let events = vec![
+            TaskEvent {
+                id: 1,
+                task_id: "task-1".into(),
+                kind: "agent.hook".into(),
+                state: TaskState::Running,
+                payload: BTreeMap::from([
+                    ("hook_event_name".into(), serde_json::json!("PostToolUse")),
+                    ("tool_name".into(), serde_json::json!("Write")),
+                    (
+                        "tool_input".into(),
+                        serde_json::json!({"file_path": "/repo/src/cli.rs", "content": "fn main() {}"}),
+                    ),
+                ]),
+                created_at: "2026-01-01T00:00:00Z".into(),
+                turn_id: Some(1),
+            },
+            acp_event(
+                2,
+                serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "edit-1",
+                    "title": "Edit the library",
+                    "kind": "edit",
+                    "status": "completed",
+                    "locations": [{"path": "/repo/src/lib.rs"}],
+                }),
+            ),
+        ];
+
+        let prompt = brief_of(&events);
+
+        assert!(prompt.contains("- src/cli.rs"), "{prompt}");
+        assert!(prompt.contains("- src/lib.rs"), "{prompt}");
     }
 
     #[test]

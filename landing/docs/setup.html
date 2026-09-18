@@ -102,6 +102,31 @@
         </ul>
         <p>Each worker can use its own sign-in. Add environment values in the worker settings when a provider needs them.</p>
 
+        <h3 id="connection">How Oga talks to a worker<a class="heading-anchor" href="#connection" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <p>Oga talks to a worker's tool over the Agent Client Protocol (ACP) when it can run that tool this way, and through the tool's own command line otherwise. Either way the work runs on the same account, with the same limits on what it may touch.</p>
+        <ul>
+          <li>Claude, Codex, OpenCode, OpenCode 2, Antigravity, and Pi workers connect over ACP.</li>
+          <li>Claude needs one extra install to connect this way: <code>npm install -g @agentclientprotocol/claude-agent-acp</code>. Without it, Claude workers use their command line.</li>
+          <li>Codex needs one too: <code>npm install -g @agentclientprotocol/codex-acp@1.12</code>. It brings its own copy of Codex and leaves the one you already have alone. Without it, or with a different version, Codex workers use their command line.</li>
+          <li>A Codex worker that signs in with <code>CODEX_API_KEY</code> always uses its command line.</li>
+          <li>OpenCode 2 workers connect this way only on version <code>0.0.0-beta-18999</code>. On any other version, they use their command line.</li>
+          <li>Antigravity needs Google's Antigravity ACP server, version <code>1.1.1</code>, from the <a href="https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp">ACP registry</a>. Unzip it and add that folder to your <code>PATH</code>. Google doesn't publish it for Intel Macs. Without it, or with a different version, Antigravity workers use their command line.</li>
+          <li>That server has its own sign-in, separate from <code>agy</code>'s. Sign in to it once from an editor that uses it, such as Zed. Until then, Antigravity workers use their command line.</li>
+          <li>Antigravity tasks that connect over ACP can't be continued in a terminal and don't show token counts or cost.</li>
+          <li>Pi needs one extra install to connect this way: <code>npm install -g pi-acp@0.0.33</code>. Without it, or with a different version, Pi workers use their command line.</li>
+          <li>Pi workers never load a project's own Pi settings, extensions, or skills, such as a <code>.pi</code> or <code>.agents/skills</code> folder. In a project that has them, Pi workers use their command line.</li>
+          <li>If a Pi extension stops to ask a question, Oga answers no, because nobody is there to reply.</li>
+          <li>Pi tasks that connect over ACP don't show token counts or cost.</li>
+          <li>A task keeps the connection it started on, so resuming it picks up the same conversation.</li>
+          <li>If ACP can't start or can't use the model and effort you picked, Oga switches the task to the command line before it begins and notes why. A worker set to use only ACP stops the task and says why.</li>
+          <li>A task's details show whether it connects over ACP or uses its command line, and why. When ACP wasn't available, you can copy what it reported.</li>
+          <li>A sign-in problem is never worked around: the task stops so you can sign in again.</li>
+          <li>If a worker stops partway through, Oga never starts the work over on its own. Resume the task when you're ready.</li>
+          <li>Tasks from before ACP keep running through the command line.</li>
+          <li>You see the same activity either way: what the worker said, what it was thinking, every file and command it touched, and its plan.</li>
+          <li><strong>Continue in terminal</strong> appears when the worker's own tool can reopen the task's conversation. Not every worker can, and Oga doesn't offer it then.</li>
+        </ul>
+
         <h2 id="default-model">Choose who gets work that names nobody<a class="heading-anchor" href="#default-model" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>Settings controls which workers and models can receive work. A model has to be turned on before Oga can select it.</p>
         <p><code>oga love</code> pins the worker and model that runs work nobody named an account for. Set it once, and every piece of work that leaves worker and model blank lands there instead of wherever Oga would otherwise guess.</p>

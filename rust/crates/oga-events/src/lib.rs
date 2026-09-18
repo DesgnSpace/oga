@@ -1,8 +1,10 @@
 //! Event bounds, normalization, presentation, and wire records.
 
+mod acp;
 pub mod socket;
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap, VecDeque},
     sync::{
         Arc, Mutex,
@@ -650,6 +652,47 @@ pub fn task_to_batch(task: &Task) -> BatchTask {
     }
 }
 
+/// A task's recorded events as rows, read in order.
+///
+/// Read together, the events settle what one alone cannot. An ACP update that
+/// names only what changed reads as the call it patched. A call that already
+/// ended does not open again when a second report of its start follows, as a
+/// Claude transcript repeats a call its hooks reported first. A hook carries no
+/// turn of its own, so it belongs to the turn the task was last in, and a call
+/// id seen again in another turn is another call.
+pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventView> {
+    let mut calls = acp::AcpCalls::default();
+    let mut ended = HashMap::<String, Option<i64>>::new();
+    let mut turn = None;
+    events
+        .iter()
+        .map(|event| {
+            turn = event.turn_id.or(turn);
+            let patched = calls.patch(event);
+            let mut view = event_view(&patched, provider);
+            if matches!(patched, Cow::Owned(_)) {
+                view.raw_text = raw_payload_text(&event.payload);
+            }
+            if let Some(id) = &view.action_id {
+                match view.phase {
+                    EventPhase::Completed | EventPhase::Failed => {
+                        ended.insert(id.clone(), turn);
+                    }
+                    EventPhase::Started if ended.get(id) == Some(&turn) => {
+                        view.minor = Some(true);
+                    }
+                    _ => {}
+                }
+            }
+            view
+        })
+        .collect()
+}
+
+fn raw_payload_text(payload: &BTreeMap<String, Value>) -> Option<String> {
+    (!payload.is_empty()).then(|| serde_json::to_string_pretty(payload).unwrap())
+}
+
 /// Upgrades the third and later retry for one target into a visible failure.
 pub fn mark_repeated_retries(views: Vec<TaskEventView>) -> Vec<TaskEventView> {
     let mut misses = HashMap::<String, usize>::new();
@@ -740,7 +783,11 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
                 }
             })
         });
-    let title = text_value(event.payload.get("title"))
+    // A permission row carries the title of the call it answered, which names
+    // what the worker wanted rather than what Oga decided.
+    let title = (event.kind != "permission_answered")
+        .then(|| text_value(event.payload.get("title")))
+        .flatten()
         .map(str::to_owned)
         .or_else(|| hook_tool.map(|tool| tool_title_with_input(tool, hook_input)))
         .unwrap_or_else(|| event_title(&event.kind, &event.payload));
@@ -757,8 +804,15 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
             Some(complete),
         )
     });
-    let raw_text =
-        (!event.payload.is_empty()).then(|| serde_json::to_string_pretty(&event.payload).unwrap());
+    let raw_text = if event.kind == "worker_stderr" {
+        event
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    } else {
+        raw_payload_text(&event.payload)
+    };
     if event.kind.starts_with("agent.")
         && let Some(view) = provider_event_view(event, provider, raw_text.clone())
     {
@@ -771,9 +825,19 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
         })
         .or_else(|| hook_lifecycle_detail(&event.payload))
         .or_else(|| event_detail(&event.kind, &event.payload));
+    let phase = if event.kind == "worker_stderr" {
+        EventPhase::Info
+    } else {
+        phase
+    };
     let hook_result = hook_view_presentation
         .as_ref()
         .and_then(|presentation| presentation.outcome.clone());
+    let title = if event.kind == "worker_stderr" {
+        "Worker log".to_owned()
+    } else {
+        title
+    };
     TaskEventView {
         id: event.id,
         task_id: event.task_id.clone(),
@@ -815,6 +879,11 @@ fn provider_event_view(
     raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let payload = &event.payload;
+    // An ACP update names itself and says nothing about which provider is
+    // behind it, so it is read the same way whoever the agent is.
+    if payload.contains_key("sessionUpdate") {
+        return acp::acp_event_view(event, provider, payload, raw_text);
+    }
     let event_type = text_value(payload.get("type"));
     if let Some("item.started" | "item.updated" | "item.completed") = event_type {
         return item_event_view(event, provider, payload, raw_text);
@@ -1572,7 +1641,6 @@ fn item_event_view(
                 raw_text,
             },
         );
-        view.verb = Some("Said".to_owned());
         view.complete = Some(true);
         view.action_id = item_id.clone();
         view.source_id = Some(item_id);
@@ -1989,6 +2057,29 @@ fn antigravity_step_view(
     let step_index = number_u64(step.get("step_index"));
     match text_value(step.get("step_type")) {
         Some("tool") => antigravity_tool_step_view(event, provider, step, raw_text),
+        // A response still being written streams its text one piece at a
+        // time; only the finished step carries the usage summary.
+        Some("agent_response")
+            if text_value(step.get("state")) == Some("ACTIVE")
+                && text_value(step.get("text_delta")).is_some() =>
+        {
+            let text = text_value(step.get("text_delta")).map(str::to_owned);
+            let mut view = provider_view(
+                event,
+                provider,
+                EventKind::Message,
+                EventPhase::Info,
+                "Agent message",
+                ProviderViewOptions {
+                    detail: text.clone(),
+                    presentation: text.map(message_presentation),
+                    minor: None,
+                    raw_text,
+                },
+            );
+            view.complete = Some(false);
+            Some(view)
+        }
         Some("agent_response") => Some(antigravity_usage_step_view(
             event,
             provider,
@@ -3933,8 +4024,73 @@ fn format_cost(value: f64) -> String {
     }
 }
 
+/// What Oga answered when the worker asked to reach something, and what it was
+/// asking for. Only a `permission_answered` row carries one.
+struct PermissionAnswer<'a> {
+    allowed: bool,
+    writes: bool,
+    subject: Option<&'a str>,
+    outside: Vec<&'a str>,
+    unattended: bool,
+}
+
+fn permission_answer(payload: &BTreeMap<String, Value>) -> Option<PermissionAnswer<'_>> {
+    Some(PermissionAnswer {
+        allowed: payload.get("allowed")?.as_bool()?,
+        writes: text_value(payload.get("access")) == Some("write"),
+        subject: text_value(payload.get("title")),
+        outside: payload
+            .get("outsideScope")
+            .and_then(Value::as_array)
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter_map(|path| text_value(Some(path)))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        unattended: payload
+            .get("unattended")
+            .and_then(Value::as_bool)
+            .unwrap_or_default(),
+    })
+}
+
+fn permission_title(answer: &PermissionAnswer<'_>) -> String {
+    match (answer.writes, answer.allowed) {
+        (true, true) => "Write allowed",
+        (true, false) => "Write refused",
+        (false, true) => "Read allowed",
+        (false, false) => "Read refused",
+    }
+    .to_owned()
+}
+
+/// What the worker wanted, and why it did not get it.
+fn permission_detail(answer: &PermissionAnswer<'_>) -> Option<String> {
+    let subject = answer.subject.map(str::to_owned);
+    if answer.allowed {
+        return subject;
+    }
+    let reason = if !answer.outside.is_empty() {
+        format!("outside this task's scope: {}", answer.outside.join(", "))
+    } else if answer.unattended {
+        "nobody was there to approve it".to_owned()
+    } else {
+        return subject;
+    };
+    Some(match subject {
+        Some(subject) => format!("{subject} · {reason}"),
+        None => reason,
+    })
+}
+
 fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<String> {
     match event_type {
+        "permission_answered" => permission_answer(payload)
+            .as_ref()
+            .and_then(permission_detail),
+        "transport_fallback" => tree_value(payload, &["detail"]),
         "worker_spawned" => {
             let provider = tree_value(payload, &["provider"]).map(|value| humanize(&value));
             let model = tree_value(payload, &["model"]).map(|value| humanize(&value));
@@ -4183,8 +4339,18 @@ fn event_phase(
     state: TaskState,
     payload: &BTreeMap<String, Value>,
 ) -> EventPhase {
-    if matches!(event_type, "agent.system" | "agent.assistant")
-        || (event_type == "agent.hook" && !payload.contains_key("tool_name"))
+    if event_type == "permission_answered" {
+        // The answer is already given, so the row never reads as work in
+        // flight; only a refusal reads as something that went wrong.
+        return match permission_answer(payload) {
+            Some(answer) if !answer.allowed => EventPhase::Failed,
+            _ => EventPhase::Info,
+        };
+    }
+    if matches!(
+        event_type,
+        "agent.system" | "agent.assistant" | "transport_fallback"
+    ) || (event_type == "agent.hook" && !payload.contains_key("tool_name"))
     {
         EventPhase::Info
     } else {
@@ -4351,6 +4517,7 @@ fn lifecycle_title(event_type: &str) -> String {
         "follow_up_started" => "Follow-up started",
         "follow_ups_paused" => "Follow-ups paused",
         "follow_ups_dropped" => "Follow-ups removed",
+        "transport_fallback" => "Using the command line",
         "scope_refusal" => "Write refused by scope",
         "scope_auto_completed" => "Scope expanded",
         "scope_inherited" => "Using approved scope",
@@ -4389,6 +4556,12 @@ fn default_kind(event_type: &str, payload: &BTreeMap<String, Value>) -> EventKin
         | "checkout_preparation_failed"
         | "checkout_removal_failed" => EventKind::Error,
         "scope_refusal" | "hold_expired" | "network_retry_exhausted" => EventKind::Error,
+        // A refusal is why the run stalled; an approval is bookkeeping.
+        "permission_answered"
+            if permission_answer(payload).is_some_and(|answer| !answer.allowed) =>
+        {
+            EventKind::Error
+        }
         // Losing a line of output is a gap in the record, not a failed run;
         // it reads as one notice rather than an error per drop.
         "line_dropped" | "event_dropped" | "events_truncated" => EventKind::Lifecycle,
@@ -4408,6 +4581,9 @@ fn default_kind(event_type: &str, payload: &BTreeMap<String, Value>) -> EventKin
 
 fn event_title(event_type: &str, payload: &BTreeMap<String, Value>) -> String {
     match event_type {
+        "permission_answered" => permission_answer(payload)
+            .as_ref()
+            .map_or_else(|| lifecycle_title(event_type), permission_title),
         "agent.system" => match system_subtype(payload) {
             "init" => "Session started".into(),
             "task_started" => SUBAGENT_STARTED_TITLE.into(),
@@ -4476,6 +4652,12 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
         return Some(true);
     }
 
+    // An approval is the ordinary case — the worker works inside its scope all
+    // run long. Only the refusal that stopped it earns a row.
+    if event_type == "permission_answered" {
+        return Some(permission_answer(payload).is_none_or(|answer| answer.allowed));
+    }
+
     // Show only when it matters: hidden unless the payload shows the
     // triggering condition held. `hold_armed`, `hold_released`,
     // `hold_cross_cwd`, and `network_retry_scheduled` need the outcome of a
@@ -4501,10 +4683,7 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
             let used_by = tree_value(payload, &["usedBy"]);
             Some(approved_for.is_none() || approved_for == used_by)
         }
-        "worker_stderr" => {
-            let empty = tree_value(payload, &["text"]).is_none();
-            Some(empty)
-        }
+        "worker_stderr" => Some(true),
         // A wait nobody asked for — the connection died, the account ran out —
         // is the reader's answer to "why is this task not running", so it shows
         // both when it starts and when it ends. A scheduled start or a
@@ -4572,6 +4751,27 @@ mod tests {
         }
         assert_eq!(event_title("agent.tool_progress", &empty), "Tool progress");
         assert_eq!(event_title("agent.item.started", &empty), "Item started");
+    }
+
+    #[test]
+    fn worker_stderr_is_minor_info_with_full_raw_text() {
+        let text = "worker output ".repeat(30);
+        let view = event_view(
+            &provider_event(1, "worker_stderr", serde_json::json!({"text": text})),
+            Provider::Claude,
+        );
+
+        assert_eq!(view.kind, EventKind::Lifecycle);
+        assert_eq!(view.phase, EventPhase::Info);
+        assert_eq!(view.title, "Worker log");
+        assert_eq!(view.minor, Some(true));
+        assert!(
+            view.detail
+                .as_ref()
+                .is_some_and(|detail| detail.len() < text.len())
+        );
+        assert_eq!(view.raw_text.as_ref().map(String::len), Some(text.len()));
+        assert_eq!(view.raw_text.as_deref(), Some(text.as_str()));
     }
 
     #[test]
@@ -6412,7 +6612,6 @@ mod tests {
             ),
             Provider::Codex,
         );
-        assert_eq!(message.verb.as_deref(), Some("Said"));
         assert_eq!(
             message.detail.as_deref(),
             Some("Loading Laravel, Pest, and refactor guidance")
@@ -7441,6 +7640,159 @@ mod tests {
         }
     }
 
+    /// Recorded from Claude's ACP probe, where every write the worker made was
+    /// answered inside the task's own scope.
+    #[test]
+    fn an_answered_permission_says_what_was_reached_and_whether_it_was_allowed() {
+        let allowed = event_view(
+            &lifecycle_event(
+                "permission_answered",
+                TaskState::Running,
+                serde_json::json!({
+                    "toolCallId": "toolu_01Hy3",
+                    "title": "Write examples/task-event-probes/claude/event-sample.txt",
+                    "kind": "edit",
+                    "access": "write",
+                    "allowed": true,
+                    "outsideScope": [],
+                })
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(allowed.title, "Write allowed");
+        assert_eq!(allowed.minor, Some(true), "an approval is bookkeeping");
+        assert_eq!(
+            allowed.phase,
+            EventPhase::Info,
+            "an answer already given never reads as work in flight"
+        );
+        assert_eq!(
+            allowed.detail.as_deref(),
+            Some("Write examples/task-event-probes/claude/event-sample.txt")
+        );
+
+        let refused = event_view(
+            &lifecycle_event(
+                "permission_answered",
+                TaskState::Running,
+                serde_json::json!({
+                    "toolCallId": "toolu_01Hy3",
+                    "title": "Write /etc/hosts",
+                    "kind": "edit",
+                    "access": "write",
+                    "allowed": false,
+                    "outsideScope": ["/etc/hosts"],
+                })
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(refused.title, "Write refused");
+        assert_eq!(refused.kind, EventKind::Error);
+        assert_eq!(refused.phase, EventPhase::Failed);
+        assert_ne!(refused.minor, Some(true), "a refusal is why a run stalled");
+        assert_eq!(
+            refused.detail.as_deref(),
+            Some("Write /etc/hosts · outside this task's scope: /etc/hosts")
+        );
+    }
+
+    /// Recorded from Codex's and Pi's probes, both of which fell back to their
+    /// command line when ACP could not be reached.
+    #[test]
+    fn falling_back_to_the_command_line_says_so_and_keeps_the_reason() {
+        let view = event_view(
+            &lifecycle_event(
+                "transport_fallback",
+                TaskState::Running,
+                serde_json::json!({
+                    "transport": "cli",
+                    "reason": "unavailable",
+                    "detail": "spawn: could not spawn provider in /repo: No such file or directory (os error 2)",
+                })
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect(),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(view.title, "Using the command line");
+        assert_eq!(
+            view.phase,
+            EventPhase::Info,
+            "a decision already taken never reads as work in flight"
+        );
+        assert_eq!(
+            view.detail.as_deref(),
+            Some(
+                "spawn: could not spawn provider in /repo: No such file or directory (os error 2)"
+            )
+        );
+    }
+
+    /// Recorded from the Codex and Pi probes: both name the file they wrote, so
+    /// the changed-files panel can list it even with no diff to read.
+    #[test]
+    fn command_line_writes_name_the_file_they_touched() {
+        let codex = event_view(
+            &provider_event(
+                1,
+                "agent.item.completed",
+                serde_json::json!({
+                    "type": "item.completed",
+                    "item": {
+                        "id": "item_1",
+                        "type": "file_change",
+                        "changes": [{"path": "/repo/examples/event-sample.txt", "kind": "add"}],
+                        "status": "completed",
+                    },
+                }),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(codex.kind, EventKind::File);
+        assert_eq!(codex.title, "Edit file");
+        assert_eq!(
+            codex
+                .presentation
+                .as_ref()
+                .and_then(|value| value.path.as_deref()),
+            Some("/repo/examples/event-sample.txt")
+        );
+
+        let pi = event_view(
+            &provider_event(
+                2,
+                "agent.tool_execution_start",
+                serde_json::json!({
+                    "type": "tool_execution_start",
+                    "toolCallId": "call_c117ff",
+                    "toolName": "write",
+                    "args": {"path": "examples/event-sample.txt", "content": "provider=pi\n"},
+                }),
+            ),
+            Provider::Pi,
+        );
+        assert_eq!(pi.kind, EventKind::File);
+        assert_eq!(
+            pi.presentation
+                .as_ref()
+                .and_then(|value| value.path.as_deref()),
+            Some("examples/event-sample.txt")
+        );
+    }
+
     #[test]
     fn scope_refusal_is_a_visible_critical_row() {
         let payload = BTreeMap::from([
@@ -7843,6 +8195,179 @@ mod tests {
         assert_eq!(user_input.kind, EventKind::Message);
         assert_eq!(user_input.title, "User input");
         assert_eq!(user_input.detail.as_deref(), Some("step 0"));
+    }
+
+    #[test]
+    fn antigravity_response_text_streams_as_the_agent_speaking() {
+        let step = |id, update: Value| {
+            event_view(
+                &provider_event(
+                    id,
+                    "agent.event",
+                    serde_json::json!({"event": "step_update", "step_update": update}),
+                ),
+                Provider::Antigravity,
+            )
+        };
+        let piece = step(
+            1,
+            serde_json::json!({
+                "conversation_id": "conv-1",
+                "step_index": 3,
+                "state": "ACTIVE",
+                "step_type": "agent_response",
+                "text_delta": "- PROBE_OK"
+            }),
+        );
+        let finished = step(
+            2,
+            serde_json::json!({
+                "conversation_id": "conv-1",
+                "step_index": 3,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "text_delta": "\n",
+                "duration_seconds": 12.6735,
+                "usage": {"input_tokens": 19877, "output_tokens": 772, "thinking_tokens": 743, "cache_read_tokens": 0, "total_tokens": 20649}
+            }),
+        );
+
+        assert_eq!(piece.kind, EventKind::Message);
+        assert_eq!(piece.detail.as_deref(), Some("- PROBE_OK"));
+        assert_eq!(piece.complete, Some(false));
+        assert_eq!(finished.kind, EventKind::Usage);
+        assert_eq!(finished.title, "Assistant responded");
+        assert_eq!(
+            finished
+                .presentation
+                .and_then(|presentation| presentation.tokens_out),
+            Some(772)
+        );
+    }
+
+    fn in_turn(mut event: TaskEvent, turn_id: Option<i64>) -> TaskEvent {
+        event.turn_id = turn_id;
+        event
+    }
+
+    fn acp_update(id: i64, turn_id: i64, update: Value) -> TaskEvent {
+        let kind = format!("agent.{}", update["sessionUpdate"].as_str().unwrap());
+        in_turn(provider_event(id, &kind, update), Some(turn_id))
+    }
+
+    #[test]
+    fn history_reads_an_acp_update_as_the_call_it_patched() {
+        // OpenCode opens the call empty, names the file in an update, then
+        // ends it with a status, a new title, and the output alone.
+        let events = [
+            acp_update(
+                1,
+                7,
+                serde_json::json!({"sessionUpdate": "tool_call", "toolCallId": "call_1", "title": "read", "kind": "read", "rawInput": {}}),
+            ),
+            acp_update(
+                2,
+                7,
+                serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "kind": "read", "status": "in_progress", "title": "read", "locations": [{"path": "/repo/rust/Cargo.toml"}], "rawInput": {"filePath": "/repo/rust/Cargo.toml"}}),
+            ),
+            acp_update(
+                3,
+                7,
+                serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "completed", "title": "rust/Cargo.toml", "content": [{"type": "content", "content": {"type": "text", "text": "[workspace]"}}]}),
+            ),
+        ];
+
+        let views = event_views(&events, Provider::OpenCode);
+        let ended = &views[2];
+
+        assert_eq!(ended.title, "Read file");
+        assert_eq!(ended.phase, EventPhase::Completed);
+        assert_eq!(
+            ended
+                .presentation
+                .as_ref()
+                .and_then(|presentation| presentation.path.as_deref()),
+            Some("/repo/rust/Cargo.toml")
+        );
+        assert_eq!(ended.result.as_deref(), Some("[workspace]"));
+        assert!(
+            !ended.raw_text.as_deref().unwrap().contains("\"kind\""),
+            "the raw text stays the update as it was recorded"
+        );
+    }
+
+    #[test]
+    fn history_keeps_a_call_that_ends_with_only_its_status() {
+        // Antigravity's ACP server ends a call with its id and status alone.
+        let opened = serde_json::json!({"sessionUpdate": "tool_call", "toolCallId": "call_860659", "title": "Running view_file", "kind": "read", "status": "in_progress", "locations": [{"path": "/repo/rust/Cargo.toml"}], "rawInput": {"AbsolutePath": "/repo/rust/Cargo.toml"}});
+        let ended = serde_json::json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_860659", "status": "completed"});
+        let events = [
+            acp_update(1, 9, opened),
+            acp_update(2, 9, ended.clone()),
+            acp_update(3, 10, ended),
+        ];
+
+        let views = event_views(&events, Provider::Antigravity);
+
+        assert_eq!(views[1].title, "Read file");
+        assert_eq!(views[1].verb.as_deref(), Some("Read"));
+        assert_eq!(
+            views[1]
+                .presentation
+                .as_ref()
+                .and_then(|presentation| presentation.path.as_deref()),
+            Some("/repo/rust/Cargo.toml")
+        );
+        assert_ne!(views[2].title, "Read file", "another turn is another call");
+    }
+
+    #[test]
+    fn history_does_not_reopen_a_call_its_hooks_already_ended() {
+        // Claude posts hooks without a turn, then its transcript repeats the
+        // start of a call the hooks already reported ending.
+        let hook = |id, name: &str, tool_use: &str| {
+            provider_event(
+                id,
+                "agent.hook",
+                serde_json::json!({"hook_event_name": name, "tool_name": "Read", "tool_use_id": tool_use, "tool_input": {"file_path": "/repo/rust/Cargo.toml"}}),
+            )
+        };
+        let transcript = |id, tool_use: &str, turn_id| {
+            in_turn(
+                provider_event(
+                    id,
+                    "agent.assistant",
+                    serde_json::json!({"type": "assistant", "message": {"id": "msg_1", "role": "assistant", "content": [{"type": "tool_use", "id": tool_use, "name": "Read", "input": {"file_path": "/repo/rust/Cargo.toml"}}]}}),
+                ),
+                Some(turn_id),
+            )
+        };
+        let events = [
+            in_turn(
+                provider_event(
+                    1,
+                    "worker_spawned",
+                    serde_json::json!({"provider": "claude"}),
+                ),
+                Some(1293),
+            ),
+            hook(2, "PreToolUse", "toolu_A"),
+            hook(3, "PostToolUse", "toolu_A"),
+            transcript(4, "toolu_A", 1293),
+            hook(5, "PreToolUse", "toolu_B"),
+            transcript(6, "toolu_A", 1294),
+        ];
+
+        let views = event_views(&events, Provider::Claude);
+
+        assert_eq!(views[2].phase, EventPhase::Completed);
+        assert_eq!(views[3].action_id.as_deref(), Some("toolu_A"));
+        assert_eq!(views[3].minor, Some(true));
+        assert_eq!(views[4].minor, None, "a call only its hooks reported stays");
+        assert_eq!(
+            views[5].minor, None,
+            "the same id in another turn is another call"
+        );
     }
 
     #[test]

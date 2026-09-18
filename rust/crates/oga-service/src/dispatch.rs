@@ -11,8 +11,9 @@ use oga_config::DEFAULT_WORKER_PROMPT;
 use oga_domain::{
     CompletionCode, HoldArgs, HoldVerb, MemoryEntry, OnBlockerFailure, ScopeGrant,
     SelectionDecision, Task, TaskCompletion, TaskKind, TaskScope, TaskState, TaskWorktree,
-    WorktreeOption,
+    Transport, WorktreeOption,
 };
+use oga_providers::AcpAdapters;
 use oga_runner::ProviderRunner;
 use oga_store::{Store, StoreError};
 use oga_worktree::{
@@ -218,6 +219,7 @@ pub struct Dispatcher {
     store: Arc<Store>,
     runner: ProviderRunner,
     active: ActiveRuns,
+    acp: AcpAdapters,
 }
 
 pub type TaskService = Dispatcher;
@@ -228,7 +230,18 @@ impl Dispatcher {
             store,
             runner,
             active: ActiveRuns::default(),
+            acp: AcpAdapters::builtin(),
         }
+    }
+
+    /// Replaces the ACP adapters this broker launches.
+    pub fn with_acp_adapters(mut self, adapters: AcpAdapters) -> Self {
+        self.acp = adapters;
+        self
+    }
+
+    pub fn acp_adapters(&self) -> &AcpAdapters {
+        &self.acp
     }
 
     pub fn store(&self) -> &Arc<Store> {
@@ -442,6 +455,7 @@ impl Dispatcher {
             tldr: request.tldr.clone(),
             title: request.title.clone(),
             session_id: None,
+            transport: None,
             completion,
             attempts: Vec::new(),
             cost_usd: None,
@@ -659,6 +673,7 @@ impl Dispatcher {
                 RunOptions {
                     session_id,
                     active: dispatcher.active.clone(),
+                    acp: dispatcher.acp.clone(),
                 },
             )
             .await;
@@ -708,7 +723,14 @@ impl Dispatcher {
     /// the session is forgotten and the same task runs again from a rebuilt
     /// brief. Clearing it first is what stops the retry repeating the failure.
     async fn restart_without_rejected_session(&self, task: &Task) -> bool {
-        if task.session_id.is_none() {
+        // An ACP task forgets a conversation its agent cannot reopen when the
+        // run settles, and waits for a person to resume it.
+        if task.session_id.is_none()
+            || task
+                .transport
+                .as_ref()
+                .is_some_and(|transport| transport.kind == Transport::Acp)
+        {
             return false;
         }
         let rejected = [

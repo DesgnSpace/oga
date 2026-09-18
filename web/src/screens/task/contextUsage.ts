@@ -10,6 +10,50 @@
 
 import type { TaskEventView } from "@/bridge/types";
 
+export interface UsageTotals {
+  tokensIn: number;
+  tokensOut: number;
+  tokensCached: number;
+}
+
+/**
+ * A worker that publishes how full its context window is restates the whole
+ * session on every reading, so the freshest one is the answer and adding them
+ * up would report the same tokens once per reading. A worker that reports a
+ * turn at a time is describing that turn alone, and those still add up.
+ */
+function reportsRunningTotal(event: TaskEventView): boolean {
+  return event.kind === "usage" && event.presentation?.total !== undefined;
+}
+
+/** What the run has spent in tokens, however its worker reports them. */
+export function usageTotals(events: TaskEventView[]): UsageTotals {
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let tokensCached = 0;
+  let running: UsageTotals | undefined;
+  for (const event of events) {
+    const presentation = event.presentation;
+    if (!presentation) continue;
+    if (reportsRunningTotal(event)) {
+      running = {
+        tokensIn: presentation.tokensIn ?? 0,
+        tokensOut: presentation.tokensOut ?? 0,
+        tokensCached: presentation.tokensCached ?? 0,
+      };
+      continue;
+    }
+    tokensIn += presentation.tokensIn ?? 0;
+    tokensOut += presentation.tokensOut ?? 0;
+    tokensCached += presentation.tokensCached ?? 0;
+  }
+  return {
+    tokensIn: tokensIn + (running?.tokensIn ?? 0),
+    tokensOut: tokensOut + (running?.tokensOut ?? 0),
+    tokensCached: tokensCached + (running?.tokensCached ?? 0),
+  };
+}
+
 export interface ContextUsage {
   /** The provider's freshest read of context consumed, in tokens. */
   used: number;

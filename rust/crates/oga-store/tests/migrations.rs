@@ -12,8 +12,8 @@ use rusqlite::Connection;
 
 use common::TestDatabase;
 
-/// The two tables this migration touches, as v47 left them, with one indexed
-/// file and one learned route already in place.
+/// The tables these migrations touch, as v47 left them, with one indexed file,
+/// one learned route, and one task already in place.
 const V47: &str = r#"BEGIN IMMEDIATE;
     CREATE TABLE schema_migrations (
       version INTEGER PRIMARY KEY,
@@ -53,6 +53,12 @@ const V47: &str = r#"BEGIN IMMEDIATE;
       source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
       VALUES('/project','tak money charg card','card charg money tak','src/billing.ts','chargeCard',
       'faa7ad94b913774e','',0,'user','','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      state TEXT NOT NULL,
+      session_id TEXT
+    );
+    INSERT INTO tasks(id,state,session_id) VALUES('before-acp','completed','claude-session-1');
     INSERT INTO schema_migrations(version, name) VALUES (47, 'project-scoped code search');
     COMMIT;"#;
 
@@ -205,4 +211,31 @@ fn reopening_an_upgraded_database_changes_nothing() {
         recorded, 1,
         "a migration must be recorded once, not per open"
     );
+}
+
+#[test]
+fn a_task_from_before_acp_stays_on_the_command_line() {
+    let database = TestDatabase::new();
+    write_v47(&database.path());
+
+    let store = database.open_writable();
+
+    let (session, transport): (Option<String>, serde_json::Value) = store
+        .with_connection(|connection| {
+            Ok(connection.query_row(
+                "SELECT session_id, transport_json FROM tasks WHERE id='before-acp'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        serde_json::from_str(&row.get::<_, String>(1)?).expect("transport JSON"),
+                    ))
+                },
+            )?)
+        })
+        .expect("task reads");
+    assert_eq!(session.as_deref(), Some("claude-session-1"));
+    assert_eq!(transport["kind"], "cli");
+    assert_eq!(transport["reason"], "legacy");
+    assert!(transport.get("acpSessionId").is_none());
 }

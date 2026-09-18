@@ -6,6 +6,7 @@ use rusqlite::Transaction;
 use serde::Serialize;
 use thiserror::Error;
 
+mod acp_run;
 pub mod archive;
 pub mod authorization;
 pub mod cancel;
@@ -24,6 +25,7 @@ pub mod reply;
 pub mod resume;
 pub mod schedule;
 pub mod steer;
+pub mod transport;
 pub mod waiting;
 
 const MAX_ATTEMPTS: usize = 10;
@@ -217,3 +219,7 @@ pub use reply::{ReplyRequest, reply};
 pub use resume::{ResumeRequest, resume};
 pub use schedule::{StartAt, parse_start_at};
 pub use steer::{SteerOutcome, SteerRequest, steer};
+pub use transport::{
+    EffectiveTransport, TRANSPORT_SETTINGS_KEY, effective_transport, set_transport_preference,
+    transport_preference,
+};

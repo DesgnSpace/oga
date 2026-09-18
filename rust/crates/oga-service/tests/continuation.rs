@@ -68,12 +68,14 @@ fn task(id: &str, cwd: &str, state: TaskState) -> Task {
         tldr: None,
         title: None,
         session_id: None,
+        transport: None,
         completion: (state == TaskState::Failed || state == TaskState::Blocked).then(|| {
             TaskCompletion {
                 exit_code: None,
                 blocked: true,
                 code: CompletionCode::WorkerError,
                 reason: Some("provider stopped".into()),
+                stop_reason: None,
                 suggested_scope: None,
                 resets_at: None,
                 asserted_completion: None,
@@ -1326,6 +1328,7 @@ async fn handoff_off_a_rate_limited_account_drops_its_hold_and_starts_now() {
         blocked: true,
         code: CompletionCode::RateLimit,
         reason: Some("usage limit reached".into()),
+        stop_reason: None,
         suggested_scope: None,
         resets_at: Some("2099-01-01T00:00:00.000Z".into()),
         asserted_completion: None,

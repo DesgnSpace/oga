@@ -84,8 +84,7 @@ export type SidebarRow =
 
 export function sidebarRowKey(row: SidebarRow): string {
   if (row.type === "groupHeader") return `group:${row.id}:${row.collapsed}:${row.indented}`;
-  const task = row.task;
-  return `task:${task.id}:${task.cwd}:${task.profileId}:${task.model}:${task.updatedAt}:${task.state}:${task.title ?? ""}:${row.indented}`;
+  return `task:${row.task.id}`;
 }
 
 export function projectionRows(

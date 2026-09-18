@@ -9,10 +9,10 @@ use axum::{
 };
 use oga_domain::{
     ActivityCounts, ArchivedFilter, FailureCode, MemoryProject, ProfileFailure, ProfileView,
-    Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskEventView,
-    TaskHoldView, TaskKind, TaskState, TaskSummary, TaskWorktree,
+    Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskHoldView, TaskKind,
+    TaskState, TaskSummary, TaskWorktree,
 };
-use oga_events::{event_view, mark_repeated_retries};
+use oga_events::{event_views, mark_repeated_retries};
 use oga_store::{Store, attach_task_timing};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use crate::router::{HttpError, HttpState};
 
-const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate";
+const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json";
 
 #[derive(Debug, Deserialize, Default)]
 pub struct StateQuery {
@@ -357,12 +357,7 @@ async fn event_response(
         store
             .with_connection(|connection| {
                 let events = read_events_with_connection(connection, &task_id, &query)?;
-                let views = mark_repeated_retries(
-                    events
-                        .iter()
-                        .map(|event| event_view(event, provider))
-                        .collect::<Vec<TaskEventView>>(),
-                );
+                let views = mark_repeated_retries(event_views(&events, provider));
                 let (updated_task, task_updated_at) = if include_task {
                     let updated_at: String = connection.query_row(
                         "SELECT updated_at FROM tasks WHERE id=?",
@@ -701,6 +696,10 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         tldr: row.get(25)?,
         title: row.get(26)?,
         session_id: row.get(27)?,
+        transport: row
+            .get::<_, Option<String>>(37)?
+            .map(|value| decode_json(&value, 37))
+            .transpose()?,
         completion,
         attempts,
         cost_usd: row.get(30)?,

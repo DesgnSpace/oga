@@ -51,11 +51,12 @@ pub use store::{
     FailureCode, ProfileFailure, ProfileSuccess, SpendTotals, WaitSettings,
 };
 pub use task::{
-    ActivityCounts, ArchivedFilter, BranchOutcome, CheckoutOutcome, CompletionCode, HoldArgs,
-    HoldVerb, HoldViewKind, InFlightTask, ListOrder, NetworkHoldArgs, OnBlockerFailure, Provider,
-    RestartHoldArgs, StateFilter, Task, TaskAttempt, TaskCompletion, TaskCompletionOverride,
-    TaskControlState, TaskHold, TaskHoldView, TaskKind, TaskListQuery, TaskMatch, TaskScope,
-    TaskState, TaskSummary, TaskWorker, TaskWorktree, WorktreeDeleteBatchResult,
+    AcpAgentIdentity, AcpRestore, ActivityCounts, ArchivedFilter, BranchOutcome, CheckoutOutcome,
+    CompletionCode, HoldArgs, HoldVerb, HoldViewKind, InFlightTask, ListOrder, NetworkHoldArgs,
+    OnBlockerFailure, Provider, RestartHoldArgs, StateFilter, Task, TaskAttempt, TaskCompletion,
+    TaskCompletionOverride, TaskControlState, TaskHold, TaskHoldView, TaskKind, TaskListQuery,
+    TaskMatch, TaskScope, TaskState, TaskSummary, TaskTransport, TaskWorker, TaskWorktree,
+    Transport, TransportPreference, TransportReason, WorktreeDeleteBatchResult,
     WorktreeDeleteEntry, WorktreeDeleteResult, WorktreeDeleteSkipped, WorktreeOption,
     WorktreeRequest,
 };

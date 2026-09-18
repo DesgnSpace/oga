@@ -131,8 +131,8 @@ pub async fn handoff(
         let session_id = old.session_id.clone().filter(|_| same_profile);
         dispatcher.store().transaction(|tx| {
             let changed = tx.execute(
-                "UPDATE tasks SET profile_id=?,model=?,effort=?,session_id=?,scope_json=?,updated_at=? WHERE id=? AND state IN ('queued','pending')",
-                rusqlite::params![profile_id, model, effort, session_id, scope_json, now, old.id],
+                "UPDATE tasks SET profile_id=?,model=?,effort=?,session_id=?,transport_json=CASE WHEN ? THEN transport_json ELSE json_remove(transport_json,'$.acpSessionId') END,scope_json=?,updated_at=? WHERE id=? AND state IN ('queued','pending')",
+                rusqlite::params![profile_id, model, effort, session_id, same_profile, scope_json, now, old.id],
             )?;
             if changed != 1 {
                 return Err(oga_store::StoreError::Refusal(format!(
@@ -174,7 +174,8 @@ pub async fn handoff(
         })?;
         return require_task(dispatcher.store(), &old.id);
     }
-    let preserve_session = same_profile && old.session_id.is_some() && profile.command.is_none();
+    let preserve_session =
+        same_profile && old.continuable_session().is_some() && profile.command.is_none();
 
     if old.state == TaskState::Running {
         let Some(process) = dispatcher.active_runs().get(&old.id) else {
@@ -194,6 +195,10 @@ pub async fn handoff(
     } else {
         None
     };
+    let continuing = old
+        .continuable_session()
+        .map(str::to_owned)
+        .filter(|_| preserve_session);
     // Built before the row moves: `old` still names the profile whose work
     // this is, and still carries the failure the brief has to explain. A
     // provider session belongs to one account, so any move off it — same
@@ -229,13 +234,14 @@ pub async fn handoff(
     };
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,profile_id=?,model=?,effort=?,session_id=?,scope_json=?,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending','running','needs_input','answered')",
+            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,profile_id=?,model=?,effort=?,session_id=?,transport_json=CASE WHEN ? THEN transport_json ELSE json_remove(transport_json,'$.acpSessionId') END,scope_json=?,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending','running','needs_input','answered')",
             rusqlite::params![
                 attempts_json,
                 profile_id,
                 model,
                 effort,
                 session_id,
+                preserve_session,
                 scope_json,
                 now,
                 old.id,
@@ -336,7 +342,7 @@ pub async fn handoff(
             scope: Some(task.scope.clone()),
             ..crate::prompt::WorkerPromptInput::default()
         },
-        session_id,
+        continuing,
     );
     Ok(task)
 }

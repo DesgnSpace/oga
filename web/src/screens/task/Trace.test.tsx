@@ -142,14 +142,15 @@ describe("TraceRows", () => {
 
   // A run group takes its id from the first member it contains, so a shared
   // expansion key would make the two rows open and close together.
-  it("keeps a group open when the member sharing its id is collapsed", () => {
+  it("keeps a group open when the member sharing its event id is collapsed", () => {
     const group = row({
       id: 7,
+      nodeId: "call:0:group",
       verb: "Read",
       target: "3 files",
       children: [
-        row({ id: 7, verb: "Read", target: "first.ts", event: fileEvent(7), expansion: { type: "content", text: "a", hiddenLines: 0, language: "plain" } }),
-        row({ id: 8, verb: "Read", target: "second.ts" }),
+        row({ id: 7, nodeId: "call:0:first", verb: "Read", target: "first.ts", event: fileEvent(7), expansion: { type: "content", text: "a", hiddenLines: 0, language: "plain" } }),
+        row({ id: 8, nodeId: "call:0:second", verb: "Read", target: "second.ts" }),
       ],
     });
 
@@ -164,16 +165,40 @@ describe("TraceRows", () => {
   it("leaves a group's members collapsed when it opens", () => {
     const group = row({
       id: 7,
+      nodeId: "call:0:group",
       verb: "Read",
       target: "3 files",
       children: [
-        row({ id: 7, verb: "Read", target: "first.ts", event: fileEvent(7), expansion: { type: "content", text: "body", hiddenLines: 0, language: "plain" } }),
+        row({ id: 7, nodeId: "call:0:first", verb: "Read", target: "first.ts", event: fileEvent(7), expansion: { type: "content", text: "body", hiddenLines: 0, language: "plain" } }),
       ],
     });
 
     render(<TraceRows rows={[group]} />);
     fireEvent.click(screen.getByText("3 files"));
     expect(screen.queryByText("body")).toBeNull();
+  });
+
+  it("keeps a call expanded by its node id when an earlier row shifts its parent's anchor id", () => {
+    const child = row({
+      id: 5,
+      nodeId: "call:0:call_a",
+      verb: "Read",
+      target: "src/app.ts",
+      event: fileEvent(5),
+      expansion: { type: "content", text: "file contents", hiddenLines: 0, language: "plain" },
+    });
+    const parentBefore = row({ id: 5, nodeId: "turn:0", target: "Work step", startsExpanded: true, children: [child] });
+
+    const view = render(<TraceRows rows={[parentBefore]} />);
+    fireEvent.click(screen.getByText("src/app.ts"));
+    expect(screen.getByText("file contents")).toBeDefined();
+
+    // A row streamed in ahead of the child gives the turn heading a new anchor
+    // id — the child's own id never changes, so its expansion should not care.
+    const parentAfter = row({ id: 2, nodeId: "turn:0", target: "Work step", startsExpanded: true, children: [child] });
+    view.rerender(<TraceRows rows={[parentAfter]} />);
+
+    expect(screen.getByText("file contents")).toBeDefined();
   });
 
   it("renders an OpenCode todo payload as checklist items with raw details available", () => {
@@ -232,6 +257,62 @@ describe("TraceRows", () => {
 
     expect(container.querySelector('[data-running="true"] .trace-target')?.textContent).toBe("cargo test");
     expect(container.querySelectorAll('[data-running="true"]')).toHaveLength(1);
+  });
+
+  it("renders a handoff with the destination emphasized and plain context", () => {
+    const { container } = render(
+      <TraceRows
+        rows={[
+          row({
+            style: "notice",
+            marker: "handoff",
+            handoff: {
+              fromId: "opencode-go/union-alpha",
+              toId: "openrouter/stealth/union-alpha",
+              earlierRunCount: 1,
+              context: "rebuilt",
+              briefTier: "verbatim",
+            },
+          }),
+        ]}
+      />,
+    );
+
+    const marker = container.querySelector(".trace-handoff-marker");
+    expect(marker?.querySelector(".trace-handoff-destination")?.tagName).toBe("STRONG");
+    expect(marker?.querySelector(".trace-handoff-destination")?.textContent).toBe("openrouter/stealth/union-alpha");
+    expect(marker?.querySelector(".trace-handoff-source")?.textContent).toBe("from opencode-go/union-alpha");
+    expect(marker?.querySelector(".trace-handoff-context")?.textContent).toBe(
+      "Started with a fresh brief built from 1 earlier run and the earlier run's transcript",
+    );
+    expect(marker?.textContent).toContain("Handed off to");
+    expect(marker?.textContent).not.toContain("verbatim");
+    expect(marker?.textContent).not.toContain("chars");
+    expect(marker?.textContent).not.toContain("events");
+  });
+
+  it("omits empty handoff context and zero counts", () => {
+    const { container } = render(
+      <TraceRows
+        rows={[
+          row({
+            style: "notice",
+            marker: "handoff",
+            handoff: {
+              fromId: "old-worker",
+              toId: "new-worker",
+              earlierRunCount: 0,
+            },
+          }),
+        ]}
+      />,
+    );
+
+    const marker = container.querySelector(".trace-handoff-marker");
+    expect(marker?.querySelector(".trace-handoff-context")).toBeNull();
+    expect(marker?.textContent).not.toContain("0");
+    expect(marker?.textContent).not.toContain("events");
+    expect(marker?.textContent).not.toContain("chars");
   });
 
   it("renders command output as a terminal with an outcome", () => {

@@ -68,6 +68,7 @@ pub async fn cancel(
         blocked: true,
         code,
         reason: Some(reason.clone()),
+        stop_reason: None,
         suggested_scope: None,
         resets_at: None,
         asserted_completion: None,

@@ -1895,3 +1895,101 @@ async fn plain_language_lookup_in_an_unindexed_directory_says_so() {
         "unexpected error: {body}"
     );
 }
+
+#[tokio::test]
+async fn transport_preference_routes_report_what_a_new_session_would_use() {
+    let fixture = Fixture::new();
+
+    let (status, current) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/profiles/profile/transport",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        current,
+        json!({
+            "preference": "auto",
+            "transport": "acp",
+            "adapter": "antigravity-acp",
+            "reason": null,
+        })
+    );
+
+    fixture
+        .store
+        .repositories()
+        .profiles()
+        .insert(
+            &Profile {
+                id: "pi".into(),
+                label: "Pi".into(),
+                provider: Provider::Pi,
+                default_model: "fake".into(),
+                enabled: true,
+                env: BTreeMap::new(),
+                capabilities: vec![],
+                command: None,
+            },
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("profile insert");
+    let (status, current) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/profiles/pi/transport",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        current,
+        json!({
+            "preference": "auto",
+            "transport": "acp",
+            "adapter": "pi-acp",
+            "reason": null,
+        })
+    );
+
+    let (status, chosen) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/profiles/pi/transport",
+            Body::from(json!({"preference": "cli"}).to_string()),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        chosen,
+        json!({
+            "preference": "cli",
+            "transport": "cli",
+            "adapter": "pi-acp",
+            "reason": "preference",
+        })
+    );
+
+    let (status, _) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/profiles/missing/transport",
+            Body::from(json!({"preference": "cli"}).to_string()),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
