@@ -603,6 +603,30 @@ describe("trace rows", () => {
   });
 });
 
+describe("ACP results", () => {
+  const block = (text: string) => JSON.stringify({ content: [{ type: "content", content: { type: "text", text } }] });
+
+  it("shows a command's output from the content block it arrived in", () => {
+    const run: TaskEventView = {
+      ...event(1, "command", "Run command"),
+      presentation: { type: "command", command: "git status" },
+      rawText: block("```console\nOn branch main\nnothing to commit\n```"),
+    };
+    expect(expansionFromEvent(run)).toEqual({ type: "command", command: "git status", output: "On branch main\nnothing to commit" });
+  });
+
+  it("shows a read file's lines from the content block it arrived in", () => {
+    const read: TaskEventView = {
+      ...event(2, "file", "Read file"),
+      presentation: { type: "file", path: "src/main.rs" },
+      rawText: block("```\n1\tfn main() {}\n```"),
+    };
+    const expansion = expansionFromEvent(read);
+    expect(expansion?.type).toBe("content");
+    expect(expansion?.type === "content" ? expansion.text : undefined).toBe("1\tfn main() {}");
+  });
+});
+
 describe("stretches the worker opened with its own words", () => {
   const narration = (id: number, text: string): TaskEventView => ({
     ...event(id, "message", "Agent message"),

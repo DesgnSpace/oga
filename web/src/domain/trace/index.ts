@@ -264,7 +264,7 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
     // A hook-driven tool call nests its output one level down, under
     // `tool_response`; only fall back to that wrapper itself once none of the
     // keys above turned up anywhere inside it.
-    let text = findText(raw, keys) ?? (event.kind === "file" ? undefined : findText(raw, ["tool_response"]));
+    let text = acpContentText(raw) ?? findText(raw, keys) ?? (event.kind === "file" ? undefined : findText(raw, ["tool_response"]));
     if (isSearch && (text === undefined || text.trim() === "")) {
       text = event.verb === "Found" ? "No files found." : "No matches found.";
     }
@@ -1149,7 +1149,33 @@ function parseJson(raw: string): unknown {
 }
 
 function commandOutput(raw: string): string | undefined {
-  return findText(raw, ["stdout", "stderr", "output", "rawOutput"]) ?? findText(raw, ["tool_response"]);
+  return findText(raw, ["stdout", "stderr", "output", "rawOutput"]) ?? acpContentText(raw) ?? findText(raw, ["tool_response"]);
+}
+
+/**
+ * An ACP call reports its result as `content` blocks, each wrapping a text
+ * block; a shell result usually arrives fenced as a console block.
+ */
+function acpContentText(raw: string): string | undefined {
+  const value = parseJson(raw);
+  if (typeof value !== "object" || value === null || !("content" in value)) return undefined;
+  const blocks = (value as { content: unknown }).content;
+  if (!Array.isArray(blocks)) return undefined;
+  const texts: string[] = [];
+  for (const block of blocks) {
+    if (typeof block !== "object" || block === null) continue;
+    const inner = (block as { type?: unknown; content?: unknown }).content;
+    if ((block as { type?: unknown }).type !== "content" || typeof inner !== "object" || inner === null) continue;
+    const text = (inner as { type?: unknown; text?: unknown }).text;
+    if ((inner as { type?: unknown }).type === "text" && typeof text === "string") texts.push(text);
+  }
+  if (texts.length === 0) return undefined;
+  return unfenced(texts.join("\n"));
+}
+
+function unfenced(text: string): string {
+  const match = /^```[^\n]*\n([\s\S]*?)\n?```\s*$/.exec(text.trim());
+  return match?.[1] ?? text;
 }
 
 function todoItems(raw: string): TodoItem[] | undefined {

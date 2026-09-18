@@ -185,6 +185,31 @@ describe("a turn the worker narrates itself", () => {
     expect(events[0]?.complete).toBe(true);
   });
 
+  it("keeps the diff an edit streamed once a status-only update closes it", () => {
+    // Claude sends an edit's diff in a middle update and closes the call with
+    // an update that carries nothing but its status.
+    const diff = {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call_1",
+      content: [{ type: "diff", path: "src/main.rs", oldText: "a\n", newText: "b\n" }],
+    };
+    const streamed: TaskEventView = {
+      ...agentCall(2, "call_1", false),
+      type: "agent.tool_call_update",
+      presentation: { type: "file", path: "src/main.rs", change: "+1 -1" },
+      rawText: JSON.stringify(diff),
+    };
+    const closed: TaskEventView = {
+      ...agentCall(3, "call_1", true),
+      rawText: JSON.stringify({ sessionUpdate: "tool_call_update", toolCallId: "call_1", status: "completed" }),
+    };
+    const [row] = callRows([agentCall(1, "call_1", false), streamed, closed]);
+
+    expect(row?.phase).toBe("completed");
+    expect(row?.rawText).toBe(JSON.stringify(diff));
+    expect(row?.presentation?.change).toBe("+1 -1");
+  });
+
   it("settles a call that reported only how it ended, keeping its subject", () => {
     const events = callRows([runningCall(1, "call_2"), callEnded(2, "call_2", "2 tests passed")]);
 

@@ -1224,6 +1224,17 @@ function settleAction(first: TaskEventView, later: TaskEventView): TaskEventView
   return merged;
 }
 
+/**
+ * Whether an update brought the call's diff, output, or result along, or only
+ * moved its status: a status-only update must not replace the payload the
+ * row expands into.
+ */
+function carriesPayload(update: TaskEventView): boolean {
+  return update.result !== undefined
+    || update.presentation?.change !== undefined
+    || update.presentation?.outcome !== undefined;
+}
+
 /** How an ACP call row reads once it finishes, by how it read while running. */
 const SETTLED_AGENT_VERBS = new Map([
   ["Deleting", "Deleted"],
@@ -1254,7 +1265,7 @@ function settleAgentCall(first: TaskEventView, later: TaskEventView): TaskEventV
     complete: reverts ? first.complete : (later.complete ?? first.complete),
     verb,
     result: later.result ?? first.result,
-    rawText: later.rawText ?? first.rawText,
+    rawText: carriesPayload(later) ? (later.rawText ?? first.rawText) : first.rawText,
     presentation: first.presentation && {
       ...first.presentation,
       change: later.presentation?.change ?? first.presentation.change,
