@@ -162,6 +162,20 @@ pub enum AcpRestore {
     Load,
 }
 
+/// How an instruction reaches a turn that is already running, settled when the
+/// session opened. Absent means it cannot, and the instruction waits for the
+/// run to finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpSteering {
+    /// `_session/steering`: the agent puts the instruction into the turn it
+    /// is running and says whether it took it.
+    Extension,
+    /// A second `session/prompt`: the agent folds the instruction into the run
+    /// it is already on and picks it up at its next step.
+    Prompt,
+}
+
 /// The transport a task's runs use, decided when a run first opens a session
 /// and kept from then on. A command-line decision is never revisited, so a
 /// fallback cannot flip a task back and forth between transports.
@@ -183,6 +197,9 @@ pub struct TaskTransport {
     pub restore: Option<AcpRestore>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AcpAgentIdentity>,
+    /// How a running turn takes an instruction, when it takes one at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steering: Option<AcpSteering>,
     pub decided_at: String,
 }
 
@@ -195,6 +212,7 @@ impl TaskTransport {
             acp_session_id: None,
             restore: None,
             agent: None,
+            steering: None,
             decided_at: decided_at.to_owned(),
         }
     }

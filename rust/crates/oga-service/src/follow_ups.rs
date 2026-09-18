@@ -57,7 +57,7 @@ impl<C: Clock> FollowUpQueue<C> {
         instruction: &str,
     ) -> Result<usize, StoreError> {
         let now = lifecycle::iso_from_system_time(self.clock.now());
-        queue_follow_up(&self.store, task_id, state, instruction, &now)
+        queue_follow_up(&self.store, task_id, state, instruction, None, &now)
     }
 
     pub fn count(&self, task_id: &str) -> Result<usize, StoreError> {
@@ -98,11 +98,15 @@ impl<C: Clock> FollowUpQueue<C> {
     }
 }
 
+/// Puts an instruction at the back of the queue. `reason` is why it could not
+/// reach the run it now waits behind, when something tried to hand it over
+/// live and the worker did not take it.
 pub fn queue_follow_up(
     store: &Store,
     task_id: &str,
     state: TaskState,
     instruction: &str,
+    reason: Option<&str>,
     now: &str,
 ) -> Result<usize, StoreError> {
     let instruction = instruction.trim();
@@ -134,14 +138,11 @@ pub fn queue_follow_up(
             [task_id],
             |row| row.get(0),
         )?;
-        append_event(
-            tx,
-            task_id,
-            "follow_up_queued",
-            state,
-            json!({"instruction": instruction, "waiting": waiting}),
-            now,
-        )?;
+        let mut payload = json!({"instruction": instruction, "waiting": waiting});
+        if let Some(reason) = reason {
+            payload["reason"] = json!(reason);
+        }
+        append_event(tx, task_id, "follow_up_queued", state, payload, now)?;
         Ok(waiting as usize)
     })
 }

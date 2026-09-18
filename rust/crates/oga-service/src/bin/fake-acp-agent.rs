@@ -33,6 +33,16 @@
 //! that does not offer the task's model, and `auth` one that refuses the
 //! session until someone signs in.
 //!
+//! A mode whose turns are `steer` waits for an instruction to be handed to the
+//! turn it is already running, the way `claude-agent-acp` takes one over
+//! `_session/steering`, and finishes with what it was told. `steer-refused`
+//! answers that request without taking the instruction. Only a mode naming
+//! `steer` advertises that it takes one at all.
+//!
+//! A mode whose turns are `join` waits for a second `session/prompt` and folds
+//! it into the turn it is already running, the way `opencode acp` does, then
+//! answers both prompts from the one run it shared. It advertises nothing.
+//!
 //! A mode starting `pi` answers the way `pi-acp` 0.0.33 does: it reports itself
 //! as that adapter, names its session with Pi's own UUID, records the session
 //! in its session map under the profile's session directory, and offers the
@@ -301,6 +311,14 @@ fn commands_announced(session: &str) {
     );
 }
 
+/// What the agent attaches to its initialize answer. `claude-agent-acp`
+/// advertises that it takes an instruction mid-turn here, beside its
+/// capabilities rather than inside them.
+fn initialize_meta(mode: &str) -> Option<Value> {
+    mode.contains("steer")
+        .then(|| json!({"steering": {"supported": true}}))
+}
+
 fn capabilities(mode: &str) -> Value {
     if mode.starts_with("pi") {
         return json!({
@@ -387,9 +405,76 @@ fn prompt(
         "exit-after-prompt" => std::process::exit(0),
         "hang" => {
             for line in lines.by_ref() {
-                log(log_path, &json!({"received": line}));
+                if let Ok(message) = serde_json::from_str::<Value>(&line) {
+                    log(log_path, &json!({"received": message}));
+                }
             }
             return;
+        }
+        turns if turns.starts_with("steer") => {
+            let taken = turns == "steer";
+            for line in lines.by_ref() {
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                log(log_path, &json!({"received": message}));
+                if message["method"] == "session/cancel" {
+                    break;
+                }
+                if message["method"] != "_session/steering" {
+                    continue;
+                }
+                let answer = if taken {
+                    json!({"outcome": "injected"})
+                } else {
+                    json!({"outcome": "promptRequired", "reason": "noRunningTurn"})
+                };
+                emit(&json!({"jsonrpc": "2.0", "id": message["id"], "result": answer}));
+                if taken {
+                    let text = message["params"]["prompt"][0]["text"]
+                        .as_str()
+                        .unwrap_or_default();
+                    chunk(&session, &format!("told mid-turn: {text}\n"));
+                }
+                break;
+            }
+            chunk(&session, "OGA_RESULT: completed");
+        }
+        "join" => {
+            let mut joined = None;
+            for line in lines.by_ref() {
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                log(log_path, &json!({"received": message}));
+                if message["method"] == "session/cancel" {
+                    break;
+                }
+                if message["method"] != "session/prompt" {
+                    continue;
+                }
+                let text = message["params"]["prompt"][0]["text"]
+                    .as_str()
+                    .unwrap_or_default();
+                chunk(&session, &format!("told mid-turn: {text}\n"));
+                joined = Some(message["id"].clone());
+                break;
+            }
+            update(
+                &session,
+                json!({
+                    "sessionUpdate": "usage_update",
+                    "used": 12_000,
+                    "size": 200_000,
+                    "cost": {"amount": 0.5, "currency": "USD"},
+                }),
+            );
+            chunk(&session, "OGA_RESULT: completed");
+            // Both prompts describe the one run they shared, so both answer
+            // off the same idle event rather than one turn each.
+            if let Some(id) = joined {
+                emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn"}}));
+            }
         }
         "ask" => {
             emit(&json!({
@@ -595,15 +680,17 @@ fn main() {
                 "id": id,
                 "error": {"code": -32000, "message": "sign in first"},
             })),
-            "initialize" => emit(&json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
+            "initialize" => {
+                let mut answer = json!({
                     "protocolVersion": 1,
                     "agentCapabilities": capabilities(&mode),
                     "agentInfo": {"name": agent_name, "version": version},
-                },
-            })),
+                });
+                if let Some(meta) = initialize_meta(&mode) {
+                    answer["_meta"] = meta;
+                }
+                emit(&json!({"jsonrpc": "2.0", "id": id, "result": answer}));
+            }
             "session/new" if opencode => emit(&json!({
                 "jsonrpc": "2.0",
                 "id": id,

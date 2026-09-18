@@ -272,6 +272,7 @@ mod tests {
                 acp_session_id: session.map(str::to_owned),
                 restore: Some(AcpRestore::Resume),
                 agent: None,
+                steering: None,
                 decided_at: NOW.into(),
             }),
             ..Task::default()

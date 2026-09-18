@@ -409,6 +409,9 @@ fn signs_in_with_codex_api_key(profile: &Profile) -> bool {
         .is_some_and(|key| !key.trim().is_empty())
 }
 
+/// The adapter that speaks to OpenCode's own ACP server.
+pub const OPENCODE_ADAPTER: &str = "opencode-acp";
+
 /// OpenCode's own `opencode acp` server, verified against OpenCode 1.18.31.
 ///
 /// The session it opens is the OpenCode session itself, so its id is the one
@@ -419,7 +422,7 @@ fn signs_in_with_codex_api_key(profile: &Profile) -> bool {
 /// effort asks for `default`, the variant the command line uses when it is
 /// given none, rather than letting the agent pick one.
 fn opencode() -> AcpAdapter {
-    AcpAdapter::new("opencode-acp", |launch| {
+    AcpAdapter::new(OPENCODE_ADAPTER, |launch| {
         ["opencode", "acp", "--cwd", launch.cwd]
             .map(str::to_owned)
             .to_vec()

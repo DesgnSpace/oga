@@ -11,13 +11,13 @@ use std::{
 };
 
 use oga_domain::{
-    AcpRestore, CompletionCode, Profile, Provider, Task, TaskScope, TaskState, TaskTransport,
-    Transport, TransportPreference, TransportReason,
+    AcpRestore, AcpSteering, CompletionCode, Profile, Provider, Task, TaskScope, TaskState,
+    TaskTransport, Transport, TransportPreference, TransportReason,
 };
 use oga_providers::{AcpAdapter, AcpAdapters};
 use oga_service::{
-    CancelRequest, DispatchRequest, Dispatcher, ResumeRequest, cancel, reconcile::ReconcileTrigger,
-    resume, set_transport_preference,
+    CancelRequest, DispatchRequest, Dispatcher, ResumeRequest, SteerRequest, cancel,
+    reconcile::ReconcileTrigger, resume, set_transport_preference, steer,
 };
 use oga_store::Store;
 use serde_json::Value;
@@ -235,6 +235,18 @@ impl Harness {
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect()
+    }
+
+    /// Waits until the agent has been sent `method`, so a test can act on a
+    /// turn while it is still running.
+    async fn await_received(&self, method: &str) {
+        for _ in 0..2_000 {
+            if !self.received(method).is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the agent was never sent {method}");
     }
 
     fn received(&self, method: &str) -> Vec<Value> {
@@ -656,12 +668,7 @@ async fn cancelling_stops_the_agent_and_settles_the_task() {
         .dispatch(DispatchRequest::new("work", "wait forever", &harness.cwd))
         .await
         .expect("dispatched");
-    for _ in 0..2_000 {
-        if !harness.received("session/prompt").is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    harness.await_received("session/prompt").await;
 
     cancel(&harness.dispatcher, CancelRequest::new(&dispatched.task.id))
         .await
@@ -699,6 +706,263 @@ async fn cancelling_stops_the_agent_and_settles_the_task() {
 }
 
 #[tokio::test]
+async fn an_instruction_reaches_the_turn_a_worker_is_already_running() {
+    let harness = harness("steer");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "rename the field",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+
+    let outcome = steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("call it label instead"),
+    )
+    .await
+    .expect("steered");
+
+    assert!(
+        !outcome.queued,
+        "the instruction was handed over, not queued"
+    );
+    let task = harness.settle(&dispatched.task.id).await;
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(
+        task.output.contains("call it label instead"),
+        "the running turn picked it up: {}",
+        task.output
+    );
+    assert_eq!(
+        transport(&task).steering,
+        Some(AcpSteering::Extension),
+        "what the agent offered is kept with the transport"
+    );
+    let handed = harness.received("_session/steering");
+    assert_eq!(handed.len(), 1);
+    assert_eq!(handed[0]["prompt"][0]["text"], "call it label instead");
+    assert_eq!(
+        handed[0]["_meta"]["steering"]["idleBehavior"], "promptRequired",
+        "an idle agent must not start a turn nobody is waiting on"
+    );
+    assert_eq!(
+        harness.received("session/prompt").len(),
+        1,
+        "the instruction joined the turn instead of starting another"
+    );
+    let kinds: Vec<String> = harness
+        .events(&task.id)
+        .into_iter()
+        .map(|event| event.kind)
+        .collect();
+    assert!(kinds.iter().any(|kind| kind == "steered"), "{kinds:?}");
+    assert!(
+        !kinds.iter().any(|kind| kind == "follow_up_queued"),
+        "{kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_worker_that_takes_no_instruction_mid_turn_still_queues_it() {
+    let harness = harness("hang");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new("work", "wait forever", &harness.cwd))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+
+    let outcome = steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("check the tests too"),
+    )
+    .await
+    .expect("steered");
+
+    assert!(outcome.queued, "it waits for this run to finish");
+    assert_eq!(outcome.task.queued_follow_ups, Some(1));
+    assert_eq!(
+        transport(&harness.dispatcher.task(&dispatched.task.id).expect("task")).steering,
+        None,
+        "this agent never offered to take one"
+    );
+    assert!(
+        harness.received("_session/steering").is_empty(),
+        "an agent that did not offer it is never asked"
+    );
+    let queued = harness
+        .events(&dispatched.task.id)
+        .into_iter()
+        .find(|event| event.kind == "follow_up_queued")
+        .expect("queued event");
+    assert_eq!(queued.payload["instruction"], "check the tests too");
+    assert!(
+        !queued.payload.contains_key("reason"),
+        "nothing was tried, so there is nothing to explain"
+    );
+
+    cancel(&harness.dispatcher, CancelRequest::new(&dispatched.task.id))
+        .await
+        .expect("cancelled");
+    harness.settle(&dispatched.task.id).await;
+}
+
+#[tokio::test]
+async fn an_instruction_the_worker_will_not_take_falls_back_to_the_queue() {
+    let harness = harness("steer-refused");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "rename the field",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+
+    let outcome = steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("call it label instead"),
+    )
+    .await
+    .expect("steered");
+
+    assert!(outcome.queued, "it fell back to waiting its turn");
+    assert_eq!(harness.received("_session/steering").len(), 1);
+    let queued = harness
+        .events(&dispatched.task.id)
+        .into_iter()
+        .find(|event| event.kind == "follow_up_queued")
+        .expect("queued event");
+    assert_eq!(queued.payload["instruction"], "call it label instead");
+    assert_eq!(
+        queued.payload["reason"], "the run had already finished",
+        "the record says why it had to wait"
+    );
+    let task = harness.dispatcher.task(&dispatched.task.id).expect("task");
+    assert_eq!(
+        transport(&task).steering,
+        Some(AcpSteering::Extension),
+        "the agent did offer to take one"
+    );
+}
+
+#[tokio::test]
+async fn an_instruction_joins_the_run_an_opencode_worker_is_already_on() {
+    let harness = opencode_harness("opencode-join");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "rename the field",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+
+    let outcome = steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("call it label instead"),
+    )
+    .await
+    .expect("steered");
+
+    assert!(
+        !outcome.queued,
+        "the instruction was handed over, not queued"
+    );
+    let task = harness.settle(&dispatched.task.id).await;
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(
+        task.output.contains("call it label instead"),
+        "the running turn picked it up: {}",
+        task.output
+    );
+    assert_eq!(
+        transport(&task).steering,
+        Some(AcpSteering::Prompt),
+        "OpenCode advertises nothing, so the adapter is what says it takes one"
+    );
+    let prompts = harness.received("session/prompt");
+    assert_eq!(
+        prompts.len(),
+        2,
+        "the instruction went over as a prompt of its own"
+    );
+    assert_eq!(prompts[1]["prompt"][0]["text"], "call it label instead");
+    assert_eq!(
+        prompts[1]["sessionId"], prompts[0]["sessionId"],
+        "on the session the turn is already running in"
+    );
+    assert!(
+        harness.received("_session/steering").is_empty(),
+        "an agent that never offered the extension is not asked over it"
+    );
+    let kinds: Vec<String> = harness
+        .events(&task.id)
+        .into_iter()
+        .map(|event| event.kind)
+        .collect();
+    assert!(kinds.iter().any(|kind| kind == "steered"), "{kinds:?}");
+    assert!(
+        !kinds.iter().any(|kind| kind == "follow_up_queued"),
+        "{kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_joined_instruction_leaves_the_turn_settling_once() {
+    let harness = opencode_harness("opencode-join");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "edit the library",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+    steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("call it label instead"),
+    )
+    .await
+    .expect("steered");
+
+    let task = harness.settle(&dispatched.task.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let events = harness.events(&task.id);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "completed")
+            .count(),
+        1,
+        "both prompts answer for the one run they shared, which settles once"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "agent.usage_update")
+            .count(),
+        1
+    );
+    assert_eq!(
+        task.cost_usd,
+        Some(0.5),
+        "the run is charged for once, not once per prompt"
+    );
+}
+
+#[tokio::test]
 async fn a_restart_picks_an_acp_conversation_back_up_instead_of_dropping_it() {
     let harness = harness("turn");
     let task = Task {
@@ -717,6 +981,7 @@ async fn a_restart_picks_an_acp_conversation_back_up_instead_of_dropping_it() {
             acp_session_id: Some("acp-session-1".into()),
             restore: Some(AcpRestore::Resume),
             agent: None,
+            steering: None,
             decided_at: NOW.into(),
         }),
         ..Task::default()
