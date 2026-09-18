@@ -9,7 +9,7 @@
 use std::{
     path::{Component, Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -17,7 +17,7 @@ use std::{
 
 use oga_acp::{
     AcpConfig, AcpError, AcpPolicy, AcpSession, AgentRelease, Decision, Launch, PolicyFuture,
-    Refusal, SessionSetting, SessionStart, Stage, Steered,
+    Refusal, SentPrompt, SessionSetting, SessionStart, Stage, Steered,
     schema::{
         AgentCapabilities, ContentBlock, HttpHeader, McpServer, McpServerHttp, PermissionOption,
         PermissionOptionKind, RequestPermissionRequest, SessionId, SessionNotification,
@@ -28,7 +28,9 @@ use oga_domain::{
     AcpAgentIdentity, AcpRestore, AcpSteering, CompletionCode, Profile, Task, TaskScope, TaskState,
     TaskTransport, TaskWorker, Transport, TransportReason,
 };
-use oga_providers::{AcpAdapter, AcpLaunch, AcpVersions, NO_FINAL_MESSAGE, Usage};
+use oga_providers::{
+    AcpAdapter, AcpLaunch, AcpVersions, NO_FINAL_MESSAGE, OPENCODE_ADAPTER, Usage,
+};
 use oga_runner::{ProviderRunner, RunRequest, Termination};
 use oga_store::{Store, StoreError};
 use rusqlite::params;
@@ -86,6 +88,10 @@ pub(crate) enum Delivered {
 /// A live ACP run, as cancel, steer and handoff reach it.
 pub(crate) struct AcpRun {
     session: AcpSession,
+    /// How this agent takes an instruction into a turn it is already running.
+    steering: Option<AcpSteering>,
+    /// Instructions handed over as their own prompt, still to be answered.
+    joined: Mutex<Vec<SentPrompt>>,
     cancelled: AtomicBool,
 }
 
@@ -98,28 +104,58 @@ impl AcpRun {
         self.session.process().terminate(Termination::Cancelled);
     }
 
-    /// Hands the running turn an instruction, by whichever way the agent said
-    /// it takes one. An agent that offered none is never asked.
+    /// Hands the running turn an instruction, by whichever way this agent
+    /// takes one. An agent that takes none is never asked.
     pub(crate) async fn steer(&self, instruction: &str) -> Delivered {
-        match self.session.steering() {
-            Some(AcpSteering::Extension) => {
-                match self
-                    .session
-                    .steer(vec![ContentBlock::from(instruction.to_owned())])
-                    .await
-                {
-                    Ok(Steered::Injected) => Delivered::InTurn,
-                    Ok(Steered::Elsewhere(outcome)) => Delivered::Missed(missed(&outcome)),
-                    Err(error) => Delivered::Missed(error.to_string()),
+        let blocks = vec![ContentBlock::from(instruction.to_owned())];
+        match self.steering {
+            Some(AcpSteering::Extension) => match self.session.steer(blocks).await {
+                Ok(Steered::Injected) => Delivered::InTurn,
+                Ok(Steered::Elsewhere(outcome)) => Delivered::Missed(missed(&outcome)),
+                Err(error) => Delivered::Missed(error.to_string()),
+            },
+            Some(AcpSteering::Prompt) => match self.session.send_prompt(blocks) {
+                Ok(sent) => {
+                    self.joined
+                        .lock()
+                        .expect("joined prompt lock is not poisoned")
+                        .push(sent);
+                    Delivered::InTurn
                 }
-            }
+                Err(error) => Delivered::Missed(error.to_string()),
+            },
             None => Delivered::Missed("this worker only takes an instruction between runs".into()),
+        }
+    }
+
+    /// Reads the answers to instructions sent as their own prompt, once the
+    /// turn they joined has ended. They answer for that same turn, which the
+    /// run's own prompt has already settled, so nothing here is counted twice.
+    async fn drain_joined(&self) {
+        let sent = std::mem::take(
+            &mut *self
+                .joined
+                .lock()
+                .expect("joined prompt lock is not poisoned"),
+        );
+        for prompt in sent {
+            prompt.settled().await;
         }
     }
 
     fn was_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
+}
+
+/// How this run takes an instruction into a turn already under way. An agent
+/// that advertises the extension is taken at its word. OpenCode advertises
+/// nothing, but folds a second prompt into the run it is already on, so it is
+/// known by the adapter that speaks to it.
+fn steering_for(adapter: &AcpAdapter, session: &AcpSession) -> Option<AcpSteering> {
+    session
+        .steering()
+        .or_else(|| (adapter.id == OPENCODE_ADAPTER).then_some(AcpSteering::Prompt))
 }
 
 /// What the agent said it did with the instruction instead of taking it, put
@@ -254,13 +290,16 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     while updates.try_recv().is_ok() {
         replayed += 1;
     }
-    if let Err(error) = record_session(&turn, &acp_launch, &session, replayed) {
+    let steering = steering_for(turn.adapter, &session);
+    if let Err(error) = record_session(&turn, &acp_launch, &session, replayed, steering) {
         session.shutdown().await;
         return Err(error);
     }
 
     let run = Arc::new(AcpRun {
         session,
+        steering,
+        joined: Mutex::new(Vec::new()),
         cancelled: AtomicBool::new(false),
     });
     let active = ActiveRun::Acp(Arc::clone(&run));
@@ -288,6 +327,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     if matches!(ended, TurnEnd::TimedOut) {
         run.session.cancel();
     }
+    run.drain_joined().await;
     run.session.shutdown().await;
     turn.active.remove(&task.id, &active);
     // Updates the agent sent before it answered are still queued once it is
@@ -490,6 +530,7 @@ fn record_session(
     launch: &AcpLaunch<'_>,
     session: &AcpSession,
     replayed: usize,
+    steering: Option<AcpSteering>,
 ) -> Result<(), LifecycleError> {
     let now = now_iso();
     let task = turn.task;
@@ -500,7 +541,7 @@ fn record_session(
         detail: None,
         acp_session_id: Some(acp_session_id.clone()),
         restore: restore_for(session.agent_capabilities()),
-        steering: session.steering(),
+        steering,
         agent: Some(AcpAgentIdentity {
             adapter: turn.adapter.id.clone(),
             name: session.agent_info().map(|info| info.name.clone()),

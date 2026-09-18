@@ -853,6 +853,116 @@ async fn an_instruction_the_worker_will_not_take_falls_back_to_the_queue() {
 }
 
 #[tokio::test]
+async fn an_instruction_joins_the_run_an_opencode_worker_is_already_on() {
+    let harness = opencode_harness("opencode-join");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "rename the field",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+
+    let outcome = steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("call it label instead"),
+    )
+    .await
+    .expect("steered");
+
+    assert!(
+        !outcome.queued,
+        "the instruction was handed over, not queued"
+    );
+    let task = harness.settle(&dispatched.task.id).await;
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(
+        task.output.contains("call it label instead"),
+        "the running turn picked it up: {}",
+        task.output
+    );
+    assert_eq!(
+        transport(&task).steering,
+        Some(AcpSteering::Prompt),
+        "OpenCode advertises nothing, so the adapter is what says it takes one"
+    );
+    let prompts = harness.received("session/prompt");
+    assert_eq!(
+        prompts.len(),
+        2,
+        "the instruction went over as a prompt of its own"
+    );
+    assert_eq!(prompts[1]["prompt"][0]["text"], "call it label instead");
+    assert_eq!(
+        prompts[1]["sessionId"], prompts[0]["sessionId"],
+        "on the session the turn is already running in"
+    );
+    assert!(
+        harness.received("_session/steering").is_empty(),
+        "an agent that never offered the extension is not asked over it"
+    );
+    let kinds: Vec<String> = harness
+        .events(&task.id)
+        .into_iter()
+        .map(|event| event.kind)
+        .collect();
+    assert!(kinds.iter().any(|kind| kind == "steered"), "{kinds:?}");
+    assert!(
+        !kinds.iter().any(|kind| kind == "follow_up_queued"),
+        "{kinds:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_joined_instruction_leaves_the_turn_settling_once() {
+    let harness = opencode_harness("opencode-join");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "edit the library",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    harness.await_received("session/prompt").await;
+    steer(
+        &harness.dispatcher,
+        SteerRequest::new(&dispatched.task.id).instruction("call it label instead"),
+    )
+    .await
+    .expect("steered");
+
+    let task = harness.settle(&dispatched.task.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    let events = harness.events(&task.id);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "completed")
+            .count(),
+        1,
+        "both prompts answer for the one run they shared, which settles once"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "agent.usage_update")
+            .count(),
+        1
+    );
+    assert_eq!(
+        task.cost_usd,
+        Some(0.5),
+        "the run is charged for once, not once per prompt"
+    );
+}
+
+#[tokio::test]
 async fn a_restart_picks_an_acp_conversation_back_up_instead_of_dropping_it() {
     let harness = harness("turn");
     let task = Task {

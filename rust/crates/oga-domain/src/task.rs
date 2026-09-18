@@ -162,15 +162,18 @@ pub enum AcpRestore {
     Load,
 }
 
-/// How an instruction reaches a turn that is already running, read from what
-/// the agent offered when the session opened. Absent means it cannot, and the
-/// instruction waits for the run to finish.
+/// How an instruction reaches a turn that is already running, settled when the
+/// session opened. Absent means it cannot, and the instruction waits for the
+/// run to finish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AcpSteering {
     /// `_session/steering`: the agent puts the instruction into the turn it
     /// is running and says whether it took it.
     Extension,
+    /// A second `session/prompt`: the agent folds the instruction into the run
+    /// it is already on and picks it up at its next step.
+    Prompt,
 }
 
 /// The transport a task's runs use, decided when a run first opens a session

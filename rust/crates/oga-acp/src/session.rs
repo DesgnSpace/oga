@@ -32,7 +32,7 @@ use crate::{
     policy::{AcpPolicy, Decision, Grants, PolicyFuture, TerminalCall, denied},
     transport::{
         Connection, DEFAULT_MAX_FRAME_BYTES, DEFAULT_MAX_STDERR_BYTES, Diagnostics, Handler,
-        RpcError,
+        RpcError, Sent,
     },
 };
 
@@ -41,6 +41,11 @@ pub const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// How long an agent has to say what it did with an instruction. The turn it
 /// is running is not waited on, only the answer about the instruction.
 const STEER_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a prompt that joined a turn is given to answer once that turn has
+/// ended. It answers off the same idle event as the turn's own prompt, so an
+/// answer that is coming is already in flight and a longer wait only holds the
+/// run open behind an agent that will never send one.
+const JOINED_TIMEOUT: Duration = Duration::from_secs(5);
 /// The extension request that carries an instruction into a running turn,
 /// advertised at `_meta.steering.supported` on the initialize response.
 const STEER_METHOD: &str = "_session/steering";
@@ -52,6 +57,19 @@ pub enum Steered {
     Injected,
     /// It did not, in the agent's own word for what happened instead.
     Elsewhere(String),
+}
+
+/// A prompt the agent has been given and not yet answered, sent to carry an
+/// instruction into a turn already under way.
+pub struct SentPrompt(Sent<PromptResponse>);
+
+impl SentPrompt {
+    /// Reads the answer and lets it go. It reports the turn the instruction
+    /// joined, which that turn's own prompt has already settled, so reading it
+    /// clears the frame rather than producing an outcome.
+    pub async fn settled(self) {
+        let _: Result<PromptResponse, RpcError> = self.0.answer(JOINED_TIMEOUT).await;
+    }
 }
 
 /// How the transport behaves, independent of which agent it is talking to.
@@ -430,6 +448,21 @@ impl AcpSession {
             Some(other) => Steered::Elsewhere(other.to_owned()),
             None => Steered::Elsewhere("no outcome".into()),
         })
+    }
+
+    /// Hands the agent an instruction as a prompt of its own, without waiting
+    /// for it to be answered.
+    ///
+    /// An agent that folds a second prompt into the run it is already on takes
+    /// the instruction into that turn. Both prompts then answer for the same
+    /// turn, so this one's answer is left unread for the caller to drain once
+    /// the turn it joined has ended.
+    pub fn send_prompt(&self, blocks: Vec<ContentBlock>) -> Result<SentPrompt, AcpError> {
+        let request = PromptRequest::new(self.session_id.clone(), blocks);
+        self.connection
+            .start_request(AGENT_METHOD_NAMES.session_prompt, &request)
+            .map(SentPrompt)
+            .map_err(|error| AcpError::unavailable(Stage::Session, error.to_string()))
     }
 
     /// Asks the agent to stop the turn. The prompt still answers, with

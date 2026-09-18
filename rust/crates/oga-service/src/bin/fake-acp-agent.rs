@@ -39,6 +39,10 @@
 //! answers that request without taking the instruction. Only a mode naming
 //! `steer` advertises that it takes one at all.
 //!
+//! A mode whose turns are `join` waits for a second `session/prompt` and folds
+//! it into the turn it is already running, the way `opencode acp` does, then
+//! answers both prompts from the one run it shared. It advertises nothing.
+//!
 //! A mode starting `pi` answers the way `pi-acp` 0.0.33 does: it reports itself
 //! as that adapter, names its session with Pi's own UUID, records the session
 //! in its session map under the profile's session directory, and offers the
@@ -435,6 +439,42 @@ fn prompt(
                 break;
             }
             chunk(&session, "OGA_RESULT: completed");
+        }
+        "join" => {
+            let mut joined = None;
+            for line in lines.by_ref() {
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                log(log_path, &json!({"received": message}));
+                if message["method"] == "session/cancel" {
+                    break;
+                }
+                if message["method"] != "session/prompt" {
+                    continue;
+                }
+                let text = message["params"]["prompt"][0]["text"]
+                    .as_str()
+                    .unwrap_or_default();
+                chunk(&session, &format!("told mid-turn: {text}\n"));
+                joined = Some(message["id"].clone());
+                break;
+            }
+            update(
+                &session,
+                json!({
+                    "sessionUpdate": "usage_update",
+                    "used": 12_000,
+                    "size": 200_000,
+                    "cost": {"amount": 0.5, "currency": "USD"},
+                }),
+            );
+            chunk(&session, "OGA_RESULT: completed");
+            // Both prompts describe the one run they shared, so both answer
+            // off the same idle event rather than one turn each.
+            if let Some(id) = joined {
+                emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "end_turn"}}));
+            }
         }
         "ask" => {
             emit(&json!({

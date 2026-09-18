@@ -6,6 +6,7 @@
 use std::{
     collections::HashMap,
     io,
+    marker::PhantomData,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
@@ -216,6 +217,15 @@ impl Connection {
         P: Serialize,
         R: DeserializeOwned,
     {
+        self.start_request(method, params)?.answer(lifetime).await
+    }
+
+    /// Writes a request and hands back the answer still to come, so the caller
+    /// decides when to wait for it. Failing here means the frame never left.
+    pub(crate) fn start_request<P, R>(&self, method: &str, params: &P) -> Result<Sent<R>, RpcError>
+    where
+        P: Serialize,
+    {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.shared
@@ -236,30 +246,13 @@ impl Connection {
                 method: method.to_owned(),
             });
         }
-
-        let answer = match timeout(lifetime, rx).await {
-            Ok(Ok(answer)) => answer,
-            Ok(Err(_)) => return Err(RpcError::Closed),
-            Err(_) => {
-                self.shared.take_waiter(id);
-                return Err(RpcError::Timeout {
-                    method: method.to_owned(),
-                    timeout: lifetime,
-                });
-            }
-        };
-        match answer {
-            Ok(result) => serde_json::from_value(result).map_err(|source| RpcError::Decode {
-                method: method.to_owned(),
-                source,
-            }),
-            Err(error) => Err(RpcError::Agent {
-                method: method.to_owned(),
-                code: error.code.into(),
-                message: error.message,
-                data: error.data,
-            }),
-        }
+        Ok(Sent {
+            id,
+            method: method.to_owned(),
+            shared: Arc::clone(&self.shared),
+            waiting: rx,
+            decoded: PhantomData,
+        })
     }
 
     pub(crate) fn notify<P: Serialize>(&self, method: &str, params: &P) -> Result<(), RpcError> {
@@ -283,6 +276,44 @@ impl Drop for Connection {
     fn drop(&mut self) {
         for task in &self.tasks {
             task.abort();
+        }
+    }
+}
+
+/// A request the agent has been given and has not answered yet.
+pub(crate) struct Sent<R> {
+    id: i64,
+    method: String,
+    shared: Arc<Shared>,
+    waiting: oneshot::Receiver<Result<Value, Error>>,
+    decoded: PhantomData<R>,
+}
+
+impl<R: DeserializeOwned> Sent<R> {
+    /// Waits for the answer, for as long as `lifetime` allows.
+    pub(crate) async fn answer(self, lifetime: Duration) -> Result<R, RpcError> {
+        let answer = match timeout(lifetime, self.waiting).await {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(_)) => return Err(RpcError::Closed),
+            Err(_) => {
+                self.shared.take_waiter(self.id);
+                return Err(RpcError::Timeout {
+                    method: self.method,
+                    timeout: lifetime,
+                });
+            }
+        };
+        match answer {
+            Ok(result) => serde_json::from_value(result).map_err(|source| RpcError::Decode {
+                method: self.method,
+                source,
+            }),
+            Err(error) => Err(RpcError::Agent {
+                method: self.method,
+                code: error.code.into(),
+                message: error.message,
+                data: error.data,
+            }),
         }
     }
 }

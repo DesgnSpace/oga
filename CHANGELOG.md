@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- An instruction you send a Claude worker while it works now reaches it straight away, instead of waiting for the current run to end. Other workers still pick it up the moment that run finishes.
+- An instruction you send a Claude or OpenCode worker while it works now reaches it straight away, instead of waiting for the current run to end. Other workers still pick it up the moment that run finishes.
 - Each step a worker takes now shows as one row that expands to its result, grouped under the turn it ran in; repeated or renamed steps no longer split into duplicates, and worker logs stay out of the way.
 - Answers you send a worker now appear in full in the transcript instead of stopping mid-sentence.
 - "Show more" on a long request now opens the whole thing; it used to stop part way with no way to read the rest.
