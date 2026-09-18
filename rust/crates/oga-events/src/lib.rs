@@ -4135,12 +4135,16 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
         }
         "steered" => tree_value(payload, &["instruction"]),
         "steer_accepted" | "follow_up_queued" | "follow_up_started" | "resumed" => {
-            tree_value(payload, &["instruction"]).or_else(|| {
+            let instruction = tree_value(payload, &["instruction"]).or_else(|| {
                 (event_type == "resumed")
                     .then(|| tree_value(payload, &["previousState"]))
                     .flatten()
                     .map(|state| format!("Resuming from {state} state"))
-            })
+            });
+            match (instruction, tree_value(payload, &["reason"])) {
+                (Some(instruction), Some(reason)) => Some(format!("{instruction} · {reason}")),
+                (instruction, _) => instruction,
+            }
         }
         "steer_rejected" => {
             tree_value(payload, &["reason"]).map(|reason| format!("Reason: {reason}"))

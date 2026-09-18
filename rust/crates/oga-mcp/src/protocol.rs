@@ -92,7 +92,7 @@ const RESUME_DESCRIPTION: &str = concat!(
 
 const STEER_DESCRIPTION: &str = concat!(
     "Leave an instruction for a task that is still running, without stopping it and without losing the work done so far. ",
-    "No runner accepts input mid-run, so the instruction waits and runs as a follow-up turn once the current run finishes clean; the answer reports it as queued. A run that fails, asks a question, or ends blocked leaves it waiting untouched, and cancelling the task discards it. ",
+    "A worker that can take one mid-run has it within seconds and carries on in the same run. Any other worker leaves it waiting, to run as a follow-up turn once the current run finishes clean; the answer reports which happened. A run that fails, asks a question, or ends blocked leaves a waiting instruction untouched, and cancelling the task discards it. ",
     "Only a running task takes one. Anything else is refused: resume continues a stopped task, reply answers one parked on a question."
 );
 
@@ -881,7 +881,7 @@ fn shared_tools() -> Vec<Value> {
             "instruction".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 64000 }),
-                "What the worker should take up when its current run finishes. A course correction in a sentence or two, not a restatement of the brief it is already running.",
+                "What the worker should do about the work it is on. A course correction in a sentence or two, not a restatement of the brief it is already running.",
             ),
         ),
         (

@@ -8,7 +8,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::acp_run::{self, AcpEnd, AcpRun, AcpTurn};
+use crate::acp_run::{self, AcpEnd, AcpRun, AcpTurn, Delivered};
 use crate::authorization;
 use crate::dependencies;
 use crate::prompt::{
@@ -90,6 +90,14 @@ impl ActiveRun {
         match self {
             Self::Cli(process) => process.cancel_now(),
             Self::Acp(run) => run.cancel(),
+        }
+    }
+
+    /// Hands the worker an instruction without stopping it.
+    pub(crate) async fn steer(&self, instruction: &str) -> Delivered {
+        match self {
+            Self::Cli(_) => Delivered::Missed("this worker has no open channel to its run".into()),
+            Self::Acp(run) => run.steer(instruction).await,
         }
     }
 

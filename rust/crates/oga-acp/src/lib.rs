@@ -26,6 +26,6 @@ pub use outcome::{AcpError, Refusal, Stage};
 pub use policy::{AcpPolicy, Decision, DenyAll, Grants, PolicyFuture, TerminalCall};
 pub use session::{
     AcpConfig, AcpSession, AgentRelease, AgentVersions, DEFAULT_HANDSHAKE_TIMEOUT,
-    DEFAULT_PROMPT_TIMEOUT, Exit, Launch, SessionSetting, SessionStart,
+    DEFAULT_PROMPT_TIMEOUT, Exit, Launch, SessionSetting, SessionStart, Steered,
 };
 pub use transport::{DEFAULT_MAX_FRAME_BYTES, DEFAULT_MAX_STDERR_BYTES, Diagnostics};

@@ -671,20 +671,21 @@ impl McpServer {
         let cwd = project_cwd(&task);
         let fields = fields(args.get("fields"))?.unwrap_or_default();
         let mut value = shaping::task_view(&task, &fields);
-        if outcome.queued {
-            value
-                .as_object_mut()
-                .expect("task view is an object")
-                .insert(
-                    "note".into(),
-                    json!("Queued as a follow-up. It will be applied after the current run."),
-                );
-        }
-        let action = if outcome.queued {
-            hints::Move::Queued
+        let (note, action) = if outcome.queued {
+            (
+                "Queued as a follow-up. It will be applied after the current run.",
+                hints::Move::Queued,
+            )
         } else {
-            hints::Move::Started
+            (
+                "The worker has it and is carrying on with the same run.",
+                hints::Move::Started,
+            )
         };
+        value
+            .as_object_mut()
+            .expect("task view is an object")
+            .insert("note".into(), json!(note));
         Ok((shaping::with_next(value, &task, action), Some(cwd)))
     }
 

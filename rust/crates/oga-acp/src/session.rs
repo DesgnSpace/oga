@@ -22,9 +22,9 @@ use agent_client_protocol_schema::{
         WriteTextFileRequest, WriteTextFileResponse,
     },
 };
-use oga_domain::TaskScope;
+use oga_domain::{AcpSteering, TaskScope};
 use oga_runner::{ProcessControl, ProviderRunner, RunRequest, Termination};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
@@ -38,6 +38,21 @@ use crate::{
 
 pub const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// How long an agent has to say what it did with an instruction. The turn it
+/// is running is not waited on, only the answer about the instruction.
+const STEER_TIMEOUT: Duration = Duration::from_secs(30);
+/// The extension request that carries an instruction into a running turn,
+/// advertised at `_meta.steering.supported` on the initialize response.
+const STEER_METHOD: &str = "_session/steering";
+
+/// What an agent did with an instruction sent into the turn it is running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Steered {
+    /// It went into the turn that is running.
+    Injected,
+    /// It did not, in the agent's own word for what happened instead.
+    Elsewhere(String),
+}
 
 /// How the transport behaves, independent of which agent it is talking to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,6 +391,44 @@ impl AcpSession {
             }
             RpcError::Closed => AcpError::in_flight(self.closing_reason()),
             other => AcpError::in_flight(other.to_string()),
+        })
+    }
+
+    /// How this agent takes an instruction while a turn is running, from what
+    /// it advertised. `None` from one that never said it can.
+    pub fn steering(&self) -> Option<AcpSteering> {
+        self.agent
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("steering"))
+            .and_then(|steering| steering.get("supported"))
+            .and_then(Value::as_bool)
+            .unwrap_or_default()
+            .then_some(AcpSteering::Extension)
+    }
+
+    /// Hands the agent an instruction for the turn it is already running.
+    ///
+    /// The turn is left to answer its own prompt: this call only carries the
+    /// instruction and reads back what became of it. Asking the agent to
+    /// require a prompt when it is idle keeps it from starting a turn nobody
+    /// is waiting on, so an instruction that arrives a moment too late is
+    /// still this client's to place.
+    pub async fn steer(&self, blocks: Vec<ContentBlock>) -> Result<Steered, AcpError> {
+        let request = json!({
+            "sessionId": self.session_id,
+            "prompt": blocks,
+            "_meta": {"steering": {"idleBehavior": "promptRequired"}},
+        });
+        let answer: Value = self
+            .connection
+            .request(STEER_METHOD, &request, STEER_TIMEOUT)
+            .await
+            .map_err(|error| AcpError::unavailable(Stage::Session, error.to_string()))?;
+        Ok(match answer["outcome"].as_str() {
+            Some("injected") => Steered::Injected,
+            Some(other) => Steered::Elsewhere(other.to_owned()),
+            None => Steered::Elsewhere("no outcome".into()),
         })
     }
 

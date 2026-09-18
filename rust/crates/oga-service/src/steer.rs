@@ -4,9 +4,13 @@ use oga_domain::{Task, TaskControlState, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, dispatch::Dispatcher, follow_ups::queue_follow_up,
-    lifecycle::now_iso, require_task, validate_model,
+    ContinuationError, acp_run::Delivered, append_event_tx, dispatch::Dispatcher,
+    follow_ups::queue_follow_up, lifecycle::now_iso, require_task, validate_model,
 };
+
+/// Why no instruction travels with a model change, whether or not the run
+/// takes one at all.
+const MODEL_IS_FIXED: &str = "a model cannot change while a run is under way";
 
 /// What became of the instruction: delivered to a live run, or left waiting for
 /// the current one to finish.
@@ -58,9 +62,20 @@ pub fn control_state(dispatcher: &Dispatcher, task: &Task) -> TaskControlState {
             reason: Some("this run has no open channel to the worker".into()),
         };
     }
+    if task
+        .transport
+        .as_ref()
+        .and_then(|transport| transport.steering)
+        .is_none()
+    {
+        return TaskControlState {
+            steerable: false,
+            reason: Some("this worker only takes an instruction between runs".into()),
+        };
+    }
     TaskControlState {
-        steerable: false,
-        reason: Some("this runner has no live stdin control channel".into()),
+        steerable: true,
+        reason: None,
     }
 }
 
@@ -100,43 +115,90 @@ pub async fn steer(
         )));
     }
     let state = control_state(dispatcher, &task);
-    if !state.steerable {
-        let reason = state
-            .reason
-            .unwrap_or_else(|| "this run cannot be steered".into());
-        let Some(instruction) = instruction else {
-            record_rejection(dispatcher, &task, None, &reason)?;
-            return Err(ContinuationError::Refusal(format!(
-                "{reason}; use handoff to change the model now: {}",
-                task.id
-            )));
-        };
-        if model.is_none() {
-            return queue_for_later(dispatcher, task, &instruction);
-        }
+    let Some(instruction) = instruction else {
+        let reason = state.reason.unwrap_or_else(|| MODEL_IS_FIXED.into());
+        return Err(ContinuationError::Refusal(format!(
+            "{reason}; use handoff to change the model now: {}",
+            task.id
+        )));
+    };
+    if model.is_some() {
+        let reason = state.reason.unwrap_or_else(|| MODEL_IS_FIXED.into());
         record_rejection(dispatcher, &task, Some(&instruction), &reason)?;
         return Err(ContinuationError::Refusal(format!(
-            "{reason}; send the instruction on its own to run it after this one, or use handoff to change the model now: {}",
+            "{reason}; send the instruction on its own, or use handoff to change the model now: {}",
             task.id
         )));
     }
-    Err(ContinuationError::Refusal(format!(
-        "this run cannot be steered: {}",
-        task.id
-    )))
+    if state.steerable {
+        return deliver_now(dispatcher, task, &instruction).await;
+    }
+    queue_for_later(dispatcher, task, &instruction, None)
 }
 
-/// Nothing can reach the worker mid-run, so the instruction waits its turn
-/// behind the current one instead of costing the caller the work done so far.
+/// Hands the instruction to the turn that is running. A worker that will not
+/// take it keeps the behaviour of one that never could: the instruction waits
+/// its turn, and the record says why it had to.
+async fn deliver_now(
+    dispatcher: &Dispatcher,
+    task: Task,
+    instruction: &str,
+) -> Result<SteerOutcome, ContinuationError> {
+    let Some(run) = dispatcher.active_runs().get(&task.id) else {
+        return queue_for_later(dispatcher, task, instruction, None);
+    };
+    match run.steer(instruction).await {
+        Delivered::InTurn => {
+            record_delivery(dispatcher, &task, instruction)?;
+            Ok(SteerOutcome {
+                task,
+                queued: false,
+            })
+        }
+        Delivered::Missed(reason) => queue_for_later(dispatcher, task, instruction, Some(&reason)),
+    }
+}
+
+/// The instruction could not reach the running turn, so it waits behind it
+/// instead of costing the caller the work done so far. `reason` is what the
+/// worker said when it was offered the instruction and did not take it.
 fn queue_for_later(
     dispatcher: &Dispatcher,
     mut task: Task,
     instruction: &str,
+    reason: Option<&str>,
 ) -> Result<SteerOutcome, ContinuationError> {
     let now = now_iso();
-    let waiting = queue_follow_up(dispatcher.store(), &task.id, task.state, instruction, &now)?;
+    let waiting = queue_follow_up(
+        dispatcher.store(),
+        &task.id,
+        task.state,
+        instruction,
+        reason,
+        &now,
+    )?;
     task.queued_follow_ups = Some(waiting as u64);
     Ok(SteerOutcome { task, queued: true })
+}
+
+fn record_delivery(
+    dispatcher: &Dispatcher,
+    task: &Task,
+    instruction: &str,
+) -> Result<(), ContinuationError> {
+    let now = now_iso();
+    dispatcher.store().transaction(|tx| {
+        append_event_tx(
+            tx,
+            &task.id,
+            "steered",
+            task.state,
+            json!({"instruction": instruction}),
+            &now,
+        )?;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 fn record_rejection(

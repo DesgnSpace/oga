@@ -17,7 +17,7 @@ use std::{
 
 use oga_acp::{
     AcpConfig, AcpError, AcpPolicy, AcpSession, AgentRelease, Decision, Launch, PolicyFuture,
-    Refusal, SessionSetting, SessionStart, Stage,
+    Refusal, SessionSetting, SessionStart, Stage, Steered,
     schema::{
         AgentCapabilities, ContentBlock, HttpHeader, McpServer, McpServerHttp, PermissionOption,
         PermissionOptionKind, RequestPermissionRequest, SessionId, SessionNotification,
@@ -25,7 +25,7 @@ use oga_acp::{
     },
 };
 use oga_domain::{
-    AcpAgentIdentity, AcpRestore, CompletionCode, Profile, Task, TaskScope, TaskState,
+    AcpAgentIdentity, AcpRestore, AcpSteering, CompletionCode, Profile, Task, TaskScope, TaskState,
     TaskTransport, TaskWorker, Transport, TransportReason,
 };
 use oga_providers::{AcpAdapter, AcpLaunch, AcpVersions, NO_FINAL_MESSAGE, Usage};
@@ -75,7 +75,15 @@ pub(crate) struct AcpTurn<'a> {
     pub(crate) active: &'a ActiveRuns,
 }
 
-/// A live ACP run, as cancel and handoff reach it.
+/// Where an instruction sent to a live run ended up.
+pub(crate) enum Delivered {
+    /// The worker took it into the turn it is running.
+    InTurn,
+    /// It never reached the turn, in the agent's words or the client's.
+    Missed(String),
+}
+
+/// A live ACP run, as cancel, steer and handoff reach it.
 pub(crate) struct AcpRun {
     session: AcpSession,
     cancelled: AtomicBool,
@@ -90,9 +98,39 @@ impl AcpRun {
         self.session.process().terminate(Termination::Cancelled);
     }
 
+    /// Hands the running turn an instruction, by whichever way the agent said
+    /// it takes one. An agent that offered none is never asked.
+    pub(crate) async fn steer(&self, instruction: &str) -> Delivered {
+        match self.session.steering() {
+            Some(AcpSteering::Extension) => {
+                match self
+                    .session
+                    .steer(vec![ContentBlock::from(instruction.to_owned())])
+                    .await
+                {
+                    Ok(Steered::Injected) => Delivered::InTurn,
+                    Ok(Steered::Elsewhere(outcome)) => Delivered::Missed(missed(&outcome)),
+                    Err(error) => Delivered::Missed(error.to_string()),
+                }
+            }
+            None => Delivered::Missed("this worker only takes an instruction between runs".into()),
+        }
+    }
+
     fn was_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
+}
+
+/// What the agent said it did with the instruction instead of taking it, put
+/// in words that read outside the protocol.
+fn missed(outcome: &str) -> String {
+    match outcome {
+        "promptRequired" => "the run had already finished",
+        "startedNewTurn" => "the worker put it in a run of its own",
+        _ => "the worker did not take it",
+    }
+    .to_owned()
 }
 
 enum TurnEnd {
@@ -462,6 +500,7 @@ fn record_session(
         detail: None,
         acp_session_id: Some(acp_session_id.clone()),
         restore: restore_for(session.agent_capabilities()),
+        steering: session.steering(),
         agent: Some(AcpAgentIdentity {
             adapter: turn.adapter.id.clone(),
             name: session.agent_info().map(|info| info.name.clone()),
