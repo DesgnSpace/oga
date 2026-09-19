@@ -31,6 +31,31 @@ function agentCall(id: number, callId: string, complete: boolean, turnId = 1): T
   };
 }
 
+/** A command call that opens unnamed and is titled only by its update. */
+function commandCall(id: number, callId: string, named: boolean, complete: boolean): TaskEventView {
+  const command = "bun -e 'console.log(1)'";
+  return {
+    id,
+    taskId: "task",
+    source: "claude",
+    type: complete ? "agent.tool_call_update" : "agent.tool_call",
+    kind: "command",
+    phase: complete ? "completed" : "started",
+    title: "Run command",
+    verb: complete ? "Ran" : "Running",
+    target: named ? command : undefined,
+    result: complete ? '{"id":1,"result":{"value":"output"}}' : undefined,
+    presentation: named
+      ? { type: "command", text: command, command }
+      : { type: "command" },
+    createdAt: `2026-09-17T10:00:0${id}Z`,
+    turnId: 1,
+    actionId: callId,
+    sourceId: callId,
+    complete,
+  };
+}
+
 /** An attempt at a failing model provider, as the events crate maps one. */
 function recoveryRow(id: number, title: string, detail: string, phase: "info" | "failed"): TaskEventView {
   return {
@@ -420,5 +445,19 @@ describe("whole runs, as the daemon served them", () => {
       expect(expansion?.type).toBe("command");
       expect(expansion?.type === "command" && expansion.output).toBeTruthy();
     }
+  });
+});
+
+describe("a command named only by its update", () => {
+  it("shows the command, not the output it printed", () => {
+    const [row] = callRows([
+      commandCall(1, "call_1", false, false),
+      commandCall(2, "call_1", true, true),
+    ]);
+
+    expect(row.target).toBe("bun -e 'console.log(1)'");
+    expect(row.presentation?.command).toBe("bun -e 'console.log(1)'");
+    expect(row.verb).toBe("Ran");
+    expect(row.result).toBe('{"id":1,"result":{"value":"output"}}');
   });
 });
