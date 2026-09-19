@@ -352,6 +352,25 @@ pub fn parse_pi_models(raw: &str, profile: &Profile) -> Vec<ModelInfo> {
         .collect()
 }
 
+/// The model ids `fx models` lists, one ` - provider/model` line each under a
+/// count. fx carries a model's thinking level in the id, so no effort ladder
+/// is offered.
+pub fn parse_fx_models(raw: &str, profile: &Profile) -> Vec<ModelInfo> {
+    strip_ansi(raw)
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- ").map(str::trim))
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            ModelMeta::default().into_info(
+                profile,
+                id.to_owned(),
+                id.to_owned(),
+                ModelInfoSource::Discovered,
+            )
+        })
+        .collect()
+}
+
 static ANTIGRAVITY_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("(?i)^[a-z0-9][a-z0-9._-]*$").expect("pattern"));
 static PI_COLUMN_SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s{2,}").expect("pattern"));

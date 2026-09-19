@@ -1615,6 +1615,8 @@ function providerLabel(value: string): string {
       return "Antigravity";
     case "pi":
       return "Pi";
+    case "fx":
+      return "fx";
     default:
       return value;
   }

@@ -26,8 +26,8 @@ use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{codex_home, environment_for, unset_environment_for};
 use oga_routing::{
     claude_models, claude_models_from_catalog, format_rfc3339_ms, now_ms, parse_antigravity_models,
-    parse_codex_models, parse_opencode_models, parse_opencode_v2_models, parse_pi_models,
-    select_model_rows, summarize_usage,
+    parse_codex_models, parse_fx_models, parse_opencode_models, parse_opencode_v2_models,
+    parse_pi_models, select_model_rows, summarize_usage,
 };
 use oga_runner::worker_path::worker_path;
 use oga_store::Store;
@@ -909,6 +909,7 @@ fn parse_provider(value: &str) -> Result<Provider, HttpError> {
         "opencode-2" => Ok(Provider::OpenCode2),
         "antigravity" => Ok(Provider::Antigravity),
         "pi" => Ok(Provider::Pi),
+        "fx" => Ok(Provider::Fx),
         _ => Err(HttpError::bad_request("invalid provider")),
     }
 }
@@ -1087,6 +1088,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         Provider::Codex => vec!["codex".into(), "debug".into(), "models".into()],
         Provider::Antigravity => vec!["agy".into(), "models".into()],
         Provider::Pi => vec!["pi".into(), "--list-models".into()],
+        Provider::Fx => vec!["fx".into(), "models".into()],
         Provider::OpenCode2 => vec![
             "opencode2".into(),
             "api".into(),
@@ -1125,6 +1127,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         Provider::Codex => parse_codex_models(&raw, profile).map_err(|_| ())?,
         Provider::Antigravity => parse_antigravity_models(&raw, profile),
         Provider::Pi => parse_pi_models(&raw, profile),
+        Provider::Fx => parse_fx_models(&raw, profile),
         Provider::OpenCode2 => parse_opencode_v2_models(&raw, profile).map_err(|_| ())?,
         Provider::OpenCode => parse_opencode_models(&raw, profile),
         Provider::Claude => unreachable!("claude models come from models.dev"),
@@ -1644,6 +1647,7 @@ async fn fetch_usage(profile: &Profile) -> ProfileUsage {
             unsupported_usage(profile, "no usage source known for antigravity")
         }
         Provider::Pi => unsupported_usage(profile, "usage tracking is not supported for pi"),
+        Provider::Fx => unsupported_usage(profile, "usage tracking is not supported for fx"),
     }
 }
 

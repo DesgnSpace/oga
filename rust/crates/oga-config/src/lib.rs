@@ -18,6 +18,7 @@ const DEFAULT_MODELS: &[(Provider, &str)] = &[
     (Provider::OpenCode2, "opencode/x-preview-f-free"),
     (Provider::Antigravity, "gemini-3.6-flash-medium"),
     (Provider::Pi, "opencode-go/deepseek-v4-flash"),
+    (Provider::Fx, "openai/gpt-5.2"),
 ];
 
 pub const EFFORT_LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
@@ -999,10 +1000,11 @@ fn provider_value(value: &str, path: &Path, field: &str) -> Result<Provider, Con
         "opencode-2" => Ok(Provider::OpenCode2),
         "antigravity" => Ok(Provider::Antigravity),
         "pi" => Ok(Provider::Pi),
+        "fx" => Ok(Provider::Fx),
         _ => Err(invalid(
             path,
             field,
-            "must be one of claude, codex, opencode, opencode-2, antigravity, pi",
+            "must be one of claude, codex, opencode, opencode-2, antigravity, pi, fx",
         )),
     }
 }

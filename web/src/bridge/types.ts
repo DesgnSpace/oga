@@ -3,7 +3,7 @@
 
 // --- Shared domain enums --------------------------------------------------
 
-export type Provider = "claude" | "codex" | "opencode" | "opencode-2" | "antigravity" | "pi";
+export type Provider = "claude" | "codex" | "opencode" | "opencode-2" | "antigravity" | "pi" | "fx";
 
 export type TaskState =
   | "queued"

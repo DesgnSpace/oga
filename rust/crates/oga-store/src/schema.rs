@@ -78,6 +78,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "task transport",
         run: migrate_v48_to_v49,
     },
+    Migration {
+        version: 50,
+        name: "providers named in code",
+        run: migrate_v49_to_v50,
+    },
 ];
 
 /// The schema this binary can read.
@@ -134,7 +139,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
-      provider TEXT NOT NULL CHECK(provider IN ('claude','codex','opencode','opencode-2','antigravity','pi')),
+      provider TEXT NOT NULL,
       default_model TEXT NOT NULL,
       enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
       env_json TEXT NOT NULL CHECK(json_valid(env_json)),
@@ -776,6 +781,42 @@ pub fn migrate_v48_to_v49(conn: &Connection) -> Result<(), StoreError> {
         INSERT INTO schema_migrations(version, name) VALUES (49, 'task transport');
         COMMIT;"#
     ))?;
+    Ok(())
+}
+
+/// Let the code decide which providers exist.
+///
+/// The provider list lived twice: in `Provider` and again in a CHECK the
+/// database held, so a provider Oga could already run was refused on the way
+/// in until a migration repeated its name here. The column now takes whatever
+/// the broker writes, which is the enum's own set.
+pub fn migrate_v49_to_v50(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        r#"PRAGMA legacy_alter_table=ON;
+        PRAGMA foreign_keys=OFF;
+        BEGIN IMMEDIATE;
+        ALTER TABLE profiles RENAME TO profiles_v49;
+        CREATE TABLE profiles (
+          id TEXT PRIMARY KEY,
+          label TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          default_model TEXT NOT NULL,
+          enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+          env_json TEXT NOT NULL CHECK(json_valid(env_json)),
+          capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
+          command_json TEXT CHECK(command_json IS NULL OR json_valid(command_json)),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          deleted_at TEXT
+        );
+        INSERT INTO profiles(id,label,provider,default_model,enabled,env_json,capabilities_json,command_json,created_at,updated_at,deleted_at)
+          SELECT id,label,provider,default_model,enabled,env_json,capabilities_json,command_json,created_at,updated_at,deleted_at FROM profiles_v49;
+        DROP TABLE profiles_v49;
+        INSERT INTO schema_migrations(version, name) VALUES (50, 'providers named in code');
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+        PRAGMA legacy_alter_table=OFF;"#,
+    )?;
     Ok(())
 }
 

@@ -258,6 +258,35 @@ describe("workers list", () => {
     expect(screen.queryByText(longModelId)).toBeNull();
   });
 
+  it("opens one worker at a time on its own page, and the list comes back", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /OpenCode work/ }));
+
+    expect(await screen.findByRole("heading", { name: "Edit worker" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Claude work/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workers" }));
+
+    expect(await screen.findByRole("button", { name: /Claude work/ })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Edit worker" })).toBeNull();
+  });
+
+  it("adds a worker on its own page instead of inside the list", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add worker" }));
+
+    expect(await screen.findByRole("heading", { name: "Add worker" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /OpenCode work/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workers" }));
+
+    expect(await screen.findByRole("button", { name: /OpenCode work/ })).toBeTruthy();
+  });
+
   it("names the kind of work each favourite model takes, in plain words", async () => {
     setTransport(makeTransport());
     render(<SettingsPage />);

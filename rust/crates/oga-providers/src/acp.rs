@@ -272,6 +272,7 @@ impl AcpAdapters {
             .register(Provider::OpenCode2, opencode2())
             .register(Provider::Antigravity, antigravity())
             .register(Provider::Pi, pi())
+            .register(Provider::Fx, fx())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -532,6 +533,74 @@ fn antigravity() -> AcpAdapter {
         };
         vec![setting("model", launch.model), setting("mode", "yolo")]
     })
+}
+
+/// fx's own `fx acp` server, verified against fx 0.0.10. Its 0.0.x releases
+/// promise nothing between them, so Oga accepts that build alone and turns any
+/// other away before a session opens.
+///
+/// It runs the `fx` on the account's path and reads the settings, workspaces,
+/// skills, and MCP servers of the `~/.fx` its environment names, so a profile
+/// with a `HOME` of its own reaches its own account. Oga's own tools ride the
+/// session's HTTP MCP servers, which fx accepts.
+///
+/// The model is a session setting taking the same id `--model` does, and `code`
+/// gives the session full tool access with no permission prompts, as
+/// `fx ask --full-access` does, leaving confinement to the runner. fx carries
+/// its thinking level in the model id, so no effort is chosen.
+///
+/// A session it opens is fx's own session under fx's own id, the one
+/// `fx --resume` reopens, saved in the account's session directory.
+fn fx() -> AcpAdapter {
+    const AGENT: &str = "fx";
+    AcpAdapter::new("fx-acp", |_| ["fx", "acp"].map(str::to_owned).to_vec())
+        .release(AcpRelease::build(AGENT, "0.0.10"))
+        .oga_tools(true)
+        .native_sessions_from(AGENT)
+        .native_session(|launch, session_id| {
+            fx_home(launch.profile)
+                .join("sessions")
+                .join(session_id)
+                .is_dir()
+        })
+        .incompatibility(|launch| {
+            let home = fx_home(launch.profile);
+            (!fx_signed_in(&home)).then(|| format!("fx isn't signed in for {}", home.display()))
+        })
+        .opened_with("available_commands_update")
+        .settings(|launch| {
+            let setting = |id: &str, value: &str| AcpSetting {
+                id: id.into(),
+                value: value.into(),
+                required: true,
+            };
+            vec![setting("model", launch.model), setting("mode", "code")]
+        })
+}
+
+/// The `~/.fx` an fx started for a profile reads, under the `HOME` it is
+/// started with.
+fn fx_home(profile: &Profile) -> PathBuf {
+    let home = environment_for(profile)
+        .get("HOME")
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .unwrap_or_else(home);
+    PathBuf::from(home).join(".fx")
+}
+
+/// Whether the account's settings name the credentials fx signs in with. An
+/// account without them opens a browser instead of answering a session.
+fn fx_signed_in(fx_home: &Path) -> bool {
+    std::fs::read_to_string(fx_home.join("settings.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|settings| {
+            settings["credential_source"]
+                .as_str()
+                .map(|source| !source.is_empty())
+        })
+        .unwrap_or(false)
 }
 
 /// Makes Antigravity's ACP server keep its sign-in in the Gemini home's token

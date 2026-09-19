@@ -230,13 +230,36 @@ pub fn command_for_with_options(
                 a.extend(["--no-approve", prompt]);
                 a.into_iter().map(String::from).collect()
             }
+            Provider::Fx => fx_ask(prompt, None),
         }
     };
     ProviderCommand {
         argv,
-        env: environment_for(profile),
+        env: run_environment_for(profile, model),
         env_remove: unset_environment_for(profile),
     }
+}
+
+/// The profile's account environment with the choices one run makes in it,
+/// for a provider that takes them there rather than on the command line.
+fn run_environment_for(profile: &Profile, model: &str) -> BTreeMap<String, String> {
+    let mut env = environment_for(profile);
+    if profile.provider == Provider::Fx {
+        env.insert("FX_MODEL".to_owned(), model.to_owned());
+    }
+    env
+}
+
+/// One noninteractive fx request, answering with the single JSON object
+/// `--json` prints. `--full-access` skips fx's own permission checks, as the
+/// interactive `code` mode does, leaving confinement to the runner.
+fn fx_ask(prompt: &str, session: Option<&str>) -> Vec<String> {
+    let mut a = vec!["fx", "ask", "--full-access", "--json", "--no-color"];
+    if let Some(session) = session {
+        a.extend(["--resume-id", session]);
+    }
+    a.extend(["--", prompt]);
+    a.into_iter().map(String::from).collect()
 }
 
 pub fn resume_command_for(
@@ -382,10 +405,11 @@ pub fn resume_command_for_with_options(
             a.extend(["--no-approve", "--session-id", session, prompt]);
             a.into_iter().map(String::from).collect()
         }
+        Provider::Fx => fx_ask(prompt, Some(session)),
     };
     Ok(ProviderCommand {
         argv,
-        env: environment_for(profile),
+        env: run_environment_for(profile, model),
         env_remove: unset_environment_for(profile),
     })
 }
@@ -457,6 +481,7 @@ pub fn session_id_from(provider: Provider, event: &Value) -> Option<String> {
         Provider::Pi if event.get("type").and_then(Value::as_str) == Some("session") => {
             event.get("id")
         }
+        Provider::Fx => event.get("session_id"),
         _ => None,
     }?;
     value
@@ -533,7 +558,11 @@ pub fn parse_stream(provider: Provider, raw: &str) -> Result<Vec<ParsedEvent>, P
                 provider,
                 session_id: session_id_from(provider, &payload),
                 write_targets: write_targets_from(&payload),
-                usage: usage_from_event(&payload),
+                usage: if provider == Provider::Fx {
+                    fx_usage(&payload)
+                } else {
+                    usage_from_event(&payload)
+                },
                 payload,
             })
         })
@@ -550,6 +579,12 @@ pub fn final_text(provider: Provider, raw: &str) -> String {
             event
                 .get("result")
                 .and_then(Value::as_str)
+                .map(str::to_owned)
+        } else if provider == Provider::Fx {
+            ["final_output", "output"]
+                .iter()
+                .filter_map(|key| event.get(*key).and_then(Value::as_str))
+                .find(|text| !text.trim().is_empty())
                 .map(str::to_owned)
         } else if provider == Provider::Pi
             && event.get("type").and_then(Value::as_str) == Some("message_end")
@@ -667,6 +702,17 @@ pub fn usage_from_event(event: &Value) -> Usage {
         };
     }
     Usage::default()
+}
+
+/// The token counts on the single object `fx ask --json` prints. fx reports no
+/// amount, so the run is priced from the catalogue like any other.
+fn fx_usage(event: &Value) -> Usage {
+    let usage = event.get("usage").and_then(Value::as_object);
+    Usage {
+        tokens_in: number(usage.and_then(|v| v.get("input_tokens"))),
+        tokens_out: number(usage.and_then(|v| v.get("output_tokens"))),
+        ..Usage::default()
+    }
 }
 
 fn generic_text(event: &Value) -> Option<String> {
@@ -811,7 +857,7 @@ pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
             env.insert("PI_CODING_AGENT_DIR".into(), agent);
             env.insert("PI_CODING_AGENT_SESSION_DIR".into(), sessions);
         }
-        Provider::OpenCode | Provider::OpenCode2 | Provider::Antigravity => {}
+        Provider::OpenCode | Provider::OpenCode2 | Provider::Antigravity | Provider::Fx => {}
     }
     env
 }
@@ -858,6 +904,7 @@ mod tests {
                 r#"{"event":"init","conversation_id":"a"}"#,
             ),
             (Provider::Pi, r#"{"type":"session","id":"p"}"#),
+            (Provider::Fx, r#"{"session_id":"f"}"#),
         ] {
             assert!(session_id_from(provider, &serde_json::from_str(line).unwrap()).is_some());
         }
@@ -922,6 +969,19 @@ mod tests {
         let turn_usage = usage_from_event(&turn_end);
         assert_eq!(turn_usage.tokens_in, None);
         assert_eq!(turn_usage.turns, Some(1.0));
+    }
+    #[test]
+    fn the_one_object_fx_prints_carries_the_answer_and_its_tokens() {
+        let raw = r#"{"output":"Goal: write b.txt\n\ndone","final_output":"done","exit_code":0,"model":"openai/gpt-5-nano","session_id":"74wO1v05fxfi","steps":1,"tool_calls":[{"name":"write_file","status":"success"}],"usage":{"input_tokens":19996,"output_tokens":542}}"#;
+        let parsed = parse_stream(Provider::Fx, raw).expect("one event");
+        let [event] = parsed.as_slice() else {
+            panic!("fx answers with one object");
+        };
+        assert_eq!(event.session_id.as_deref(), Some("74wO1v05fxfi"));
+        assert_eq!(event.usage.tokens_in, Some(19996.0));
+        assert_eq!(event.usage.tokens_out, Some(542.0));
+        assert_eq!(event.usage.cost_usd, None);
+        assert_eq!(final_text(Provider::Fx, raw), "done");
     }
     #[test]
     fn claude_prompt_is_separated_from_variadic_options() {

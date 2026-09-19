@@ -53,6 +53,21 @@ const V47: &str = r#"BEGIN IMMEDIATE;
       source_digest,task_id,attempt,profile_id,model,created_at,last_confirmed_at)
       VALUES('/project','tak money charg card','card charg money tak','src/billing.ts','chargeCard',
       'faa7ad94b913774e','',0,'user','','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    CREATE TABLE profiles (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK(provider IN ('claude','codex','opencode','opencode-2','antigravity','pi')),
+      default_model TEXT NOT NULL,
+      enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+      env_json TEXT NOT NULL CHECK(json_valid(env_json)),
+      capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
+      command_json TEXT CHECK(command_json IS NULL OR json_valid(command_json)),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+      deleted_at TEXT
+    );
+    INSERT INTO profiles(id,label,provider,default_model,enabled,env_json,capabilities_json,created_at,updated_at)
+      VALUES('claude','Claude','claude','sonnet',1,'{}','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
       state TEXT NOT NULL,
@@ -89,6 +104,33 @@ fn version(store: &Store) -> i64 {
             )
         })
         .expect("version reads")
+}
+
+#[test]
+fn a_provider_the_old_check_refused_is_addable_after_the_upgrade() {
+    let database = TestDatabase::new();
+    write_v47(&database.path());
+
+    let store = database.open_writable();
+
+    store
+        .with_transaction(|transaction| {
+            Ok(transaction.execute(
+                "INSERT INTO profiles(id,label,provider,default_model,enabled,env_json,capabilities_json,created_at,updated_at) \
+                 VALUES('fx','fx','fx','openai/gpt-5.2',1,'{}','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')",
+                [],
+            )?)
+        })
+        .expect("a provider named only in code is addable");
+
+    let kept: String = store
+        .with_connection(|connection| {
+            Ok(connection.query_row("SELECT label FROM profiles WHERE id='claude'", [], |row| {
+                row.get(0)
+            })?)
+        })
+        .expect("the profile from before the upgrade reads");
+    assert_eq!(kept, "Claude");
 }
 
 #[test]

@@ -479,6 +479,8 @@ export function providerLabel(provider: Provider): string {
       return "Antigravity";
     case "pi":
       return "Pi";
+    case "fx":
+      return "fx";
   }
 }
 
@@ -496,13 +498,15 @@ export function providerFromString(raw: string): Provider | undefined {
       return "antigravity";
     case "pi":
       return "pi";
+    case "fx":
+      return "fx";
     default:
       return undefined;
   }
 }
 
 export function supportedProviders(): Provider[] {
-  return ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi"];
+  return ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx"];
 }
 
 export function isSecretKey(key: string): boolean {

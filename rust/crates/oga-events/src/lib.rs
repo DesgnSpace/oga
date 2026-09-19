@@ -1398,6 +1398,30 @@ fn provider_event_view(
                 _ => None,
             }
         }
+        // `fx ask --json` answers with one object for the whole request rather
+        // than a stream, so the only row it carries is that request's tally.
+        Provider::Fx => {
+            let usage = payload.get("usage").and_then(Value::as_object);
+            let steps = number_u64(payload.get("steps"));
+            let mut presentation = usage_presentation();
+            presentation.tokens_in = number_u64(usage.and_then(|value| value.get("input_tokens")));
+            presentation.tokens_out =
+                number_u64(usage.and_then(|value| value.get("output_tokens")));
+            Some(provider_view(
+                event,
+                provider,
+                EventKind::Usage,
+                EventPhase::Completed,
+                "Run summary",
+                ProviderViewOptions {
+                    detail: steps
+                        .map(|value| format!("{value} step{}", if value == 1 { "" } else { "s" })),
+                    presentation: Some(presentation),
+                    minor: None,
+                    raw_text,
+                },
+            ))
+        }
     }
 }
 

@@ -6,7 +6,7 @@ import { SearchField } from "@/components/SearchField";
 import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
-import { CloseIcon } from "@/ui/icons";
+import { BackArrowIcon, ChevronIcon, CloseIcon } from "@/ui/icons";
 import { MarkdownContent } from "@/domain/markdown";
 import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
@@ -79,6 +79,8 @@ function defaultModelFor(provider: Provider): string {
       return "antigravity";
     case "pi":
       return "pi";
+    case "fx":
+      return "fx";
   }
 }
 
@@ -448,7 +450,8 @@ function SettingsSkeleton() {
   );
 }
 
-type EditorMode = { kind: "closed" } | { kind: "add" } | { kind: "edit"; profile: ProfileView };
+/// Which of the workers tab's three pages is on screen.
+type WorkersView = { kind: "list" } | { kind: "add" } | { kind: "worker"; id: string };
 
 function WaitingPanel() {
   const [settings, setSettings] = useState<WaitSettings | undefined>(undefined);
@@ -598,26 +601,6 @@ function NotificationsPanel() {
   );
 }
 
-function ChevronGlyph({ expanded }: { expanded: boolean }) {
-  return (
-    <svg
-      className={`settings-worker-row-chevron${expanded ? " settings-worker-row-chevron-open" : ""}`}
-      viewBox="0 0 16 16"
-      width={16}
-      height={16}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M5 6 8 9l3-3" />
-    </svg>
-  );
-}
-
 const WORK_LABELS = {
   context: "Reading and lookups",
   mechanical: "Small edits",
@@ -713,8 +696,7 @@ function WorkersPanel({
   refreshing: boolean;
   offline: boolean;
 }) {
-  const [expandedId, setExpandedId] = useState<string | undefined>(undefined);
-  const [editor, setEditor] = useState<EditorMode>({ kind: "closed" });
+  const [view, setView] = useState<WorkersView>({ kind: "list" });
   const [deleteId, setDeleteId] = useState<string | undefined>(undefined);
   const [deleting, setDeleting] = useState(false);
   const [checkedAt, setCheckedAt] = useState<number | undefined>(undefined);
@@ -722,6 +704,13 @@ function WorkersPanel({
   useEffect(() => {
     if (state.overview === "ready") setCheckedAt(Date.now());
   }, [state.overview]);
+
+  const showList = useCallback(() => {
+    setDeleteId(undefined);
+    setView({ kind: "list" });
+  }, []);
+
+  const selected = view.kind === "worker" ? state.profiles.find((profile) => profile.id === view.id) : undefined;
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -735,14 +724,14 @@ function WorkersPanel({
       if (result.ok) {
         lifecycle.dismiss();
         setState((s) => ({ ...s, profiles: s.profiles.filter((p) => p.id !== id) }));
-        if (expandedId === id) setExpandedId(undefined);
+        setView({ kind: "list" });
         await onRefresh();
       } else {
         lifecycle.error(quoted ? `Couldn't remove worker ${quoted}` : "Couldn't remove worker", { description: "Try again.", detail: result.error.message });
       }
       setDeleting(false);
     },
-    [deleting, expandedId, onRefresh, setState, state.profiles],
+    [deleting, onRefresh, setState, state.profiles],
   );
 
   const handleToggle = useCallback(
@@ -777,6 +766,68 @@ function WorkersPanel({
     setCheckedAt(Date.now());
   }, [onRefresh]);
 
+  if (view.kind === "add") {
+    return (
+      <div className="settings-worker-page">
+        <BackToWorkers onClick={showList} />
+        <ProfileEditor
+          profile={undefined}
+          models={suggestedModels(state, undefined)}
+          offline={offline}
+          setState={setState}
+          onClose={showList}
+          onRefresh={onRefresh}
+          onSaved={(profile) => setView({ kind: "worker", id: profile.id })}
+        />
+      </div>
+    );
+  }
+
+  if (view.kind === "worker" && selected) {
+    return (
+      <div className="settings-worker-page">
+        <BackToWorkers onClick={showList} />
+        <ProfileEditor
+          profile={selected}
+          models={suggestedModels(state, selected.id)}
+          offline={offline}
+          setState={setState}
+          onClose={showList}
+          onRefresh={onRefresh}
+          onDelete={() => setDeleteId(selected.id)}
+        />
+        <WorkerModelsSection
+          profile={selected}
+          state={state}
+          setState={setState}
+          loadModelScope={loadModelScope}
+          offline={offline}
+        />
+        {deleteId === selected.id ? (
+          <div className="settings-confirmation" role="alert">
+            <div>
+              <strong>Delete this worker?</strong>
+              <p>Existing tasks keep their history. New tasks cannot use this worker, and you can&apos;t undo this here.</p>
+            </div>
+            <div className="settings-confirmation-actions">
+              <button
+                className="settings-button settings-button-danger"
+                type="button"
+                disabled={deleting || offline}
+                onClick={() => handleDelete(selected.id)}
+              >
+                {deleting ? "Deleting…" : "Delete worker"}
+              </button>
+              <button className="settings-button" type="button" disabled={deleting} onClick={() => setDeleteId(undefined)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="settings-stack">
       <section className="settings-section">
@@ -797,7 +848,7 @@ function WorkersPanel({
               className="settings-button settings-button-primary"
               type="button"
               disabled={offline}
-              onClick={() => setEditor({ kind: "add" })}
+              onClick={() => setView({ kind: "add" })}
             >
               Add worker
             </button>
@@ -807,19 +858,6 @@ function WorkersPanel({
         <FavouriteModels rules={state.modelSettings.snapshot?.love ?? []} />
 
         <div className="settings-worker-rows">
-          {editor.kind === "add" ? (
-            <div className="settings-worker-row settings-worker-row-expanded settings-worker-row-editing">
-              <ProfileEditor
-                profile={undefined}
-                models={suggestedModels(state, undefined)}
-                offline={offline}
-                setState={setState}
-                onClose={() => setEditor({ kind: "closed" })}
-                onRefresh={onRefresh}
-                onSaved={(profile) => setExpandedId(profile.id)}
-              />
-            </div>
-          ) : null}
           {state.overview === "loading" ? (
             <p className="settings-status">Loading workers…</p>
           ) : state.overview === "error" ? (
@@ -827,124 +865,61 @@ function WorkersPanel({
               Couldn&apos;t load workers. <button className="text-button" type="button" onClick={() => void onRefresh()}>Try again</button>
             </p>
           ) : state.profiles.length === 0 ? (
-            editor.kind === "add" ? null : (
-              <EmptyState
-                title="No workers yet"
-                hint="Add a worker to choose where tasks run."
-                className="settings-empty"
-              />
-            )
+            <EmptyState
+              title="No workers yet"
+              hint="Add a worker to choose where tasks run."
+              className="settings-empty"
+            />
           ) : (
-            state.profiles.map((profile) =>
-              editor.kind === "edit" && editor.profile.id === profile.id ? (
-                <div
-                  key={profile.id}
-                  className="settings-worker-row settings-worker-row-expanded settings-worker-row-editing"
-                >
-                  <ProfileEditor
-                    profile={editor.profile}
-                    models={suggestedModels(state, profile.id)}
-                    offline={offline}
-                    setState={setState}
-                    onClose={() => setEditor({ kind: "closed" })}
-                    onRefresh={onRefresh}
-                    onDelete={() => {
-                      setEditor({ kind: "closed" });
-                      setDeleteId(profile.id);
-                    }}
-                  />
-                </div>
-              ) : (
-                <WorkerRow
-                  key={profile.id}
-                  profile={profile}
-                  worker={state.modelSettings.snapshot?.workers.find((w) => w.id === profile.id)}
-                  expanded={expandedId === profile.id}
-                  onToggleExpand={() => setExpandedId((id) => (id === profile.id ? undefined : profile.id))}
-                  onToggle={handleToggle}
-                  state={state}
-                  setState={setState}
-                  loadModelScope={loadModelScope}
-                  onEdit={() => {
-                    setExpandedId(profile.id);
-                    setEditor({ kind: "edit", profile });
-                  }}
-                  onDelete={() => setDeleteId(profile.id)}
-                  offline={offline}
-                />
-              ),
-            )
+            state.profiles.map((profile) => (
+              <WorkerRow
+                key={profile.id}
+                profile={profile}
+                worker={state.modelSettings.snapshot?.workers.find((w) => w.id === profile.id)}
+                onOpen={() => setView({ kind: "worker", id: profile.id })}
+                onToggle={handleToggle}
+                offline={offline}
+              />
+            ))
           )}
         </div>
       </section>
 
       <WaitingPanel />
-
-      {deleteId ? (
-        <div className="settings-confirmation" role="alert">
-          <div>
-            <strong>Delete this worker?</strong>
-            <p>Existing tasks keep their history. New tasks cannot use this worker, and you can&apos;t undo this here.</p>
-          </div>
-          <div className="settings-confirmation-actions">
-            <button
-              className="settings-button settings-button-danger"
-              type="button"
-              disabled={deleting || offline}
-              onClick={() => handleDelete(deleteId)}
-            >
-              {deleting ? "Deleting…" : "Delete worker"}
-            </button>
-            <button className="settings-button" type="button" disabled={deleting} onClick={() => setDeleteId(undefined)}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
+  );
+}
+
+function BackToWorkers({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="text-button settings-worker-back" type="button" onClick={onClick}>
+      <BackArrowIcon size={14} />
+      Workers
+    </button>
   );
 }
 
 function WorkerRow({
   profile,
   worker,
-  expanded,
-  onToggleExpand,
+  onOpen,
   onToggle,
-  state,
-  setState,
-  loadModelScope,
-  onEdit,
-  onDelete,
   offline,
 }: {
   profile: ProfileView;
   worker: ModelSettingsSnapshot["workers"][number] | undefined;
-  expanded: boolean;
-  onToggleExpand: () => void;
+  onOpen: () => void;
   onToggle: (id: string, enabled: boolean) => void;
-  state: SettingsState;
-  setState: React.Dispatch<React.SetStateAction<SettingsState>>;
-  loadModelScope: (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => Promise<void>;
-  onEdit: () => void;
-  onDelete: () => void;
   offline: boolean;
 }) {
   const available = Boolean(worker?.configured) && profile.enabled;
   const modelCount = worker?.models.length ?? 0;
   const binaryPath = profile.command?.join(" ");
-  const panelId = `worker-row-panel-${profile.id}`;
 
   return (
-    <div className={`settings-worker-row${expanded ? " settings-worker-row-expanded" : ""}`}>
+    <div className="settings-worker-row">
       <div className="settings-worker-row-header">
-        <button
-          className="settings-worker-row-main"
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={panelId}
-          onClick={onToggleExpand}
-        >
+        <button className="settings-worker-row-main" type="button" onClick={onOpen}>
           <span className="settings-worker-row-mark">
             <ProviderLogo provider={profile.provider} size={22} />
             <span
@@ -961,9 +936,9 @@ function WorkerRow({
               {modelCount} {modelCount === 1 ? "model" : "models"}
             </small>
           </span>
+          <ChevronIcon className="settings-worker-row-chevron" size={16} />
         </button>
         <div className="settings-worker-row-actions">
-          <ChevronGlyph expanded={expanded} />
           <Switch
             className="settings-worker-row-switch"
             checked={profile.enabled}
@@ -973,38 +948,6 @@ function WorkerRow({
           />
         </div>
       </div>
-      {expanded ? (
-        <div className="settings-worker-row-panel" id={panelId}>
-          <WorkerModelsSection
-            profile={profile}
-            state={state}
-            setState={setState}
-            loadModelScope={loadModelScope}
-            offline={offline}
-          />
-          <div className="settings-worker-row-env">
-            <h4>Environment</h4>
-            {Object.keys(profile.env).length === 0 ? (
-              <p className="settings-muted">No environment overrides.</p>
-            ) : (
-              Object.entries(profile.env).map(([key, value]) => (
-                <div key={key} className="settings-env-row">
-                  <SyntaxCode source={key} inline />
-                  <SyntaxCode source={value} inline />
-                </div>
-              ))
-            )}
-          </div>
-          <div className="settings-detail-actions">
-            <button className="settings-button" type="button" disabled={offline} onClick={onEdit}>
-              Edit
-            </button>
-            <button className="text-button text-button-danger" type="button" disabled={offline} onClick={onDelete}>
-              Delete worker
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1103,7 +1046,7 @@ function WorkerModelsSection({
   return (
     <section className="settings-worker-models">
       <div className="settings-section-heading">
-        <h4>Models</h4>
+        <h3>Models</h3>
         <label className="settings-scope-picker">
           <span>Applies to</span>
           <select value={scopeKey(state.modelScope)} onChange={(e) => handleScopeChange(e.target.value)}>

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- You can now send work to fx, alongside Claude, Codex, OpenCode, Antigravity, and Pi. Pick it in Settings and choose from the models your fx account can reach.
+- Workers in Settings now open as their own page instead of unfolding inside the list, so the form, the models, and the environment have room to read. The window also uses the full height of your screen.
 - Worker messages in the task timeline now show their formatting — bold, code, lists — instead of the raw symbols.
 - An instruction you send a Claude or OpenCode worker while it works now reaches it straight away, instead of waiting for the current run to end. Other workers still pick it up the moment that run finishes.
 - Each step a worker takes now shows as one row that expands to its result, grouped under the turn it ran in; repeated or renamed steps no longer split into duplicates, and worker logs stay out of the way.

@@ -13,6 +13,7 @@ pub enum Provider {
     OpenCode2,
     Antigravity,
     Pi,
+    Fx,
 }
 
 impl Provider {
@@ -24,6 +25,7 @@ impl Provider {
             Provider::OpenCode2 => "opencode-2",
             Provider::Antigravity => "antigravity",
             Provider::Pi => "pi",
+            Provider::Fx => "fx",
         }
     }
 }

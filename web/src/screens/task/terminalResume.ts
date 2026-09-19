@@ -31,6 +31,8 @@ function resumeArgv(provider: ProfileView["provider"], session: string): string[
       return ["agy", "--conversation", session];
     case "pi":
       return ["pi", "--session", session];
+    case "fx":
+      return ["fx", "--resume", session];
     default:
       return null;
   }

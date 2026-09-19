@@ -577,6 +577,7 @@ pub(crate) async fn run_task_with_session_and_active(
                 | Provider::OpenCode2
                 | Provider::Antigravity
                 | Provider::Pi
+                | Provider::Fx
         )
         .then(|| {
             process
