@@ -31,6 +31,24 @@ function agentCall(id: number, callId: string, complete: boolean, turnId = 1): T
   };
 }
 
+/** An attempt at a failing model provider, as the events crate maps one. */
+function recoveryRow(id: number, title: string, detail: string, phase: "info" | "failed"): TaskEventView {
+  return {
+    id,
+    taskId: "task",
+    source: "claude",
+    type: "agent.session_info_update",
+    kind: "lifecycle",
+    phase,
+    title,
+    detail,
+    createdAt: `2026-09-17T10:00:0${id}Z`,
+    turnId: 1,
+    actionId: "model-response-recovery",
+    sourceId: "model-response-recovery",
+  };
+}
+
 function callEnded(id: number, callId: string, outcome: string, turnId = 1): TaskEventView {
   return {
     id,
@@ -150,6 +168,19 @@ describe("a turn the worker narrates itself", () => {
     const events = [hookCall(1, "toolu_1", 1), agentCall(2, "call_1", true, 2), hookCall(3, "toolu_2", 2)];
 
     expect(withoutDuplicateHookCalls(events).map((event) => event.id)).toEqual([1, 2]);
+  });
+
+  it("keeps a provider failing over and over on one row that counts the attempts", () => {
+    const rows = callRows([
+      recoveryRow(1, "Provider unavailable", "Provider unavailable · retrying, attempt 1 of 3", "info"),
+      recoveryRow(2, "Provider unavailable", "Provider unavailable · retrying, attempt 2 of 3", "info"),
+      recoveryRow(3, "Provider unavailable", "Provider unavailable · retrying, attempt 3 of 3", "info"),
+      recoveryRow(4, "Rate limited", "Rate limited · stopped after 3 attempts", "failed"),
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.detail).toBe("Rate limited · stopped after 3 attempts");
+    expect(rows[0]?.phase).toBe("failed");
   });
 
   it("settles an open call into one row when its update arrives", () => {

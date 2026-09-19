@@ -15,6 +15,7 @@
 - "Show more" on a long request now opens the whole thing; it used to stop part way with no way to read the rest.
 - Changed files now let you pick what you are looking at: this run's edits, everything not yet committed, or the checkout compared with any branch you choose.
 - Code questions now answer with up to seven places instead of ten.
+- A task whose model is unavailable or rate limited now says so on one row, with the attempt it is on, instead of a run of rows that say nothing. When the worker gives up because it ran out of usage, the task waits for that to reset and carries on by itself instead of ending with an error.
 - The task list keeps every task's status right on its own. A task that finished no longer slips back to looking like it is still working, and the list catches up by itself after a connection drop, so you never have to refresh to trust what it says.
 
 ## 0.2.0 - 2026-09-13

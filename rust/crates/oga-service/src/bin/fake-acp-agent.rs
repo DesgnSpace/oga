@@ -39,6 +39,10 @@
 //! answers that request without taking the instruction. Only a mode naming
 //! `steer` advertises that it takes one at all.
 //!
+//! A mode whose turns are `recovery` has a model provider failing under it: it
+//! retries by itself, reports every attempt in the vendor block of a session
+//! update, gives up on a usage limit, and then calls the turn a refusal.
+//!
 //! A mode whose turns are `join` waits for a second `session/prompt` and folds
 //! it into the turn it is already running, the way `opencode acp` does, then
 //! answers both prompts from the one run it shared. It advertises nothing.
@@ -92,6 +96,18 @@ fn update(session: &str, update: Value) {
         "method": "session/update",
         "params": {"sessionId": session, "update": update},
     }));
+}
+
+/// A recovery run as the agent publishes it: a session update carrying nothing
+/// of its own, with the story in its vendor block.
+fn recovery_update(session: &str, recovery: Value) {
+    update(
+        session,
+        json!({
+            "sessionUpdate": "session_info_update",
+            "_meta": {"fx": {"modelResponseRecovery": recovery}},
+        }),
+    );
 }
 
 fn chunk(session: &str, text: &str) {
@@ -559,6 +575,38 @@ fn prompt(
                 );
             }
             chunk(&session, "OGA_RESULT: completed");
+        }
+        "recovery" => {
+            for attempt in 1..=3 {
+                recovery_update(
+                    &session,
+                    json!({
+                        "state": "active",
+                        "kind": "auto_retry",
+                        "cause": "provider_unavailable",
+                        "action": "retrying_request",
+                        "attempt": attempt,
+                        "attemptLimit": 3,
+                        "durable": true,
+                        "message": format!("⚠ Provider unavailable · HTTP 503 · service_unavailable_error: Service temporarily unavailable. · retrying request · attempt {attempt}/3"),
+                    }),
+                );
+            }
+            recovery_update(
+                &session,
+                json!({
+                    "state": "paused",
+                    "kind": "terminal_provider_error",
+                    "cause": "rate_limited",
+                    "action": "paused",
+                    "requiredAction": "continue_later",
+                    "attempt": 3,
+                    "attemptLimit": 3,
+                    "message": "⚠ Rate limited · HTTP 429 · rate_limit_exceeded: Free tier requests on this model are rate-limited. · recovery paused after 3/3 attempts",
+                }),
+            );
+            emit(&json!({"jsonrpc": "2.0", "id": id, "result": {"stopReason": "refusal"}}));
+            return;
         }
         _ => {
             chunk(&session, "Looking at the task");
