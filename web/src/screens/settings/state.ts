@@ -28,6 +28,7 @@ export type SettingsTab =
   | "prompts"
   | "callerPrompts"
   | "storage"
+  | "shortcuts"
   | "about";
 
 export const SETTINGS_TABS: SettingsTab[] = [
@@ -38,8 +39,9 @@ export const SETTINGS_TABS: SettingsTab[] = [
   "prompts",
   "callerPrompts",
   "storage",
+  "shortcuts",
   "about",
-];
+ ];
 
 export function tabLabel(tab: SettingsTab): string {
   switch (tab) {
@@ -57,6 +59,8 @@ export function tabLabel(tab: SettingsTab): string {
       return "Brief rules";
     case "storage":
       return "Task history";
+    case "shortcuts":
+      return "Keyboard shortcuts";
     case "about":
       return "About";
   }

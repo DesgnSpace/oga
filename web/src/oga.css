@@ -4421,6 +4421,61 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     white-space: nowrap;
 }
 
+.settings-shortcuts-group {
+    margin-top: var(--space-5);
+}
+
+.settings-shortcuts-group h3 {
+    margin: 0;
+    font-size: var(--text-base);
+}
+
+.settings-shortcuts-list {
+    display: grid;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.settings-shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--color-border);
+}
+
+.settings-shortcut-action {
+    min-width: 0;
+}
+
+.settings-shortcut-keys {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.settings-shortcut-combo {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.settings-shortcut-combo kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 1px 6px;
+    border: 1px solid var(--color-border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--color-bg);
+    font: inherit;
+    font-size: var(--text-md);
+    text-align: center;
+}
+
 .settings-worker-rows {
     display: grid;
     align-content: start;
