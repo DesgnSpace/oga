@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Settings now lists every keyboard shortcut in one place, grouped by what you are doing, so you can look up what to press without hunting through tooltips.
+
 - You can now send work to fx, alongside Claude, Codex, OpenCode, Antigravity, and Pi. Pick it in Settings and choose from the models your fx account can reach.
 - Workers in Settings now open as their own page instead of unfolding inside the list, so the form, the models, and the environment have room to read. The window also uses the full height of your screen.
 - Worker messages in the task timeline now show their formatting — bold, code, lists — instead of the raw symbols.

@@ -400,6 +400,16 @@ export default function SettingsPage({
           <CleanupPanel state={state} setState={setState} reload={loadCleanup} offline={offline} />
         </div>
         <div
+          id="settings-panel-shortcuts"
+          role="tabpanel"
+          tabIndex={0}
+          aria-labelledby="settings-tab-shortcuts"
+          hidden={activeTab !== "shortcuts"}
+          className={activeTab !== "shortcuts" ? "settings-tab-panel-hidden" : undefined}
+        >
+          <ShortcutsPanel />
+        </div>
+        <div
           id="settings-panel-about"
           role="tabpanel"
           tabIndex={0}
@@ -597,6 +607,123 @@ function NotificationsPanel() {
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
         </label>
       </div>
+    </section>
+  );
+}
+
+interface ShortcutRow {
+  keys: string[][];
+  action: string;
+}
+
+interface ShortcutGroup {
+  heading: string;
+  rows: ShortcutRow[];
+}
+
+// Every row below is bound somewhere in the app — app-wide menu
+// accelerators (rust/apps/oga-desktop/src/commands.rs, wired through
+// web/src/shell/menuCommands.ts), the web fallback for the same actions
+// (web/src/shell/useKeyboardShortcuts.ts), or a component's own key
+// handler. Nothing here is aspirational.
+const SHORTCUT_GROUPS: ShortcutGroup[] = [
+  {
+    heading: "Finding your way",
+    rows: [
+      { keys: [["⌘", "K"]], action: "Find a task" },
+      { keys: [["⌘", "["]], action: "Go back" },
+      { keys: [["⌘", "]"]], action: "Go forward" },
+      { keys: [["⌘", ","]], action: "Open Settings" },
+      { keys: [["⌘", "⇧", "U"]], action: "Open usage" },
+    ],
+  },
+  {
+    heading: "The task screen",
+    rows: [
+      { keys: [["⌘", "/"]], action: "Show or hide the task list" },
+      { keys: [["⌘", "\\"]], action: "Show or hide the changed-files panel" },
+      { keys: [["⌘", "R"]], action: "Refresh the task list" },
+      { keys: [["⌘", "1"], ["⌘", "2"], ["⌘", "3"]], action: "Jump to the activity, the request, or the response" },
+    ],
+  },
+  {
+    heading: "Text size",
+    rows: [
+      { keys: [["⌘", "="], ["⌘", "⇧", "="]], action: "Zoom in" },
+      { keys: [["⌘", "-"]], action: "Zoom out" },
+      { keys: [["⌘", "0"]], action: "Back to actual size" },
+    ],
+  },
+  {
+    heading: "Writing to a worker",
+    rows: [
+      { keys: [["⌘", "↵"]], action: "Send the message" },
+      { keys: [["⎋"]], action: "Clear what you typed" },
+    ],
+  },
+  {
+    heading: "Reading a task",
+    rows: [
+      { keys: [["↑"], ["↓"]], action: "Move through the activity" },
+      { keys: [["Home"], ["End"]], action: "Jump to the first or last row" },
+      { keys: [["PgUp"], ["PgDn"]], action: "Move a screenful at a time" },
+      { keys: [["←"], ["→"]], action: "Resize the changed-files panel" },
+      { keys: [["↵"]], action: "Reset the panel width" },
+    ],
+  },
+  {
+    heading: "The task list",
+    rows: [
+      { keys: [["↑"], ["↓"]], action: "Move between tasks" },
+      { keys: [["Home"], ["End"]], action: "Jump to the first or last task" },
+      { keys: [["↓"]], action: "Jump from the search field into the list" },
+    ],
+  },
+  {
+    heading: "Dialogs, menus, and search",
+    rows: [
+      { keys: [["⎋"]], action: "Close the dialog" },
+      { keys: [["Tab"], ["⇧", "Tab"]], action: "Move through the dialog" },
+      { keys: [["↑"], ["↓"]], action: "Move through a menu" },
+      { keys: [["↵"]], action: "Choose what's highlighted" },
+      { keys: [["⎋"]], action: "Close menus and popovers" },
+      { keys: [["⎋"]], action: "Clear the search — press again to leave the field" },
+      { keys: [["⎋"]], action: "Step back out of the worker editor" },
+    ],
+  },
+];
+
+function ShortcutsPanel() {
+  return (
+    <section className="settings-section" aria-labelledby="settings-shortcuts-heading">
+      <div className="settings-section-heading">
+        <div>
+          <p className="eyebrow">Reference</p>
+          <h2 id="settings-shortcuts-heading">Keyboard shortcuts</h2>
+        </div>
+      </div>
+      <p className="settings-helper">What you can press, grouped by what you are doing.</p>
+      {SHORTCUT_GROUPS.map((group) => (
+        <div key={group.heading} className="settings-shortcuts-group">
+          <h3>{group.heading}</h3>
+          <ul className="settings-shortcuts-list">
+            {group.rows.map((row) => (
+              <li key={row.action} className="settings-shortcut-row">
+                <span className="settings-shortcut-action">{row.action}</span>
+                <span className="settings-shortcut-keys">
+                  {row.keys.map((combo) => (
+                    <span key={combo.join("+")} className="settings-shortcut-combo">
+                      {combo.map((key) => (
+                        <kbd key={key}>{key}</kbd>
+                      ))}
+                    </span>
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </section>
   );
 }
