@@ -22,6 +22,7 @@ use oga_store::{Store, StoreError};
 use serde_json::{Map, Value};
 use tokio::{sync::watch, time::sleep};
 
+pub use acp::ModelRecovery;
 pub use socket::{
     EventSocketHandle, EventSocketOptions, SocketError, event_socket_path, start_event_socket,
 };

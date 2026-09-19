@@ -28,6 +28,7 @@ use oga_domain::{
     AcpAgentIdentity, AcpRestore, AcpSteering, CompletionCode, Profile, Task, TaskScope, TaskState,
     TaskTransport, TaskWorker, Transport, TransportReason,
 };
+use oga_events::ModelRecovery;
 use oga_providers::{
     AcpAdapter, AcpLaunch, AcpVersions, NO_FINAL_MESSAGE, OPENCODE_ADAPTER, Usage,
 };
@@ -43,7 +44,7 @@ use crate::{
         broker_base_url, completion, encode, load_task, now_iso, record_profile_outcome,
         settle_task, worker_env,
     },
-    prompt::{WorkerOutcome, interpret_worker_outcome},
+    prompt::{WorkerOutcome, interpret_worker_outcome, rate_limit_reset_at},
     transport::{self, AcpStart},
 };
 
@@ -647,22 +648,26 @@ fn outcome(
     stderr: &str,
 ) -> WorkerOutcome {
     let (answer, stop_reason) = match ended {
-        TurnEnd::TimedOut => {
-            return failed(CompletionCode::Timeout, "provider run timed out".into());
-        }
+        TurnEnd::TimedOut => (None, None),
         TurnEnd::Answered(answer) => {
             let stop_reason = answer
                 .as_ref()
                 .ok()
                 .map(|response| stop_reason_name(&response.stop_reason));
-            (answer, stop_reason)
+            (Some(answer), stop_reason)
         }
     };
+    // An agent that gave up on a rate-limited provider is what stopped the run,
+    // whatever the turn went on to call it: the work stands and only the limit
+    // has to clear, so that reading wins over the stop reason.
     let mut worker = if was_cancelled {
         cancelled()
+    } else if let Some(waiting) = transcript.rate_limit_wait() {
+        waiting
     } else {
         match answer {
-            Ok(response) => match response.stop_reason {
+            None => failed(CompletionCode::Timeout, "provider run timed out".into()),
+            Some(Ok(response)) => match response.stop_reason {
             StopReason::EndTurn => {
                 interpret_worker_outcome(Some(0), transcript.final_text(), stderr, None)
             }
@@ -686,27 +691,27 @@ fn outcome(
                 "The worker stopped without saying why. Resume the task to continue.".into(),
             ),
             },
-            Err(AcpError::Refused {
+            Some(Err(AcpError::Refused {
                 kind: Refusal::Authentication,
                 reason,
-            }) => failed(
+            })) => failed(
                 CompletionCode::Auth,
                 format!(
                     "This worker needs you to sign in again ({reason}). Sign in to that account, then resume the task."
                 ),
             ),
-            Err(AcpError::Refused {
+            Some(Err(AcpError::Refused {
                 kind: Refusal::Permission,
                 reason,
-            }) => failed(
+            })) => failed(
                 CompletionCode::PermissionDenied,
                 format!(
                     "The worker declined part of this task ({reason}). Check what that worker is allowed to do, then resume the task."
                 ),
             ),
-            Err(AcpError::Unavailable { reason, .. } | AcpError::PromptInFlight { reason }) => {
-                failed(CompletionCode::WorkerError, stopped_mid_turn(&reason))
-            }
+            Some(Err(
+                AcpError::Unavailable { reason, .. } | AcpError::PromptInFlight { reason },
+            )) => failed(CompletionCode::WorkerError, stopped_mid_turn(&reason)),
         }
     };
     worker.completion.stop_reason = stop_reason;
@@ -790,6 +795,10 @@ struct Transcript {
     final_message: String,
     /// The freshest total the agent reported for the whole session, in USD.
     session_cost: Option<f64>,
+    /// The last thing the agent said about recovering from its model provider.
+    /// Only the last one matters: an agent that paused and then got through
+    /// reports that too.
+    recovery: Option<ModelRecovery>,
 }
 
 impl Transcript {
@@ -836,6 +845,9 @@ impl Transcript {
         self.flush(store, task_id, turn_id).await?;
         let payload = serde_json::to_value(&notification.update)
             .map_err(|error| LifecycleError::Store(format!("invalid ACP update: {error}")))?;
+        if let Some(recovery) = payload.get("_meta").and_then(ModelRecovery::from_meta) {
+            self.recovery = Some(recovery);
+        }
         let kind = payload
             .get("sessionUpdate")
             .and_then(Value::as_str)
@@ -860,6 +872,27 @@ impl Transcript {
         });
         append_turn_event(store, task_id, turn_id, format!("agent.{kind}"), payload).await?;
         Ok(())
+    }
+
+    /// How the run ended when the agent gave up on a provider that was rate
+    /// limiting it, which is a wait rather than a failure: the work is untouched
+    /// and the same worker can finish it once the limit clears.
+    fn rate_limit_wait(&self) -> Option<WorkerOutcome> {
+        let reason = self
+            .recovery
+            .as_ref()
+            .filter(|recovery| recovery.rate_limited())?
+            .message
+            .clone()
+            .unwrap_or_else(|| "the provider stopped answering".to_owned());
+        let mut worker = failed(
+            CompletionCode::RateLimit,
+            format!(
+                "This worker's model is rate limited ({reason}). Oga waits for the usage to reset, then runs the task again."
+            ),
+        );
+        worker.completion.resets_at = rate_limit_reset_at(&reason);
+        Some(worker)
     }
 
     fn final_text(&self) -> String {

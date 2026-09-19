@@ -37,6 +37,11 @@ use crate::{
 };
 
 pub const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+/// `initialize` only exchanges capabilities, so an agent that has not answered
+/// long after the slowest healthy start is stuck rather than busy. It is held
+/// well short of the rest of the handshake, which may replay a conversation
+/// before it answers.
+pub const DEFAULT_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
 pub const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// How long an agent has to say what it did with an instruction. The turn it
 /// is running is not waited on, only the answer about the instruction.
@@ -77,8 +82,10 @@ impl SentPrompt {
 pub struct AcpConfig {
     pub protocol_version: ProtocolVersion,
     pub client_info: Implementation,
-    /// The bound on `initialize` and on creating or restoring a session.
+    /// The bound on creating or restoring a session.
     pub handshake_timeout: Duration,
+    /// The bound on `initialize`, ahead of any session.
+    pub initialize_timeout: Duration,
     /// The bound on one prompt turn.
     pub prompt_timeout: Duration,
     pub max_frame_bytes: usize,
@@ -91,6 +98,7 @@ impl Default for AcpConfig {
             protocol_version: ProtocolVersion::V1,
             client_info: Implementation::new("oga", env!("CARGO_PKG_VERSION")),
             handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
+            initialize_timeout: DEFAULT_INITIALIZE_TIMEOUT,
             prompt_timeout: DEFAULT_PROMPT_TIMEOUT,
             max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
             max_stderr_bytes: DEFAULT_MAX_STDERR_BYTES,
@@ -335,6 +343,7 @@ impl AcpSession {
         let (agent, session_id) = match opening {
             Ok(opened) => opened,
             Err(error) => {
+                let error = with_last_words(error, &connection.diagnostics());
                 control.terminate(Termination::Cancelled);
                 reaper.abort();
                 return Err(error);
@@ -521,7 +530,7 @@ async fn handshake(
             &InitializeRequest::new(config.protocol_version)
                 .client_capabilities(capabilities_for(grants))
                 .client_info(config.client_info.clone()),
-            config.handshake_timeout,
+            config.initialize_timeout,
         )
         .await
         .map_err(|error| classify_handshake(Stage::Initialize, error))?;
@@ -727,6 +736,35 @@ fn classify_handshake(stage: Stage, error: RpcError) -> AcpError {
         }
         other => AcpError::unavailable(stage, other.to_string()),
     }
+}
+
+/// How much of the agent's stderr travels with a handshake that failed.
+const LAST_WORDS_CHARS: usize = 400;
+const LAST_WORDS_LINES: usize = 3;
+
+/// Adds what the agent wrote to stderr to a handshake that failed. An agent
+/// that never answered leaves nothing in the protocol to report, so otherwise
+/// the only account of the failure is that it did not answer. That it went
+/// quiet is itself worth saying: it separates an agent that explained itself
+/// from one that simply stopped.
+fn with_last_words(error: AcpError, diagnostics: &Diagnostics) -> AcpError {
+    let AcpError::Unavailable { stage, reason } = error else {
+        return error;
+    };
+    let lines: Vec<&str> = diagnostics
+        .stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let said = if lines.is_empty() {
+        "the agent wrote nothing before it stopped".to_owned()
+    } else {
+        let tail = lines[lines.len().saturating_sub(LAST_WORDS_LINES)..].join(" / ");
+        let clipped: String = tail.chars().take(LAST_WORDS_CHARS).collect();
+        format!("the agent last wrote: {clipped}")
+    };
+    AcpError::unavailable(stage, format!("{reason}; {said}"))
 }
 
 /// The handshake advertises exactly what the policy grants, so an agent never

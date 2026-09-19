@@ -33,6 +33,58 @@ const CONTEXT_TITLE: &str = "Context";
 /// The longest subject a row shows before it is clipped.
 const SUBJECT_LIMIT: usize = 120;
 
+/// The row identity every recovery update of one turn shares, so an agent
+/// retrying its provider ten times reads as one row moving on.
+const RECOVERY_ACTION_ID: &str = "model-response-recovery";
+
+/// What an agent reports about recovering from a model provider that is
+/// failing under it.
+///
+/// `_meta` is vendor-namespaced, so this reads the one vendor that publishes a
+/// recovery run and leaves every other agent's block alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelRecovery {
+    /// The agent has stopped trying and needs something to change.
+    pub paused: bool,
+    /// Why the provider failed, in the agent's own vocabulary.
+    pub cause: Option<String>,
+    pub attempt: Option<u64>,
+    pub attempt_limit: Option<u64>,
+    /// The agent's own line about it, written for a terminal.
+    pub message: Option<String>,
+}
+
+impl ModelRecovery {
+    /// The recovery run an update's `_meta` describes, or `None` when the agent
+    /// reported none.
+    pub fn from_meta(meta: &Value) -> Option<Self> {
+        let recovery = meta.get("fx")?.get("modelResponseRecovery")?;
+        Some(Self {
+            paused: text_value(recovery.get("state")) == Some("paused"),
+            cause: text_value(recovery.get("cause")).map(str::to_owned),
+            attempt: number_u64(recovery.get("attempt")),
+            attempt_limit: number_u64(recovery.get("attemptLimit")),
+            message: text_value(recovery.get("message"))
+                .map(|message| message.trim_matches(['⚠', ' ']).to_owned())
+                .filter(|message| !message.is_empty()),
+        })
+    }
+
+    /// Whether the provider's own usage limit is what stopped the run, which is
+    /// a wait rather than a failure.
+    pub fn rate_limited(&self) -> bool {
+        self.paused && self.cause.as_deref() == Some("rate_limited")
+    }
+
+    fn title(&self) -> &'static str {
+        match self.cause.as_deref() {
+            Some("rate_limited") => "Rate limited",
+            Some("provider_unavailable") => "Provider unavailable",
+            _ => "Provider error",
+        }
+    }
+}
+
 /// One ACP update as a row, or `None` when the update is not one this presents
 /// and the generic view should name it.
 pub(crate) fn acp_event_view(
@@ -65,12 +117,14 @@ pub(crate) fn acp_event_view(
             "Commands listed",
             raw_text,
         )),
-        "session_info_update" => Some(bookkeeping_view(
-            event,
-            provider,
-            "Session updated",
-            raw_text,
-        )),
+        // Session bookkeeping is also where an agent reports its own model
+        // provider failing, and that is the one thing here a reader needs.
+        "session_info_update" => Some(
+            match payload.get("_meta").and_then(ModelRecovery::from_meta) {
+                Some(recovery) => recovery_view(event, provider, &recovery, raw_text),
+                None => bookkeeping_view(event, provider, "Session updated", raw_text),
+            },
+        ),
         _ => None,
     }
 }
@@ -95,6 +149,54 @@ fn bookkeeping_view(
             raw_text,
         },
     )
+}
+
+/// A model provider failing under the agent, as one row a reader can follow
+/// from the first attempt to the last.
+///
+/// Every attempt shares the row, so ten tries move one row on rather than
+/// filling the timeline. The agent's own message is written for a terminal — a
+/// warning glyph, an HTTP code, an upgrade link — so the row says what happened
+/// in the product's words and reads that text out only where it is the reason
+/// the run stopped.
+fn recovery_view(
+    event: &TaskEvent,
+    provider: Provider,
+    recovery: &ModelRecovery,
+    raw_text: Option<String>,
+) -> TaskEventView {
+    let title = recovery.title();
+    let stage = match (recovery.paused, recovery.attempt, recovery.attempt_limit) {
+        (true, _, Some(limit)) => format!("stopped after {limit} attempts"),
+        (true, _, None) => "stopped".to_owned(),
+        (false, Some(attempt), Some(limit)) => format!("retrying, attempt {attempt} of {limit}"),
+        (false, _, _) => "retrying".to_owned(),
+    };
+    let mut view = provider_view(
+        event,
+        provider,
+        EventKind::Lifecycle,
+        if recovery.paused {
+            EventPhase::Failed
+        } else {
+            EventPhase::Info
+        },
+        title,
+        ProviderViewOptions {
+            detail: Some(format!("{title} · {stage}")),
+            presentation: None,
+            minor: None,
+            raw_text,
+        },
+    );
+    view.result = recovery
+        .message
+        .as_deref()
+        .filter(|_| recovery.paused)
+        .map(|message| cap(message, SUBJECT_LIMIT).0);
+    view.action_id = Some(RECOVERY_ACTION_ID.to_owned());
+    view.source_id = Some(Some(RECOVERY_ACTION_ID.to_owned()));
+    view
 }
 
 /// The text of a content chunk, when it is text at all. An image or an
@@ -844,6 +946,95 @@ mod tests {
                 !view.title.contains(['.', '_']),
                 "{} leaked its wire name",
                 view.title
+            );
+        }
+    }
+
+    /// Recorded from an fx run whose provider was down: ten identical session
+    /// updates, each carrying the attempt it was on.
+    #[test]
+    fn a_failing_provider_reads_as_one_row_that_counts_its_attempts() {
+        let retrying = view(json!({
+            "sessionUpdate": "session_info_update",
+            "_meta": {"fx": {"modelResponseRecovery": {
+                "state": "active",
+                "kind": "auto_retry",
+                "cause": "provider_unavailable",
+                "attempt": 1,
+                "attemptLimit": 10,
+                "message": "⚠ Provider unavailable · HTTP 503 · service_unavailable_error: Service temporarily unavailable. Please try again shortly. · retrying request · attempt 1/10",
+            }}},
+        }));
+
+        assert_eq!(retrying.title, "Provider unavailable");
+        assert_eq!(retrying.kind, EventKind::Lifecycle);
+        assert_eq!(retrying.phase, EventPhase::Info);
+        assert_ne!(retrying.minor, Some(true), "a reader has to see this");
+        assert_eq!(
+            retrying.detail.as_deref(),
+            Some("Provider unavailable · retrying, attempt 1 of 10")
+        );
+        assert_eq!(
+            retrying.result, None,
+            "an attempt in flight says all it needs in one line"
+        );
+        assert_eq!(retrying.action_id.as_deref(), Some(RECOVERY_ACTION_ID));
+        assert_eq!(
+            retrying.source_id,
+            Some(Some(RECOVERY_ACTION_ID.to_owned())),
+            "every attempt patches the row the reader is already on"
+        );
+    }
+
+    #[test]
+    fn a_provider_that_gave_up_names_the_limit_and_reads_out_its_reason() {
+        let paused = view(json!({
+            "sessionUpdate": "session_info_update",
+            "_meta": {"fx": {"modelResponseRecovery": {
+                "state": "paused",
+                "kind": "terminal_provider_error",
+                "cause": "rate_limited",
+                "requiredAction": "continue_later",
+                "attempt": 10,
+                "attemptLimit": 10,
+                "message": "⚠ Rate limited · HTTP 429 · rate_limit_exceeded: Free tier requests on this model are rate-limited. · recovery paused after 10/10 attempts",
+            }}},
+        }));
+
+        assert_eq!(paused.title, "Rate limited");
+        assert_eq!(paused.phase, EventPhase::Failed);
+        assert_eq!(
+            paused.detail.as_deref(),
+            Some("Rate limited · stopped after 10 attempts")
+        );
+        assert_eq!(
+            paused.result.as_deref(),
+            Some(
+                "Rate limited · HTTP 429 · rate_limit_exceeded: Free tier requests on this model are rate-limited. · recovery paused a"
+            ),
+            "the agent's own reason stays readable without leading the row"
+        );
+        assert_eq!(paused.action_id.as_deref(), Some(RECOVERY_ACTION_ID));
+    }
+
+    #[test]
+    fn a_recovery_shape_this_does_not_know_still_reads_as_a_row() {
+        let bare = view(json!({
+            "sessionUpdate": "session_info_update",
+            "_meta": {"fx": {"modelResponseRecovery": {"state": "active"}}},
+        }));
+        assert_eq!(bare.title, "Provider error");
+        assert_eq!(bare.detail.as_deref(), Some("Provider error · retrying"));
+
+        for meta in [
+            json!({"claudeCode": {"toolName": "Bash"}}),
+            json!({"fx": {"somethingElse": true}}),
+            json!("not an object"),
+        ] {
+            assert_eq!(
+                ModelRecovery::from_meta(&meta),
+                None,
+                "{meta} is not a recovery run"
             );
         }
     }

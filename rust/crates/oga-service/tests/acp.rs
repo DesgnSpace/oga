@@ -392,6 +392,70 @@ async fn a_session_total_is_charged_once_however_often_the_agent_reports_it() {
     );
 }
 
+/// Recorded from an fx run: the agent retried a failing provider, gave up on a
+/// usage limit, and answered `refusal`. Nothing refused anything, and the work
+/// only needs the limit to clear.
+#[tokio::test]
+async fn a_provider_that_gave_up_on_a_usage_limit_settles_as_rate_limited() {
+    let harness = harness("recovery");
+
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "port the runner",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    let task = harness.settle(&dispatched.task.id).await;
+
+    assert_eq!(
+        task.state,
+        TaskState::Pending,
+        "the run waits for the limit instead of dying: {task:?}"
+    );
+    let hold = oga_service::holds::get_hold(&harness.store, &task.id)
+        .expect("a hold read")
+        .expect("a hold");
+    assert_eq!(hold.await_profile.as_deref(), Some("work"));
+    assert!(
+        hold.note.starts_with("Waiting for usage to reset"),
+        "{}",
+        hold.note
+    );
+    let completion = task.completion.as_ref().expect("a completion");
+    assert_eq!(completion.code, CompletionCode::RateLimit);
+    assert_eq!(
+        completion.stop_reason.as_deref(),
+        Some("refusal"),
+        "what the agent said is still on the record"
+    );
+    let reason = completion.reason.as_deref().expect("a reason");
+    assert!(
+        reason.contains("rate limited") && reason.contains("rate_limit_exceeded"),
+        "{reason}"
+    );
+
+    let rows: Vec<String> = harness
+        .events(&task.id)
+        .iter()
+        .filter(|event| event.kind == "agent.session_info_update")
+        .map(|event| oga_events::event_view(event, Provider::Claude))
+        .map(|view| view.detail.unwrap_or(view.title))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "Provider unavailable · retrying, attempt 1 of 3",
+            "Provider unavailable · retrying, attempt 2 of 3",
+            "Provider unavailable · retrying, attempt 3 of 3",
+            "Rate limited · stopped after 3 attempts",
+        ],
+        "every attempt reads as itself, and none of them says \"Session updated\""
+    );
+}
+
 #[tokio::test]
 async fn a_follow_up_resumes_the_same_acp_conversation() {
     let harness = harness("turn");
