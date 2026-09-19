@@ -391,7 +391,7 @@ impl AcpSession {
     /// run, so a failure from here is reported rather than retried.
     pub async fn prompt(&self, blocks: Vec<ContentBlock>) -> Result<PromptResponse, AcpError> {
         let request = PromptRequest::new(self.session_id.clone(), blocks);
-        let answer: Result<PromptResponse, RpcError> = self
+        let answer: Result<Value, RpcError> = self
             .connection
             .request(
                 AGENT_METHOD_NAMES.session_prompt,
@@ -399,7 +399,7 @@ impl AcpSession {
                 self.prompt_timeout,
             )
             .await;
-        answer.map_err(|error| match error {
+        let answer = answer.map_err(|error| match error {
             RpcError::NotSent { .. } => AcpError::unavailable(
                 Stage::Session,
                 "the agent closed before the prompt was written",
@@ -409,6 +409,11 @@ impl AcpSession {
             }
             RpcError::Closed => AcpError::in_flight(self.closing_reason()),
             other => AcpError::in_flight(other.to_string()),
+        })?;
+        serde_json::from_value(spec_stop_reason(answer)).map_err(|error| {
+            AcpError::in_flight(format!(
+                "could not read the agent's answer to session/prompt: {error}"
+            ))
         })
     }
 
@@ -841,6 +846,16 @@ fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
 #[cfg(not(unix))]
 fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
     None
+}
+
+/// The turn's end as the schema spells it. fx answers `refused` where the
+/// schema names that reason `refusal`, and a turn that ended must still be
+/// readable when an agent spells one of its words its own way.
+fn spec_stop_reason(mut answer: Value) -> Value {
+    if answer.get("stopReason").and_then(Value::as_str) == Some("refused") {
+        answer["stopReason"] = Value::from("refusal");
+    }
+    answer
 }
 
 #[cfg(test)]

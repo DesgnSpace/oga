@@ -4709,6 +4709,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     transform: translateY(-50%);
 }
 
+.settings-worker-form .settings-provider-select select,
 .settings-provider-select select {
     padding-left: calc(var(--space-3) + 24px);
 }
@@ -5162,6 +5163,10 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-width: 0;
 }
 
+.settings-worker-page > * {
+    min-width: 0;
+}
+
 .settings-worker-back {
     display: inline-flex;
     align-items: center;
@@ -5256,7 +5261,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     font-size: var(--text-md);
 }
 
-.settings-worker-form input,
+.settings-worker-form input:not([type="checkbox"]),
 .settings-worker-form select {
     width: 100%;
     height: var(--control-height);
@@ -5297,7 +5302,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     padding: var(--space-3) 0 0;
     margin-top: var(--space-1);
     border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
-    background: var(--color-surface);
+    background: inherit;
 }
 
 .settings-worker-form-footer-actions {
