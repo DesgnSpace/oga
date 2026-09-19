@@ -10,7 +10,7 @@ use axum::{
         sse::{Event, Sse},
     },
 };
-use oga_domain::{EventKind, EventPointer, Provider, TaskEvent, TaskKind};
+use oga_domain::{EventKind, EventPointer, Provider, TaskEvent, TaskKind, TaskState};
 use oga_events::{EventFeed, event_view};
 use oga_store::{Store, StoreError};
 use rusqlite::{Row, ToSql, params_from_iter};
@@ -311,6 +311,10 @@ struct PointerTaskContext {
     title: Option<String>,
     tldr: Option<String>,
     provider: Provider,
+    /// Where the task stands now. A reader folds a pointer into a list it
+    /// already holds, so the frame names the task's current state rather than
+    /// the one its event row was written under.
+    state: TaskState,
 }
 
 fn event_pointer(event: &TaskEvent, context: &PointerTaskContext) -> EventPointer {
@@ -375,7 +379,7 @@ fn event_pointer(event: &TaskEvent, context: &PointerTaskContext) -> EventPointe
         task_id: event.task_id.clone(),
         event_type: event.kind.clone(),
         kind,
-        state: event.state,
+        state: context.state,
         at: event.created_at.clone(),
         title: context
             .title
@@ -430,7 +434,7 @@ fn load_pointer_contexts(
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(
-                "SELECT t.id,t.kind,t.title,t.tldr,p.provider FROM tasks t LEFT JOIN profiles p ON p.id=t.profile_id AND p.deleted_at IS NULL WHERE t.id IN ({placeholders})"
+                "SELECT t.id,t.kind,t.title,t.tldr,p.provider,t.state FROM tasks t LEFT JOIN profiles p ON p.id=t.profile_id AND p.deleted_at IS NULL WHERE t.id IN ({placeholders})"
             );
             let mut values: Vec<&dyn ToSql> = Vec::with_capacity(task_ids.len());
             values.extend(task_ids.iter().map(|id| id as &dyn ToSql));
@@ -440,9 +444,10 @@ fn load_pointer_contexts(
                 let kind = decode_task_kind(row.get(1)?, 1)?;
                 let provider = row
                     .get::<_, Option<String>>(4)?
-                    .map(|value| decode_provider(&value, 4))
+                    .map(|value| decode_name::<Provider>(&value, 4))
                     .transpose()?
                     .unwrap_or(Provider::Claude);
+                let state = decode_name::<TaskState>(&row.get::<_, String>(5)?, 5)?;
                 Ok((
                     row.get::<_, String>(0)?,
                     PointerTaskContext {
@@ -450,6 +455,7 @@ fn load_pointer_contexts(
                         title: row.get(2)?,
                         tldr: row.get(3)?,
                         provider,
+                        state,
                     },
                 ))
             })?;
@@ -474,7 +480,8 @@ fn decode_task_kind(row: String, column: usize) -> rusqlite::Result<Option<TaskK
         })
 }
 
-fn decode_provider(row: &str, column: usize) -> rusqlite::Result<Provider> {
+/// Reads a bare enum column back through the name serde gives it.
+fn decode_name<T: serde::de::DeserializeOwned>(row: &str, column: usize) -> rusqlite::Result<T> {
     serde_json::from_str(&format!("\"{row}\"")).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             column,

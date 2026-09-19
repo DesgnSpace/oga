@@ -367,7 +367,8 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
       }
       if (status.connected) connectionWasLive.current = true;
       connectionState.current = status.connected ? "connected" : "reconnecting";
-      sidebarRef.applyConnection(status);
+      const returning = sidebarRef.applyConnection(status);
+      if (returning) void sidebarRef.refresh();
     });
     void streamStatus().then((result) => {
       if (!active || receivedStatus || !result.ok) return;

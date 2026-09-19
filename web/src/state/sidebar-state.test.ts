@@ -351,7 +351,8 @@ describe("connection", () => {
   it("reads a dropped shell stream as reconnecting", () => {
     let state: SidebarState = { ...defaultSidebarState(), connection: "connected" };
 
-    state = applyConnection(state, {
+    let returning: boolean;
+    [state, returning] = applyConnection(state, {
       connected: false,
       cursor: 0,
       streamFloor: 0,
@@ -361,8 +362,10 @@ describe("connection", () => {
 
     expect(state.connection).toBe("reconnecting");
     expect(state.error).toBe("broker restarting");
+    expect(returning).toBe(false);
 
-    state = applyConnection(state, { connected: true, cursor: 4, streamFloor: 0, stale: false });
+    [state, returning] = applyConnection(state, { connected: true, cursor: 4, streamFloor: 0, stale: false });
     expect(state.connection).toBe("connected");
+    expect(returning).toBe(true);
   });
 });

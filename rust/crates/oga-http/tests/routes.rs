@@ -722,6 +722,41 @@ async fn sse_routes_replay_and_filter_events() {
     );
 }
 
+/// A reader folds a pointer into a list it already holds, so the frame has to
+/// say where the task stands now. History pruning writes its marker under the
+/// states it removed, which would otherwise put a settled task back to work.
+#[tokio::test]
+async fn sse_pointers_carry_the_task_state_not_the_one_stamped_on_the_row() {
+    let fixture = Fixture::new();
+    let dropped = fixture
+        .store
+        .repositories()
+        .events()
+        .append(&TaskEvent {
+            id: 0,
+            task_id: "task".into(),
+            kind: "history_dropped".into(),
+            state: TaskState::Running,
+            payload: BTreeMap::from([(String::from("dropped"), json!(12))]),
+            created_at: "2026-01-01T00:03:00.000Z".into(),
+            turn_id: None,
+        })
+        .expect("history event");
+
+    let response = request(
+        &fixture.router,
+        Method::GET,
+        &format!("/api/events?after={}&task=task", dropped - 1),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let frames = sse_frames(response, 2).await;
+    assert_eq!(frames[1].0, "task");
+    assert_eq!(frames[1].1["type"], "history_dropped");
+    assert_eq!(frames[1].1["state"], "completed");
+}
+
 #[tokio::test]
 async fn sse_route_reports_stale_cursors_and_invalid_queries() {
     let fixture = Fixture::new();

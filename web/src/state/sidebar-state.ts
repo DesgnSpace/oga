@@ -274,11 +274,16 @@ export function clearSelection(state: SidebarState): SidebarState {
  * forever silently. */
 export const MAX_RECONNECT_ATTEMPTS = 5;
 
-export function applyConnection(state: SidebarState, status: StreamStatus): SidebarState {
-  if (status.connected) return { ...state, connection: "connected", reconnectAttempts: 0 };
+/** Also reports whether the stream came back from a drop, the one case where
+ * what the list holds may have fallen behind the broker. */
+export function applyConnection(state: SidebarState, status: StreamStatus): [SidebarState, boolean] {
+  if (status.connected) {
+    const returning = state.connection === "reconnecting" || state.connection === "offline";
+    return [{ ...state, connection: "connected", reconnectAttempts: 0 }, returning];
+  }
   const reconnectAttempts = state.reconnectAttempts + 1;
   const connection = reconnectAttempts >= MAX_RECONNECT_ATTEMPTS ? "offline" : "reconnecting";
-  return { ...state, connection, reconnectAttempts, error: status.error };
+  return [{ ...state, connection, reconnectAttempts, error: status.error }, false];
 }
 
 export function applyEventFrame(state: SidebarState, frame: EventFrame): [SidebarState, EventAction] {
@@ -499,8 +504,11 @@ export class SidebarController {
     return action;
   }
 
-  /** Records what the shell's broker connection is doing. */
-  applyConnection(status: StreamStatus): void {
-    this.store.update((state) => applyConnection(state, status));
+  /** Records what the shell's broker connection is doing, and reports whether
+   * the list has to be read again to catch up with the drop. */
+  applyConnection(status: StreamStatus): boolean {
+    const [next, returning] = applyConnection(this.store.snapshot, status);
+    this.store.set(next);
+    return returning;
   }
 }
