@@ -28,6 +28,7 @@ fn agent(mode: &str, cwd: &Path) -> RunRequest {
 fn config() -> AcpConfig {
     AcpConfig {
         handshake_timeout: Duration::from_secs(5),
+        initialize_timeout: Duration::from_secs(5),
         prompt_timeout: Duration::from_secs(10),
         ..AcpConfig::default()
     }
@@ -182,7 +183,7 @@ async fn a_silent_agent_times_out_rather_than_hanging() {
         temp.path(),
         Arc::new(DenyAll),
         AcpConfig {
-            handshake_timeout: Duration::from_millis(200),
+            initialize_timeout: Duration::from_millis(200),
             ..config()
         },
     )
@@ -191,6 +192,22 @@ async fn a_silent_agent_times_out_rather_than_hanging() {
     assert!(
         error.allows_retry_elsewhere(),
         "unexpected failure: {error}"
+    );
+    assert!(
+        error.to_string().contains("wrote nothing"),
+        "the failure should say the agent went quiet: {error}"
+    );
+}
+
+#[tokio::test]
+async fn a_failed_handshake_carries_what_the_agent_wrote() {
+    let temp = TempDir::new().expect("temporary directory");
+    let error = open_with("exit-immediately", temp.path(), Arc::new(DenyAll), config())
+        .await
+        .expect_err("an agent that exits cannot shake hands");
+    assert!(
+        error.to_string().contains("fake agent could not start"),
+        "the failure should carry the agent's own words: {error}"
     );
 }
 

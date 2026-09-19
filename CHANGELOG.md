@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A worker that never answers when a task starts now gives up in half the time, and the task says what that worker said before it went quiet instead of only that it did not answer.
+
 - Settings now lists every keyboard shortcut in one place, grouped by what you are doing, so you can look up what to press without hunting through tooltips.
 
 - You can now send work to fx, alongside Claude, Codex, OpenCode, Antigravity, and Pi. Pick it in Settings and choose from the models your fx account can reach.
