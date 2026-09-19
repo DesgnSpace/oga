@@ -1,4 +1,4 @@
-export { MarkdownContent, renderMarkdownToNodes } from "./MarkdownContent";
+export { InlineMarkdown, MarkdownContent, renderMarkdownToNodes } from "./MarkdownContent";
 export {
   parseInline,
   parseBlocks,

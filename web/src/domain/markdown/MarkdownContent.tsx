@@ -165,6 +165,17 @@ function renderBlock(
   }
 }
 
+/**
+ * One line of markdown as phrasing content: emphasis and code are styled, a
+ * leading list marker is dropped, and a link reads as its text so the line can
+ * sit inside a button.
+ */
+export function InlineMarkdown({ source }: { source: string }) {
+  const line = source.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "");
+  const inlines = parseInline(line).map((node): Inline => (node.type === "link" ? { type: "text", text: node.text } : node));
+  return <InlineNodes inlines={inlines} />;
+}
+
 export const MarkdownContent = React.memo(function MarkdownContent({ source }: { source: string }) {
   const { blocks, truncated, refs } = parseBlocks(source);
   return (

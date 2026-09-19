@@ -355,7 +355,9 @@ function TraceHandoffMarker({ handoff }: { handoff: HandoffPresentation }) {
 }
 
 function TraceTarget({ row }: { row: TraceRow }) {
-  const prose = row.expansion?.type === "prose" ? row.expansion.text : undefined;
+  const prose = row.expansion?.type === "prose"
+    ? row.expansion.text
+    : row.event?.kind === "message" ? row.target : undefined;
   const source = prose ?? row.target;
   if (source === undefined) return null;
   const presentationType = row.event?.presentation?.type;

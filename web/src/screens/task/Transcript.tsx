@@ -3,7 +3,7 @@
 // Ported from rust/crates/oga-ui/src/task_detail/mod.rs's view layer.
 
 import * as React from "react";
-import { MarkdownContent } from "@/domain/markdown";
+import { InlineMarkdown, MarkdownContent } from "@/domain/markdown";
 import { compositionHasThinking, type ActivityComposition } from "@/domain/activity";
 import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
 import { ChevronIcon, FollowUpIcon, ReplyIcon, ResponseIcon, SteerIcon } from "@/ui/icons";
@@ -207,7 +207,10 @@ const TranscriptWork = React.memo(function TranscriptWork({
         aria-label={open ? "Hide worker steps" : "Show worker steps"}
         onClick={() => onToggle(segment.id, segment.startsExpanded)}
       >
-        <span className="transcript-work-label" title={fullTitle}>{fullTitle}</span>
+        <span className="transcript-work-label" title={fullTitle}>
+          {workLabel(segment)}
+          {summary ? <> · <InlineMarkdown source={summary} /></> : null}
+        </span>
         <span className={`transcript-work-chevron${open ? " transcript-work-chevron-open" : ""}`} aria-hidden="true">
           <ChevronIcon size={14} />
         </span>
