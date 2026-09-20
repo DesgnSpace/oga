@@ -14,11 +14,12 @@ use axum::{
 };
 use oga_config::{
     ConfigLayer, ConfigLayers, DEFAULT_CALLER_PROMPT, DEFAULT_WORKER_PROMPT, LoveRules,
-    ModelOverrides, ResolvedModelSettings, config_revision, global_cwd, load_config_layers,
-    model_enabled, model_override_for, read_model_overrides, read_model_settings,
+    MASKED_SECRET, ModelOverrides, ResolvedModelSettings, config_revision, global_cwd,
+    load_config_layers, model_enabled, model_override_for, read_model_overrides,
+    read_model_settings,
 };
 use oga_domain::{
-    CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
+    AdvisorSettings, CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
     ModelQuery as DomainModelQuery, ModelSettingsRow, Profile, ProfileUsage, Provider, UsageSource,
     UsageWindow, UsageWindowKind, WaitSettings,
 };
@@ -42,6 +43,7 @@ const MODEL_SETTINGS_KEY: &str = "models";
 const PROMPTS_KEY: &str = "prompts";
 const CALLER_PROMPTS_KEY: &str = "callerPrompts";
 const CLEANUP_KEY: &str = "cleanup";
+const ADVISOR_KEY: &str = "advisor";
 const MIN_CLEANUP_DAYS: u64 = 1;
 const MAX_CLEANUP_DAYS: u64 = 3_650;
 const MAX_WAIT_MINUTES: u64 = 24 * 60;
@@ -397,6 +399,58 @@ pub async fn put_waiting(
         &now_iso(),
     )?;
     get_waiting(State(state)).await
+}
+
+/// The advisor's own settings, with the key masked. Everything else here
+/// reads a project's settings; this one is global, because the key signs in
+/// to one account whichever project a task starts from.
+pub async fn get_advisor(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
+    let settings = advisor_settings(&state.store)?;
+    Ok(Json(json!({
+        "enabled": settings.enabled,
+        "apiKey": if settings.api_key.is_empty() { "" } else { MASKED_SECRET },
+    })))
+}
+
+pub async fn put_advisor(
+    State(state): State<HttpState>,
+    body: Bytes,
+) -> Result<Json<Value>, HttpError> {
+    let body: AdvisorSettings = parse_json(&body)?;
+    let stored = advisor_settings(&state.store)?;
+    let api_key = if body.api_key == MASKED_SECRET {
+        stored.api_key
+    } else {
+        body.api_key.trim().to_owned()
+    };
+    if body.enabled && api_key.is_empty() {
+        return Err(HttpError::bad_request(
+            "Paste your TypeSafe key before turning this on.",
+        ));
+    }
+    state.store.repositories().settings().put(
+        &global_cwd().display().to_string(),
+        ADVISOR_KEY,
+        &serde_json::to_string(&AdvisorSettings {
+            enabled: body.enabled,
+            api_key,
+        })
+        .unwrap(),
+        &now_iso(),
+    )?;
+    get_advisor(State(state)).await
+}
+
+/// The stored advisor settings, or the defaults when nothing was written or
+/// what was written no longer parses. Carries the key, so it never reaches a
+/// response body unmasked.
+pub fn advisor_settings(store: &Store) -> Result<AdvisorSettings, HttpError> {
+    Ok(store
+        .repositories()
+        .settings()
+        .get(&global_cwd().display().to_string(), ADVISOR_KEY)?
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default())
 }
 
 pub async fn preview_cleanup(

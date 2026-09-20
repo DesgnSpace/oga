@@ -205,6 +205,10 @@ pub fn router(state: HttpState) -> Router {
             "/api/waiting",
             get(settings::get_waiting).put(settings::put_waiting),
         )
+        .route(
+            "/api/advisor",
+            get(settings::get_advisor).put(settings::put_advisor),
+        )
         .route("/api/cleanup/preview", get(settings::preview_cleanup))
         .route("/api/cleanup/run", post(settings::run_cleanup))
         .route(

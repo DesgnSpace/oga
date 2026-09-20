@@ -677,6 +677,21 @@ impl LoopbackClient {
         .await
     }
 
+    pub async fn advisor(&self) -> Result<oga_domain::AdvisorSettings, ClientError> {
+        self.get_json(self.endpoint(&["api", "advisor"])).await
+    }
+
+    pub async fn put_advisor(
+        &self,
+        settings: &oga_domain::AdvisorSettings,
+    ) -> Result<oga_domain::AdvisorSettings, ClientError> {
+        self.put_json(
+            self.endpoint(&["api", "advisor"]),
+            serde_json::to_value(settings).map_err(ClientError::Encode)?,
+        )
+        .await
+    }
+
     pub async fn run_cleanup(&self) -> Result<oga_domain::CleanupResult, ClientError> {
         self.post_json(self.endpoint(&["api", "cleanup", "run"]), Value::Null)
             .await

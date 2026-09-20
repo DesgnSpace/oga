@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 axum = "0.8"
+oga-advisor = { path = "../oga-advisor" }
 oga-config = { path = "../oga-config" }
 oga-context = { path = "../oga-context" }
 oga-domain = { path = "../oga-domain" }

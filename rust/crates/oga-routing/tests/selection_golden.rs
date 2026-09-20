@@ -12,9 +12,9 @@ use oga_domain::{
     UsageSource, UsageWindow, UsageWindowKind, WorkKind,
 };
 use oga_routing::{
-    AllowedModel, CLAUDE_EFFORTS, NamedPair, NoEligibleModel, PolicyRoute, RouteError,
-    RoutePreferences, RoutingPolicy, SelectionInputs, check_named_route, choose_model,
-    classify_task, model_traits, normalize_profile_statuses,
+    AdvisedModel, AllowedModel, CLAUDE_EFFORTS, NamedPair, NoEligibleModel, PolicyRoute,
+    RouteError, RoutePreferences, RoutingPolicy, SelectionInputs, check_named_route, choose_model,
+    classify_task, model_traits, normalize_profile_statuses, offered_models,
 };
 
 fn profile(id: &str, provider: Provider, default_model: &str) -> Profile {
@@ -1661,6 +1661,118 @@ fn model_settings_bound_selection() {
     )
     .unwrap_err();
     assert_eq!(failure.code(), NoEligibleModel::CODE);
+}
+
+// Advice stands ahead of a love rule and ahead of the score, and gives way
+// the moment the destination it names cannot take the work.
+#[test]
+fn advice_outranks_a_love_rule_and_gives_way_when_it_cannot_run() {
+    let catalog = models();
+    let workers = profiles();
+    let prompt = "Rename this variable in two files.";
+    let loved_settings = loved("opencode/big-pickle", Some("opencode"));
+    let advised = |profile_id: &str, model: &str| RoutePreferences {
+        advised: Some(AdvisedModel {
+            profile_id: profile_id.into(),
+            model: model.into(),
+        }),
+        ..RoutePreferences::default()
+    };
+
+    let route = choose_model(
+        prompt,
+        &catalog,
+        &workers,
+        &advised("claude", "sonnet"),
+        &SelectionInputs::new(&loved_settings),
+    )
+    .unwrap();
+    assert_eq!(route.model, "sonnet");
+    assert!(!route.reason.contains("loved"), "{}", route.reason);
+    assert!(
+        route.reason.contains("picked for this brief"),
+        "{}",
+        route.reason
+    );
+
+    // A destination no account offers leaves the ordinary path untouched, so
+    // the love rule still decides.
+    let route = choose_model(
+        prompt,
+        &catalog,
+        &workers,
+        &advised("claude", "nothing-here"),
+        &SelectionInputs::new(&loved_settings),
+    )
+    .unwrap();
+    assert_eq!(route.model, "opencode/big-pickle");
+    assert!(!route.reason.contains("picked for this brief"));
+
+    // So does one that is rate limited: advice never resurrects a candidate
+    // the gates already refused.
+    let failures = [ProfileFailure {
+        profile_id: "claude".into(),
+        code: FailureCode::RateLimit,
+        message: "rate limited".into(),
+        failed_at: "2026-01-01T00:00:00.000Z".into(),
+        consecutive_failures: 1,
+        retry_at: Some("2099-01-01T00:00:00.000Z".into()),
+        model: Some("sonnet".into()),
+    }];
+    let statuses = normalize_profile_statuses(
+        &workers,
+        &catalog,
+        &failures,
+        &[],
+        oga_routing::now_ms(),
+        false,
+    );
+    let route = choose_model(
+        prompt,
+        &catalog,
+        &workers,
+        &advised("claude", "sonnet"),
+        &SelectionInputs::new(&loved_settings).statuses(&statuses),
+    )
+    .unwrap();
+    assert_ne!(route.model, "sonnet");
+    assert!(!route.reason.contains("picked for this brief"));
+}
+
+// The destinations an advisor is offered: only what a task naming no model
+// could actually be sent to right now.
+#[test]
+fn only_reachable_destinations_are_offered() {
+    let catalog = models();
+    let workers = profiles();
+    let settings = settings_with(all_on(&catalog), None);
+
+    let offered = offered_models(&catalog, &workers, &SelectionInputs::new(&settings));
+    assert!(offered.iter().any(|model| model.id == "sonnet"));
+
+    let failures = [ProfileFailure {
+        profile_id: "claude".into(),
+        code: FailureCode::RateLimit,
+        message: "rate limited".into(),
+        failed_at: "2026-01-01T00:00:00.000Z".into(),
+        consecutive_failures: 1,
+        retry_at: Some("2099-01-01T00:00:00.000Z".into()),
+        model: Some("sonnet".into()),
+    }];
+    let statuses = normalize_profile_statuses(
+        &workers,
+        &catalog,
+        &failures,
+        &[],
+        oga_routing::now_ms(),
+        false,
+    );
+    let offered = offered_models(
+        &catalog,
+        &workers,
+        &SelectionInputs::new(&settings).statuses(&statuses),
+    );
+    assert!(!offered.iter().any(|model| model.id == "sonnet"));
 }
 
 fn loved(model_name: &str, profile_id: Option<&str>) -> ResolvedModelSettings {

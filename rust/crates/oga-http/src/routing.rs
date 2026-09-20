@@ -3,10 +3,12 @@
 use std::path::Path;
 
 use axum::{Json, body::Bytes, extract::State, response::IntoResponse};
-use oga_domain::{DecidedBy, EffortSource, SelectionDecision};
+use oga_advisor::{Advisor, Choice};
+use oga_config::{ModelOverrides, model_override_for};
+use oga_domain::{AdvisedRoute, DecidedBy, EffortSource, ModelInfo, Profile, SelectionDecision};
 use oga_routing::{
-    NamedPair, ROUTER_VERSION, RoutePreferences, SelectionInputs, check_named_route, choose_model,
-    load_routing_policy,
+    AdvisedModel, ModelRoute, NamedPair, ROUTER_VERSION, RoutePreferences, SelectionInputs,
+    check_named_route, choose_model, load_routing_policy, model_capabilities, offered_models,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -81,7 +83,8 @@ pub async fn preview(
             effort: None,
             default_profile_shortcut: false,
         },
-    )?;
+    )
+    .await?;
     let record = &route.decision.record;
     let mut response = json!({
         "profileId": route.profile_id,
@@ -98,7 +101,60 @@ pub async fn preview(
     Ok(Json(response))
 }
 
-pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError> {
+/// Everything a route is chosen against, read once per dispatch: the
+/// accounts, their catalogs, this project's settings and policy, and the
+/// cached availability and usage behind them.
+pub(crate) struct RoutingInputs {
+    profiles: Vec<Profile>,
+    models: Vec<ModelInfo>,
+    settings: oga_config::ResolvedModelSettings,
+    policy: Option<oga_routing::RoutingPolicy>,
+    statuses: Vec<oga_routing::ProfileStatus>,
+    usage: Vec<oga_domain::ProfileUsage>,
+}
+
+impl RoutingInputs {
+    pub(crate) fn read(state: &HttpState, cwd: &Path) -> Result<RoutingInputs, HttpError> {
+        let profiles = state.store.repositories().profiles().list()?;
+        let models = settings::cached_catalog(&profiles);
+        let settings = settings::resolved_model_settings(&state.store, &cwd.display().to_string())?;
+        let policy =
+            load_routing_policy(cwd).map_err(|error| HttpError::bad_request(error.to_string()))?;
+        let failures = state::list_profile_failures(&state.store)?;
+        let statuses = oga_routing::normalize_profile_statuses(
+            &profiles,
+            &models,
+            &failures,
+            &[],
+            oga_routing::now_ms(),
+            false,
+        );
+        // Cache-only: a live provider read here would put a CLI spawn on the
+        // hot dispatch path. A profile with no cached read yet scores as
+        // unknown rather than blocking route selection on it.
+        let usage = settings::cached_usage(&profiles);
+        Ok(RoutingInputs {
+            profiles,
+            models,
+            settings,
+            policy,
+            statuses,
+            usage,
+        })
+    }
+
+    fn selection(&self) -> SelectionInputs<'_> {
+        let inputs = SelectionInputs::new(&self.settings)
+            .statuses(&self.statuses)
+            .usage(&self.usage);
+        match self.policy.as_ref() {
+            Some(policy) => inputs.policy(policy),
+            None => inputs,
+        }
+    }
+}
+
+pub async fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError> {
     let cwd = Path::new(&input.cwd);
     if !cwd.is_absolute() {
         return Err(HttpError::bad_request("cwd must be an absolute path"));
@@ -110,35 +166,15 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
         return Err(HttpError::bad_request("prompt must not be empty"));
     }
 
-    let profiles = state.store.repositories().profiles().list()?;
-    let models = settings::cached_catalog(&profiles);
-    let cwd = oga_config::canonical_cwd(cwd);
-    let cwd_string = cwd.display().to_string();
-    let settings = settings::resolved_model_settings(&state.store, &cwd_string)?;
-    let policy =
-        load_routing_policy(&cwd).map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let failures = state::list_profile_failures(&state.store)?;
-    let statuses = oga_routing::normalize_profile_statuses(
-        &profiles,
-        &models,
-        &failures,
-        &[],
-        oga_routing::now_ms(),
-        false,
-    );
-    // Cache-only: a live provider read here would put a CLI spawn on the hot
-    // dispatch path. A profile with no cached read yet scores as unknown
-    // rather than blocking route selection on it.
-    let usage = settings::cached_usage(&profiles);
-    let extra = match policy.as_ref() {
-        Some(policy) => SelectionInputs::new(&settings)
-            .statuses(&statuses)
-            .usage(&usage)
-            .policy(policy),
-        None => SelectionInputs::new(&settings)
-            .statuses(&statuses)
-            .usage(&usage),
-    };
+    let world = RoutingInputs::read(state, &oga_config::canonical_cwd(cwd))?;
+    let RoutingInputs {
+        profiles,
+        models,
+        settings,
+        policy,
+        ..
+    } = &world;
+    let extra = world.selection();
 
     match (&input.profile, &input.model) {
         (Some(profile_id), Some(model)) => {
@@ -146,8 +182,8 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
             // caller naming both profile and model gets no quota or
             // availability advice, only whether the pair itself is reachable.
             let named_extra = match policy.as_ref() {
-                Some(policy) => SelectionInputs::new(&settings).policy(policy),
-                None => SelectionInputs::new(&settings),
+                Some(policy) => SelectionInputs::new(settings).policy(policy),
+                None => SelectionInputs::new(settings),
             };
             let audit = check_named_route(
                 &input.prompt,
@@ -157,8 +193,8 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
                     effort: input.effort.as_deref(),
                     preference: None,
                 },
-                &models,
-                &profiles,
+                models,
+                profiles,
                 &named_extra,
             )
             .map_err(|error| HttpError::bad_request(error.to_string()))?;
@@ -176,47 +212,158 @@ pub fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, HttpError
                 && input.profile.is_none()
                 && input.model.is_none()
                 && input.kind.is_none()
-                && default_profile(&profiles).is_some();
+                && default_profile(profiles).is_some();
             let profile_id = if default_route {
-                default_profile(&profiles).map(|profile| profile.id.clone())
+                default_profile(profiles).map(|profile| profile.id.clone())
             } else {
                 input.profile.clone()
             };
-            let route = choose_model(
-                &input.prompt,
-                &models,
-                &profiles,
-                &RoutePreferences {
-                    model_hint: input.model.clone(),
-                    kind: input.kind,
-                    profile_id,
-                    ..RoutePreferences::default()
-                },
-                &extra,
-            )
-            .map_err(|error| HttpError::bad_request(error.to_string()))?;
+            let preferences = RoutePreferences {
+                model_hint: input.model.clone(),
+                kind: input.kind,
+                profile_id,
+                ..RoutePreferences::default()
+            };
+            let route = choose_model(&input.prompt, models, profiles, &preferences, &extra)
+                .map_err(|error| HttpError::bad_request(error.to_string()))?;
+            // Advice only stands in for a choice the router made on its own.
+            // A caller who named the account or the model already answered
+            // the question, so nothing is asked on their behalf.
+            let (route, advised) = match advisor(state)? {
+                Some(advisor) if input.profile.is_none() && input.model.is_none() => {
+                    take_advice(&advisor, &input, &world, &preferences, route).await
+                }
+                _ => (route, None),
+            };
             let effort = input
                 .effort
                 .clone()
                 .or_else(|| route.effort.clone())
                 .or_else(|| default_route.then(|| "low".to_owned()));
+            let decided_by = if advised.as_ref().is_some_and(|advised| advised.used) {
+                DecidedBy::Advisor
+            } else if input.profile.is_some() {
+                DecidedBy::CallerProfile
+            } else {
+                DecidedBy::Router
+            };
             Ok(RoutePlan {
                 profile_id: route.profile_id.clone(),
                 model: route.model.clone(),
                 effort,
-                decision: decision_from_route(
-                    &route,
-                    if input.profile.is_some() {
-                        DecidedBy::CallerProfile
-                    } else {
-                        DecidedBy::Router
-                    },
-                    input.effort.is_some(),
-                ),
+                decision: decision_from_route(&route, decided_by, input.effort.is_some(), advised),
                 warnings: route.warnings,
                 reason: route.reason,
             })
         }
+    }
+}
+
+/// Ask the advisor where this brief should run and take its answer, when
+/// there is an answer worth taking. Anything else leaves the route the rules
+/// built exactly as it was: switched off, no key, a call that failed or ran
+/// long, advice too thin to act on, or a destination selection will not send
+/// this work to. What was advised is recorded either way, so a task that ran
+/// on the rules still shows what it was weighed against.
+async fn take_advice(
+    advisor: &Advisor,
+    input: &RouteInput,
+    world: &RoutingInputs,
+    preferences: &RoutePreferences,
+    route: ModelRoute,
+) -> (ModelRoute, Option<AdvisedRoute>) {
+    let destinations = describe_destinations(world);
+    let Some(choice) = advisor.choose(&advisor_brief(input), &destinations).await else {
+        return (route, None);
+    };
+    apply_advice(input, world, preferences, route, choice)
+}
+
+/// The advisor to ask, when one is switched on and signed in. The key it
+/// holds goes nowhere but the request header.
+fn advisor(state: &HttpState) -> Result<Option<Advisor>, HttpError> {
+    let settings = settings::advisor_settings(&state.store)?;
+    Ok((settings.enabled && !settings.api_key.is_empty()).then(|| Advisor::new(settings.api_key)))
+}
+
+/// Weigh one answer against the route the rules built. Advice too close to
+/// call, or naming a destination selection will not send this work to, is
+/// recorded and passed up rather than followed.
+fn apply_advice(
+    input: &RouteInput,
+    world: &RoutingInputs,
+    preferences: &RoutePreferences,
+    route: ModelRoute,
+    choice: Choice,
+) -> (ModelRoute, Option<AdvisedRoute>) {
+    let mut advised = AdvisedRoute {
+        profile_id: choice.profile_id.clone(),
+        model: choice.model.clone(),
+        confidence: choice.confidence,
+        used: false,
+        ignored_because: None,
+    };
+    if !choice.confident() {
+        advised.ignored_because = Some("the answer was too close to call".into());
+        return (route, Some(advised));
+    }
+    let preferences = RoutePreferences {
+        advised: Some(AdvisedModel {
+            profile_id: choice.profile_id.clone(),
+            model: choice.model.clone(),
+        }),
+        ..preferences.clone()
+    };
+    match choose_model(
+        &input.prompt,
+        &world.models,
+        &world.profiles,
+        &preferences,
+        &world.selection(),
+    ) {
+        Ok(picked) if picked.profile_id == choice.profile_id && picked.model == choice.model => {
+            advised.used = true;
+            (picked, Some(advised))
+        }
+        _ => {
+            advised.ignored_because = Some("that worker could not take this task".into());
+            (route, Some(advised))
+        }
+    }
+}
+
+/// Every destination this task could go to, each described by what it is good
+/// at, so the advisor weighs strengths rather than names.
+fn describe_destinations(world: &RoutingInputs) -> Vec<oga_advisor::Destination> {
+    let no_overrides = ModelOverrides::default();
+    let overrides = world.settings.overrides.as_ref().unwrap_or(&no_overrides);
+    offered_models(&world.models, &world.profiles, &world.selection())
+        .into_iter()
+        .map(|model| {
+            let capabilities = model_capabilities(
+                model,
+                model_override_for(overrides, &model.profile_id, &model.id).as_ref(),
+            );
+            oga_advisor::Destination {
+                profile_id: model.profile_id.clone(),
+                model: model.id.clone(),
+                description: if capabilities.is_empty() {
+                    model.label.clone()
+                } else {
+                    format!("{}: {}", model.label, capabilities.join(", "))
+                },
+            }
+        })
+        .collect()
+}
+
+/// What the advisor reads: the brief the caller typed and the kind of work
+/// they named with it. Never memories, never files — only what was already
+/// said out loud when the task was handed over.
+fn advisor_brief(input: &RouteInput) -> String {
+    match input.kind {
+        Some(kind) => format!("Kind of work: {}\n\n{}", kind.as_str(), input.prompt),
+        None => input.prompt.clone(),
     }
 }
 
@@ -238,6 +385,7 @@ fn decision_from_route(
     route: &oga_routing::ModelRoute,
     decided_by: DecidedBy,
     caller_effort: bool,
+    advised: Option<AdvisedRoute>,
 ) -> SelectionDecision {
     SelectionDecision {
         record: oga_domain::RoutingRecord {
@@ -275,6 +423,7 @@ fn decision_from_route(
             rejected: (!route.rejected.is_empty()).then(|| route.rejected.clone()),
             rejected_count: (!route.rejected.is_empty()).then_some(route.rejected_count as u64),
             warnings: (!route.warnings.is_empty()).then(|| route.warnings.clone()),
+            advised,
         },
         chosen: None,
     }
@@ -310,6 +459,7 @@ fn decision_from_audit(
             rejected: (!audit.rejected.is_empty()).then(|| audit.rejected.clone()),
             rejected_count: (!audit.rejected.is_empty()).then_some(audit.rejected.len() as u64),
             warnings: (!audit.warnings.is_empty()).then(|| audit.warnings.clone()),
+            advised: None,
         },
         chosen: None,
     }
@@ -319,12 +469,15 @@ fn decision_from_audit(
 mod tests {
     use std::{collections::BTreeMap, sync::Arc};
 
+    use axum::extract::State;
     use oga_domain::{Profile, Provider};
     use oga_store::Store;
 
     use super::*;
 
     const MODEL: &str = "opencode-go/ox-alpha-free";
+    const FAST_MODEL: &str = "opencode-go/deepseek-v4-flash";
+    const DEEP_MODEL: &str = "openai/gpt-5.6-luna";
 
     fn fixture() -> (tempfile::TempDir, Arc<Store>) {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -349,21 +502,7 @@ mod tests {
         (directory, store)
     }
 
-    fn switch(store: &Store, cwd: &Path, on: bool) {
-        store
-            .repositories()
-            .settings()
-            .put(
-                &oga_config::canonical_cwd(cwd).display().to_string(),
-                oga_config::MODEL_SETTINGS_KEY,
-                &json!({ "profiles": { "profile": { "modelEnabled": { MODEL: on } } } })
-                    .to_string(),
-                "2026-01-01T00:00:00.000Z",
-            )
-            .expect("model setting");
-    }
-
-    fn route_to_model(store: Arc<Store>, cwd: &Path) -> Result<RoutePlan, HttpError> {
+    async fn route_to_model(store: Arc<Store>, cwd: &Path) -> Result<RoutePlan, HttpError> {
         plan(
             &HttpState::new(store),
             RouteInput {
@@ -376,23 +515,26 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
     }
 
-    #[test]
-    fn model_hint_can_route_without_a_profile() {
+    #[tokio::test]
+    async fn model_hint_can_route_without_a_profile() {
         let (directory, store) = fixture();
-        switch(&store, directory.path(), true);
+        switch_model(&store, directory.path(), "profile", MODEL, true);
 
-        let route = route_to_model(store, directory.path()).expect("route");
+        let route = route_to_model(store, directory.path())
+            .await
+            .expect("route");
 
         assert_eq!(route.profile_id, "profile");
         assert_eq!(route.model, MODEL);
     }
 
-    #[test]
-    fn project_loved_model_reaches_unnamed_route() {
+    #[tokio::test]
+    async fn project_loved_model_reaches_unnamed_route() {
         let (directory, store) = fixture();
-        switch(&store, directory.path(), true);
+        switch_model(&store, directory.path(), "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("models:\n  profile:\n    {MODEL}:\n      loved: true\n"),
@@ -411,16 +553,17 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
         .expect("route");
 
         assert_eq!(route.profile_id, "profile");
         assert_eq!(route.model, MODEL);
     }
 
-    #[test]
-    fn a_love_rule_for_the_kind_of_work_reaches_an_unnamed_route() {
+    #[tokio::test]
+    async fn a_love_rule_for_the_kind_of_work_reaches_an_unnamed_route() {
         let (directory, store) = fixture();
-        switch(&store, directory.path(), true);
+        switch_model(&store, directory.path(), "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("love:\n  - model: profile:{MODEL}\n    when: [context]\n    effort: low\n"),
@@ -439,18 +582,19 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
         .expect("route");
 
         assert_eq!(route.model, MODEL);
         assert_eq!(route.profile_id, "profile");
     }
 
-    #[test]
-    fn a_love_rule_for_a_subject_beats_one_for_the_class() {
+    #[tokio::test]
+    async fn a_love_rule_for_a_subject_beats_one_for_the_class() {
         use oga_domain::WorkKind;
 
         let (directory, store) = fixture();
-        switch(&store, directory.path(), true);
+        switch_model(&store, directory.path(), "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("love:\n  - model: profile:{MODEL}\n    when: [ui]\n"),
@@ -470,6 +614,7 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
         .expect("route");
 
         assert_eq!(route.model, MODEL);
@@ -492,17 +637,18 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
         .expect("route");
 
         assert_eq!(route.model, MODEL);
     }
 
-    #[test]
-    fn a_named_class_kind_reaches_its_loved_model_over_the_prompts_own_read() {
+    #[tokio::test]
+    async fn a_named_class_kind_reaches_its_loved_model_over_the_prompts_own_read() {
         use oga_domain::WorkKind;
 
         let (directory, store) = fixture();
-        switch(&store, directory.path(), true);
+        switch_model(&store, directory.path(), "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("love:\n  - model: profile:{MODEL}\n    when: [mechanical]\n"),
@@ -523,6 +669,7 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
         .expect("route");
         assert!(!unnamed.reason.contains("loved"), "{}", unnamed.reason);
 
@@ -540,6 +687,7 @@ mod tests {
                 default_profile_shortcut: false,
             },
         )
+        .await
         .expect("route");
 
         assert_eq!(route.model, MODEL);
@@ -552,11 +700,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn naming_a_model_that_is_off_refuses_instead_of_substituting() {
+    #[tokio::test]
+    async fn naming_a_model_that_is_off_refuses_instead_of_substituting() {
         let (directory, store) = fixture();
 
-        let refusal = route_to_model(store.clone(), directory.path()).expect_err("refused");
+        let refusal = route_to_model(store.clone(), directory.path())
+            .await
+            .expect_err("refused");
         assert!(
             refusal
                 .message
@@ -571,10 +721,291 @@ mod tests {
         );
 
         // Switched on, then off again: the switch is what decides, both ways.
-        switch(&store, directory.path(), true);
-        assert!(route_to_model(store.clone(), directory.path()).is_ok());
-        switch(&store, directory.path(), false);
-        assert!(route_to_model(store, directory.path()).is_err());
+        switch_model(&store, directory.path(), "profile", MODEL, true);
+        assert!(
+            route_to_model(store.clone(), directory.path())
+                .await
+                .is_ok()
+        );
+        switch_model(&store, directory.path(), "profile", MODEL, false);
+        assert!(route_to_model(store, directory.path()).await.is_err());
+    }
+
+    /// Two accounts with one model each, so advice has something to choose
+    /// between and the loved rule has something to be overridden.
+    fn two_workers() -> (tempfile::TempDir, Arc<Store>) {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+        for (id, model) in [("fast", FAST_MODEL), ("deep", DEEP_MODEL)] {
+            store
+                .repositories()
+                .profiles()
+                .insert(
+                    &Profile {
+                        id: id.into(),
+                        label: id.into(),
+                        provider: Provider::OpenCode,
+                        default_model: model.into(),
+                        enabled: true,
+                        env: BTreeMap::new(),
+                        capabilities: Vec::new(),
+                        command: None,
+                    },
+                    "2026-01-01T00:00:00.000Z",
+                )
+                .expect("profile insert");
+            switch_model(&store, directory.path(), id, model, true);
+        }
+        (directory, store)
+    }
+
+    fn switch_model(store: &Store, cwd: &Path, profile: &str, model: &str, on: bool) {
+        let cwd = oga_config::canonical_cwd(cwd).display().to_string();
+        let existing: Value = store
+            .repositories()
+            .settings()
+            .get(&cwd, oga_config::MODEL_SETTINGS_KEY)
+            .expect("read")
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_else(|| json!({ "profiles": {} }));
+        let mut settings = existing;
+        settings["profiles"][profile]["modelEnabled"][model] = json!(on);
+        store
+            .repositories()
+            .settings()
+            .put(
+                &cwd,
+                oga_config::MODEL_SETTINGS_KEY,
+                &settings.to_string(),
+                "2026-01-01T00:00:00.000Z",
+            )
+            .expect("model setting");
+    }
+
+    fn love(directory: &Path, destination: &str) {
+        std::fs::write(
+            directory.join(".oga.yaml"),
+            format!("love:\n  - model: {destination}\n"),
+        )
+        .expect("project config");
+    }
+
+    fn unnamed(cwd: &Path) -> RouteInput {
+        RouteInput {
+            prompt: "Implement the thing described in the plan.".into(),
+            cwd: cwd.display().to_string(),
+            profile: None,
+            model: None,
+            kind: None,
+            effort: None,
+            default_profile_shortcut: false,
+        }
+    }
+
+    /// Everything a route is chosen against for this cwd, as `plan` reads it.
+    fn world_of(state: &HttpState, input: &RouteInput) -> RoutingInputs {
+        RoutingInputs::read(state, &oga_config::canonical_cwd(Path::new(&input.cwd)))
+            .expect("world")
+    }
+
+    /// The route the rules alone build — what advice is weighed against.
+    fn rules_route(world: &RoutingInputs, input: &RouteInput) -> ModelRoute {
+        choose_model(
+            &input.prompt,
+            &world.models,
+            &world.profiles,
+            &RoutePreferences::default(),
+            &world.selection(),
+        )
+        .expect("route")
+    }
+
+    async fn store_advisor(state: &HttpState, settings: Value) {
+        let _ = settings::put_advisor(State(state.clone()), Bytes::from(settings.to_string()))
+            .await
+            .expect("advisor settings");
+    }
+
+    fn advice(profile_id: &str, model: &str, confidence: f64) -> Choice {
+        Choice {
+            profile_id: profile_id.into(),
+            model: model.into(),
+            confidence,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stored_key_decides_nothing_until_the_switch_is_on() {
+        let (directory, store) = two_workers();
+        love(directory.path(), &format!("fast:{FAST_MODEL}"));
+        let state = HttpState::new(store.clone());
+        store_advisor(&state, json!({ "enabled": false, "apiKey": "secret" })).await;
+
+        let route = plan(&state, unnamed(directory.path()))
+            .await
+            .expect("route");
+
+        assert_eq!(route.profile_id, "fast");
+        assert_eq!(route.decision.record.decided_by, DecidedBy::Router);
+        assert_eq!(route.decision.record.advised, None);
+        assert!(route.reason.contains("loved"), "{}", route.reason);
+    }
+
+    #[tokio::test]
+    async fn the_key_never_comes_back_out_of_the_api() {
+        let (_directory, store) = two_workers();
+        let state = HttpState::new(store);
+        store_advisor(
+            &state,
+            json!({ "enabled": true, "apiKey": "ts-live-secret" }),
+        )
+        .await;
+
+        let shown = settings::get_advisor(State(state.clone()))
+            .await
+            .expect("read")
+            .0;
+        assert_eq!(shown["apiKey"], "••••••••");
+        assert_eq!(shown["enabled"], true);
+
+        // Writing the mask back leaves the stored key where it was, so
+        // turning the switch off and on again does not wipe it.
+        store_advisor(&state, json!({ "enabled": false, "apiKey": "••••••••" })).await;
+        assert_eq!(
+            settings::advisor_settings(&state.store)
+                .expect("read")
+                .api_key,
+            "ts-live-secret"
+        );
+    }
+
+    #[tokio::test]
+    async fn turning_the_switch_on_without_a_key_is_refused() {
+        let (_directory, store) = two_workers();
+        let state = HttpState::new(store);
+
+        let refusal = settings::put_advisor(
+            State(state),
+            Bytes::from(json!({ "enabled": true, "apiKey": "" }).to_string()),
+        )
+        .await
+        .expect_err("refused");
+
+        assert!(
+            refusal.message.contains("TypeSafe key"),
+            "{}",
+            refusal.message
+        );
+    }
+
+    #[tokio::test]
+    async fn a_confident_answer_takes_the_task_off_the_loved_model() {
+        let (directory, store) = two_workers();
+        love(directory.path(), &format!("fast:{FAST_MODEL}"));
+        let state = HttpState::new(store);
+        let input = unnamed(directory.path());
+        let world = world_of(&state, &input);
+        let rules = rules_route(&world, &input);
+        assert_eq!(rules.profile_id, "fast");
+
+        let (route, advised) = apply_advice(
+            &input,
+            &world,
+            &RoutePreferences::default(),
+            rules,
+            advice("deep", DEEP_MODEL, 0.91),
+        );
+
+        assert_eq!(route.profile_id, "deep");
+        assert_eq!(route.model, DEEP_MODEL);
+        let advised = advised.expect("recorded");
+        assert!(advised.used);
+        assert_eq!(advised.confidence, 0.91);
+        assert_eq!(advised.ignored_because, None);
+        assert!(
+            route.reason.contains("picked for this brief"),
+            "{}",
+            route.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answer_too_close_to_call_leaves_the_rules_in_charge() {
+        let (directory, store) = two_workers();
+        love(directory.path(), &format!("fast:{FAST_MODEL}"));
+        let state = HttpState::new(store);
+        let input = unnamed(directory.path());
+        let world = world_of(&state, &input);
+        let rules = rules_route(&world, &input);
+
+        let (route, advised) = apply_advice(
+            &input,
+            &world,
+            &RoutePreferences::default(),
+            rules,
+            advice("deep", DEEP_MODEL, 0.49),
+        );
+
+        assert_eq!(route.profile_id, "fast");
+        let advised = advised.expect("recorded");
+        assert!(!advised.used);
+        assert_eq!(advised.model, DEEP_MODEL);
+        assert_eq!(
+            advised.ignored_because.as_deref(),
+            Some("the answer was too close to call")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answer_naming_a_worker_that_cannot_run_it_leaves_the_rules_in_charge() {
+        let (directory, store) = two_workers();
+        love(directory.path(), &format!("fast:{FAST_MODEL}"));
+        switch_model(&store, directory.path(), "deep", DEEP_MODEL, false);
+        let state = HttpState::new(store);
+        let input = unnamed(directory.path());
+        let world = world_of(&state, &input);
+        let rules = rules_route(&world, &input);
+
+        let (route, advised) = apply_advice(
+            &input,
+            &world,
+            &RoutePreferences::default(),
+            rules,
+            advice("deep", DEEP_MODEL, 0.99),
+        );
+
+        assert_eq!(route.profile_id, "fast");
+        let advised = advised.expect("recorded");
+        assert!(!advised.used);
+        assert_eq!(
+            advised.ignored_because.as_deref(),
+            Some("that worker could not take this task")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_switched_off_worker_is_never_offered_as_a_destination() {
+        let (directory, store) = two_workers();
+        switch_model(&store, directory.path(), "deep", DEEP_MODEL, false);
+        let state = HttpState::new(store);
+        let world = world_of(&state, &unnamed(directory.path()));
+
+        let destinations = describe_destinations(&world);
+
+        assert_eq!(destinations.len(), 1);
+        assert_eq!(destinations[0].profile_id, "fast");
+    }
+
+    #[test]
+    fn the_advisor_reads_the_brief_and_the_kind_and_nothing_else() {
+        let mut input = unnamed(Path::new("/tmp"));
+        assert_eq!(advisor_brief(&input), input.prompt);
+
+        input.kind = Some(oga_domain::WorkKind::Ui);
+        assert_eq!(
+            advisor_brief(&input),
+            "Kind of work: ui\n\nImplement the thing described in the plan."
+        );
     }
 
     #[test]

@@ -300,6 +300,7 @@ impl McpServer {
                     default_profile_shortcut: false,
                 },
             )
+            .await
             .map_err(|error| McpError::Message(error.message))?;
             (route.profile_id, route.model, route.effort)
         } else {

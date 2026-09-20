@@ -1023,6 +1023,10 @@ fn invalid(path: &Path, field: &str, message: &str) -> ConfigError {
     }
 }
 
+/// What a stored secret reads as over the API. Writing it back means "leave
+/// what is already there", so a form can round-trip a value it never saw.
+pub const MASKED_SECRET: &str = "••••••••";
+
 pub fn mask_secret_env(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     env.iter()
         .map(|(k, v)| {
@@ -1032,7 +1036,7 @@ pub fn mask_secret_env(env: &BTreeMap<String, String>) -> BTreeMap<String, Strin
                     .iter()
                     .any(|needle| k.to_ascii_uppercase().contains(needle))
                 {
-                    "••••••••".into()
+                    MASKED_SECRET.into()
                 } else {
                     v.clone()
                 },

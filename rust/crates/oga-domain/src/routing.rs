@@ -350,6 +350,24 @@ pub struct RoutingRecord {
     pub rejected_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
+    /// What the advisor said, when one was asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advised: Option<AdvisedRoute>,
+}
+
+/// Where the advisor would have sent this task, how sure it was, and whether
+/// the dispatch followed it. Kept even when it did not, so a task that ran on
+/// the rules still shows what else was on the table and why it was not used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvisedRoute {
+    pub profile_id: String,
+    pub model: String,
+    pub confidence: f64,
+    pub used: bool,
+    /// Why the advice was not followed; absent when it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored_because: Option<String>,
 }
 
 /// Why a task landed on the profile, model, and effort it did. `decidedBy`
@@ -379,6 +397,7 @@ pub struct SelectionDecision {
 #[serde(rename_all = "kebab-case")]
 pub enum DecidedBy {
     Router,
+    Advisor,
     CallerProfile,
     CallerExplicit,
 }
