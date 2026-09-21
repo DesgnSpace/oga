@@ -2160,12 +2160,12 @@ h1 {
 }
 
 .composer-card {
+    position: relative;
     display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    align-items: center;
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border-radius: 22px;
     background: var(--color-elevated);
 }
 
@@ -2177,7 +2177,7 @@ h1 {
     width: 100%;
     min-height: 44px;
     max-height: 160px;
-    padding: 10px 12px;
+    padding: 10px 40px 10px 16px;
     resize: none;
     border: 0;
     background: transparent;
@@ -2202,24 +2202,55 @@ h1 {
     opacity: 0.6;
 }
 
-.composer-footer {
+.composer-send {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    display: flex;
+    width: 28px;
+    height: 28px;
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(-50%);
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+}
+
+.composer-send:not(:disabled):hover {
+    background: var(--color-hover);
+}
+
+.composer-send-active:not(:disabled) {
+    color: var(--color-text);
+}
+
+.composer-send:disabled {
+    cursor: default;
+    opacity: 0.4;
+}
+
+.composer-controls {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    padding: 6px 6px 6px 10px;
-    border-top: 1px solid var(--color-border);
-    background: color-mix(in srgb, var(--color-bg) 55%, var(--color-surface));
+    padding: 0 16px;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
 }
 
-.composer-footer-left {
+.composer-controls-left {
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: var(--space-1);
+    gap: var(--space-2);
 }
 
-.composer-footer-right {
+.composer-controls-right {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
@@ -2227,43 +2258,32 @@ h1 {
     margin-left: auto;
 }
 
-.composer-scope {
+.composer-menu-anchor {
+    position: relative;
+    display: inline-flex;
+}
+
+.composer-menu-trigger {
+    width: 22px;
+    height: 22px;
+    min-height: 0;
+    color: var(--color-text-muted);
+}
+
+.composer-menu-trigger:hover,
+.composer-menu-trigger[aria-expanded="true"] {
+    color: var(--color-text);
+}
+
+.composer-scope-picker {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    background: var(--color-bg);
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    line-height: 1;
+    gap: 3px;
 }
 
-.composer-scope-dot {
-    color: var(--color-success);
-    font-size: var(--text-sm);
-    line-height: 1;
-}
-
-.composer-scope-read-only .composer-scope-dot {
-    color: var(--color-text-muted);
-}
-
-.composer-thinking-toggle {
-    padding: 2px 8px;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.composer-thinking-toggle:hover,
-.composer-thinking-toggle[aria-pressed="true"] {
-    color: var(--color-accent);
+.composer-scope-chevron {
+    transform: rotate(90deg);
+    opacity: 0.7;
 }
 
 .composer-note {
@@ -2272,23 +2292,14 @@ h1 {
     font-size: var(--text-sm);
 }
 
-.composer-hint {
-    margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    opacity: 0.6;
-    white-space: nowrap;
-}
-
 .composer-send-now {
-    padding: 4px 10px;
+    padding: 2px 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
-    background: var(--color-bg);
+    background: transparent;
     color: inherit;
     font: inherit;
     font-size: var(--text-sm);
-    font-weight: 600;
     cursor: pointer;
 }
 
@@ -2300,29 +2311,52 @@ h1 {
     background: var(--color-bg);
 }
 
-.composer-submit {
-    display: inline-flex;
+/* The composer's `+` popover: same panel chrome as .menu-panel, portaled to
+   the body since the composer's own container clips anything positioned
+   outside its box. */
+.composer-menu {
+    position: fixed;
+    z-index: var(--z-menu);
+    width: 240px;
+    max-width: calc(100vw - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.composer-menu-back {
+    color: var(--color-text-muted);
+}
+
+.composer-menu-back-icon {
+    transform: rotate(180deg);
+}
+
+.menu-item-chevron {
     flex: 0 0 auto;
-    height: var(--control-height);
-    align-items: center;
-    gap: 6px;
-    padding: 0 12px;
-    border: 1px solid var(--color-accent);
-    border-radius: 999px;
-    background: var(--color-accent);
-    color: var(--color-text-inverse);
-    font: inherit;
-    font-size: var(--text-md);
-    font-weight: 600;
-    cursor: pointer;
+    color: var(--color-text-muted);
 }
 
-.composer-submit:not(:disabled):hover {
-    background: color-mix(in srgb, var(--color-accent) 85%, var(--color-bg));
+.composer-menu-details {
+    display: flex;
+    flex-direction: column;
+    padding: 2px;
 }
 
-.composer-submit:not(:disabled):active {
-    background: color-mix(in srgb, var(--color-accent) 75%, var(--color-bg));
+.composer-menu-details .task-metadata {
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: 0;
+    padding: 4px 0 0;
+}
+
+.composer-menu-details .task-metadata-item,
+.composer-menu-details .task-metadata-static {
+    width: 100%;
+    max-width: 100%;
+    justify-content: space-between;
+    padding: 5px 6px;
+    border-radius: 6px;
 }
 
 .task-metadata {
@@ -3418,7 +3452,6 @@ select {
 .settings-button,
 .task-action,
 .composer-send-now,
-.composer-submit,
 .load-more {
     padding-block: 4px;
 }

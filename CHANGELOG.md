@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.
 - Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.
 
 ## 0.2.1 - 2026-09-21

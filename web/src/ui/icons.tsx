@@ -365,6 +365,23 @@ export function SendIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function PlusIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M8 3.8v8.4M3.8 8h8.4" />
+    </Svg>
+  );
+}
+
+export function ReturnIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M11 4.2v3.3a2 2 0 0 1-2 2H4.6" />
+      <path d="M6.8 7.3 4.6 9.5l2.2 2.2" />
+    </Svg>
+  );
+}
+
 export function CodeIcon({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -428,6 +445,8 @@ export const iconRegistry: Array<{ name: string; Component: React.ComponentType<
   { name: "ResponseIcon", Component: ResponseIcon },
   { name: "CopyIcon", Component: CopyIcon },
   { name: "SendIcon", Component: SendIcon },
+  { name: "PlusIcon", Component: PlusIcon },
+  { name: "ReturnIcon", Component: ReturnIcon },
   { name: "CodeIcon", Component: CodeIcon },
   { name: "ExternalLinkIcon", Component: ExternalLinkIcon },
   { name: "OpenExternalIcon", Component: OpenExternalIcon },

@@ -2,8 +2,12 @@
 // Ported from rust/crates/oga-ui/src/composer/mod.rs — keep behavior and copy identical.
 
 import * as React from "react";
-import type { TaskScope } from "@/bridge/types";
-import { ChevronIcon, SendIcon } from "@/ui/icons";
+import { createPortal } from "react-dom";
+import type { Task, TaskEventView, TaskScope } from "@/bridge/types";
+import { CheckIcon, ChevronIcon, PlusIcon, ReturnIcon } from "@/ui/icons";
+import { connectionSummary, TaskMetadata } from "./TaskMetadata";
+
+const MENU_MARGIN = 8;
 
 export type ComposerSendMode = "primary" | "steer";
 
@@ -120,12 +124,27 @@ export interface ConversationComposerProps {
   onSend: ComposerSend;
   onRemoveQueued: (index: number) => void;
   thinkingToggle?: { active: boolean; onToggle: () => void };
+  task: Task;
+  events: TaskEventView[];
+  contextWindow: number | undefined;
 }
 
 const COMPOSER_MIN_HEIGHT = 44;
 const COMPOSER_MAX_HEIGHT = 160;
 
-export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQueued, thinkingToggle }: ConversationComposerProps) {
+export function ConversationComposer({
+  routing,
+  scope,
+  queued,
+  onSend,
+  onRemoveQueued,
+  thinkingToggle,
+  task,
+  events,
+  contextWindow,
+}: ConversationComposerProps) {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuTriggerRef = React.useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const disabled = isSendDisabled(routing, draft) || sending;
@@ -152,6 +171,7 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
       ? "This run can read files but not change them."
       : "This run can change files."
     : undefined;
+  const connection = connectionSummary(task.transport);
 
   // Resetting height first makes scrollHeight reflect only the content, so it shrinks back too.
   React.useLayoutEffect(() => {
@@ -213,53 +233,217 @@ export function ConversationComposer({ routing, scope, queued, onSend, onRemoveQ
             }
           }}
           aria-label={placeholder(routing)}
-          aria-describedby="composer-shortcut-hint"
         />
-        <div className="composer-footer">
-          <div className="composer-footer-left">
-            {thinkingToggle && (
-              <button
-                className="composer-thinking-toggle"
-                type="button"
-                aria-pressed={thinkingToggle.active}
-                onClick={thinkingToggle.onToggle}
-              >
-                {thinkingToggle.active ? "Hide thinking" : "Show thinking"}
-              </button>
-            )}
-            {scopeLabel && (
-              <span className={readOnlyScope ? "composer-scope composer-scope-read-only" : "composer-scope"} title={scopeHelp}>
-                <span className="composer-scope-dot" aria-hidden="true">●</span>
-                {scopeLabel}
-              </span>
-            )}
-          </div>
-          <div className="composer-footer-right">
-            <span className="composer-hint" id="composer-shortcut-hint">
-              {draft !== "" ? "Esc to clear · " : ""}{shortcut} to {label.toLowerCase()}
-            </span>
-            {routing.type === "steer-and-queue" && (
-              <button
-                className="composer-send-now"
-                type="button"
-                disabled={disabled}
-                aria-label="Send now — interrupts the running worker"
-                title="Send now — interrupts the running worker"
-                onClick={() => void submit("steer")}
-              >
-                Send now
-              </button>
-            )}
-            <button className="composer-submit" type="submit" disabled={disabled} title={`${label} — ${shortcut}`}>
-              <SendIcon />
-              {sending ? "Sending…" : label}
-            </button>
-          </div>
-        </div>
+        <button
+          className={`composer-send${draft.trim() !== "" ? " composer-send-active" : ""}`}
+          type="submit"
+          disabled={disabled}
+          aria-label={sending ? "Sending…" : `${label} — ${shortcut}`}
+          title={sending ? "Sending…" : `${label} — ${shortcut}`}
+        >
+          <ReturnIcon size={15} />
+        </button>
       </form>
+      <div className="composer-controls">
+        <div className="composer-controls-left">
+          <div className="composer-menu-anchor">
+            <button
+              ref={menuTriggerRef}
+              className="icon-button composer-menu-trigger"
+              type="button"
+              aria-label="More options"
+              title="More options"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((value) => !value)}
+            >
+              <PlusIcon size={14} />
+            </button>
+            {menuOpen && (
+              <ComposerMenu
+                triggerRef={menuTriggerRef}
+                thinkingToggle={thinkingToggle}
+                task={task}
+                events={events}
+                contextWindow={contextWindow}
+                onClose={() => setMenuOpen(false)}
+              />
+            )}
+          </div>
+          {scopeLabel && (
+            <span className="composer-scope-picker" title={scopeHelp}>
+              <ChevronIcon size={10} className="composer-scope-chevron" />
+              {scopeLabel}
+            </span>
+          )}
+        </div>
+        <div className="composer-controls-right">
+          {routing.type === "steer-and-queue" && (
+            <button
+              className="composer-send-now"
+              type="button"
+              disabled={disabled}
+              aria-label="Send now — interrupts the running worker"
+              title="Send now — interrupts the running worker"
+              onClick={() => void submit("steer")}
+            >
+              Send now
+            </button>
+          )}
+          {connection && <span className="composer-connection">{connection}</span>}
+        </div>
+      </div>
       {routingsEqual(routing, { type: "resume", textRequired: false }) && (
         <p className="composer-note">Leave the message empty to continue the run.</p>
       )}
     </section>
+  );
+}
+
+interface ComposerMenuProps {
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  thinkingToggle?: { active: boolean; onToggle: () => void };
+  task: Task;
+  events: TaskEventView[];
+  contextWindow: number | undefined;
+  onClose: () => void;
+}
+
+interface MenuPlacement {
+  bottom: number;
+  left: number;
+  maxHeight: number;
+}
+
+const MENU_WIDTH = 240;
+
+/**
+ * Anchored to the trigger's rect alone (its own width is a fixed CSS
+ * constant), so the position is known on the very first render — no
+ * measure-then-reposition pass, which would otherwise leave the panel
+ * `visibility: hidden` (and unfocusable) for that first render.
+ */
+function computePlacement(trigger: HTMLElement): MenuPlacement {
+  const rect = trigger.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  return {
+    bottom: viewportHeight - rect.top + MENU_MARGIN,
+    left: Math.max(MENU_MARGIN, Math.min(rect.left, viewportWidth - MENU_WIDTH - MENU_MARGIN)),
+    maxHeight: Math.max(0, rect.top - MENU_MARGIN * 2),
+  };
+}
+
+/**
+ * The composer's own popover: opens above the `+` trigger, with a "Show
+ * thinking" toggle and a "Details" row that swaps in the same task metadata
+ * list shown elsewhere. Portals to the body because the composer's own
+ * scroll container clips anything positioned outside its box.
+ */
+function ComposerMenu({ triggerRef, thinkingToggle, task, events, contextWindow, onClose }: ComposerMenuProps) {
+  const [showDetails, setShowDetails] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = React.useState<MenuPlacement>(() =>
+    triggerRef.current ? computePlacement(triggerRef.current) : { bottom: MENU_MARGIN, left: MENU_MARGIN, maxHeight: 300 },
+  );
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  React.useEffect(() => {
+    const update = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      setPlacement(computePlacement(trigger));
+    };
+    window.addEventListener("resize", update);
+    document.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      document.removeEventListener("scroll", update, true);
+    };
+  }, [triggerRef]);
+
+  React.useEffect(() => {
+    const firstItem = menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+    firstItem?.focus();
+
+    const closeOnPointer = (event: PointerEvent) => {
+      // SAFETY: pointer events always target a Node in the DOM tree.
+      const target = event.target as Node | null;
+      if (target && (menuRef.current?.contains(target) || triggerRef.current?.contains(target))) return;
+      onCloseRef.current();
+    };
+    document.addEventListener("pointerdown", closeOnPointer);
+    return () => document.removeEventListener("pointerdown", closeOnPointer);
+  }, [triggerRef, showDetails]);
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (showDetails) {
+        setShowDetails(false);
+        return;
+      }
+      onClose();
+      triggerRef.current?.focus();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+      const currentIndex = items.findIndex((item) => item === document.activeElement);
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      items[(currentIndex + delta + items.length) % items.length]?.focus();
+    }
+  };
+
+  if (globalThis.document === undefined) return null;
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="menu-panel composer-menu"
+      role="menu"
+      style={{ bottom: placement.bottom, left: placement.left, maxHeight: placement.maxHeight }}
+      onKeyDown={handleKeyDown}
+    >
+      {showDetails ? (
+        <>
+          <button type="button" className="menu-item composer-menu-back" onClick={() => setShowDetails(false)}>
+            <ChevronIcon size={12} className="composer-menu-back-icon" />
+            <span className="menu-item-label">Details</span>
+          </button>
+          <div className="composer-menu-details">
+            <TaskMetadata task={task} events={events} contextWindow={contextWindow} />
+          </div>
+        </>
+      ) : (
+        <>
+          {thinkingToggle && (
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={thinkingToggle.active}
+              className="menu-item"
+              onClick={() => {
+                thinkingToggle.onToggle();
+                onClose();
+              }}
+            >
+              <span className="menu-item-icon" aria-hidden="true">
+                {thinkingToggle.active && <CheckIcon size={12} />}
+              </span>
+              <span className="menu-item-label">Show thinking</span>
+            </button>
+          )}
+          <button type="button" role="menuitem" className="menu-item" onClick={() => setShowDetails(true)}>
+            <span className="menu-item-icon" aria-hidden="true" />
+            <span className="menu-item-label">Details</span>
+            <ChevronIcon size={12} className="menu-item-chevron" />
+          </button>
+        </>
+      )}
+    </div>,
+    document.body,
   );
 }
