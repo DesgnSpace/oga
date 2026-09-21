@@ -13,6 +13,7 @@ import { toast } from "@/state/toast";
 import { workerToastName } from "@/lib/toast-subject";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
 import type {
+  AdvisorSettings,
   BridgeResult,
   CleanupSettings,
   CleanupSnapshot,
@@ -584,6 +585,117 @@ function WaitingPanel() {
   );
 }
 
+function AdvisorPanel() {
+  const [settings, setSettings] = useState<AdvisorSettings | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [keyDraft, setKeyDraft] = useState("");
+
+  const loadAdvisor = useCallback(async () => {
+    const result = await broker.advisor();
+    if (result.ok) {
+      setSettings(result.value);
+      setError(undefined);
+    } else {
+      setError(result.error.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAdvisor();
+  }, [loadAdvisor]);
+
+  useEffect(() => {
+    if (settings) setKeyDraft(settings.apiKey);
+  }, [settings?.apiKey]);
+
+  const save = async (next: AdvisorSettings) => {
+    const previous = settings;
+    setSettings(next);
+    setSaving(true);
+    const result = await broker.putAdvisor(next);
+    setSaving(false);
+    if (result.ok) {
+      setSettings(result.value);
+      setError(undefined);
+      return;
+    }
+    setSettings(previous);
+    setError(result.error.message);
+  };
+
+  const commitKey = () => {
+    if (!settings || keyDraft === settings.apiKey) return;
+    void save({ ...settings, apiKey: keyDraft.trim() });
+  };
+
+  const hasKey = Boolean(settings?.apiKey);
+
+  return (
+    <section className="settings-section">
+      <div className="settings-section-heading">
+        <div>
+          <p className="eyebrow">Choosing a worker</p>
+          <h2>When you name no worker</h2>
+        </div>
+      </div>
+      <p className="settings-helper">
+        Your rules decide today. Turn this on and Oga reads the brief first, so the work lands on the
+        worker that suits it.
+      </p>
+      {error ? (
+        <div className="settings-message settings-message-error" role="alert">
+          <strong>Couldn&apos;t load these choices</strong>
+          <p>{error}</p>
+          <button className="text-button" type="button" onClick={() => void loadAdvisor()}>
+            Try again
+          </button>
+        </div>
+      ) : null}
+      {settings ? (
+        <div className="settings-option-list">
+          <label className="settings-option settings-option-field">
+            <span>
+              <strong>TypeSafe key</strong>
+              <small>From your TypeSafe account. It stays on this machine.</small>
+            </span>
+            <input
+              className="settings-mono"
+              type="password"
+              spellCheck={false}
+              autoComplete="off"
+              aria-label="TypeSafe key"
+              value={keyDraft}
+              disabled={saving}
+              placeholder="Paste your key"
+              onChange={(event) => setKeyDraft(event.target.value)}
+              onBlur={commitKey}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitKey();
+                }
+              }}
+            />
+          </label>
+          <label className="settings-option">
+            <span>
+              <strong>Match the worker to the brief</strong>
+              <small>{hasKey ? "Your rules still decide when no answer comes back." : "Add your key first."}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.enabled}
+              disabled={saving || !hasKey}
+              onChange={(event) => void save({ ...settings, enabled: event.target.checked })}
+            />
+          </label>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function NotificationsPanel() {
   const [enabled, setEnabled] = useTaskNotifications();
 
@@ -1012,6 +1124,7 @@ function WorkersPanel({
         </div>
       </section>
 
+      <AdvisorPanel />
       <WaitingPanel />
     </div>
   );

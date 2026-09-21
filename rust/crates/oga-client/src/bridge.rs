@@ -6,7 +6,9 @@
 //! it is showing it gets a [`TaskDelta`], because working out what changed is
 //! the shell's job rather than the web view's.
 
-use oga_domain::{CleanupSettings, EventPointer, Task, TaskEventView, WaitSettings};
+use oga_domain::{
+    AdvisorSettings, CleanupSettings, EventPointer, Task, TaskEventView, WaitSettings,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -77,6 +79,10 @@ pub enum BrokerCall {
     Waiting,
     PutWaiting {
         settings: WaitSettings,
+    },
+    Advisor,
+    PutAdvisor {
+        settings: AdvisorSettings,
     },
     ArchiveTask {
         task_id: String,
@@ -304,6 +310,8 @@ mod native {
                 BrokerCall::RunCleanup => encode(self.run_cleanup().await),
                 BrokerCall::Waiting => encode(self.waiting().await),
                 BrokerCall::PutWaiting { settings } => encode(self.put_waiting(&settings).await),
+                BrokerCall::Advisor => encode(self.advisor().await),
+                BrokerCall::PutAdvisor { settings } => encode(self.put_advisor(&settings).await),
                 BrokerCall::ArchiveTask {
                     task_id,
                     archived,

@@ -386,6 +386,17 @@ export interface WaitSettings {
   moveOnRateLimit: boolean;
 }
 
+/**
+ * Whether a task that names no worker has one picked for it, and the key that
+ * signs in. A read never carries the key itself — `apiKey` comes back masked
+ * when one is stored, and empty when none is. Sending the mask back leaves the
+ * stored key alone.
+ */
+export interface AdvisorSettings {
+  enabled: boolean;
+  apiKey: string;
+}
+
 export interface HealthReport {
   status: string;
   version: string;
@@ -731,6 +742,8 @@ export type BrokerCall =
   | { call: "runCleanup" }
   | { call: "waiting" }
   | { call: "putWaiting"; settings: WaitSettings }
+  | { call: "advisor" }
+  | { call: "putAdvisor"; settings: AdvisorSettings }
   | { call: "archiveTask"; taskId: string; archived: boolean; deleteBranch?: boolean }
   | { call: "cancelTask"; taskId: string }
   | { call: "resumeTask"; taskId: string; request: ResumeRequest }
@@ -767,6 +780,8 @@ export interface BrokerCallResult {
   runCleanup: CleanupResult;
   waiting: WaitSettings;
   putWaiting: WaitSettings;
+  advisor: AdvisorSettings;
+  putAdvisor: AdvisorSettings;
   archiveTask: ArchiveTaskResponse;
   cancelTask: void;
   resumeTask: void;

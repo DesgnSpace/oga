@@ -2721,6 +2721,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oga-advisor"
+version = "0.2.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "oga-cli"
 version = "0.2.1"
 dependencies = [
@@ -2857,6 +2867,7 @@ version = "0.2.1"
 dependencies = [
  "axum",
  "http-body-util",
+ "oga-advisor",
  "oga-config",
  "oga-context",
  "oga-domain",

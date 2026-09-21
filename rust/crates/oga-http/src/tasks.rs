@@ -194,7 +194,8 @@ pub(crate) async fn dispatch_body(
             effort: body.effort,
             default_profile_shortcut: true,
         },
-    )?;
+    )
+    .await?;
     let workspace = cwd.display().to_string();
     let worker_prompt = settings::worker_prompt(&state.store, &workspace)?;
     let (scope, grant_id, remember_scope) = match body.scope {

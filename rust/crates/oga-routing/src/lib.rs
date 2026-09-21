@@ -27,9 +27,10 @@ pub use policy::{
     unoffered_rule_message,
 };
 pub use selection::{
-    ModelCandidate, ModelNameMatch, ModelRoute, NamedPair, NamedRouteAudit, NoEligibleModel,
-    ROUTER_VERSION, RouteError, RoutePreferences, SelectionInputs, ambiguous_message,
-    check_named_route, choose_model, not_enabled_message, resolve_model_name,
+    AdvisedModel, ModelCandidate, ModelNameMatch, ModelRoute, NamedPair, NamedRouteAudit,
+    NoEligibleModel, ROUTER_VERSION, RouteError, RoutePreferences, SelectionInputs,
+    ambiguous_message, check_named_route, choose_model, not_enabled_message, offered_models,
+    resolve_model_name,
 };
 pub use status::format_rfc3339_ms;
 pub use status::{

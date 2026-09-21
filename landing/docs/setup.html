@@ -158,6 +158,11 @@ oga love claude:opus --when general</code></pre>
         <p>Every command above applies to the project you're standing in. Add <code>--global</code> to set it for every project instead. That's the fallback: a project's own rules, once it has any, replace the global list whole rather than add to it.</p>
         <pre><code>oga love claude:opus --global</code></pre>
 
+        <h3 id="match-the-worker-to-the-brief">Match the worker to the brief<a class="heading-anchor" href="#match-the-worker-to-the-brief" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
+        <p>Rules pin work by kind. Turn this on instead and Oga reads the brief before the work goes out, so a task lands on the worker whose strengths fit what it actually asks for.</p>
+        <p>Open Settings, find <strong>Choosing a worker</strong>, paste your <a href="https://typesafe.ai" target="_blank" rel="noopener noreferrer">TypeSafe</a> key, and switch it on. It applies only to work that names neither worker nor model — name one and the task still goes straight there.</p>
+        <p>Your rules stay underneath. When no answer comes back, or one comes back too close to call, or the worker it picked can't take the job, the work falls to your rules and starts as usual. Either way the task records which worker was suggested, how sure the suggestion was, and whether the work went there.</p>
+
         <div class="docs-callout">
           <p><code>oga config</code> prints what a folder actually resolves to — accounts, models, and which file each setting came from.</p>
         </div>

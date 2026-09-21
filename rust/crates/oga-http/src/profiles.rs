@@ -9,7 +9,7 @@ use axum::{
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use oga_config::{default_model, mask_secret_env};
+use oga_config::{MASKED_SECRET, default_model, mask_secret_env};
 use oga_domain::{Profile, ProfileView, Provider, TransportPreference};
 use oga_routing::{format_rfc3339_ms, now_ms};
 use oga_service::{
@@ -20,8 +20,6 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::router::{HttpError, HttpState, parse_json};
-
-const MASKED_SECRET: &str = "••••••••";
 
 pub async fn list_not_found() -> Response {
     Response::builder()

@@ -36,8 +36,8 @@ pub use event::{
 pub use health::{HealthReport, MCP_CONTRACT_VERSION, Staleness, VERSION};
 pub use profile::{Config, MemoryEntry, MemoryProject, Profile, ProfileView, ScopeGrant};
 pub use routing::{
-    AccountFailure, ChosenRoute, DecidedBy, Difficulty, EffortSource, ModelCost, ModelInfo,
-    ModelInfoSource, ModelQuery, ModelSettingsRow, ModelUsageSummary, ObservedRateLimit,
+    AccountFailure, AdvisedRoute, ChosenRoute, DecidedBy, Difficulty, EffortSource, ModelCost,
+    ModelInfo, ModelInfoSource, ModelQuery, ModelSettingsRow, ModelUsageSummary, ObservedRateLimit,
     ProfileUsage, RateLimitByModel, RoutePreference, RoutingRecord, RunnerUp, SelectionDecision,
     SelectionRejection, SelectionRelaxation, SelectionStage, TaskClass, TaskSelection, TaskTopic,
     UsageQuery, UsageSource, UsageWindow, UsageWindowKind, WorkKind,
@@ -47,8 +47,8 @@ pub use socket::{
     MAX_EVENT_TITLE, OUTCOME_STATES, SubscribeFrame, WireTaskOutcome,
 };
 pub use store::{
-    CleanupPlan, CleanupRecord, CleanupResult, CleanupSettings, CleanupSnapshot, CleanupStateCount,
-    FailureCode, ProfileFailure, ProfileSuccess, SpendTotals, WaitSettings,
+    AdvisorSettings, CleanupPlan, CleanupRecord, CleanupResult, CleanupSettings, CleanupSnapshot,
+    CleanupStateCount, FailureCode, ProfileFailure, ProfileSuccess, SpendTotals, WaitSettings,
 };
 pub use task::{
     AcpAgentIdentity, AcpRestore, AcpSteering, ActivityCounts, ArchivedFilter, BranchOutcome,

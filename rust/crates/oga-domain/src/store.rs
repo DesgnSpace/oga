@@ -138,3 +138,15 @@ impl Default for WaitSettings {
         }
     }
 }
+
+/// Whether an advisor picks the worker for tasks that name none, and the key
+/// it signs in with. The key leaves the broker only in the advisor's own
+/// request header: every read over the API masks it, the way a worker's
+/// secret environment values are masked.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvisorSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub api_key: String,
+}

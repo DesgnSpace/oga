@@ -22,7 +22,7 @@ use crate::usage::{
 };
 
 /// Bumped whenever selection changes shape, so old records stay interpretable.
-pub const ROUTER_VERSION: u32 = 3;
+pub const ROUTER_VERSION: u32 = 4;
 
 /// How many rejections ride a response and a task record. The catalogs run to
 /// dozens of models per account, and a list of every model the policy does not
@@ -55,6 +55,19 @@ struct Attempt {
     quota: bool,
 }
 
+/// A destination an advisor named for this one task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdvisedModel {
+    pub profile_id: String,
+    pub model: String,
+}
+
+impl AdvisedModel {
+    fn names(&self, profile_id: &str, model: &str) -> bool {
+        self.profile_id == profile_id && self.model == model
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RoutePreferences {
     pub preference: Option<RoutePreference>,
@@ -71,6 +84,11 @@ pub struct RoutePreferences {
     /// wins, since the caller picked the account and wants its best model for
     /// this class.
     pub profile_id: Option<String>,
+    /// Where an advisor read this brief and said the work should go. It
+    /// stands ahead of the love rules and the score, but never ahead of the
+    /// gates: a destination that cannot take the work is passed over as if
+    /// nothing had been advised, and the route says where it landed instead.
+    pub advised: Option<AdvisedModel>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -494,6 +512,25 @@ pub fn choose_model(
             && (!attempt.quota || !quota_binds || !is_exhausted(item))
     };
 
+    // Advice replaces the rules only when it can be followed. A destination
+    // no account offers, one that is unavailable or out of usage, or one
+    // below what this work needs leaves the rules exactly where they were —
+    // otherwise a pick that cannot run would quietly cost the task its love
+    // rule as well.
+    let advised_can_run = options.advised.as_ref().is_some_and(|advised| {
+        screened.iter().any(|item| {
+            advised.names(&item.model.profile_id, &item.model.id)
+                && passes(
+                    item,
+                    Attempt {
+                        policy: true,
+                        quota: true,
+                    },
+                )
+                && model_traits(item.model).quality >= floor
+        })
+    });
+
     // A love rule is the caller's standing answer to the question selection
     // would otherwise ask for this kind of work, so it stands in for the class
     // policy the way a named model does — the class still prices the effort
@@ -505,6 +542,7 @@ pub fn choose_model(
     if let Some(loved) = extra.settings.love.for_task(love_class, topic)
         && options.model_hint.is_none()
         && options.profile_id.is_none()
+        && !advised_can_run
     {
         let defaults: HashMap<&str, &str> = profiles
             .iter()
@@ -851,9 +889,20 @@ pub fn choose_model(
             }
         })
         .collect();
+    // Advice outranks both the allow order and the score, but only among
+    // candidates that already cleared every gate, so it can promote a
+    // destination selection would have taken second — never resurrect one it
+    // refused.
+    let advised_first = |candidate: &ModelCandidate| -> usize {
+        match &options.advised {
+            Some(advised) if advised.names(&candidate.profile_id, &candidate.model) => 0,
+            _ => 1,
+        }
+    };
     candidates.sort_by(|a, b| {
-        rank_of(a)
-            .cmp(&rank_of(b))
+        advised_first(a)
+            .cmp(&advised_first(b))
+            .then_with(|| rank_of(a).cmp(&rank_of(b)))
             .then_with(|| b.score.total_cmp(&a.score))
             .then_with(|| match (perishability_of(a), perishability_of(b)) {
                 (Some(pa), Some(pb)) => pb.score.total_cmp(&pa.score),
@@ -908,6 +957,13 @@ pub fn choose_model(
             "; applied this project's rules for {} work",
             demand.task_class.as_str()
         ));
+    }
+    if options
+        .advised
+        .as_ref()
+        .is_some_and(|advised| advised.names(&selected_profile_id, &selected_model_id))
+    {
+        reason.push_str("; picked for this brief over the other workers that could take it");
     }
     reason.push_str(&format!(
         "; selected quality {}/5, cost {}/5, speed {}/5",
@@ -1538,6 +1594,53 @@ fn diverse_candidates(candidates: Vec<ModelCandidate>, limit: usize) -> Vec<Mode
         }
     }
     selected
+}
+
+/// Every destination a task naming no model could actually be sent to right
+/// now: turned on for this project, able to run the work, and neither
+/// unavailable nor out of usage. This is what an advisor is offered to choose
+/// between, so nothing it names is a place the work could not have gone.
+pub fn offered_models<'a>(
+    models: &'a [ModelInfo],
+    profiles: &[Profile],
+    extra: &SelectionInputs,
+) -> Vec<&'a ModelInfo> {
+    let enabled: HashSet<&str> = profiles
+        .iter()
+        .filter(|profile| profile.enabled)
+        .map(|profile| profile.id.as_str())
+        .collect();
+    let status_by_model: HashMap<(&str, &str), &ProfileStatus> = extra
+        .statuses
+        .iter()
+        .map(|status| ((status.profile.as_str(), status.model.as_str()), status))
+        .collect();
+    let usage_by_profile: HashMap<&str, &ProfileUsage> = extra
+        .usage
+        .iter()
+        .map(|row| (row.profile.as_str(), row))
+        .collect();
+    models
+        .iter()
+        .filter(|model| {
+            enabled.contains(model.profile_id.as_str())
+                && profile_enabled(extra.settings, &model.profile_id)
+                && model_enabled(extra.settings, &model.profile_id, &model.id)
+                && model.tool_call != Some(false)
+                && !not_a_text_model(&model.id)
+        })
+        .filter(|model| {
+            status_by_model
+                .get(&(model.profile_id.as_str(), model.id.as_str()))
+                .is_none_or(|status| status.state != AvailabilityState::Unavailable)
+        })
+        .filter(|model| {
+            usage_by_profile
+                .get(model.profile_id.as_str())
+                .and_then(|row| worst_window_used_percent(row, Some(model.id.as_str())))
+                .is_none_or(|used| used < NEAR_EXHAUSTED_PERCENT)
+        })
+        .collect()
 }
 
 fn match_hint<'a>(models: &[&'a ModelInfo], hint: &str) -> Vec<&'a ModelInfo> {
