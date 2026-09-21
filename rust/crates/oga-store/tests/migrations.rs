@@ -123,13 +123,16 @@ fn a_provider_the_old_check_refused_is_addable_after_the_upgrade() {
         })
         .expect("a provider named only in code is addable");
 
-    let kept: String = store
-        .with_connection(|connection| {
-            Ok(connection.query_row("SELECT label FROM profiles WHERE id='claude'", [], |row| {
-                row.get(0)
-            })?)
-        })
-        .expect("the profile from before the upgrade reads");
+    let kept: String =
+        store
+            .with_connection(|connection| {
+                Ok(connection.query_row(
+                    "SELECT label FROM profiles WHERE id='claude'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .expect("the profile from before the upgrade reads");
     assert_eq!(kept, "Claude");
 }
 

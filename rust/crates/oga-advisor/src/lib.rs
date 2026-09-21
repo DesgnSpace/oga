@@ -25,12 +25,37 @@ const MIN_CONFIDENCE: f64 = 0.5;
 /// stalled advisor costs a dispatch a few seconds instead of holding it.
 const TIMEOUT: Duration = Duration::from_secs(4);
 
-/// The question's key, in the request and in the answer.
+/// The worker question's key, in the request and in the answer.
 const QUESTION: &str = "worker";
 
 const INSTRUCTIONS: &str = "Pick the worker that should run this task. The state is the brief \
      the task will be given. Weigh what the brief actually asks for against what each worker is \
-     good at.";
+     good at. Among workers that can do the job well, prefer one whose unused allowance resets \
+     soon, so it is spent rather than lost, and avoid one close to its limit or out of credits.";
+
+/// The effort question's key, in the request and in the answer.
+const EFFORT_QUESTION: &str = "effort";
+
+const EFFORT_INSTRUCTIONS: &str = "Pick how hard the worker should think on this task. The state \
+     is the brief the task will be given. More effort is slower and costs more; spend it only \
+     where the brief needs careful reasoning.";
+
+/// Every effort level a worker may accept, weakest first, with what it is
+/// worth spending on.
+const EFFORTS: [(&str, &str); 6] = [
+    ("minimal", "a mechanical edit with nothing to decide"),
+    ("low", "a small, clear change or a quick lookup"),
+    ("medium", "ordinary feature work across a few files"),
+    ("high", "work that needs a plan, or care across many files"),
+    (
+        "xhigh",
+        "hard reasoning: races, security, subtle correctness",
+    ),
+    (
+        "max",
+        "the hardest problems, where a wrong answer is costly",
+    ),
+];
 
 /// One destination the advisor may pick, as it is described to the advisor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +64,8 @@ pub struct Destination {
     pub model: String,
     /// What this destination is good at, in the advisor's own terms.
     pub description: String,
+    /// Effort levels this destination accepts. Empty when none is published.
+    pub efforts: Vec<String>,
 }
 
 impl Destination {
@@ -55,6 +82,9 @@ pub struct Choice {
     pub profile_id: String,
     pub model: String,
     pub confidence: f64,
+    /// How hard the picked worker should think, when the advisor answered
+    /// confidently with a level that worker accepts.
+    pub effort: Option<String>,
 }
 
 impl Choice {
@@ -112,23 +142,46 @@ impl Advisor {
     }
 }
 
-/// The body TypeSafe reads: the brief as the state, and one Choice question
-/// whose criteria are the destinations and what each is good at.
+/// The body TypeSafe reads: the brief as the state, a Choice question whose
+/// criteria are the destinations and what each is good at, and a second one
+/// for the effort when any destination accepts one.
 fn request_body(state: &str, destinations: &[Destination]) -> Value {
     let criteria: serde_json::Map<String, Value> = destinations
         .iter()
         .map(|destination| (destination.key(), json!(destination.description)))
         .collect();
+    let mut questions = serde_json::Map::new();
+    questions.insert(
+        QUESTION.into(),
+        json!({
+            "type": "choice",
+            "instructions": INSTRUCTIONS,
+            "criteria": criteria,
+        }),
+    );
+    let efforts: serde_json::Map<String, Value> = EFFORTS
+        .iter()
+        .filter(|(level, _)| {
+            destinations
+                .iter()
+                .any(|destination| destination.efforts.iter().any(|offered| offered == level))
+        })
+        .map(|(level, worth)| ((*level).to_owned(), json!(worth)))
+        .collect();
+    if efforts.len() >= 2 {
+        questions.insert(
+            EFFORT_QUESTION.into(),
+            json!({
+                "type": "choice",
+                "instructions": EFFORT_INSTRUCTIONS,
+                "criteria": efforts,
+            }),
+        );
+    }
     json!({
         "state": state,
         "model": MODEL,
-        "questions": {
-            QUESTION: {
-                "type": "choice",
-                "instructions": INSTRUCTIONS,
-                "criteria": criteria,
-            }
-        }
+        "questions": questions,
     })
 }
 
@@ -140,16 +193,25 @@ struct ChoiceAnswer {
 
 /// Reads an answer back to the destination it names. A missing answer, a key
 /// no destination carries, or a body of another shape all read as no advice.
+/// An effort answer that is missing, thin, or a level the picked destination
+/// does not accept leaves the effort to the rules.
 fn read_choice(body: &Value, destinations: &[Destination]) -> Option<Choice> {
-    let answer: ChoiceAnswer =
-        serde_json::from_value(body.get("answers")?.get(QUESTION)?.clone()).ok()?;
+    let answers = body.get("answers")?;
+    let answer: ChoiceAnswer = serde_json::from_value(answers.get(QUESTION)?.clone()).ok()?;
     let picked = destinations
         .iter()
         .find(|destination| destination.key() == answer.choice)?;
+    let effort = answers
+        .get(EFFORT_QUESTION)
+        .and_then(|effort| serde_json::from_value::<ChoiceAnswer>(effort.clone()).ok())
+        .filter(|effort| effort.confidence >= MIN_CONFIDENCE)
+        .map(|effort| effort.choice)
+        .filter(|level| picked.efforts.contains(level));
     Some(Choice {
         profile_id: picked.profile_id.clone(),
         model: picked.model.clone(),
         confidence: answer.confidence,
+        effort,
     })
 }
 
@@ -166,11 +228,13 @@ mod tests {
                 profile_id: "fast".into(),
                 model: "vendor/small".into(),
                 description: "free".into(),
+                efforts: vec![],
             },
             Destination {
                 profile_id: "deep".into(),
                 model: "vendor/large".into(),
                 description: "reasoning, long-context".into(),
+                efforts: vec!["low".into(), "medium".into(), "high".into()],
             },
         ]
     }
@@ -210,6 +274,40 @@ mod tests {
         let criteria = &body["questions"]["worker"]["criteria"];
         assert_eq!(criteria["fast:vendor/small"], "free");
         assert_eq!(criteria["deep:vendor/large"], "reasoning, long-context");
+        let efforts = body["questions"]["effort"]["criteria"]
+            .as_object()
+            .expect("effort criteria");
+        let mut levels: Vec<_> = efforts.keys().map(String::as_str).collect();
+        levels.sort_unstable();
+        assert_eq!(levels, ["high", "low", "medium"]);
+    }
+
+    #[test]
+    fn an_effort_the_picked_worker_accepts_reads_back_with_the_choice() {
+        let answered = json!({
+            "answers": {
+                "worker": { "choice": "deep:vendor/large", "confidence": 0.9 },
+                "effort": { "choice": "high", "confidence": 0.8 },
+            },
+        });
+
+        let choice = read_choice(&answered, &destinations()).expect("choice");
+
+        assert_eq!(choice.effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn an_effort_the_picked_worker_does_not_accept_is_left_to_the_rules() {
+        let answered = json!({
+            "answers": {
+                "worker": { "choice": "fast:vendor/small", "confidence": 0.9 },
+                "effort": { "choice": "high", "confidence": 0.8 },
+            },
+        });
+
+        let choice = read_choice(&answered, &destinations()).expect("choice");
+
+        assert_eq!(choice.effort, None);
     }
 
     #[test]

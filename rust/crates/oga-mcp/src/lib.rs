@@ -287,26 +287,32 @@ impl McpServer {
         // path a stated kind can actually reach: it is what reads the prompt,
         // applies a loved rule, and resolves an effort. Naming a profile or a
         // model is the caller's own call, same as ever.
-        let (profile_id, model, route_effort) = if profile_arg.is_none() && model_arg.is_none() {
-            let route = oga_http::routing::plan(
-                &self.state,
-                oga_http::routing::RouteInput {
-                    prompt: prompt.clone(),
-                    cwd: cwd.clone(),
-                    profile: None,
-                    model: None,
-                    kind,
-                    effort: effort_arg.clone(),
-                    default_profile_shortcut: false,
-                },
-            )
-            .await
-            .map_err(|error| McpError::Message(error.message))?;
-            (route.profile_id, route.model, route.effort)
-        } else {
-            let (profile_id, model) = self.route(&cwd, profile_arg, model_arg)?;
-            (profile_id, model, None)
-        };
+        let (profile_id, model, route_effort, selection) =
+            if profile_arg.is_none() && model_arg.is_none() {
+                let route = oga_http::routing::plan(
+                    &self.state,
+                    oga_http::routing::RouteInput {
+                        prompt: prompt.clone(),
+                        cwd: cwd.clone(),
+                        profile: None,
+                        model: None,
+                        kind,
+                        effort: effort_arg.clone(),
+                        default_profile_shortcut: false,
+                    },
+                )
+                .await
+                .map_err(|error| McpError::Message(error.message))?;
+                (
+                    route.profile_id,
+                    route.model,
+                    route.effort,
+                    Some(route.decision),
+                )
+            } else {
+                let (profile_id, model) = self.route(&cwd, profile_arg, model_arg)?;
+                (profile_id, model, None, None)
+            };
         let mut request = DispatchRequest::new(profile_id, prompt, PathBuf::from(&cwd));
         request.model = Some(model);
         request.scope = scope(args.get("scope"))?;
@@ -315,6 +321,7 @@ impl McpServer {
         request.timeout = optional_u64(args, "timeoutMs")?.map(Duration::from_millis);
         request.parent_task_id = optional_string(args, "parent");
         request.effort = effort_arg.or(route_effort);
+        request.selection = selection;
         request.tldr = Some(tldr);
         request.title = Some(title);
         request.worktree = args

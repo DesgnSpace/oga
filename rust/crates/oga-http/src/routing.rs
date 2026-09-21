@@ -301,6 +301,7 @@ fn apply_advice(
         model: choice.model.clone(),
         confidence: choice.confidence,
         used: false,
+        effort: choice.effort.clone(),
         ignored_because: None,
     };
     if !choice.confident() {
@@ -321,8 +322,14 @@ fn apply_advice(
         &preferences,
         &world.selection(),
     ) {
-        Ok(picked) if picked.profile_id == choice.profile_id && picked.model == choice.model => {
+        Ok(mut picked)
+            if picked.profile_id == choice.profile_id && picked.model == choice.model =>
+        {
             advised.used = true;
+            if let Some(effort) = choice.effort {
+                picked.effort = Some(effort);
+                picked.effort_reason = "the advisor matched it to the brief".into();
+            }
             (picked, Some(advised))
         }
         _ => {
@@ -337,6 +344,7 @@ fn apply_advice(
 fn describe_destinations(world: &RoutingInputs) -> Vec<oga_advisor::Destination> {
     let no_overrides = ModelOverrides::default();
     let overrides = world.settings.overrides.as_ref().unwrap_or(&no_overrides);
+    let now_ms = oga_routing::now_ms();
     offered_models(&world.models, &world.profiles, &world.selection())
         .into_iter()
         .map(|model| {
@@ -344,17 +352,76 @@ fn describe_destinations(world: &RoutingInputs) -> Vec<oga_advisor::Destination>
                 model,
                 model_override_for(overrides, &model.profile_id, &model.id).as_ref(),
             );
+            let mut facts = capabilities;
+            if let Some(window) = model.context_window {
+                facts.push(format!("{}k-token context", window / 1000));
+            }
+            if let Some(cost) = model
+                .cost
+                .as_ref()
+                .filter(|cost| cost.input > 0.0 || cost.output > 0.0)
+            {
+                facts.push(format!(
+                    "${} in / ${} out per million tokens",
+                    cost.input, cost.output
+                ));
+            }
+            if let Some(usage) = world
+                .usage
+                .iter()
+                .find(|usage| usage.profile == model.profile_id)
+            {
+                facts.extend(usage_facts(usage, &model.id, now_ms));
+            }
+            let efforts = model.efforts.clone().unwrap_or_default();
+            if !efforts.is_empty() {
+                facts.push(format!("effort levels: {}", efforts.join(", ")));
+            }
             oga_advisor::Destination {
                 profile_id: model.profile_id.clone(),
                 model: model.id.clone(),
-                description: if capabilities.is_empty() {
+                description: if facts.is_empty() {
                     model.label.clone()
                 } else {
-                    format!("{}: {}", model.label, capabilities.join(", "))
+                    format!("{}: {}", model.label, facts.join("; "))
                 },
+                efforts,
             }
         })
         .collect()
+}
+
+/// How much of this account is left for `model` and when it comes back, so
+/// the advisor can spend an allowance that resets soon before it is lost and
+/// steer clear of one about to run out.
+fn usage_facts(usage: &oga_domain::ProfileUsage, model: &str, now_ms: i64) -> Vec<String> {
+    let summary = oga_routing::summarize_usage(usage, model);
+    let mut facts = Vec::new();
+    if summary.out_of_credits {
+        facts.push("out of credits".to_owned());
+    }
+    if summary.rate_limited {
+        facts.push("rate-limited right now".to_owned());
+    }
+    let week = oga_routing::weekly_window(usage, Some(model));
+    if let Some(week) = week {
+        let resets = week
+            .resets_at
+            .as_deref()
+            .and_then(oga_routing::parse_rfc3339_ms)
+            .map(|at| format!(", resets in {}h", (at - now_ms).max(0) / 3_600_000))
+            .unwrap_or_default();
+        facts.push(format!(
+            "{:.0}% of its weekly allowance used{resets}",
+            week.used_percent
+        ));
+    }
+    if let Some(used) = summary.percent_used
+        && week.is_none_or(|week| week.used_percent != used)
+    {
+        facts.push(format!("{used:.0}% of its tightest limit used"));
+    }
+    facts
 }
 
 /// What the advisor reads: the brief the caller typed and the kind of work
@@ -398,6 +465,11 @@ fn decision_from_route(
             preference: route.preference,
             effort_source: if caller_effort {
                 EffortSource::Caller
+            } else if advised
+                .as_ref()
+                .is_some_and(|advised| advised.used && advised.effort.is_some())
+            {
+                EffortSource::Advisor
             } else if route.effort_reason == "the loved model's configured reasoning effort" {
                 EffortSource::Loved
             } else if route.effort.is_some() {
@@ -831,6 +903,7 @@ mod tests {
             profile_id: profile_id.into(),
             model: model.into(),
             confidence,
+            effort: None,
         }
     }
 

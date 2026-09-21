@@ -365,6 +365,10 @@ pub struct AdvisedRoute {
     pub model: String,
     pub confidence: f64,
     pub used: bool,
+    /// How hard the advisor said the worker should think; absent when it
+    /// gave no level worth taking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// Why the advice was not followed; absent when it was.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignored_because: Option<String>,
@@ -406,6 +410,7 @@ pub enum DecidedBy {
 #[serde(rename_all = "snake_case")]
 pub enum EffortSource {
     Caller,
+    Advisor,
     Loved,
     Default,
     None,
