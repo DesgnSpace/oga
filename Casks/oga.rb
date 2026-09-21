@@ -1,6 +1,6 @@
 cask "oga" do
-  version "0.2.0"
-  sha256 "8d75e1d821df3ad5adf14a04402f397cbd8d0b9ad9dc4940fe9178c4ac859627"
+  version "0.2.1"
+  sha256 "a3e085a9bec11bc4625648f4cafc37b0d2bc8c603510de5099311d3a95ac545c"
 
   url "https://downloads.desgn.space/oga/Oga-#{version}.zip"
   name "Oga"
