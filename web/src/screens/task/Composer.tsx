@@ -272,7 +272,6 @@ export function ConversationComposer({
           </div>
           {scopeLabel && (
             <span className="composer-scope-picker" title={scopeHelp}>
-              <ChevronIcon size={10} className="composer-scope-chevron" />
               {scopeLabel}
             </span>
           )}
@@ -317,12 +316,7 @@ interface MenuPlacement {
 
 const MENU_WIDTH = 240;
 
-/**
- * Anchored to the trigger's rect alone (its own width is a fixed CSS
- * constant), so the position is known on the very first render — no
- * measure-then-reposition pass, which would otherwise leave the panel
- * `visibility: hidden` (and unfocusable) for that first render.
- */
+/** Anchors the panel's bottom edge just above the trigger, using a fixed panel width. */
 function computePlacement(trigger: HTMLElement): MenuPlacement {
   const rect = trigger.getBoundingClientRect();
   const viewportWidth = window.innerWidth;

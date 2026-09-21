@@ -2278,12 +2278,6 @@ h1 {
 .composer-scope-picker {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-}
-
-.composer-scope-chevron {
-    transform: rotate(90deg);
-    opacity: 0.7;
 }
 
 .composer-note {
@@ -2354,9 +2348,28 @@ h1 {
 .composer-menu-details .task-metadata-static {
     width: 100%;
     max-width: 100%;
-    justify-content: space-between;
     padding: 5px 6px;
     border-radius: 6px;
+}
+
+/* `justify-content: space-between` centers the value between the label and
+   the copy icon when a row has three children (label, value, copy) but
+   pins it flush right when a row has only two (label, value) — an
+   inconsistency across rows. Every row instead gets the same label-left,
+   value-right layout: the label stays its own width, the value grows to
+   fill the rest and ellipsis-truncates, and the copy icon (when present)
+   sits right after it. */
+.composer-menu-details .task-metadata-label {
+    flex: 0 0 auto;
+}
+
+.composer-menu-details .task-metadata-value {
+    flex: 1 1 auto;
+    text-align: right;
+}
+
+.composer-menu-details .task-metadata-copy {
+    margin-left: 4px;
 }
 
 .task-metadata {

@@ -24,6 +24,10 @@ function CopyableDetail({
   title?: string;
 }) {
   const displayedValue = displayValue ?? (shorten ? shortId(value) : value);
+  // The value can be wider than the row and ellipsis-truncates, so the title
+  // always carries the full value — appended to a caller's reason when one
+  // is given, unless that reason already is the value (e.g. a full path).
+  const fullTitle = title && title !== value ? `${title} — ${value}` : title ?? value;
   const [copied, setCopied] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(flashTimer.current), []);
@@ -44,7 +48,7 @@ function CopyableDetail({
       className={showLabel ? "task-metadata-item" : "task-metadata-item task-metadata-chip"}
       type="button"
       aria-label={copied ? `Copied ${label.toLowerCase()}: ${value}` : `Copy ${label.toLowerCase()}: ${value}`}
-      title={title ?? `Copy ${label.toLowerCase()}`}
+      title={fullTitle}
       onClick={() => void copy()}
     >
       {showLabel && <span className="task-metadata-label">{label}</span>}
