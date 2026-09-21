@@ -14,6 +14,7 @@ import {
   monthLabel,
   type HeatmapCell,
   type MonthKey,
+  type MonthRange,
 } from "./heatmap";
 
 type UsageTab = "overview" | "models";
@@ -162,6 +163,14 @@ function OverviewPanel({
   longestStreakDays: number;
 }) {
   const [view, setView] = useState<OverviewView>("grid");
+  const bounds = useMemo(
+    () => heatmapMonthBounds(period.days, { start: period.start, end: period.end }),
+    [period.days, period.start, period.end],
+  );
+  const [month, setMonth] = useState<MonthKey>(bounds.max);
+  useEffect(() => {
+    setMonth(bounds.max);
+  }, [period.days, period.start, period.end]);
   const cards: ReadonlyArray<{ label: string; value: string }> = [
     { label: "Tasks", value: period.tasks.toLocaleString() },
     { label: "Cost", value: formatCost(period.costUsd) ?? "$0.00" },
@@ -182,23 +191,26 @@ function OverviewPanel({
           </div>
         ))}
       </dl>
-      <div className="usage-period-switch" role="group" aria-label="Activity view">
-        {VIEWS.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            aria-pressed={view === entry.id}
-            className={`usage-period-option${view === entry.id ? " usage-period-option-active" : ""}`}
-            onClick={() => setView(entry.id)}
-          >
-            {entry.label}
-          </button>
-        ))}
+      <div className="usage-visual-toolbar">
+        <div className="usage-period-switch" role="group" aria-label="Activity view">
+          {VIEWS.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              aria-pressed={view === entry.id}
+              className={`usage-period-option${view === entry.id ? " usage-period-option-active" : ""}`}
+              onClick={() => setView(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+        <MonthStepper month={month} bounds={bounds} onChange={setMonth} />
       </div>
       {view === "grid" ? (
-        <Heatmap days={period.days} start={period.start} end={period.end} />
+        <Heatmap days={period.days} month={month} />
       ) : (
-        <UsageCharts period={period} />
+        <UsageCharts period={period} month={month} />
       )}
     </div>
   );
@@ -216,56 +228,55 @@ function formatPeakHour(hour: number): string {
 
 const WEEKDAY_LABELS: ReadonlyArray<string> = ["", "Mon", "", "Wed", "", "Fri", ""];
 
-function Heatmap({
-  days,
-  start,
-  end,
+function MonthStepper({
+  month,
+  bounds,
+  onChange,
 }: {
-  days: UsageDay[];
-  start?: string;
-  end?: string;
+  month: MonthKey;
+  bounds: MonthRange;
+  onChange: (month: MonthKey) => void;
 }) {
-  const bounds = useMemo(() => heatmapMonthBounds(days, { start, end }), [days, start, end]);
-  const [month, setMonth] = useState<MonthKey>(bounds.max);
-  useEffect(() => {
-    setMonth(bounds.max);
-  }, [days, start, end]);
+  const canGoBack = compareMonths(month, bounds.min) > 0;
+  const canGoForward = compareMonths(month, bounds.max) < 0;
+  return (
+    <div className="usage-month-stepper">
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Previous month"
+        title="Previous month"
+        disabled={!canGoBack}
+        onClick={() => onChange(clampMonth(addMonths(month, -1), bounds))}
+      >
+        <BackArrowIcon />
+      </button>
+      <span className="usage-heatmap-month-label" aria-live="polite">
+        {monthLabel(month)}
+      </span>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Next month"
+        title="Next month"
+        disabled={!canGoForward}
+        onClick={() => onChange(clampMonth(addMonths(month, 1), bounds))}
+      >
+        <ForwardArrowIcon />
+      </button>
+    </div>
+  );
+}
 
+function Heatmap({ days, month }: { days: UsageDay[]; month: MonthKey }) {
   const calendar = useMemo(() => buildHeatmapMonth(days, month), [days, month]);
   const max = Math.max(0, ...days.map((day) => day.costUsd));
   const hasActivity = calendar.weeks.some((week) => week.some((cell) => cell.inMonth && cell.day !== undefined));
   const monthTasks = calendar.weeks.flat().reduce((total, cell) => total + (cell.inMonth ? cell.day?.tasks ?? 0 : 0), 0);
-  const canGoBack = compareMonths(month, bounds.min) > 0;
-  const canGoForward = compareMonths(month, bounds.max) < 0;
   const label = monthLabel(month);
 
   return (
     <div className="usage-heatmap">
-      <div className="usage-heatmap-header">
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Previous month"
-          title="Previous month"
-          disabled={!canGoBack}
-          onClick={() => setMonth((current) => clampMonth(addMonths(current, -1), bounds))}
-        >
-          <BackArrowIcon />
-        </button>
-        <span className="usage-heatmap-month-label" aria-live="polite">
-          {label}
-        </span>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Next month"
-          title="Next month"
-          disabled={!canGoForward}
-          onClick={() => setMonth((current) => clampMonth(addMonths(current, 1), bounds))}
-        >
-          <ForwardArrowIcon />
-        </button>
-      </div>
       <div className="usage-heatmap-body">
         <div className="usage-heatmap-weekdays" aria-hidden="true">
           {WEEKDAY_LABELS.map((weekday, index) => (
@@ -320,10 +331,31 @@ function intensityLevel(cost: number, max: number): number {
   return 4;
 }
 
+function monthStart(month: MonthKey): string {
+  return `${String(month.year).padStart(4, "0")}-${String(month.month).padStart(2, "0")}-01`;
+}
+
+function monthEnd(month: MonthKey): string {
+  const lastDay = new Date(month.year, month.month, 0).getDate();
+  return `${String(month.year).padStart(4, "0")}-${String(month.month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+}
+
+function latestDate(a: string, b?: string): string {
+  return b !== undefined && b > a ? b : a;
+}
+
+function earliestDate(a: string, b?: string): string {
+  return b !== undefined && b < a ? b : a;
+}
+
 const CHART_BREAKDOWN_LIMIT = 8;
 
-function UsageCharts({ period }: { period: UsagePeriod }) {
-  const series = useMemo(() => buildDailySeries(period.days, period.start, period.end), [period.days, period.start, period.end]);
+function UsageCharts({ period, month }: { period: UsagePeriod; month: MonthKey }) {
+  const series = useMemo(() => {
+    const start = latestDate(monthStart(month), period.start);
+    const end = earliestDate(monthEnd(month), period.end);
+    return buildDailySeries(period.days, start, end);
+  }, [period.days, period.start, period.end, month]);
   const bars = useMemo(() => topBreakdown(period.breakdown, CHART_BREAKDOWN_LIMIT), [period.breakdown]);
   return (
     <div className="usage-charts">
@@ -421,9 +453,9 @@ function ModelBarChart({ bars }: { bars: ReadonlyArray<ModelBar> }) {
   const isEmpty = bars.length === 0 || max <= 0;
   return (
     <div className="usage-chart">
-      <h3 className="usage-chart-title">Cost by worker</h3>
+      <h3 className="usage-chart-title">Cost by model</h3>
       {isEmpty ? (
-        <p className="usage-chart-empty">No usage by worker in this period.</p>
+        <p className="usage-chart-empty">No usage by model in this period.</p>
       ) : (
         <ul className="usage-bar-chart">
           {bars.map((bar) => (

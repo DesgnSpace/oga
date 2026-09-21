@@ -164,7 +164,7 @@ const EFFORT_DESCRIPTION: &str = concat!(
 );
 const ALLOW_QUESTIONS_DESCRIPTION: &str = concat!(
     "Whether the worker may stop and ask. True, the default, lets it park in needs_input with a question and wait there until reply answers. ",
-    "False tells it to report a blocked result instead of asking, so the task settles without a turn from the caller."
+    "False tells it to decide for itself instead of asking, so the task settles without a turn from the caller."
 );
 const CAN_DELEGATE_DESCRIPTION: &str = concat!(
     "Whether this worker may create tasks of its own. Off by default: the delegate tool is not served to it at all, so no prompt can talk it into fanning work out. ",
