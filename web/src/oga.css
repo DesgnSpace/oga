@@ -5076,6 +5076,19 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     font: inherit;
 }
 
+.settings-option-field > input {
+    flex: 0 1 28rem;
+    width: 100%;
+    min-width: 12rem;
+    height: auto;
+    min-height: var(--control-height);
+    padding: 0 var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
 .settings-number-field > span {
     color: var(--color-text-muted);
     font-size: var(--text-base);
