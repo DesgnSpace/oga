@@ -27,8 +27,9 @@ const QUESTION: &str = "worker";
 
 const INSTRUCTIONS: &str = "Pick the worker that should run this task. The state is the brief \
      the task will be given. Weigh what the brief actually asks for against what each worker is \
-     good at. Among workers that can do the job well, prefer one whose unused allowance resets \
-     soon, so it is spent rather than lost, and avoid one close to its limit or out of credits.";
+     good at. Among workers that can do the job well, prefer a free or cheaper one, and one whose \
+     unused allowance resets soon, so it is spent rather than lost; avoid one close to its limit \
+     or out of credits. Never trade away a worker the job needs to save money.";
 
 /// The effort question's key, in the request and in the answer.
 const EFFORT_QUESTION: &str = "effort";

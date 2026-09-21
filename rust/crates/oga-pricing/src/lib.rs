@@ -34,6 +34,21 @@ pub struct CatalogModel {
     pub name: String,
 }
 
+/// What models.dev says a model is and can take in, beyond its price.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ModelFacts {
+    pub description: Option<String>,
+    pub reasoning: Option<bool>,
+    pub tool_call: Option<bool>,
+    /// Input kinds the model reads, such as `text`, `image`, or `pdf`.
+    pub input: Vec<String>,
+    pub context: Option<u64>,
+    pub output: Option<u64>,
+    /// The training cutoff, as models.dev writes it (`2026-09` or a full date).
+    pub knowledge: Option<String>,
+    pub release_date: Option<String>,
+}
+
 /// Model pricing indexed for lookup, built once per fetch from `api.json`.
 #[derive(Debug, Clone, Default)]
 pub struct PricingCatalogue {
@@ -45,6 +60,9 @@ pub struct PricingCatalogue {
     /// provider found in the catalogue wins ties.
     by_bare: BTreeMap<String, ModelRate>,
     models: BTreeMap<String, Vec<CatalogModel>>,
+    /// Every model's facts, keyed the same two ways as its rate.
+    facts_by_qualified: BTreeMap<String, ModelFacts>,
+    facts_by_bare: BTreeMap<String, ModelFacts>,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +80,34 @@ struct RawModel {
     name: Option<String>,
     #[serde(default)]
     cost: Option<RawCost>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    reasoning: Option<bool>,
+    #[serde(default)]
+    tool_call: Option<bool>,
+    #[serde(default)]
+    modalities: Option<RawModalities>,
+    #[serde(default)]
+    limit: Option<RawLimit>,
+    #[serde(default)]
+    knowledge: Option<String>,
+    #[serde(default)]
+    release_date: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawModalities {
+    #[serde(default)]
+    input: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct RawLimit {
+    #[serde(default)]
+    context: Option<u64>,
+    #[serde(default)]
+    output: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +140,23 @@ pub fn parse_catalogue(raw: &str) -> PricingCatalogue {
                     id: model_id.clone(),
                     name: model.name.unwrap_or_else(|| model_id.clone()),
                 });
+            let facts = ModelFacts {
+                description: model.description.filter(|text| !text.trim().is_empty()),
+                reasoning: model.reasoning,
+                tool_call: model.tool_call,
+                input: model.modalities.map(|m| m.input).unwrap_or_default(),
+                context: model.limit.as_ref().and_then(|limit| limit.context),
+                output: model.limit.as_ref().and_then(|limit| limit.output),
+                knowledge: model.knowledge,
+                release_date: model.release_date,
+            };
+            catalogue
+                .facts_by_qualified
+                .insert(format!("{provider_id}/{model_id}"), facts.clone());
+            catalogue
+                .facts_by_bare
+                .entry(model_id.clone())
+                .or_insert(facts);
             let Some(cost) = model.cost else { continue };
             let rate = ModelRate {
                 input: cost.input,
@@ -156,20 +219,48 @@ pub fn rate_for<'a>(
     provider_id: &str,
     model: &str,
 ) -> Option<&'a ModelRate> {
+    lookup(
+        &catalogue.by_qualified,
+        &catalogue.by_bare,
+        provider_id,
+        model,
+    )
+}
+
+/// Looks up what models.dev says about `model`, matched the way
+/// [`rate_for`] matches its price.
+pub fn facts_for<'a>(
+    catalogue: &'a PricingCatalogue,
+    provider_id: &str,
+    model: &str,
+) -> Option<&'a ModelFacts> {
+    lookup(
+        &catalogue.facts_by_qualified,
+        &catalogue.facts_by_bare,
+        provider_id,
+        model,
+    )
+}
+
+fn lookup<'a, T>(
+    by_qualified: &'a BTreeMap<String, T>,
+    by_bare: &'a BTreeMap<String, T>,
+    provider_id: &str,
+    model: &str,
+) -> Option<&'a T> {
     let model = normalize(model);
     if normalize(provider_id) == "antigravity"
         && let Some(key) = antigravity_catalog_key(&model)
     {
-        return catalogue.by_qualified.get(&key);
+        return by_qualified.get(&key);
     }
     let (prefix, bare) = match model.split_once('/') {
         Some((prefix, bare)) => (prefix.to_owned(), bare.to_owned()),
         None => (normalize(provider_id), model.clone()),
     };
-    catalogue
-        .by_qualified
+    by_qualified
         .get(&format!("{prefix}/{bare}"))
-        .or_else(|| catalogue.by_bare.get(&bare))
+        .or_else(|| by_bare.get(&bare))
 }
 
 /// `tokens_in` excludes cached reads (matching `oga_providers::Usage`);

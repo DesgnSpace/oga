@@ -85,9 +85,11 @@ pub struct RoutePreferences {
     /// this class.
     pub profile_id: Option<String>,
     /// Where an advisor read this brief and said the work should go. It
-    /// stands ahead of the love rules and the score, but never ahead of the
-    /// gates: a destination that cannot take the work is passed over as if
-    /// nothing had been advised, and the route says where it landed instead.
+    /// stands ahead of the love rules, the score, and the floor the prompt
+    /// heuristic guessed, but never ahead of the gates: a destination that is
+    /// disabled, unavailable, out of usage, or below a [routes] policy's
+    /// minimum is passed over as if nothing had been advised, and the route
+    /// says where it landed instead.
     pub advised: Option<AdvisedModel>,
 }
 
@@ -318,11 +320,18 @@ pub fn choose_model(
         .preference
         .or(policy_route.and_then(|route| route.preference))
         .unwrap_or_else(|| difficulty_preference(difficulty));
-    let floor = difficulty_floor(difficulty).max(
-        policy_route
-            .and_then(|route| route.min_quality)
-            .unwrap_or(0),
-    );
+    let policy_floor = policy_route
+        .and_then(|route| route.min_quality)
+        .unwrap_or(0);
+    let floor = difficulty_floor(difficulty).max(policy_floor);
+    // The advisor read the brief itself, so its pick answers to the floor a
+    // [routes] policy sets, not to the one the prompt heuristic guessed.
+    let is_advised = |model: &ModelInfo| {
+        options
+            .advised
+            .as_ref()
+            .is_some_and(|advised| advised.names(&model.profile_id, &model.id))
+    };
     let mut warnings: Vec<String> = Vec::new();
     let mut rejected: Vec<SelectionRejection> = Vec::new();
 
@@ -514,7 +523,7 @@ pub fn choose_model(
 
     // Advice replaces the rules only when it can be followed. A destination
     // no account offers, one that is unavailable or out of usage, or one
-    // below what this work needs leaves the rules exactly where they were —
+    // below a [routes] policy's minimum leaves the rules exactly where they were —
     // otherwise a pick that cannot run would quietly cost the task its love
     // rule as well.
     let advised_can_run = options.advised.as_ref().is_some_and(|advised| {
@@ -527,7 +536,7 @@ pub fn choose_model(
                         quota: true,
                     },
                 )
-                && model_traits(item.model).quality >= floor
+                && model_traits(item.model).quality >= policy_floor
         })
     });
 
@@ -814,9 +823,13 @@ pub fn choose_model(
     // tier beats no run and the record says which happened.
     let usable_traits: Vec<ModelTraits> = usable.iter().map(|model| model_traits(model)).collect();
     let quality_at = |index: usize| usable_traits[index].quality;
+    let clears = |index: usize, floor: u8| {
+        quality_at(index) >= floor
+            || (is_advised(usable[index]) && quality_at(index) >= policy_floor)
+    };
     let clearing_indices = |floor: u8| -> Vec<usize> {
         (0..usable.len())
-            .filter(|index| quality_at(*index) >= floor)
+            .filter(|index| clears(*index, floor))
             .collect()
     };
     let mut effective_floor = floor;
@@ -835,7 +848,7 @@ pub fn choose_model(
     }
     for (index, model) in usable.iter().enumerate() {
         let quality = usable_traits[index].quality;
-        if quality < effective_floor {
+        if !clears(index, effective_floor) {
             reject(
                 &mut rejected,
                 model,

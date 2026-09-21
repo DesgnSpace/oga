@@ -5,7 +5,9 @@ use std::path::Path;
 use axum::{Json, body::Bytes, extract::State, response::IntoResponse};
 use oga_advisor::{Advisor, Choice};
 use oga_config::{ModelOverrides, model_override_for};
-use oga_domain::{AdvisedRoute, DecidedBy, EffortSource, ModelInfo, Profile, SelectionDecision};
+use oga_domain::{
+    AdvisedRoute, DecidedBy, EffortSource, ModelInfo, Profile, SelectionDecision, TaskClass,
+};
 use oga_routing::{
     AdvisedModel, ModelRoute, NamedPair, ROUTER_VERSION, RoutePreferences, SelectionInputs,
     check_named_route, choose_model, load_routing_policy, model_capabilities, offered_models,
@@ -289,8 +291,10 @@ async fn take_advice(
     preferences: &RoutePreferences,
     route: ModelRoute,
 ) -> (ModelRoute, Result<AdvisedRoute, String>) {
-    let destinations = describe_destinations(world);
-    match advisor.choose(&advisor_brief(input), &destinations).await {
+    let catalogue = oga_pricing::catalogue().await;
+    let destinations = describe_destinations(world, catalogue.as_ref());
+    let brief = advisor_brief(input, route.task_class);
+    match advisor.choose(&brief, &destinations).await {
         Ok(choice) => {
             let (route, advised) = apply_advice(input, world, preferences, route, choice);
             (route, Ok(advised))
@@ -357,30 +361,58 @@ fn apply_advice(
 
 /// Every destination this task could go to, each described by what it is good
 /// at, so the advisor weighs strengths rather than names.
-fn describe_destinations(world: &RoutingInputs) -> Vec<oga_advisor::Destination> {
+fn describe_destinations(
+    world: &RoutingInputs,
+    catalogue: Option<&oga_pricing::PricingCatalogue>,
+) -> Vec<oga_advisor::Destination> {
     let no_overrides = ModelOverrides::default();
     let overrides = world.settings.overrides.as_ref().unwrap_or(&no_overrides);
     let now_ms = oga_routing::now_ms();
     offered_models(&world.models, &world.profiles, &world.selection())
         .into_iter()
         .map(|model| {
-            let capabilities = model_capabilities(
+            let published = catalogue.and_then(|catalogue| {
+                oga_pricing::facts_for(catalogue, model.provider.as_str(), &model.id)
+            });
+            let mut capabilities = model_capabilities(
                 model,
                 model_override_for(overrides, &model.profile_id, &model.id).as_ref(),
             );
-            let mut facts = capabilities;
-            if let Some(window) = model.context_window {
+            if model.reasoning.is_none()
+                && published.is_some_and(|facts| facts.reasoning == Some(true))
+            {
+                capabilities.push("reasoning".into());
+            }
+            let traits = oga_routing::model_traits(model);
+            let mut facts = vec![format!(
+                "quality {}/5, speed {}/5",
+                traits.quality, traits.speed
+            )];
+            facts.extend(capabilities);
+            if let Some(window) = model
+                .context_window
+                .or_else(|| published.and_then(|facts| facts.context))
+            {
                 facts.push(format!("{}k-token context", window / 1000));
             }
-            if let Some(cost) = model
+            if let Some(published) = published {
+                facts.extend(published_facts(published));
+            }
+            let price = model
                 .cost
                 .as_ref()
-                .filter(|cost| cost.input > 0.0 || cost.output > 0.0)
+                .map(|cost| (cost.input, cost.output))
+                .or_else(|| {
+                    catalogue
+                        .and_then(|catalogue| {
+                            oga_pricing::rate_for(catalogue, model.provider.as_str(), &model.id)
+                        })
+                        .map(|rate| (rate.input, rate.output))
+                });
+            if let Some((input, output)) =
+                price.filter(|(input, output)| *input > 0.0 || *output > 0.0)
             {
-                facts.push(format!(
-                    "${} in / ${} out per million tokens",
-                    cost.input, cost.output
-                ));
+                facts.push(format!("${input} in / ${output} out per million tokens"));
             }
             if let Some(usage) = world
                 .usage
@@ -393,18 +425,38 @@ fn describe_destinations(world: &RoutingInputs) -> Vec<oga_advisor::Destination>
             if !efforts.is_empty() {
                 facts.push(format!("effort levels: {}", efforts.join(", ")));
             }
+            let summary = published
+                .and_then(|facts| facts.description.as_deref())
+                .map(|text| format!(" — {}", text.trim_end_matches('.')))
+                .unwrap_or_default();
             oga_advisor::Destination {
                 profile_id: model.profile_id.clone(),
                 model: model.id.clone(),
-                description: if facts.is_empty() {
-                    model.label.clone()
-                } else {
-                    format!("{}: {}", model.label, facts.join("; "))
-                },
+                description: format!("{}{summary}: {}", model.label, facts.join("; ")),
                 efforts,
             }
         })
         .collect()
+}
+
+/// What models.dev adds beyond the catalog Oga already reads: what the model
+/// takes in besides text, how long an answer it can write, and how recent its
+/// knowledge is.
+fn published_facts(published: &oga_pricing::ModelFacts) -> Vec<String> {
+    let mut facts = Vec::new();
+    if published.input.iter().any(|kind| kind != "text") {
+        facts.push(format!("reads {}", published.input.join(", ")));
+    }
+    if let Some(output) = published.output {
+        facts.push(format!("{}k-token answers", output / 1000));
+    }
+    if let Some(knowledge) = &published.knowledge {
+        facts.push(format!("knowledge up to {knowledge}"));
+    }
+    if let Some(released) = &published.release_date {
+        facts.push(format!("released {released}"));
+    }
+    facts
 }
 
 /// How much of this account is left for `model` and when it comes back, so
@@ -440,13 +492,18 @@ fn usage_facts(usage: &oga_domain::ProfileUsage, model: &str, now_ms: i64) -> Ve
     facts
 }
 
-/// What the advisor reads: the brief the caller typed and the kind of work
-/// they named with it. Never memories, never files — only what was already
-/// said out loud when the task was handed over.
-fn advisor_brief(input: &RouteInput) -> String {
+/// What the advisor reads: the brief the caller typed and the kind of work,
+/// as the caller named it or, failing that, as the rules read it from the
+/// brief. Never memories, never files — only what was already said out loud
+/// when the task was handed over.
+fn advisor_brief(input: &RouteInput, guessed: TaskClass) -> String {
     match input.kind {
         Some(kind) => format!("Kind of work: {}\n\n{}", kind.as_str(), input.prompt),
-        None => input.prompt.clone(),
+        None => format!(
+            "Kind of work (read from the brief): {}\n\n{}",
+            guessed.as_str(),
+            input.prompt
+        ),
     }
 }
 
@@ -1080,7 +1137,7 @@ mod tests {
         let state = HttpState::new(store);
         let world = world_of(&state, &unnamed(directory.path()));
 
-        let destinations = describe_destinations(&world);
+        let destinations = describe_destinations(&world, None);
 
         assert_eq!(destinations.len(), 1);
         assert_eq!(destinations[0].profile_id, "fast");
@@ -1089,11 +1146,14 @@ mod tests {
     #[test]
     fn the_advisor_reads_the_brief_and_the_kind_and_nothing_else() {
         let mut input = unnamed(Path::new("/tmp"));
-        assert_eq!(advisor_brief(&input), input.prompt);
+        assert_eq!(
+            advisor_brief(&input, TaskClass::Build),
+            "Kind of work (read from the brief): build\n\nImplement the thing described in the plan."
+        );
 
         input.kind = Some(oga_domain::WorkKind::Ui);
         assert_eq!(
-            advisor_brief(&input),
+            advisor_brief(&input, TaskClass::Build),
             "Kind of work: ui\n\nImplement the thing described in the plan."
         );
     }
