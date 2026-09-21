@@ -27,11 +27,13 @@
     --space-3: 12px;
     --space-4: 16px;
     --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --gutter: var(--space-4);
     --measure: 78ch;
-    --measure-log: 120ch;
+    --measure-log: 76ch;
     --radius: 6px;
     --control-height: 28px;
     --topbar-height: 40px;
@@ -487,7 +489,7 @@ a {
     min-width: 0;
     align-items: center;
     gap: var(--space-1);
-    padding-right: var(--space-2);
+    padding-right: var(--space-3);
     white-space: nowrap;
 }
 
@@ -538,7 +540,7 @@ a {
     display: inline-flex;
     min-width: 0;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-3);
     overflow: hidden;
 }
 
@@ -549,7 +551,7 @@ a {
 .title-bar-stat-group {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-3);
 }
 
 
@@ -656,7 +658,7 @@ a {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) var(--gutter);
+    padding: var(--space-2) var(--gutter) var(--space-3);
 }
 
 .sidebar-search {
@@ -690,7 +692,7 @@ a {
 .search-field input {
     min-width: 0;
     flex: 1;
-    padding: 6px 0;
+    padding: 7px 0;
     border: 0;
     background: transparent;
     color: var(--color-text);
@@ -881,6 +883,13 @@ a {
     text-decoration: none;
 }
 
+.sidebar-task {
+    padding: var(--space-2) var(--space-3);
+    margin: 1px var(--space-2);
+    width: calc(100% - var(--space-4));
+    border-radius: var(--radius);
+}
+
 .sidebar-task-row {
     position: relative;
     display: flex;
@@ -895,7 +904,7 @@ a {
 .sidebar-row-menu-button {
     position: absolute;
     top: 50%;
-    right: var(--space-2);
+    right: var(--space-3);
     transform: translateY(-50%);
     opacity: 0;
     pointer-events: none;
@@ -915,8 +924,7 @@ a {
 .sidebar-group {
     min-height: 28px;
     align-items: center;
-    padding-top: var(--space-3);
-    padding-bottom: var(--space-1);
+    padding: var(--space-4) var(--gutter) var(--space-1);
     color: var(--color-text-muted);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -1125,7 +1133,7 @@ a {
 
 .task-copy {
     display: grid;
-    gap: var(--space-1);
+    gap: 2px;
 }
 
 .task-line {
@@ -1258,7 +1266,7 @@ a {
     min-height: 0;
     overflow: hidden;
     margin: 0;
-    padding: var(--space-3);
+    padding: var(--space-3) var(--space-5) 0;
 }
 
 .eyebrow {
@@ -1379,15 +1387,15 @@ h1 {
    pane so its controls land on the pane's right edge, not the column's. */
 .task-detail-header {
     width: 100%;
-    padding-bottom: var(--space-4);
+    padding-bottom: var(--space-2);
 }
 
 .task-controls {
     display: grid;
     min-width: 0;
-    gap: var(--space-3);
+    gap: var(--space-2);
     overflow: hidden;
-    padding: var(--space-5) 0 var(--space-3);
+    padding: var(--space-4) 0 var(--space-4);
     border: 0;
     background: transparent;
 }
@@ -2177,13 +2185,13 @@ h1 {
     width: 100%;
     min-height: 44px;
     max-height: 160px;
-    padding: 10px 40px 10px 16px;
+    padding: 12px 44px 12px 18px;
     resize: none;
     border: 0;
     background: transparent;
     color: inherit;
     font: inherit;
-    font-size: var(--text-base);
+    font-size: 0.875rem;
     line-height: 1.5;
     box-sizing: border-box;
     overflow-x: hidden;
@@ -2238,7 +2246,7 @@ h1 {
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    padding: 0 16px;
+    padding: 0 18px;
     color: var(--color-text-muted);
     font-size: var(--text-sm);
 }
@@ -2561,12 +2569,12 @@ h1 {
 }
 
 .detail-response .review-content {
-    font-size: var(--text-base);
-    line-height: 1.6;
+    font-size: 0.875rem;
+    line-height: 1.65;
 }
 
 .detail-response-label {
-    margin: 0 0 var(--space-2);
+    margin: 0 0 var(--space-1);
     color: var(--color-danger);
     font-size: var(--text-base);
     font-weight: 600;
@@ -2611,6 +2619,17 @@ h1 {
     word-break: break-word;
 }
 
+.markdown-content h1:not(:first-child),
+.markdown-content h2:not(:first-child),
+.markdown-content h3:not(:first-child),
+.markdown-content h4:not(:first-child) {
+    margin-top: var(--space-2);
+}
+
+.markdown-content :is(h1, h2, h3, h4) + * {
+    margin-top: calc(var(--space-2) * -1);
+}
+
 .markdown-content h1 {
     font-size: var(--text-lg);
 }
@@ -2627,7 +2646,7 @@ h1 {
 .markdown-content p {
     margin: 0;
     max-width: 100%;
-    line-height: 1.6;
+    line-height: 1.65;
     overflow-wrap: anywhere;
     word-break: break-word;
 }
@@ -2639,7 +2658,7 @@ h1 {
 }
 
 .markdown-content li + li {
-    margin-top: var(--space-1);
+    margin-top: 6px;
 }
 
 .markdown-content blockquote {
@@ -2761,7 +2780,7 @@ h1 {
 .transcript {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-6);
     width: min(100%, var(--measure-log));
     margin-inline: auto;
 }
@@ -2788,6 +2807,7 @@ h1 {
     display: flex;
     align-items: center;
     gap: var(--space-1);
+    margin-bottom: var(--space-1);
     color: var(--color-text-muted);
     font-size: var(--text-md);
     font-weight: 500;
@@ -2800,8 +2820,8 @@ h1 {
     background: transparent;
     border: 0;
     color: var(--color-text);
-    font-size: var(--text-base);
-    line-height: 1.5;
+    font-size: 0.875rem;
+    line-height: 1.65;
     word-wrap: break-word;
     text-align: left;
 }
@@ -2916,7 +2936,7 @@ h1 {
 .transcript-work {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: var(--space-1);
 }
 
 .transcript-work-toggle {
@@ -2924,7 +2944,7 @@ h1 {
     width: 100%;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-2) 0;
+    padding: 6px 0;
     background: none;
     border: none;
     color: var(--color-text-muted);
@@ -2961,7 +2981,7 @@ h1 {
 
 .transcript-work-body {
     border: 0;
-    padding-top: var(--space-4);
+    padding-top: var(--space-3);
 }
 
 .transcript-load-earlier {
@@ -3002,12 +3022,12 @@ h1 {
 
 
 .trace-row {
-    min-height: 24px;
-    padding: 2px 0;
+    min-height: 28px;
+    padding: 4px 0;
 }
 
 .trace-row-step-start {
-    margin-top: var(--space-2);
+    margin-top: var(--space-3);
     border: 0;
 }
 
@@ -3133,19 +3153,19 @@ h1 {
 }
 
 .trace-children {
-    margin: var(--space-2) 0 0 var(--space-4);
+    margin: var(--space-2) 0 0 var(--space-3);
     padding-left: var(--space-3);
     border: 0;
 }
 
 .trace-children .trace-row {
     min-height: 28px;
-    padding-top: var(--space-1);
-    padding-bottom: var(--space-1);
+    padding-top: 2px;
+    padding-bottom: 2px;
 }
 
 .trace-expansion {
-    margin-top: var(--space-2);
+    margin: var(--space-2) 0 var(--space-3);
     padding: var(--space-3);
     border-radius: 6px;
 }
