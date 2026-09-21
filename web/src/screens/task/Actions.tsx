@@ -22,7 +22,6 @@ import { ArchiveIcon, CancelIcon, CheckIcon, MoreIcon, RestoreIcon } from "@/ui/
 import { MarkdownContent } from "@/domain/markdown";
 import { ComposerRequest, ConversationComposer, isResume, routingForState } from "./Composer";
 import { isExplainedWait, nextTryLabel } from "./format";
-import { TaskMetadata } from "./TaskMetadata";
 import { taskToastName } from "@/lib/toast-subject";
 import { toast } from "@/state/toast";
 
@@ -977,9 +976,11 @@ export function TaskControls({
           onSend={handleSend}
           onRemoveQueued={removeQueued}
           thinkingToggle={thinkingToggle}
+          task={task}
+          events={events}
+          contextWindow={contextWindow}
         />
       )}
-      {routing.type !== "none" && <TaskMetadata task={task} events={events} contextWindow={contextWindow} />}
     </section>
   );
 }
