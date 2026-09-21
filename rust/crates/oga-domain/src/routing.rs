@@ -353,6 +353,10 @@ pub struct RoutingRecord {
     /// What the advisor said, when one was asked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub advised: Option<AdvisedRoute>,
+    /// Why the advisor gave no pick, when the router decided on its own: it
+    /// was switched off, or the call failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advisor_unanswered: Option<String>,
 }
 
 /// Where the advisor would have sent this task, how sure it was, and whether

@@ -1,10 +1,10 @@
 //! Asks TypeSafe's Jev which connected worker should run a task, reading the
 //! brief the caller already typed and nothing else.
 //!
-//! The answer is advice. Every outcome short of a confident pick of one of
-//! the destinations offered — no key, a refused call, a slow one, an answer
-//! naming something that was never on the table — comes back as nothing, and
-//! the routing rules decide as they always have.
+//! Its pick decides where the task runs. Every outcome short of a pick of
+//! one of the destinations offered — a refused call, a slow one, an answer
+//! naming something that was never on the table — comes back as the reason
+//! there was no pick, and the routing rules decide as they always have.
 
 use std::time::Duration;
 
@@ -17,13 +17,10 @@ const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 /// The flagship build. A pinned one (`jev-1.13.0`) answers the same shape.
 const MODEL: &str = "jev-latest";
 
-/// Below this the distribution is too flat to act on: the rules already hold
-/// an answer, and a near-coin-flip is not a better one.
-const MIN_CONFIDENCE: f64 = 0.5;
-
-/// Long enough for one small call on a slow connection, short enough that a
-/// stalled advisor costs a dispatch a few seconds instead of holding it.
-const TIMEOUT: Duration = Duration::from_secs(4);
+/// Long enough for a long brief weighed against every enabled model, which
+/// takes a few seconds on its own; short enough that a stalled advisor delays
+/// a dispatch instead of holding it.
+const TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The worker question's key, in the request and in the answer.
 const QUESTION: &str = "worker";
@@ -75,22 +72,46 @@ impl Destination {
     }
 }
 
-/// Where the advisor would send this task, and how concentrated the
-/// distribution behind that was.
+/// Where the advisor would send this task, and how much of its probability
+/// went to that pick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
     pub profile_id: String,
     pub model: String,
     pub confidence: f64,
     /// How hard the picked worker should think, when the advisor answered
-    /// confidently with a level that worker accepts.
+    /// with a level that worker accepts.
     pub effort: Option<String>,
 }
 
-impl Choice {
-    /// Whether the distribution is concentrated enough to route on.
-    pub fn confident(&self) -> bool {
-        self.confidence >= MIN_CONFIDENCE
+/// Why the advisor gave no pick. Its `Display` is the reason recorded on the
+/// task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoAdvice {
+    /// Fewer than two destinations, so there was nothing to choose between.
+    NothingToChoose,
+    TimedOut,
+    Unreachable,
+    /// TypeSafe answered with this HTTP status.
+    Refused(u16),
+    /// The answer was not the shape a pick comes back in.
+    Unreadable,
+    /// The answer named a worker that was never offered.
+    NotOffered,
+}
+
+impl std::fmt::Display for NoAdvice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NoAdvice::NothingToChoose => write!(f, "only one worker could take this task"),
+            NoAdvice::TimedOut => write!(f, "TypeSafe took longer than {}s", TIMEOUT.as_secs()),
+            NoAdvice::Unreachable => write!(f, "TypeSafe could not be reached"),
+            NoAdvice::Refused(401 | 403) => write!(f, "TypeSafe did not accept the key"),
+            NoAdvice::Refused(429) => write!(f, "TypeSafe asked to slow down"),
+            NoAdvice::Refused(status) => write!(f, "TypeSafe answered with error {status}"),
+            NoAdvice::Unreadable => write!(f, "TypeSafe's answer could not be read"),
+            NoAdvice::NotOffered => write!(f, "TypeSafe picked a worker that was not offered"),
+        }
     }
 }
 
@@ -117,28 +138,44 @@ impl Advisor {
         self
     }
 
-    /// Ask where `state` should run. `None` covers every failure the caller
-    /// treats alike: fewer than two destinations to choose between, a
-    /// transport or status failure, a body that does not parse, and an answer
-    /// naming something outside `destinations`. A pick the distribution does
-    /// not back still comes back, so the caller can record what was advised
-    /// before falling back from it — see [`Choice::confident`].
-    pub async fn choose(&self, state: &str, destinations: &[Destination]) -> Option<Choice> {
+    /// Ask where `state` should run, or say why there is no pick.
+    pub async fn choose(
+        &self,
+        state: &str,
+        destinations: &[Destination],
+    ) -> Result<Choice, NoAdvice> {
         if destinations.len() < 2 {
-            return None;
+            return Err(NoAdvice::NothingToChoose);
         }
-        let client = reqwest::Client::builder().timeout(TIMEOUT).build().ok()?;
+        let sent = |error: reqwest::Error| {
+            if error.is_timeout() {
+                NoAdvice::TimedOut
+            } else {
+                NoAdvice::Unreachable
+            }
+        };
+        let client = reqwest::Client::builder()
+            .timeout(TIMEOUT)
+            .build()
+            .map_err(|_| NoAdvice::Unreachable)?;
         let response = client
             .post(&self.endpoint)
             .bearer_auth(&self.api_key)
             .json(&request_body(state, destinations))
             .send()
             .await
-            .ok()?;
+            .map_err(sent)?;
         if !response.status().is_success() {
-            return None;
+            return Err(NoAdvice::Refused(response.status().as_u16()));
         }
-        read_choice(&response.json::<Value>().await.ok()?, destinations)
+        let body = response.json::<Value>().await.map_err(|error| {
+            if error.is_timeout() {
+                NoAdvice::TimedOut
+            } else {
+                NoAdvice::Unreadable
+            }
+        })?;
+        read_choice(&body, destinations)
     }
 }
 
@@ -193,21 +230,24 @@ struct ChoiceAnswer {
 
 /// Reads an answer back to the destination it names. A missing answer, a key
 /// no destination carries, or a body of another shape all read as no advice.
-/// An effort answer that is missing, thin, or a level the picked destination
+/// An effort answer that is missing or names a level the picked destination
 /// does not accept leaves the effort to the rules.
-fn read_choice(body: &Value, destinations: &[Destination]) -> Option<Choice> {
-    let answers = body.get("answers")?;
-    let answer: ChoiceAnswer = serde_json::from_value(answers.get(QUESTION)?.clone()).ok()?;
+fn read_choice(body: &Value, destinations: &[Destination]) -> Result<Choice, NoAdvice> {
+    let answers = body.get("answers").ok_or(NoAdvice::Unreadable)?;
+    let answer: ChoiceAnswer = answers
+        .get(QUESTION)
+        .and_then(|answer| serde_json::from_value(answer.clone()).ok())
+        .ok_or(NoAdvice::Unreadable)?;
     let picked = destinations
         .iter()
-        .find(|destination| destination.key() == answer.choice)?;
+        .find(|destination| destination.key() == answer.choice)
+        .ok_or(NoAdvice::NotOffered)?;
     let effort = answers
         .get(EFFORT_QUESTION)
         .and_then(|effort| serde_json::from_value::<ChoiceAnswer>(effort.clone()).ok())
-        .filter(|effort| effort.confidence >= MIN_CONFIDENCE)
         .map(|effort| effort.choice)
         .filter(|level| picked.efforts.contains(level));
-    Some(Choice {
+    Ok(Choice {
         profile_id: picked.profile_id.clone(),
         model: picked.model.clone(),
         confidence: answer.confidence,
@@ -328,19 +368,18 @@ mod tests {
 
         assert_eq!(choice.profile_id, "deep");
         assert_eq!(choice.model, "vendor/large");
-        assert!(choice.confident());
     }
 
     #[test]
-    fn a_thin_answer_still_reads_so_it_can_be_recorded_before_the_fallback() {
+    fn an_unsure_answer_is_still_a_pick() {
         let answered = json!({
             "answers": { "worker": { "choice": "fast:vendor/small", "confidence": 0.31 } },
         });
 
         let choice = read_choice(&answered, &destinations()).expect("choice");
 
+        assert_eq!(choice.model, "vendor/small");
         assert_eq!(choice.confidence, 0.31);
-        assert!(!choice.confident());
     }
 
     #[test]
@@ -349,22 +388,28 @@ mod tests {
             "answers": { "worker": { "choice": "other:vendor/huge", "confidence": 0.99 } },
         });
 
-        assert_eq!(read_choice(&answered, &destinations()), None);
+        assert_eq!(
+            read_choice(&answered, &destinations()),
+            Err(NoAdvice::NotOffered)
+        );
     }
 
     #[test]
     fn a_body_of_another_shape_is_no_advice() {
-        assert_eq!(read_choice(&json!({}), &destinations()), None);
+        assert_eq!(
+            read_choice(&json!({}), &destinations()),
+            Err(NoAdvice::Unreadable)
+        );
         assert_eq!(
             read_choice(&json!({ "answers": { "worker": {} } }), &destinations()),
-            None
+            Err(NoAdvice::Unreadable)
         );
         assert_eq!(
             read_choice(
                 &json!({ "answers": { "worker": { "type": "noul", "noul": 0.9 } } }),
                 &destinations()
             ),
-            None
+            Err(NoAdvice::Unreadable)
         );
     }
 
@@ -372,7 +417,10 @@ mod tests {
     async fn one_destination_is_not_a_choice_worth_asking_about() {
         let advisor = Advisor::new("key").endpoint("http://127.0.0.1:1/v1/systemone");
 
-        assert_eq!(advisor.choose("anything", &destinations()[..1]).await, None);
+        assert_eq!(
+            advisor.choose("anything", &destinations()[..1]).await,
+            Err(NoAdvice::NothingToChoose)
+        );
     }
 
     #[tokio::test]
@@ -382,7 +430,7 @@ mod tests {
 
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
-            None
+            Err(NoAdvice::Refused(401))
         );
     }
 
@@ -395,7 +443,7 @@ mod tests {
 
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
-            None
+            Err(NoAdvice::Refused(422))
         );
     }
 
@@ -406,7 +454,7 @@ mod tests {
 
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
-            None
+            Err(NoAdvice::Refused(429))
         );
     }
 
@@ -417,7 +465,7 @@ mod tests {
 
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
-            None
+            Err(NoAdvice::Refused(529))
         );
     }
 
@@ -427,7 +475,7 @@ mod tests {
 
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
-            None
+            Err(NoAdvice::Unreachable)
         );
     }
 
@@ -437,12 +485,12 @@ mod tests {
 
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
-            None
+            Err(NoAdvice::Unreadable)
         );
     }
 
     #[tokio::test]
-    async fn a_confident_answer_names_the_destination_it_picked() {
+    async fn an_answer_names_the_destination_it_picked() {
         let advisor = Advisor::new("key").endpoint(stub(
             "200 OK",
             r#"{"model":"jev-1.13.0","answers":{"worker":{"type":"choice","choice":"deep:vendor/large","probabilities":{"deep:vendor/large":0.9,"fast:vendor/small":0.1},"confidence":0.9}},"usage":{"input_tokens":1,"output_tokens":1}}"#,
@@ -454,6 +502,5 @@ mod tests {
             .expect("choice");
 
         assert_eq!(choice.model, "vendor/large");
-        assert!(choice.confident());
     }
 }

@@ -229,11 +229,22 @@ pub async fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Htt
             // Advice only stands in for a choice the router made on its own.
             // A caller who named the account or the model already answered
             // the question, so nothing is asked on their behalf.
-            let (route, advised) = match advisor(state)? {
-                Some(advisor) if input.profile.is_none() && input.model.is_none() => {
-                    take_advice(&advisor, &input, &world, &preferences, route).await
+            let (route, advice) = if input.profile.is_some() || input.model.is_some() {
+                (route, None)
+            } else {
+                match advisor(state)? {
+                    Some(advisor) => {
+                        let (route, advice) =
+                            take_advice(&advisor, &input, &world, &preferences, route).await;
+                        (route, Some(advice))
+                    }
+                    None => (route, Some(Err("the advisor is switched off".to_owned()))),
                 }
-                _ => (route, None),
+            };
+            let (advised, advisor_unanswered) = match advice {
+                Some(Ok(advised)) => (Some(advised), None),
+                Some(Err(reason)) => (None, Some(reason)),
+                None => (None, None),
             };
             let effort = input
                 .effort
@@ -251,7 +262,13 @@ pub async fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Htt
                 profile_id: route.profile_id.clone(),
                 model: route.model.clone(),
                 effort,
-                decision: decision_from_route(&route, decided_by, input.effort.is_some(), advised),
+                decision: decision_from_route(
+                    &route,
+                    decided_by,
+                    input.effort.is_some(),
+                    advised,
+                    advisor_unanswered,
+                ),
                 warnings: route.warnings,
                 reason: route.reason,
             })
@@ -259,24 +276,27 @@ pub async fn plan(state: &HttpState, input: RouteInput) -> Result<RoutePlan, Htt
     }
 }
 
-/// Ask the advisor where this brief should run and take its answer, when
-/// there is an answer worth taking. Anything else leaves the route the rules
-/// built exactly as it was: switched off, no key, a call that failed or ran
-/// long, advice too thin to act on, or a destination selection will not send
-/// this work to. What was advised is recorded either way, so a task that ran
-/// on the rules still shows what it was weighed against.
+/// Ask the advisor where this brief should run and take its answer. Anything
+/// else leaves the route the rules built exactly as it was: switched off, no
+/// key, a call that failed or ran long, or a destination selection will not
+/// send this work to. What was advised is recorded either way, so a task that ran
+/// on the rules still shows what it was weighed against, and a call with no
+/// pick comes back as the reason.
 async fn take_advice(
     advisor: &Advisor,
     input: &RouteInput,
     world: &RoutingInputs,
     preferences: &RoutePreferences,
     route: ModelRoute,
-) -> (ModelRoute, Option<AdvisedRoute>) {
+) -> (ModelRoute, Result<AdvisedRoute, String>) {
     let destinations = describe_destinations(world);
-    let Some(choice) = advisor.choose(&advisor_brief(input), &destinations).await else {
-        return (route, None);
-    };
-    apply_advice(input, world, preferences, route, choice)
+    match advisor.choose(&advisor_brief(input), &destinations).await {
+        Ok(choice) => {
+            let (route, advised) = apply_advice(input, world, preferences, route, choice);
+            (route, Ok(advised))
+        }
+        Err(reason) => (route, Err(reason.to_string())),
+    }
 }
 
 /// The advisor to ask, when one is switched on and signed in. The key it
@@ -286,16 +306,16 @@ fn advisor(state: &HttpState) -> Result<Option<Advisor>, HttpError> {
     Ok((settings.enabled && !settings.api_key.is_empty()).then(|| Advisor::new(settings.api_key)))
 }
 
-/// Weigh one answer against the route the rules built. Advice too close to
-/// call, or naming a destination selection will not send this work to, is
-/// recorded and passed up rather than followed.
+/// Follow one answer in place of the route the rules built. Advice naming a
+/// destination selection will not send this work to is recorded and passed
+/// up rather than followed.
 fn apply_advice(
     input: &RouteInput,
     world: &RoutingInputs,
     preferences: &RoutePreferences,
     route: ModelRoute,
     choice: Choice,
-) -> (ModelRoute, Option<AdvisedRoute>) {
+) -> (ModelRoute, AdvisedRoute) {
     let mut advised = AdvisedRoute {
         profile_id: choice.profile_id.clone(),
         model: choice.model.clone(),
@@ -304,10 +324,6 @@ fn apply_advice(
         effort: choice.effort.clone(),
         ignored_because: None,
     };
-    if !choice.confident() {
-        advised.ignored_because = Some("the answer was too close to call".into());
-        return (route, Some(advised));
-    }
     let preferences = RoutePreferences {
         advised: Some(AdvisedModel {
             profile_id: choice.profile_id.clone(),
@@ -330,11 +346,11 @@ fn apply_advice(
                 picked.effort = Some(effort);
                 picked.effort_reason = "the advisor matched it to the brief".into();
             }
-            (picked, Some(advised))
+            (picked, advised)
         }
         _ => {
             advised.ignored_because = Some("that worker could not take this task".into());
-            (route, Some(advised))
+            (route, advised)
         }
     }
 }
@@ -453,6 +469,7 @@ fn decision_from_route(
     decided_by: DecidedBy,
     caller_effort: bool,
     advised: Option<AdvisedRoute>,
+    advisor_unanswered: Option<String>,
 ) -> SelectionDecision {
     SelectionDecision {
         record: oga_domain::RoutingRecord {
@@ -496,6 +513,7 @@ fn decision_from_route(
             rejected_count: (!route.rejected.is_empty()).then_some(route.rejected_count as u64),
             warnings: (!route.warnings.is_empty()).then(|| route.warnings.clone()),
             advised,
+            advisor_unanswered,
         },
         chosen: None,
     }
@@ -532,6 +550,7 @@ fn decision_from_audit(
             rejected_count: (!audit.rejected.is_empty()).then_some(audit.rejected.len() as u64),
             warnings: (!audit.warnings.is_empty()).then(|| audit.warnings.clone()),
             advised: None,
+            advisor_unanswered: None,
         },
         chosen: None,
     }
@@ -921,6 +940,10 @@ mod tests {
         assert_eq!(route.profile_id, "fast");
         assert_eq!(route.decision.record.decided_by, DecidedBy::Router);
         assert_eq!(route.decision.record.advised, None);
+        assert_eq!(
+            route.decision.record.advisor_unanswered.as_deref(),
+            Some("the advisor is switched off")
+        );
         assert!(route.reason.contains("loved"), "{}", route.reason);
     }
 
@@ -991,7 +1014,7 @@ mod tests {
 
         assert_eq!(route.profile_id, "deep");
         assert_eq!(route.model, DEEP_MODEL);
-        let advised = advised.expect("recorded");
+
         assert!(advised.used);
         assert_eq!(advised.confidence, 0.91);
         assert_eq!(advised.ignored_because, None);
@@ -1003,7 +1026,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_answer_too_close_to_call_leaves_the_rules_in_charge() {
+    async fn an_unsure_answer_still_decides_the_route() {
         let (directory, store) = two_workers();
         love(directory.path(), &format!("fast:{FAST_MODEL}"));
         let state = HttpState::new(store);
@@ -1016,17 +1039,11 @@ mod tests {
             &world,
             &RoutePreferences::default(),
             rules,
-            advice("deep", DEEP_MODEL, 0.49),
+            advice("deep", DEEP_MODEL, 0.2),
         );
 
-        assert_eq!(route.profile_id, "fast");
-        let advised = advised.expect("recorded");
-        assert!(!advised.used);
-        assert_eq!(advised.model, DEEP_MODEL);
-        assert_eq!(
-            advised.ignored_because.as_deref(),
-            Some("the answer was too close to call")
-        );
+        assert_eq!(route.profile_id, "deep");
+        assert!(advised.used);
     }
 
     #[tokio::test]
@@ -1048,7 +1065,7 @@ mod tests {
         );
 
         assert_eq!(route.profile_id, "fast");
-        let advised = advised.expect("recorded");
+
         assert!(!advised.used);
         assert_eq!(
             advised.ignored_because.as_deref(),
