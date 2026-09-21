@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-09-21
+
 - The Charts view in the usage window now works. It shows cost and tokens day by day for the month you are on, and the month arrows move the charts as well as the grid. Both now fill the window instead of sitting in a narrow strip down the middle.
 - A task no longer ends as blocked just because the worker said it was stuck. A run that hit a slow test or a missing setup and worked around it now finishes as done, and a task only stops for you when the worker asks a question or the run itself fails.
 - A worker that never answers when a task starts now gives up in half the time, and the task says what that worker said before it went quiet instead of only that it did not answer.
