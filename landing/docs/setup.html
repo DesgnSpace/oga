@@ -105,7 +105,7 @@
         <h3 id="connection">How Oga talks to a worker<a class="heading-anchor" href="#connection" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h3>
         <p>Oga talks to a worker's tool over the Agent Client Protocol (ACP) when it can run that tool this way, and through the tool's own command line otherwise. Either way the work runs on the same account, with the same limits on what it may touch.</p>
         <ul>
-          <li>Claude, Codex, OpenCode, OpenCode 2, Antigravity, and Pi workers connect over ACP.</li>
+          <li>Claude, Codex, OpenCode, OpenCode 2, Antigravity, Pi, fx, and Cursor workers connect over ACP.</li>
           <li>Claude needs one extra install to connect this way: <code>npm install -g @agentclientprotocol/claude-agent-acp</code>. Without it, Claude workers use their command line.</li>
           <li>Codex needs one too: <code>npm install -g @agentclientprotocol/codex-acp@1.12</code>. It brings its own copy of Codex and leaves the one you already have alone. Without it, or with a different version, Codex workers use their command line.</li>
           <li>A Codex worker that signs in with <code>CODEX_API_KEY</code> always uses its command line.</li>
@@ -117,6 +117,10 @@
           <li>Pi workers never load a project's own Pi settings, extensions, or skills, such as a <code>.pi</code> or <code>.agents/skills</code> folder. In a project that has them, Pi workers use their command line.</li>
           <li>If a Pi extension stops to ask a question, Oga answers no, because nobody is there to reply.</li>
           <li>Pi tasks that connect over ACP don't show token counts or cost.</li>
+          <li>Cursor connects over ACP and nothing else. There's no command line to fall back to, so a Cursor task that can't start says why and stops.</li>
+          <li>Cursor needs the <code>cursor-agent</code> command on your <code>PATH</code>. Sign in once with <code>cursor-agent login</code>; until then, Cursor tasks stop and say so.</li>
+          <li>Each Cursor model name carries its own thinking, context, and speed choice, so the effort you pick is ignored.</li>
+          <li>Cursor tasks can't be continued in a terminal and don't show token counts or cost.</li>
           <li>A task keeps the connection it started on, so resuming it picks up the same conversation.</li>
           <li>If ACP can't start or can't use the model and effort you picked, Oga switches the task to the command line before it begins and notes why. A worker set to use only ACP stops the task and says why.</li>
           <li>A task's details show whether it connects over ACP or uses its command line, and why. When ACP wasn't available, you can copy what it reported.</li>

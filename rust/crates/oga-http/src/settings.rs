@@ -23,17 +23,18 @@ use oga_domain::{
     UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
-use oga_providers::{codex_home, environment_for, unset_environment_for};
+use oga_providers::{CURSOR_LOGIN, codex_home, environment_for, unset_environment_for};
 use oga_routing::{
-    claude_models, claude_models_from_catalog, format_rfc3339_ms, now_ms, parse_antigravity_models,
-    parse_codex_models, parse_fx_models, parse_opencode_models, parse_opencode_v2_models,
-    parse_pi_models, select_model_rows, summarize_usage,
+    claude_models, claude_models_from_catalog, cursor_models, format_rfc3339_ms, now_ms,
+    parse_antigravity_models, parse_codex_models, parse_fx_models, parse_opencode_models,
+    parse_opencode_v2_models, parse_pi_models, select_model_rows, summarize_usage,
 };
 use oga_runner::worker_path::worker_path;
 use oga_store::Store;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::process::{ChildStdin, ChildStdout, Command};
 use tokio::time::timeout;
 
 use crate::router::{HttpError, HttpState};
@@ -910,6 +911,7 @@ fn parse_provider(value: &str) -> Result<Provider, HttpError> {
         "antigravity" => Ok(Provider::Antigravity),
         "pi" => Ok(Provider::Pi),
         "fx" => Ok(Provider::Fx),
+        "cursor" => Ok(Provider::Cursor),
         _ => Err(HttpError::bad_request("invalid provider")),
     }
 }
@@ -1082,6 +1084,9 @@ fn apply_profile_environment(command: &mut Command, profile: &Profile) {
 /// understood yields no models, so the caller falls back to the profile's
 /// configured model rather than showing nothing at all.
 async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
+    if profile.provider == Provider::Cursor {
+        return discover_cursor_models(profile).await;
+    }
     let dir = tempfile::tempdir().map_err(|_| ())?;
     let cwd = dir.path().display().to_string();
     let argv: Vec<String> = match profile.provider {
@@ -1104,6 +1109,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
             "--refresh".into(),
         ],
         Provider::Claude => unreachable!("claude models come from models.dev"),
+        Provider::Cursor => unreachable!("cursor models come from an ACP session"),
     };
     let mut command = Command::new(&argv[0]);
     command
@@ -1131,8 +1137,86 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         Provider::OpenCode2 => parse_opencode_v2_models(&raw, profile).map_err(|_| ())?,
         Provider::OpenCode => parse_opencode_models(&raw, profile),
         Provider::Claude => unreachable!("claude models come from models.dev"),
+        Provider::Cursor => unreachable!("cursor models come from an ACP session"),
     };
     Ok(parsed)
+}
+
+/// The models a Cursor account can reach, read from a session of its own.
+///
+/// Cursor offers its catalogue only to an ACP session: the ids carry the
+/// thinking, context, and speed choices a run makes, and `cursor-agent models`
+/// lists neither those ids nor those choices. So this opens a session in a
+/// throwaway directory, keeps what opening it answered, and drops the session
+/// without ever prompting it.
+async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
+    let dir = tempfile::tempdir().map_err(|_| ())?;
+    let cwd = dir.path().display().to_string();
+    let mut command = Command::new("cursor-agent");
+    command
+        .arg("acp")
+        .current_dir(&cwd)
+        .env("PATH", worker_path())
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    apply_profile_environment(&mut command, profile);
+    let mut agent = command.spawn().map_err(|_| ())?;
+    let mut stdin = agent.stdin.take().ok_or(())?;
+    let mut stdout = BufReader::new(agent.stdout.take().ok_or(())?).lines();
+    let opened = timeout(PROVIDER_TIMEOUT, async {
+        let handshake = [
+            (
+                1,
+                "initialize",
+                json!({"protocolVersion": 1, "clientCapabilities": {}}),
+            ),
+            (2, "authenticate", json!({"methodId": CURSOR_LOGIN})),
+        ];
+        for (id, method, params) in handshake {
+            ask(&mut stdin, &mut stdout, id, method, params).await?;
+        }
+        ask(
+            &mut stdin,
+            &mut stdout,
+            3,
+            "session/new",
+            json!({"cwd": cwd, "mcpServers": []}),
+        )
+        .await
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or(())?;
+    Ok(cursor_models(&opened, profile))
+}
+
+/// Sends one request and answers with the agent's `result` for it, skipping
+/// everything it says on the way. An error, or a close before the answer,
+/// ends the read.
+async fn ask(
+    stdin: &mut ChildStdin,
+    lines: &mut Lines<BufReader<ChildStdout>>,
+    id: u64,
+    method: &str,
+    params: Value,
+) -> Option<Value> {
+    let frame = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+    stdin
+        .write_all(format!("{frame}\n").as_bytes())
+        .await
+        .ok()?;
+    while let Ok(Some(line)) = lines.next_line().await {
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if message["id"] == json!(id) {
+            return message.get("result").cloned();
+        }
+    }
+    None
 }
 
 async fn cached_opencode_models(profile: &Profile) -> Vec<ModelInfo> {
@@ -1647,6 +1731,9 @@ async fn fetch_usage(profile: &Profile) -> ProfileUsage {
             unsupported_usage(profile, "no usage source known for antigravity")
         }
         Provider::Pi => unsupported_usage(profile, "usage tracking is not supported for pi"),
+        Provider::Cursor => {
+            unsupported_usage(profile, "usage tracking is not supported for cursor")
+        }
         Provider::Fx => unsupported_usage(profile, "usage tracking is not supported for fx"),
     }
 }

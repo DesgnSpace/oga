@@ -14,6 +14,7 @@ pub enum Provider {
     Antigravity,
     Pi,
     Fx,
+    Cursor,
 }
 
 impl Provider {
@@ -26,6 +27,7 @@ impl Provider {
             Provider::Antigravity => "antigravity",
             Provider::Pi => "pi",
             Provider::Fx => "fx",
+            Provider::Cursor => "cursor",
         }
     }
 }

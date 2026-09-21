@@ -1399,6 +1399,9 @@ fn provider_event_view(
                 _ => None,
             }
         }
+        // Cursor is reached over ACP alone, so every event it has already
+        // read itself above.
+        Provider::Cursor => None,
         // `fx ask --json` answers with one object for the whole request rather
         // than a stream, so the only row it carries is that request's tally.
         Provider::Fx => {

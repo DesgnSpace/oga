@@ -12,7 +12,8 @@ use serde_json::Value;
 mod acp;
 
 pub use acp::{
-    AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, OPENCODE_ADAPTER,
+    AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, CURSOR_LOGIN,
+    OPENCODE_ADAPTER,
 };
 
 pub const NO_FINAL_MESSAGE: &str =
@@ -84,6 +85,8 @@ pub enum ProviderError {
     Json(#[from] serde_json::Error),
     #[error("{0} cannot continue an earlier session")]
     CannotResume(String),
+    #[error("{0} has no command line Oga can run: it connects over ACP only")]
+    NoCommandLine(&'static str),
 }
 
 pub fn command_for(
@@ -93,7 +96,7 @@ pub fn command_for(
     model: Option<&str>,
     effort: Option<&str>,
     oga_server: Option<OgaServer<'_>>,
-) -> ProviderCommand {
+) -> Result<ProviderCommand, ProviderError> {
     command_for_with_options(
         profile,
         prompt,
@@ -113,7 +116,7 @@ pub fn command_for_with_options(
     cwd: &str,
     model: Option<&str>,
     options: CommandOptions<'_>,
-) -> ProviderCommand {
+) -> Result<ProviderCommand, ProviderError> {
     let CommandOptions {
         hook_url,
         effort,
@@ -231,13 +234,14 @@ pub fn command_for_with_options(
                 a.into_iter().map(String::from).collect()
             }
             Provider::Fx => fx_ask(prompt, None),
+            Provider::Cursor => return Err(ProviderError::NoCommandLine("cursor")),
         }
     };
-    ProviderCommand {
+    Ok(ProviderCommand {
         argv,
         env: run_environment_for(profile, model),
         env_remove: unset_environment_for(profile),
-    }
+    })
 }
 
 /// The profile's account environment with the choices one run makes in it,
@@ -406,6 +410,7 @@ pub fn resume_command_for_with_options(
             a.into_iter().map(String::from).collect()
         }
         Provider::Fx => fx_ask(prompt, Some(session)),
+        Provider::Cursor => return Err(ProviderError::NoCommandLine("cursor")),
     };
     Ok(ProviderCommand {
         argv,
@@ -857,7 +862,11 @@ pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
             env.insert("PI_CODING_AGENT_DIR".into(), agent);
             env.insert("PI_CODING_AGENT_SESSION_DIR".into(), sessions);
         }
-        Provider::OpenCode | Provider::OpenCode2 | Provider::Antigravity | Provider::Fx => {}
+        Provider::OpenCode
+        | Provider::OpenCode2
+        | Provider::Antigravity
+        | Provider::Fx
+        | Provider::Cursor => {}
     }
     env
 }
@@ -985,7 +994,9 @@ mod tests {
     }
     #[test]
     fn claude_prompt_is_separated_from_variadic_options() {
-        let argv = command_for(&profile(Provider::Claude), "go", "/repo", None, None, None).argv;
+        let argv = command_for(&profile(Provider::Claude), "go", "/repo", None, None, None)
+            .expect("a command line")
+            .argv;
         assert_eq!(argv[argv.len() - 2..], ["--".to_owned(), "go".to_owned()]);
         let resumed = resume_command_for(
             &profile(Provider::Claude),
@@ -1006,7 +1017,9 @@ mod tests {
     #[test]
     fn command_uses_provider_program() {
         assert_eq!(
-            command_for(&profile(Provider::Pi), "go", "/repo", None, None, None).argv[0],
+            command_for(&profile(Provider::Pi), "go", "/repo", None, None, None)
+                .expect("a command line")
+                .argv[0],
             "pi"
         );
     }
@@ -1031,7 +1044,8 @@ mod tests {
         profile
             .env
             .insert("CLAUDE_CONFIG_DIR".into(), "$HOME/.claude-me".into());
-        let command = command_for(&profile, "go", "/repo", None, None, None);
+        let command =
+            command_for(&profile, "go", "/repo", None, None, None).expect("a command line");
         assert_eq!(
             command.env["CLAUDE_CONFIG_DIR"],
             format!("{home}/.claude-me")
@@ -1081,7 +1095,8 @@ mod tests {
             .insert("CLAUDE_CONFIG_DIR".into(), "$HOME/.claude".into());
 
         for candidate in [&primary, &spelled_out] {
-            let command = command_for(candidate, "go", "/repo", None, None, None);
+            let command =
+                command_for(candidate, "go", "/repo", None, None, None).expect("a command line");
             assert!(!command.env.contains_key("CLAUDE_CONFIG_DIR"));
             assert!(command.env_remove.contains("CLAUDE_CONFIG_DIR"));
             assert!(
@@ -1093,7 +1108,8 @@ mod tests {
 
         let mut personal = profile(Provider::Claude);
         personal.id = "claude-me".into();
-        let command = command_for(&personal, "go", "/repo", None, None, None);
+        let command =
+            command_for(&personal, "go", "/repo", None, None, None).expect("a command line");
         assert_eq!(
             command.env["CLAUDE_CONFIG_DIR"],
             format!("{home}/.claude-me")
@@ -1127,7 +1143,8 @@ mod tests {
         }
         let mut claude = profile(Provider::Claude);
         claude.id = "claude".into();
-        let command = command_for(&claude, "go", "/repo", None, None, None);
+        let command =
+            command_for(&claude, "go", "/repo", None, None, None).expect("a command line");
         assert!(!command.env.contains_key("CLAUDE_CONFIG_DIR"));
         assert!(command.env_remove.contains("CLAUDE_CONFIG_DIR"));
         assert_eq!(claude_config_dir(&claude), format!("{}/.claude", home()));

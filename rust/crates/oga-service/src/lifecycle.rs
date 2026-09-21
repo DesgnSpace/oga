@@ -525,6 +525,7 @@ pub(crate) async fn run_task_with_session_and_active(
             Some(&task.model),
             command_options,
         )
+        .map_err(|error| LifecycleError::Refusal(error.to_string()))?
     };
     let turn_id = match claimed_turn {
         Some(turn_id) => turn_id,

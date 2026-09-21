@@ -231,6 +231,9 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
             AcpVersions::Build(build) => AgentRelease::build(&release.agent, build),
         });
     }
+    if let Some(method_id) = &adapter.authentication {
+        launch = launch.authentication(method_id);
+    }
     if adapter.oga_tools {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);
     }

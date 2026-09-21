@@ -160,7 +160,7 @@ const KIND_DESCRIPTION: &str = concat!(
 const EFFORT_DESCRIPTION: &str = concat!(
     "How hard the model is asked to think on this run, weakest to strongest: minimal, low, medium, high, xhigh, max. ",
     "Omitted, a routing rule's own configured effort applies if it has one, else the model's default. ",
-    "Passed through by claude, codex, opencode, opencode-2 and pi; antigravity ignores it, since its model ids carry the level. models reports the levels each model accepts in `efforts`."
+    "Passed through by claude, codex, opencode, opencode-2 and pi; antigravity and cursor ignore it, since their model ids carry the level. models reports the levels each model accepts in `efforts`."
 );
 const ALLOW_QUESTIONS_DESCRIPTION: &str = concat!(
     "Whether the worker may stop and ask. True, the default, lets it park in needs_input with a question and wait there until reply answers. ",
@@ -556,7 +556,7 @@ fn shared_tools() -> Vec<Value> {
                 (
                     "provider".into(),
                     described(
-                        json!({ "type": "string", "enum": ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi"] }),
+                        json!({ "type": "string", "enum": ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx", "cursor"] }),
                         "Restrict to the accounts of one provider.",
                     ),
                 ),

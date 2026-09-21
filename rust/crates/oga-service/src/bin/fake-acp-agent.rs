@@ -33,6 +33,13 @@
 //! that does not offer the task's model, and `auth` one that refuses the
 //! session until someone signs in.
 //!
+//! A mode starting `cursor` answers the way `cursor-agent acp` does: it names
+//! neither itself nor its version, offers one sign-in method and refuses every
+//! session until the client claims it, names its session with a UUID of
+//! Cursor's own, and offers the model and the execution mode as session
+//! settings. `no-model` is an account that does not offer the task's model,
+//! and `no-sign-in` a server offering a method this client cannot claim.
+//!
 //! A mode whose turns are `steer` waits for an instruction to be handed to the
 //! turn it is already running, the way `claude-agent-acp` takes one over
 //! `_session/steering`, and finishes with what it was told. `steer-refused`
@@ -75,6 +82,8 @@ const CODEX_THREAD: &str = "019a4c1e-7b2d-7c30-9e41-5d6f7a8b9c0d";
 const ANTIGRAVITY_SESSION: &str = "5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c";
 /// Pi names a session with a UUID, and `pi-acp` opens the session under it.
 const PI_SESSION: &str = "0b7d4a8e-5c1f-4d2a-9e3b-6f8c1a2d4e5f";
+/// Cursor's ACP server names a session with a UUID of its own.
+const CURSOR_SESSION: &str = "3c9a1d7e-4b2f-4a8c-91d6-7e5b3f2a8c04";
 
 fn emit(value: &Value) {
     println!("{value}");
@@ -302,6 +311,39 @@ fn pi_settings(mode: &str, model: &str, thinking: &str) -> Value {
     ])
 }
 
+/// Cursor's settings: the models its session offers, each id carrying its own
+/// thinking and context choices, and the execution modes, starting on the one
+/// with full tool access.
+fn cursor_settings(mode: &str, model: &str, access: &str) -> Value {
+    let mut models =
+        vec![json!({"value": "auto-smart[optimize_for=balanced]", "name": "Auto Balance"})];
+    if !mode.ends_with("no-model") {
+        models.push(json!({"value": "claude-sonnet-5[thinking=true,effort=high]", "name": "claude-sonnet-5"}));
+    }
+    json!([
+        {
+            "id": "mode",
+            "name": "Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": access,
+            "options": [
+                {"value": "agent", "name": "Agent"},
+                {"value": "plan", "name": "Plan"},
+                {"value": "ask", "name": "Ask"},
+            ],
+        },
+        {
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": model,
+            "options": models,
+        },
+    ])
+}
+
 /// Records the session the way `pi-acp` does, keyed by its id, with the file
 /// Pi keeps it in under the session directory it was started with.
 fn record_pi_session(session: &str, cwd: &str) {
@@ -336,6 +378,13 @@ fn initialize_meta(mode: &str) -> Option<Value> {
 }
 
 fn capabilities(mode: &str) -> Value {
+    if mode.starts_with("cursor") {
+        return json!({
+            "loadSession": true,
+            "mcpCapabilities": {"http": true, "sse": true},
+            "sessionCapabilities": {"list": {}},
+        });
+    }
     if mode.starts_with("pi") {
         return json!({
             "loadSession": true,
@@ -649,12 +698,14 @@ fn main() {
     let codex = mode.starts_with("codex");
     let antigravity = mode.starts_with("antigravity");
     let pi = mode.starts_with("pi");
-    let session_id = match (opencode, claude, codex, antigravity, pi) {
+    let cursor = mode.starts_with("cursor");
+    let session_id = match (opencode, claude, codex, antigravity, pi, cursor) {
         (true, ..) => "ses_acp1",
         (_, true, ..) => CLAUDE_SESSION,
         (_, _, true, ..) => CODEX_THREAD,
-        (.., true, _) => ANTIGRAVITY_SESSION,
-        (.., true) => PI_SESSION,
+        (_, _, _, true, ..) => ANTIGRAVITY_SESSION,
+        (.., true, _) => PI_SESSION,
+        (.., true) => CURSOR_SESSION,
         _ => SESSION,
     };
     let renamed = mode.ends_with("renamed");
@@ -686,6 +737,7 @@ fn main() {
         .or_else(|| mode.strip_prefix("codex-"))
         .or_else(|| mode.strip_prefix("antigravity-"))
         .or_else(|| mode.strip_prefix("pi-"))
+        .or_else(|| mode.strip_prefix("cursor-"))
         .unwrap_or(&mode)
         .to_owned();
     let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
@@ -697,6 +749,9 @@ fn main() {
     if pi {
         model = "anthropic/claude-sonnet-4-5".to_owned();
         effort = "medium".to_owned();
+    }
+    if cursor {
+        model = "auto-smart[optimize_for=balanced]".to_owned();
     }
     if codex {
         let config: Value = env::var("CODEX_CONFIG")
@@ -710,6 +765,7 @@ fn main() {
             .to_owned();
     }
 
+    let mut signed_in = !cursor;
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines().map_while(Result::ok);
     while let Some(line) = lines.next() {
@@ -727,6 +783,39 @@ fn main() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "error": {"code": -32000, "message": "sign in first"},
+            })),
+            "initialize" if cursor => {
+                let offered = if mode.ends_with("no-sign-in") {
+                    "cursor_api_key"
+                } else {
+                    "cursor_login"
+                };
+                emit(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": 1,
+                        "agentCapabilities": capabilities(&mode),
+                        "authMethods": [{"id": offered, "name": "Cursor Login"}],
+                    },
+                }));
+            }
+            "authenticate" => {
+                signed_in = true;
+                emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}}));
+            }
+            "session/new" | "session/load" if cursor && !signed_in => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32000, "message": "Authentication required"},
+            })),
+            "session/new" if cursor => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": session_id,
+                    "configOptions": cursor_settings(&mode, &model, &access),
+                },
             })),
             "initialize" => {
                 let mut answer = json!({
@@ -802,7 +891,9 @@ fn main() {
                     Some("mode") => access = value,
                     _ => effort = value,
                 }
-                let offered = if pi {
+                let offered = if cursor {
+                    cursor_settings(&mode, &model, &access)
+                } else if pi {
                     pi_settings(&mode, &model, &effort)
                 } else if claude {
                     claude_settings(&mode, &effort)
@@ -828,7 +919,13 @@ fn main() {
                 ] {
                     chunk(session, text);
                 }
-                if pi {
+                if cursor {
+                    emit(&json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {"configOptions": cursor_settings(&mode, &model, &access)},
+                    }));
+                } else if pi {
                     emit(&json!({
                         "jsonrpc": "2.0",
                         "id": id,

@@ -1623,6 +1623,8 @@ function providerLabel(value: string): string {
       return "Pi";
     case "fx":
       return "fx";
+    case "cursor":
+      return "Cursor";
     default:
       return value;
   }
