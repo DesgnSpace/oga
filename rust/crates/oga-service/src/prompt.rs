@@ -268,14 +268,11 @@ fn memories_section(memories: &[MemoryEntry]) -> String {
 }
 
 fn reporting_lines(allow_questions: bool) -> Vec<String> {
-    vec![
-        if allow_questions {
-            "If a product choice, secret, destructive action, or new authority is required, stop and end with: OGA_NEEDS_INPUT: <one clear question>".into()
-        } else {
-            "Do not ask questions. If required information or authority is missing, report a blocked result.".into()
-        },
-        "If work cannot be completed, end with: OGA_BLOCKED: <permission_denied|needs_authority|worker_error> | <short reason>".into(),
-    ]
+    vec![if allow_questions {
+        "If a product choice, secret, destructive action, or new authority is required, stop and end with: OGA_NEEDS_INPUT: <one clear question>".into()
+    } else {
+        "Do not ask questions. Decide with what you have, and say in the report what you could not settle.".into()
+    }]
 }
 
 /// Render the scope sentence shared by fresh prompts and continuation prompts.
@@ -446,30 +443,6 @@ pub fn interpret_worker_outcome(
             },
         };
     }
-    if let Some(blocked) = marker_value(&output, "OGA_BLOCKED") {
-        let (raw_code, reason) = blocked.split_once('|').map_or(
-            (blocked.as_str(), "worker reported blocked"),
-            |(code, reason)| (code.trim(), reason.trim()),
-        );
-        let code = match raw_code.trim().to_ascii_lowercase().as_str() {
-            "permission_denied" => CompletionCode::PermissionDenied,
-            "needs_authority" => CompletionCode::NeedsAuthority,
-            _ => CompletionCode::WorkerError,
-        };
-        return WorkerOutcome {
-            state: TaskState::Blocked,
-            output,
-            question: None,
-            error: Some(reason.to_owned()),
-            completion: TaskCompletion {
-                exit_code: exit,
-                blocked: true,
-                code,
-                reason: Some(reason.to_owned()),
-                ..empty_completion()
-            },
-        };
-    }
     if let Some(line) = completed_marker(&output) {
         let output = output
             .lines()
@@ -545,8 +518,7 @@ pub fn interpret_worker_outcome(
             },
         };
     }
-    let lower = output.to_ascii_lowercase();
-    if !output.trim().is_empty() && !permission_block(&lower) {
+    if !output.trim().is_empty() {
         return WorkerOutcome {
             state: TaskState::Completed,
             output,
@@ -560,26 +532,16 @@ pub fn interpret_worker_outcome(
             },
         };
     }
-    let code = if permission_block(&lower) {
-        CompletionCode::PermissionDenied
-    } else {
-        CompletionCode::WorkerError
-    };
-    let reason = if code == CompletionCode::WorkerError {
-        "worker exited without output".into()
-    } else {
-        compact(&output)
-    };
     WorkerOutcome {
         state: TaskState::Blocked,
         output,
         question: None,
-        error: Some(reason.clone()),
+        error: Some("worker exited without output".to_owned()),
         completion: TaskCompletion {
             exit_code: exit,
             blocked: true,
-            code,
-            reason: Some(reason),
+            code: CompletionCode::WorkerError,
+            reason: Some("worker exited without output".to_owned()),
             ..empty_completion()
         },
     }
@@ -644,22 +606,6 @@ fn compact(value: &str) -> String {
         .chars()
         .take(500)
         .collect()
-}
-
-fn permission_block(value: &str) -> bool {
-    contains_any(
-        value,
-        &[
-            "awaiting permission",
-            "awaiting approval",
-            "need permission",
-            "need approval",
-            "needs permission",
-            "needs approval",
-            "requires permission",
-            "requires approval",
-        ],
-    ) || (value.contains("cannot proceed") && value.contains("permission"))
 }
 
 fn provider_error(output: &str) -> Option<(i32, Value)> {
@@ -1002,15 +948,18 @@ mod tests {
             interpret_worker_outcome(Some(0), "Shipped it\nOGA_RESULT: completed\n", "", None);
         assert_eq!(completed.state, TaskState::Completed);
         assert_eq!(completed.output, "Shipped it");
+    }
 
-        let blocked = interpret_worker_outcome(
+    #[test]
+    fn a_worker_calling_itself_blocked_still_completes() {
+        let outcome = interpret_worker_outcome(
             Some(0),
-            "OGA_BLOCKED: permission_denied | no access",
+            "bun test timed out\nOGA_BLOCKED: worker_error | tests timed out",
             "",
             None,
         );
-        assert_eq!(blocked.completion.code, CompletionCode::PermissionDenied);
-        assert_eq!(blocked.state, TaskState::Blocked);
+        assert_eq!(outcome.state, TaskState::Completed);
+        assert_eq!(outcome.completion.code, CompletionCode::Completed);
     }
 
     #[test]

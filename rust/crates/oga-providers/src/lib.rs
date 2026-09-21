@@ -749,7 +749,7 @@ fn pi_message_text(event: &Value) -> Option<String> {
 }
 fn marker_line(line: &str) -> Option<String> {
     let line = line.trim();
-    ["OGA_RESULT:", "OGA_BLOCKED:", "OGA_NEEDS_INPUT:"]
+    ["OGA_RESULT:", "OGA_NEEDS_INPUT:"]
         .iter()
         .any(|prefix| line.starts_with(prefix))
         .then(|| line.to_owned())
