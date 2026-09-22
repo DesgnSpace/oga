@@ -310,9 +310,9 @@ export function ConversationComposer({
           {running && <span className="composer-run-spinner" role="img" aria-label="Running" title="Running" />}
         </div>
       </div>
-      {routingsEqual(routing, { type: "resume", textRequired: false }) && (
-        <p className="composer-note">Leave the message empty to continue the run.</p>
-      )}
+      <p className="composer-note">
+        {routingsEqual(routing, { type: "resume", textRequired: false }) && "Leave the message empty to continue the run."}
+      </p>
     </section>
   );
 }
