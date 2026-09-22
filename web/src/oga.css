@@ -2339,10 +2339,15 @@ h1 {
     }
 }
 
+/* Shares the toolbar's inset, and keeps its line when empty so the input and
+   toolbar hold still as the hint comes and goes. */
 .composer-note {
+    min-height: 1.5em;
     margin: 0;
+    padding: 0 18px;
     color: var(--color-text-muted);
     font-size: var(--text-sm);
+    line-height: 1.5;
 }
 
 .composer-send-now {
