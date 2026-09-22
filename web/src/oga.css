@@ -883,10 +883,12 @@ a {
     text-decoration: none;
 }
 
+/* Rows sit inset so hover and selection read as a rounded pill; the inner
+   padding keeps their text on the same edge as the group headings. */
 .sidebar-task {
-    padding: var(--space-2) var(--space-3);
-    margin: 1px var(--space-2);
     width: calc(100% - var(--space-4));
+    margin: 1px var(--space-2);
+    padding: var(--space-2);
     border-radius: var(--radius);
 }
 
@@ -930,9 +932,12 @@ a {
     font-weight: 600;
 }
 
-.sidebar-group-indented,
-.sidebar-task-indented {
+.sidebar-group-indented {
     padding-left: var(--space-5);
+}
+
+.sidebar-task-indented {
+    padding-left: var(--space-4);
 }
 
 .sidebar-task-archived {

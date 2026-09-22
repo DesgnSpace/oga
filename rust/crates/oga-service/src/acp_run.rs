@@ -36,13 +36,13 @@ use oga_runner::{ProviderRunner, RunRequest, Termination};
 use oga_store::{Store, StoreError};
 use rusqlite::params;
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     lifecycle::{
-        ActiveRun, ActiveRuns, LifecycleError, RunOutcome, Settlement, append_event_tx,
-        broker_base_url, completion, encode, load_task, now_iso, record_profile_outcome,
-        settle_task, worker_env,
+        ActiveRun, ActiveRuns, LifecycleError, MAX_ABORT_RETRIES, RunOutcome, Settlement,
+        append_event_tx, broker_base_url, completion, encode, load_task, now_iso,
+        record_profile_outcome, settle_task, worker_env,
     },
     prompt::{WorkerOutcome, interpret_worker_outcome, rate_limit_reset_at},
     transport::{self, AcpStart},
@@ -307,15 +307,48 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     turn.active.insert(&task.id, active.clone());
 
     let mut transcript = Transcript::default();
-    let ended = match load_task(store, &task.id) {
+    let deadline = Instant::now() + turn_bound;
+    let mut ended = match load_task(store, &task.id) {
         Ok(current) => {
             if current.is_none_or(|current| current.state != TaskState::Running) {
                 run.cancel();
             }
-            converse(&turn, &run, &mut updates, &mut transcript, turn_bound).await
+            converse(
+                &turn,
+                &run,
+                &mut updates,
+                &mut transcript,
+                turn.prompt,
+                deadline,
+            )
+            .await
         }
         Err(error) => Err(error.into()),
     };
+    // An agent that ends a turn on an error of its own is still running with
+    // the session open, so it is asked to carry on rather than the task failed.
+    let mut retries = 0;
+    while retries < MAX_ABORT_RETRIES && !run.was_cancelled() {
+        let Ok(TurnEnd::Answered(Err(AcpError::TurnFailed { reason }))) = &ended else {
+            break;
+        };
+        retries += 1;
+        let recorded = record_turn_retry(&turn, &mut transcript, reason, retries).await;
+        ended = match recorded {
+            Ok(()) => {
+                converse(
+                    &turn,
+                    &run,
+                    &mut updates,
+                    &mut transcript,
+                    CONTINUE_AFTER_TURN_ERROR,
+                    deadline,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+    }
     let ended = match ended {
         Ok(ended) => ended,
         Err(error) => {
@@ -367,20 +400,51 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     })))
 }
 
-/// Sends the prompt once and records the agent's updates until it answers or
-/// the task's time runs out.
+const CONTINUE_AFTER_TURN_ERROR: &str = "Your last step stopped on an error inside the worker, not in your work. Continue from where you stopped, without redoing finished steps.";
+
+/// Writes down that the turn ended on the agent's own error and is being
+/// picked back up, after everything the agent sent before it.
+async fn record_turn_retry(
+    turn: &AcpTurn<'_>,
+    transcript: &mut Transcript,
+    reason: &str,
+    attempt: usize,
+) -> Result<(), LifecycleError> {
+    transcript
+        .flush(turn.store, &turn.task.id, turn.turn_id)
+        .await?;
+    append_turn_event(
+        turn.store,
+        &turn.task.id,
+        turn.turn_id,
+        "provider_retry".into(),
+        json!({
+            "provider": turn.profile.provider.as_str(),
+            "kind": "turn_error",
+            "attempt": attempt,
+            "maxAttempts": MAX_ABORT_RETRIES,
+            "error": reason,
+        }),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Sends one prompt and records the agent's updates until it answers or the
+/// task's time runs out.
 async fn converse(
     turn: &AcpTurn<'_>,
     run: &AcpRun,
     updates: &mut mpsc::UnboundedReceiver<SessionNotification>,
     transcript: &mut Transcript,
-    turn_bound: Duration,
+    prompt: &str,
+    deadline: Instant,
 ) -> Result<TurnEnd, LifecycleError> {
     let prompt = run
         .session
-        .prompt(vec![ContentBlock::from(turn.prompt.to_owned())]);
+        .prompt(vec![ContentBlock::from(prompt.to_owned())]);
     tokio::pin!(prompt);
-    let deadline = tokio::time::sleep(turn_bound);
+    let deadline = tokio::time::sleep_until(deadline);
     tokio::pin!(deadline);
     let mut receiving = true;
     loop {
@@ -487,7 +551,7 @@ fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleE
             ),
             false,
         ),
-        AcpError::PromptInFlight { reason } => (
+        AcpError::PromptInFlight { reason } | AcpError::TurnFailed { reason } => (
             failed(CompletionCode::WorkerError, stopped_mid_turn(&reason)),
             false,
         ),
@@ -710,7 +774,9 @@ fn outcome(
                 ),
             ),
             Some(Err(
-                AcpError::Unavailable { reason, .. } | AcpError::PromptInFlight { reason },
+                AcpError::Unavailable { reason, .. }
+                | AcpError::PromptInFlight { reason }
+                | AcpError::TurnFailed { reason },
             )) => failed(CompletionCode::WorkerError, stopped_mid_turn(&reason)),
         }
     };

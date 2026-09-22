@@ -417,6 +417,7 @@ impl AcpSession {
                 AcpError::refused(Refusal::Authentication, message)
             }
             RpcError::Closed => AcpError::in_flight(self.closing_reason()),
+            error @ RpcError::Agent { .. } => AcpError::turn_failed(error.to_string()),
             other => AcpError::in_flight(other.to_string()),
         })?;
         serde_json::from_value(spec_stop_reason(answer)).map_err(|error| {

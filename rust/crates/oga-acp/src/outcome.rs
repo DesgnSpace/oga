@@ -71,6 +71,11 @@ pub enum AcpError {
     /// turn may have run, so it must be reported rather than run again.
     #[error("the prompt was sent and its outcome is unknown: {reason}")]
     PromptInFlight { reason: String },
+    /// The agent answered the prompt with an error of its own. The turn ended
+    /// partway, but the agent is still running and its session can take
+    /// another prompt.
+    #[error("the agent ended the turn with an error: {reason}")]
+    TurnFailed { reason: String },
 }
 
 impl AcpError {
@@ -90,6 +95,12 @@ impl AcpError {
 
     pub(crate) fn in_flight(reason: impl Into<String>) -> Self {
         Self::PromptInFlight {
+            reason: reason.into(),
+        }
+    }
+
+    pub(crate) fn turn_failed(reason: impl Into<String>) -> Self {
+        Self::TurnFailed {
             reason: reason.into(),
         }
     }

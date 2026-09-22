@@ -124,6 +124,32 @@ async fn an_agent_that_exits_mid_prompt_leaves_the_turn_in_flight() {
 }
 
 #[tokio::test]
+async fn an_agent_error_ends_the_turn_but_keeps_the_session() {
+    let temp = TempDir::new().expect("temporary directory");
+    let session = open("error-once", temp.path())
+        .await
+        .expect("session opened");
+
+    let error = session
+        .prompt(ask("hi"))
+        .await
+        .expect_err("the agent answers the first prompt with an error");
+    assert!(
+        matches!(error, AcpError::TurnFailed { .. }),
+        "an error the agent answered with leaves its session open: {error}"
+    );
+    assert!(!error.allows_retry_elsewhere());
+
+    let answer = session
+        .prompt(ask("continue"))
+        .await
+        .expect("the same session takes the next prompt");
+    assert_eq!(answer.stop_reason, StopReason::EndTurn);
+
+    session.shutdown().await;
+}
+
+#[tokio::test]
 async fn malformed_and_oversized_frames_are_dropped_not_fatal() {
     let temp = TempDir::new().expect("temporary directory");
     let mut env = BTreeMap::new();

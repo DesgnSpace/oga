@@ -213,6 +213,7 @@ fn main() {
     }
 
     let (mut model, mut effort, mut changes) = ("fast".to_owned(), "default".to_owned(), 0);
+    let mut prompts = 0;
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines().map_while(Result::ok);
     while let Some(line) = lines.next() {
@@ -247,6 +248,17 @@ fn main() {
             "session/prompt" if mode == "configurable" => {
                 chunk(&format!("model={model} effort={effort} changes={changes}"));
                 result(&id, json!({"stopReason": "end_turn"}));
+            }
+            // Fails its first turn the way OpenCode does on a malformed tool
+            // call, then answers the next prompt in the same session.
+            "session/prompt" if mode == "error-once" => {
+                prompts += 1;
+                if prompts == 1 {
+                    failure(&id, -32603, "Internal error: Expected 'id' to be a string.");
+                } else {
+                    chunk("carried on");
+                    result(&id, json!({"stopReason": "end_turn"}));
+                }
             }
             "session/prompt" => prompt(&mode, &id, &mut lines),
             "session/cancel" => {}

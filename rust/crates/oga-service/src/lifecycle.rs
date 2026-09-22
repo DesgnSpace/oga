@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-const MAX_ABORT_RETRIES: usize = 2;
+pub(crate) const MAX_ABORT_RETRIES: usize = 2;
 
 /// Errors returned by the lifecycle runner before a terminal row is written.
 #[derive(Debug, Error)]
