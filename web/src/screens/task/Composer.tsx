@@ -5,7 +5,8 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import type { Task, TaskEventView, TaskScope } from "@/bridge/types";
 import { CheckIcon, ChevronIcon, PlusIcon, ReturnIcon } from "@/ui/icons";
-import { connectionSummary, TaskMetadata } from "./TaskMetadata";
+import { effortDisplay } from "./format";
+import { TaskMetadata } from "./TaskMetadata";
 
 const MENU_MARGIN = 8;
 
@@ -171,7 +172,9 @@ export function ConversationComposer({
       ? "This run can read files but not change them."
       : "This run can change files."
     : undefined;
-  const connection = connectionSummary(task.transport);
+  const effort = effortDisplay(task);
+  const running = task.state === "running";
+  const branch = task.worktree?.branch ?? task.branch;
 
   // Resetting height first makes scrollHeight reflect only the content, so it shrinks back too.
   React.useLayoutEffect(() => {
@@ -275,6 +278,11 @@ export function ConversationComposer({
               {scopeLabel}
             </span>
           )}
+          {branch && (
+            <span className="composer-branch" title={branch}>
+              {branch}
+            </span>
+          )}
         </div>
         <div className="composer-controls-right">
           {routing.type === "steer-and-queue" && (
@@ -289,7 +297,17 @@ export function ConversationComposer({
               Send now
             </button>
           )}
-          {connection && <span className="composer-connection">{connection}</span>}
+          <span className="composer-run-facts">
+            <span className="composer-run-model" title={task.model}>
+              {task.model}
+            </span>
+            {effort && (
+              <span className="composer-run-effort" title={effort.title}>
+                {effort.label.charAt(0).toUpperCase() + effort.label.slice(1)}
+              </span>
+            )}
+          </span>
+          {running && <span className="composer-run-spinner" role="img" aria-label="Running" title="Running" />}
         </div>
       </div>
       {routingsEqual(routing, { type: "resume", textRequired: false }) && (

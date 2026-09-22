@@ -116,12 +116,6 @@ export function TaskMetadata({
   );
 }
 
-/** Plain-text connection name for compact display outside the details list. */
-export function connectionSummary(transport: TaskTransportView | undefined): string | undefined {
-  if (!transport) return undefined;
-  return transport.kind === "acp" ? "ACP" : "Command line";
-}
-
 /** Why a task uses its command line instead of ACP. */
 const COMMAND_LINE_REASONS = {
   unavailable: "ACP wasn't available when this task started",

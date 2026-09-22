@@ -1530,10 +1530,7 @@ function ProfileEditor({
   return (
     <article className="settings-worker-form-card" aria-label={isNew ? "Add worker" : `Edit ${profile?.label ?? "worker"}`}>
       <header className="settings-worker-form-heading">
-        <div>
-          <p className="eyebrow">Worker</p>
-          <h3>{isNew ? "Add worker" : "Edit worker"}</h3>
-        </div>
+        <h3>{isNew ? "Add worker" : "Edit worker"}</h3>
       </header>
       <form
         className="settings-worker-form"
@@ -1548,7 +1545,10 @@ function ProfileEditor({
           <div className="settings-worker-form-grid">
             {isNew ? (
               <div className="settings-worker-form-row">
-                <label htmlFor="worker-form-id">Worker ID</label>
+                <div className="settings-worker-form-label">
+                  <label htmlFor="worker-form-id">Worker ID</label>
+                  <small id="worker-form-id-help">Lowercase letters, numbers, and dashes. Set once.</small>
+                </div>
                 <div className="settings-worker-form-field">
                   <input
                     id="worker-form-id"
@@ -1563,7 +1563,6 @@ function ProfileEditor({
                     onBlur={() => markTouched("id")}
                     placeholder="claude-work"
                   />
-                  <small id="worker-form-id-help">Lowercase letters, numbers, and dashes. Set once.</small>
                   {idError ? (
                     <p className="settings-form-error" id="worker-form-id-error" role="alert">
                       {idError}
@@ -1573,7 +1572,10 @@ function ProfileEditor({
               </div>
             ) : null}
             <div className="settings-worker-form-row">
-              <label htmlFor="worker-form-name">Display name</label>
+              <div className="settings-worker-form-label">
+                <label htmlFor="worker-form-name">Display name</label>
+                <small id="worker-form-name-help">Shown in the workers list.</small>
+              </div>
               <div className="settings-worker-form-field">
                 <input
                   id="worker-form-name"
@@ -1588,7 +1590,6 @@ function ProfileEditor({
                   onBlur={() => markTouched("label")}
                   placeholder="Claude work"
                 />
-                <small id="worker-form-name-help">Shown in the workers list.</small>
                 {labelError ? (
                   <p className="settings-form-error" id="worker-form-name-error" role="alert">
                     {labelError}
@@ -1597,18 +1598,20 @@ function ProfileEditor({
               </div>
             </div>
             <div className="settings-worker-form-row">
-              <span id="worker-form-available-label">Availability</span>
+              <div className="settings-worker-form-label">
+                <span id="worker-form-available-label">Available for tasks</span>
+                <small>Turn off to pause new tasks on this worker.</small>
+              </div>
               <div className="settings-worker-form-field">
-                <label className="settings-toggle" aria-labelledby="worker-form-available-label">
+                <label className="settings-toggle">
                   <input
                     type="checkbox"
                     checked={enabled}
                     disabled={disabled}
+                    aria-labelledby="worker-form-available-label"
                     onChange={(e) => setEnabled(e.target.checked)}
                   />
-                  <span>Available for tasks</span>
                 </label>
-                <small>Turn off to pause new tasks on this worker.</small>
               </div>
             </div>
           </div>
@@ -1618,7 +1621,10 @@ function ProfileEditor({
           <h4 id="worker-form-runs">Where it runs</h4>
           <div className="settings-worker-form-grid">
             <div className="settings-worker-form-row">
-              <label htmlFor="worker-form-tool">Command-line tool</label>
+              <div className="settings-worker-form-label">
+                <label htmlFor="worker-form-tool">Command-line tool</label>
+                <small id="worker-form-tool-help">The tool this worker signs in with.</small>
+              </div>
               <div className="settings-worker-form-field">
                 <span className="settings-provider-select">
                   <ProviderLogo provider={provider} size={18} />
@@ -1639,11 +1645,13 @@ function ProfileEditor({
                     ))}
                   </select>
                 </span>
-                <small id="worker-form-tool-help">The tool this worker signs in with.</small>
               </div>
             </div>
             <div className="settings-worker-form-row">
-              <label htmlFor="worker-form-model">Default model</label>
+              <div className="settings-worker-form-label">
+                <label htmlFor="worker-form-model">Default model</label>
+                <small id="worker-form-model-help">Leave blank for the tool default. Type to search known models.</small>
+              </div>
               <div className="settings-worker-form-field">
                 <input
                   id="worker-form-model"
@@ -1664,7 +1672,6 @@ function ProfileEditor({
                     ))}
                   </datalist>
                 ) : null}
-                <small id="worker-form-model-help">Leave blank for the tool default. Type to search known models.</small>
               </div>
             </div>
           </div>
@@ -1674,51 +1681,11 @@ function ProfileEditor({
           <h4 id="worker-form-env">Environment variables</h4>
           <div className="settings-worker-form-grid">
             <div className="settings-worker-form-row">
-              <span id="worker-form-env-label">Variables</span>
-              <div className="settings-worker-form-field" role="group" aria-labelledby="worker-form-env-label">
-                {envRows.map((row) => (
-                  <div key={row.id} className="settings-env-editor-row">
-                    <input
-                      className="settings-mono"
-                      spellCheck={false}
-                      autoComplete="off"
-                      aria-label="Variable name"
-                      value={row.key}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        setEnvRows((rows) => rows.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)))
-                      }
-                      onBlur={() => markTouched("env")}
-                      placeholder="NAME"
-                    />
-                    <input
-                      className="settings-mono"
-                      spellCheck={false}
-                      autoComplete="off"
-                      aria-label="Variable value"
-                      type={isSecretKey(row.key) ? "password" : "text"}
-                      value={row.value}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        setEnvRows((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))
-                      }
-                      onBlur={() => markTouched("env")}
-                      placeholder="Value"
-                    />
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label={row.key.trim() ? `Remove ${row.key.trim()}` : "Remove variable"}
-                      disabled={disabled}
-                      onClick={() => {
-                        markTouched("env");
-                        setEnvRows((rows) => rows.filter((r) => r.id !== row.id));
-                      }}
-                    >
-                      <CloseIcon size={14} />
-                    </button>
-                  </div>
-                ))}
+              <div className="settings-worker-form-label">
+                <span id="worker-form-env-label">Variables</span>
+                <small>One row per variable. Values stay on this device.</small>
+              </div>
+              <div className="settings-worker-form-field">
                 <button
                   className="text-button"
                   type="button"
@@ -1732,14 +1699,62 @@ function ProfileEditor({
                 >
                   Add variable
                 </button>
-                <small>One row per variable. Values stay on this device.</small>
-                {shownEnvError ? (
-                  <p className="settings-form-error" role="alert">
-                    {shownEnvError}
-                  </p>
-                ) : null}
               </div>
             </div>
+            {envRows.length > 0 || shownEnvError ? (
+              <div className="settings-worker-form-row settings-worker-form-row-stack">
+                <div className="settings-worker-form-field" role="group" aria-labelledby="worker-form-env-label">
+                  {envRows.map((row) => (
+                    <div key={row.id} className="settings-env-editor-row">
+                      <input
+                        className="settings-mono"
+                        spellCheck={false}
+                        autoComplete="off"
+                        aria-label="Variable name"
+                        value={row.key}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          setEnvRows((rows) => rows.map((r) => (r.id === row.id ? { ...r, key: e.target.value } : r)))
+                        }
+                        onBlur={() => markTouched("env")}
+                        placeholder="NAME"
+                      />
+                      <input
+                        className="settings-mono"
+                        spellCheck={false}
+                        autoComplete="off"
+                        aria-label="Variable value"
+                        type={isSecretKey(row.key) ? "password" : "text"}
+                        value={row.value}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          setEnvRows((rows) => rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))
+                        }
+                        onBlur={() => markTouched("env")}
+                        placeholder="Value"
+                      />
+                      <button
+                        className="icon-button"
+                        type="button"
+                        aria-label={row.key.trim() ? `Remove ${row.key.trim()}` : "Remove variable"}
+                        disabled={disabled}
+                        onClick={() => {
+                          markTouched("env");
+                          setEnvRows((rows) => rows.filter((r) => r.id !== row.id));
+                        }}
+                      >
+                        <CloseIcon size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {shownEnvError ? (
+                    <p className="settings-form-error" role="alert">
+                      {shownEnvError}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -1747,7 +1762,10 @@ function ProfileEditor({
           <h4 id="worker-form-tags">Tags</h4>
           <div className="settings-worker-form-grid">
             <div className="settings-worker-form-row">
-              <label htmlFor="worker-form-tags-input">Tags</label>
+              <div className="settings-worker-form-label">
+                <label htmlFor="worker-form-tags-input">Tags</label>
+                <small id="worker-form-tags-help">Tags help Oga pick this worker for matching work. Separate with commas.</small>
+              </div>
               <div className="settings-worker-form-field">
                 <input
                   id="worker-form-tags-input"
@@ -1759,7 +1777,6 @@ function ProfileEditor({
                   onChange={(e) => setTags(e.target.value)}
                   placeholder="build, review"
                 />
-                <small id="worker-form-tags-help">Tags help Oga pick this worker for matching work. Separate with commas.</small>
               </div>
             </div>
           </div>

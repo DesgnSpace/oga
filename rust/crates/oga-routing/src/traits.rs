@@ -135,6 +135,24 @@ pub fn model_traits(model_info: &ModelInfo) -> ModelTraits {
     }
 }
 
+/// The family a model id belongs to and the release it carries:
+/// `claude-opus-5-5` reads as `claude-opus` at `[5, 5]`, `claude-opus-5` as the
+/// same family at `[5]`. Numbers run until the first word that follows them, so
+/// a suffix like `-sol` or a date is not mistaken for a version part.
+pub fn family_version(id: &str) -> (String, Vec<u64>) {
+    let lower = id.to_lowercase();
+    let mut family: Vec<&str> = Vec::new();
+    let mut version: Vec<u64> = Vec::new();
+    for segment in lower.split(['-', '.']) {
+        match segment.parse::<u64>() {
+            Ok(number) if !family.is_empty() => version.push(number),
+            _ if version.is_empty() => family.push(segment),
+            _ => break,
+        }
+    }
+    (family.join("-"), version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +166,16 @@ mod tests {
             "oc",
             ModelInfoFields::default(),
         ))
+    }
+
+    #[test]
+    fn a_later_release_of_one_family_outranks_the_earlier_one() {
+        let (family, version) = family_version("claude-opus-5-5");
+        assert_eq!(family, "claude-opus");
+        assert!(version > family_version("claude-opus-5").1);
+        assert!(version > family_version("claude-opus-4-6").1);
+        assert_ne!(family, family_version("claude-sonnet-5-5").0);
+        assert_eq!(family_version("gpt-5.6-sol"), ("gpt".into(), vec![5, 6]));
     }
 
     #[test]

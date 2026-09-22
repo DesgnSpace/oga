@@ -16,7 +16,7 @@ use crate::classify::{TaskDemand, classify_task};
 use crate::effort::{EFFORT_ORDER, default_effort, difficulty_floor, difficulty_preference};
 use crate::policy::{RoutingPolicy, unoffered_rule_message};
 use crate::status::{AvailabilityState, ProfileStatus};
-use crate::traits::{CostSource, ModelTraits, model_traits};
+use crate::traits::{CostSource, ModelTraits, family_version, model_traits};
 use crate::usage::{
     LOW_HEADROOM_PERCENT, NEAR_EXHAUSTED_PERCENT, now_ms, perishability, worst_window_used_percent,
 };
@@ -912,11 +912,24 @@ pub fn choose_model(
             _ => 1,
         }
     };
+    // Two releases of one model score the same, and the alphabetical fallback
+    // would put the older one first: `claude-opus-5` sorts before
+    // `claude-opus-5-5`. Within a family the later release wins instead.
+    let newer_first = |a: &ModelCandidate, b: &ModelCandidate| -> Ordering {
+        let (left_family, left_version) = family_version(&a.model);
+        let (right_family, right_version) = family_version(&b.model);
+        if left_family == right_family {
+            right_version.cmp(&left_version)
+        } else {
+            Ordering::Equal
+        }
+    };
     candidates.sort_by(|a, b| {
         advised_first(a)
             .cmp(&advised_first(b))
             .then_with(|| rank_of(a).cmp(&rank_of(b)))
             .then_with(|| b.score.total_cmp(&a.score))
+            .then_with(|| newer_first(a, b))
             .then_with(|| match (perishability_of(a), perishability_of(b)) {
                 (Some(pa), Some(pb)) => pb.score.total_cmp(&pa.score),
                 _ => Ordering::Equal,
