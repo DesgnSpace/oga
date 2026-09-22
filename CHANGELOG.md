@@ -4,6 +4,8 @@
 
 - The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.
 - Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.
+- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.
+- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.
 
 ## 0.2.1 - 2026-09-21
 

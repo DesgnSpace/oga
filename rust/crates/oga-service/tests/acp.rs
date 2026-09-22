@@ -1088,6 +1088,62 @@ async fn a_turn_past_the_tasks_timeout_fails_as_a_timeout() {
 }
 
 #[tokio::test]
+async fn a_handoff_to_another_account_decides_its_transport_again() {
+    let harness = harness("exit-after-prompt");
+    let first = harness.run("start").await;
+    assert_eq!(first.state, TaskState::Failed, "{first:?}");
+    let first_decided_at = transport(&first).decided_at.clone();
+
+    let mut other = harness
+        .store
+        .repositories()
+        .profiles()
+        .get("work")
+        .expect("profile")
+        .expect("work profile");
+    other.id = "other".into();
+    harness
+        .store
+        .repositories()
+        .profiles()
+        .insert(&other, NOW)
+        .expect("other profile");
+    harness
+        .store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {
+                "work": {"modelEnabled": {"model-one": true}},
+                "other": {"modelEnabled": {"model-one": true}},
+            }})
+            .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+
+    oga_service::handoff(
+        &harness.dispatcher,
+        oga_service::HandoffRequest::new(first.id.clone()).profile("other"),
+    )
+    .await
+    .expect("handed off");
+    let moved = harness.settle(&first.id).await;
+
+    assert_eq!(moved.state, TaskState::Failed, "{moved:?}");
+    assert_eq!(moved.profile_id, "other");
+    assert_ne!(
+        transport(&moved).decided_at,
+        first_decided_at,
+        "a fresh session on a different account is a fresh decision, not the old account's"
+    );
+}
+
+#[tokio::test]
 async fn a_handoff_to_another_account_leaves_the_acp_conversation_behind() {
     let harness = harness("exit-after-prompt");
     let first = harness.run("start").await;

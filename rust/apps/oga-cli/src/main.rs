@@ -226,6 +226,10 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
             },
         ),
     )?;
+    // Before the broker can dispatch anything: a login shell takes over a
+    // second to start, and a spawn racing ahead of it searches only the
+    // broker's own bare PATH, missing an install a terminal finds fine.
+    let _ = tokio::task::spawn_blocking(oga_service::warm_login_path).await;
     // Before anything is served: the rows still reading `running` belong to a
     // broker that is gone, and every surface reads the row.
     match state.dispatcher.reconcile(ReconcileTrigger::BrokerStart) {
@@ -237,7 +241,6 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
     }
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let bound_port = listener.local_addr()?.port();
-    tokio::task::spawn_blocking(oga_service::warm_login_path);
     let checkpoint_task = {
         let store = store.clone();
         tokio::spawn(async move {
