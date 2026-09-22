@@ -613,11 +613,13 @@ fn record_session(
             version: session.agent_info().map(|info| info.version.clone()),
             protocol_version: session.protocol_version().as_u16(),
         }),
-        decided_at: task
-            .transport
-            .as_ref()
-            .filter(|recorded| recorded.kind == Transport::Acp)
-            .map_or_else(|| now.clone(), |recorded| recorded.decided_at.clone()),
+        decided_at: if matches!(turn.start, AcpStart::Restore { .. }) {
+            task.transport
+                .as_ref()
+                .map_or_else(|| now.clone(), |recorded| recorded.decided_at.clone())
+        } else {
+            now.clone()
+        },
     };
     let identity = session.process().identity();
     let worker = TaskWorker {

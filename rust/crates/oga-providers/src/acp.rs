@@ -308,15 +308,24 @@ impl AcpAdapters {
 ///
 /// A session it opens is a Claude Code session, created under the id it
 /// answers with, so `claude --resume` reopens the conversation in a terminal.
-/// The Claude Code behind it is the build the adapter ships rather than the
-/// one on the account's path, so the two versions can differ; they write the
-/// same transcripts into the same account, which is what a terminal reopens.
+/// Left alone, the adapter drives the Claude Code build it ships rather than
+/// the one on the account's path, so a model the account's own `claude` was
+/// updated for can be one the bundled build has never heard of.
+/// `CLAUDE_CODE_EXECUTABLE` is the SDK's own escape hatch for that — it names
+/// the executable to launch instead of the bundled one — so the adapter is
+/// pointed at `claude` and lets the same `PATH` lookup the command line uses
+/// find it, unless the account's own environment already sets that variable
+/// to something more specific.
 fn claude() -> AcpAdapter {
     AcpAdapter::new("claude-agent-acp", |_| vec!["claude-agent-acp".to_owned()])
         .oga_tools(true)
         .native_sessions_from("@agentclientprotocol/claude-agent-acp")
         .environment(|launch| {
-            BTreeMap::from([("ANTHROPIC_MODEL".to_owned(), launch.model.to_owned())])
+            let mut env = BTreeMap::from([("ANTHROPIC_MODEL".to_owned(), launch.model.to_owned())]);
+            if !launch.profile.env.contains_key("CLAUDE_CODE_EXECUTABLE") {
+                env.insert("CLAUDE_CODE_EXECUTABLE".to_owned(), "claude".to_owned());
+            }
+            env
         })
         .directories(|launch| vec![PathBuf::from(skills_dir(launch.profile))])
         .settings(|launch| {
@@ -1208,6 +1217,41 @@ mod tests {
         assert_eq!(
             adapter.native_sessions_from.as_deref(),
             Some("@agentclientprotocol/claude-agent-acp")
+        );
+        assert_eq!(
+            command
+                .env
+                .get("CLAUDE_CODE_EXECUTABLE")
+                .map(String::as_str),
+            Some("claude"),
+            "the adapter should run the account's own claude, not the one it bundles"
+        );
+    }
+
+    #[test]
+    fn claude_leaves_an_account_configured_executable_alone() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters.get(Provider::Claude).expect("claude adapter");
+        let profile = profile(
+            Provider::Claude,
+            BTreeMap::from([("CLAUDE_CODE_EXECUTABLE".into(), "/opt/claude/claude".into())]),
+        );
+        let launch = AcpLaunch {
+            profile: &profile,
+            model: "claude-opus-5-5",
+            effort: None,
+            cwd: "/repo",
+        };
+
+        let command = adapter.command(&launch);
+
+        assert_eq!(
+            command
+                .env
+                .get("CLAUDE_CODE_EXECUTABLE")
+                .map(String::as_str),
+            Some("/opt/claude/claude"),
+            "an account that already names its own executable keeps it"
         );
     }
 
