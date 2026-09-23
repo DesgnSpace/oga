@@ -833,11 +833,13 @@ export function TaskControls({
   events,
   onChanged,
   thinkingToggle,
+  focusReply,
 }: {
   task: Task;
   events: TaskEventView[];
   onChanged: () => void;
   thinkingToggle?: { active: boolean; onToggle: () => void };
+  focusReply: boolean;
 }) {
   const [busy, setBusy] = React.useState(false);
   const routing = routingForState(task.state, false, task.question);
@@ -979,6 +981,7 @@ export function TaskControls({
           task={task}
           events={events}
           contextWindow={contextWindow}
+          focusReply={focusReply}
         />
       )}
     </section>

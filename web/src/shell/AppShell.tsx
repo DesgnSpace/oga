@@ -56,7 +56,7 @@ function ScreenLoading({ route }: { route: Route }) {
   );
 }
 
-function TaskDetailRoute({ taskId, onHeader }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void }) {
+function TaskDetailRoute({ taskId, onHeader, focusReply }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void; focusReply: boolean }) {
   const [, forceUpdate] = useState(0);
   // Task detail starts its request during render, so read its snapshot again
   // after the subscription effects have been installed.
@@ -64,7 +64,7 @@ function TaskDetailRoute({ taskId, onHeader }: { taskId: string; onHeader: (info
     const handle = setTimeout(() => forceUpdate((value) => value + 1), 0);
     return () => clearTimeout(handle);
   }, [taskId]);
-  return <TaskDetailPage taskId={taskId} onHeader={onHeader} />;
+  return <TaskDetailPage taskId={taskId} onHeader={onHeader} focusReply={focusReply} />;
 }
 
 function offlineBannerCopy(connection: ConnectionState): string | undefined {
@@ -296,6 +296,11 @@ function Shell() {
     () => sidebarController.snapshot.sidebarCollapsed,
   );
   const [taskHeader, setTaskHeader] = useState<TaskTitleBarInfo>();
+  const [focusReplyTaskId, setFocusReplyTaskId] = useState<string>();
+  const selectTask = useCallback((id: string) => {
+    setFocusReplyTaskId(id);
+    navigate({ kind: "task", id });
+  }, [navigate]);
   const titleRoute = underlyingRoute;
 
   return (
@@ -305,7 +310,7 @@ function Shell() {
         <Sidebar
           sidebarController={sidebarController}
           initialTask={initialTask}
-          onSelectTask={(id) => navigate({ kind: "task", id })}
+          onSelectTask={selectTask}
             onOpenSettings={openSettings}
             onOpenUsage={openUsage}
           navigation={{ canGoBack, canGoForward, onBack: goBack, onForward: goForward }}
@@ -323,7 +328,7 @@ function Shell() {
           />
           <section className={contentClassName(underlyingRoute)} aria-labelledby="page-title">
             <Suspense fallback={<ScreenLoading route={underlyingRoute} />}>
-              {underlyingRoute.kind === "task" && <TaskDetailRoute taskId={underlyingRoute.id} onHeader={setTaskHeader} />}
+              {underlyingRoute.kind === "task" && <TaskDetailRoute taskId={underlyingRoute.id} onHeader={setTaskHeader} focusReply={focusReplyTaskId === underlyingRoute.id} />}
               {underlyingRoute.kind === "home" && (
                 <EmptyWorkspace sidebarController={sidebarController} onOpenSettings={openSettings} />
               )}
