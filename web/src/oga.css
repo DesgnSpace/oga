@@ -5,6 +5,9 @@
     --text-sm: 0.6875rem;
     --text-md: 0.75rem;
     --text-base: 0.8125rem;
+    /* Monospace sets wider than sans at the same size, so mono text in the
+       task view is scaled down to read as the same size as --text-base. */
+    --text-base-mono: calc(var(--text-base) * 0.94);
     --text-lg: 1rem;
     --color-bg: #fafafa;
     --color-sidebar: #f4f4f4;
@@ -558,7 +561,7 @@ a {
 .title-bar-diff {
     color: var(--color-success);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base-mono);
     font-weight: 600;
 }
 
@@ -570,7 +573,7 @@ a {
     gap: var(--space-3);
     white-space: nowrap;
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
 }
 
 .title-bar-secondary-row > * {
@@ -2582,7 +2585,7 @@ h1 {
     gap: 4px;
     color: var(--color-text-muted);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base-mono);
     white-space: nowrap;
 }
 
@@ -2603,6 +2606,7 @@ h1 {
     align-items: baseline;
     gap: 4px;
     font-family: var(--font-mono);
+    font-size: var(--text-base-mono);
 }
 
 .task-detail-header-actions {
@@ -2625,7 +2629,7 @@ h1 {
 }
 
 .detail-response .review-content {
-    font-size: 0.875rem;
+    font-size: var(--text-base);
     line-height: 1.65;
 }
 
@@ -2726,7 +2730,7 @@ h1 {
 
 .markdown-content code {
     font-family: var(--font-mono);
-    font-size: var(--text-md);
+    font-size: var(--text-base-mono);
     background: var(--color-elevated);
     padding: 1px 4px;
     border-radius: 4px;
@@ -3131,7 +3135,7 @@ h1 {
     flex: 0 0 auto;
     gap: var(--space-1);
     color: var(--color-text-muted);
-    font-size: var(--text-md);
+    font-size: var(--text-base);
     font-weight: 500;
 }
 
@@ -3152,7 +3156,7 @@ h1 {
 
 .trace-target-technical {
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base-mono);
 }
 
 @keyframes trace-running-shimmer {
@@ -3186,7 +3190,7 @@ h1 {
 .trace-result {
     color: var(--color-text-muted);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base-mono);
 }
 
 .trace-state-failed .trace-result {
@@ -3245,7 +3249,7 @@ h1 {
 .trace-terminal-label {
     margin-bottom: var(--space-2);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     letter-spacing: 0.04em;
     text-transform: lowercase;
 }
@@ -3253,7 +3257,7 @@ h1 {
 .trace-terminal-command,
 .trace-terminal-output {
     font-family: var(--font-mono);
-    font-size: var(--text-base);
+    font-size: var(--text-base-mono);
     line-height: 1.6;
 }
 
@@ -3299,7 +3303,7 @@ h1 {
     gap: var(--space-1);
     margin-top: var(--space-3);
     color: var(--color-danger);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: 600;
 }
 
@@ -3314,11 +3318,9 @@ h1 {
     --diffs-line-height: 19px;
 }
 
-/* Mono sets wider than the surrounding text at the same size, so the code
-   card drops a step to sit quieter than the prose around it. */
 .code-card {
     font-family: var(--font-mono);
-    font-size: var(--text-md);
+    font-size: var(--text-base-mono);
     line-height: 1.6;
 }
 
@@ -3326,7 +3328,7 @@ h1 {
     display: block;
     margin-top: var(--space-2);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
 }
 
 /* A file preview stays inside the row's own bounds — capped height for an
@@ -3373,7 +3375,7 @@ h1 {
 .trace-file-preview-modal-title {
     margin: 0 0 var(--space-3);
     font-family: var(--font-mono);
-    font-size: var(--text-base);
+    font-size: var(--text-base-mono);
     word-break: break-all;
 }
 
@@ -3410,7 +3412,7 @@ h1 {
 
 .review-content code {
     font-family: var(--font-mono);
-    font-size: var(--text-md);
+    font-size: var(--text-base-mono);
 }
 
 .review-token-comment {
@@ -3457,7 +3459,7 @@ h1 {
 .trace-raw-event summary {
     color: var(--color-text-muted);
     cursor: pointer;
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
 }
 
 .trace-todo-list {
@@ -3471,13 +3473,13 @@ h1 {
     display: flex;
     gap: var(--space-2);
     padding-left: var(--space-1);
-    font-size: var(--text-md);
+    font-size: var(--text-base);
 }
 
 .trace-todo-marker {
     flex: 0 0 1.5rem;
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-base-mono);
     font-weight: 600;
 }
 

@@ -7,6 +7,7 @@
 - Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.
 - A task no longer fails with a confusing error when it starts just as Oga itself is starting up.
 - The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.
+- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes.
 
 ## 0.2.1 - 2026-09-21
 
