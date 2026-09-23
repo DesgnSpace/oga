@@ -485,6 +485,8 @@ export function providerLabel(provider: Provider): string {
       return "Pi";
     case "fx":
       return "fx";
+    case "cursor":
+      return "Cursor";
   }
 }
 
@@ -504,13 +506,15 @@ export function providerFromString(raw: string): Provider | undefined {
       return "pi";
     case "fx":
       return "fx";
+    case "cursor":
+      return "cursor";
     default:
       return undefined;
   }
 }
 
 export function supportedProviders(): Provider[] {
-  return ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx"];
+  return ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx", "cursor"];
 }
 
 export function isSecretKey(key: string): boolean {

@@ -82,6 +82,8 @@ function defaultModelFor(provider: Provider): string {
       return "pi";
     case "fx":
       return "fx";
+    case "cursor":
+      return "auto-smart[optimize_for=balanced]";
   }
 }
 

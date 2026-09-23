@@ -9,9 +9,9 @@ use std::{
 use agent_client_protocol_schema::{
     ProtocolVersion,
     v1::{
-        AGENT_METHOD_NAMES, AgentCapabilities, CLIENT_METHOD_NAMES, CancelNotification,
-        ClientCapabilities, ContentBlock, CreateTerminalRequest, Error, ErrorCode,
-        FileSystemCapabilities, Implementation, InitializeRequest, InitializeResponse,
+        AGENT_METHOD_NAMES, AgentCapabilities, AuthenticateRequest, CLIENT_METHOD_NAMES,
+        CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest, Error,
+        ErrorCode, FileSystemCapabilities, Implementation, InitializeRequest, InitializeResponse,
         KillTerminalRequest, LoadSessionRequest, LoadSessionResponse, McpServer, NewSessionRequest,
         NewSessionResponse, PromptRequest, PromptResponse, ReadTextFileRequest,
         ReadTextFileResponse, ReleaseTerminalRequest, RequestPermissionOutcome,
@@ -135,6 +135,10 @@ pub struct Launch {
     /// The released agent this launch was verified against. Any other agent
     /// answering the command is turned away before a session opens.
     pub release: Option<AgentRelease>,
+    /// The sign-in method to claim before a session is asked for, for an agent
+    /// that refuses one until the client has. It names credentials the account
+    /// already holds; nothing here supplies any.
+    pub authentication: Option<String>,
 }
 
 /// A released agent, by the name it reports and the versions of it that share
@@ -233,11 +237,17 @@ impl Launch {
             mcp_servers: Vec::new(),
             settings: Vec::new(),
             release: None,
+            authentication: None,
         }
     }
 
     pub fn release(mut self, release: AgentRelease) -> Self {
         self.release = Some(release);
+        self
+    }
+
+    pub fn authentication(mut self, method_id: impl Into<String>) -> Self {
+        self.authentication = Some(method_id.into());
         self
     }
 
@@ -565,9 +575,47 @@ async fn handshake(
         ));
     }
 
+    if let Some(method_id) = &launch.authentication {
+        authenticate(connection, &agent, method_id, config).await?;
+    }
+
     let (session_id, offered) = open_session(connection, launch, cwd, &agent, config).await?;
     configure(connection, &session_id, offered, &launch.settings, config).await?;
     Ok((agent, session_id))
+}
+
+/// Claims a sign-in the account already holds, for an agent that refuses a
+/// session until the client has asked for one. The method has to be one the
+/// agent advertised: the protocol says so, and an agent that offers another
+/// wants credentials this client has no way to give.
+async fn authenticate(
+    connection: &Connection,
+    agent: &InitializeResponse,
+    method_id: &str,
+    config: &AcpConfig,
+) -> Result<(), AcpError> {
+    if !agent
+        .auth_methods
+        .iter()
+        .any(|method| method.id().0.as_ref() == method_id)
+    {
+        return Err(AcpError::refused(
+            Refusal::Authentication,
+            format!("the agent doesn't offer to sign in with {method_id}"),
+        ));
+    }
+    connection
+        .request::<_, Value>(
+            AGENT_METHOD_NAMES.authenticate,
+            &AuthenticateRequest::new(method_id.to_owned()),
+            config.handshake_timeout,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| match error {
+            RpcError::Agent { message, .. } => AcpError::refused(Refusal::Authentication, message),
+            other => AcpError::unavailable(Stage::Initialize, other.to_string()),
+        })
 }
 
 /// Opens the session and returns the settings the agent advertises for it.

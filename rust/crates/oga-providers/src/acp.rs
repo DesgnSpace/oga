@@ -104,6 +104,13 @@ pub struct AcpAdapter {
     /// agent must accept Oga's HTTP MCP server. An agent that cannot is
     /// incompatible rather than quietly left without them.
     pub oga_tools: bool,
+    /// The sign-in method the agent has to be asked for before it will open a
+    /// session. It spends credentials the account already holds; Oga supplies
+    /// none of its own.
+    pub authentication: Option<String>,
+    /// The provider has no command line Oga can run, so a run whose agent
+    /// cannot be reached stops where it is rather than going elsewhere.
+    pub acp_only: bool,
     /// The agent, by the name it reports, whose ACP session id is also the id
     /// the provider's command line resumes, so a terminal can pick the
     /// conversation up. Any other agent answering the same command gets no
@@ -117,6 +124,8 @@ impl fmt::Debug for AcpAdapter {
             .debug_struct("AcpAdapter")
             .field("id", &self.id)
             .field("oga_tools", &self.oga_tools)
+            .field("authentication", &self.authentication)
+            .field("acp_only", &self.acp_only)
             .field("native_sessions_from", &self.native_sessions_from)
             .field("release", &self.release)
             .field("opened_with", &self.opened_with)
@@ -142,6 +151,8 @@ impl AcpAdapter {
             opened_with: None,
             declines_questions: false,
             oga_tools: false,
+            authentication: None,
+            acp_only: false,
             native_sessions_from: None,
         }
     }
@@ -188,6 +199,16 @@ impl AcpAdapter {
 
     pub fn oga_tools(mut self, required: bool) -> Self {
         self.oga_tools = required;
+        self
+    }
+
+    pub fn authentication(mut self, method_id: impl Into<String>) -> Self {
+        self.authentication = Some(method_id.into());
+        self
+    }
+
+    pub fn acp_only(mut self) -> Self {
+        self.acp_only = true;
         self
     }
 
@@ -273,6 +294,7 @@ impl AcpAdapters {
             .register(Provider::Antigravity, antigravity())
             .register(Provider::Pi, pi())
             .register(Provider::Fx, fx())
+            .register(Provider::Cursor, cursor())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -587,6 +609,51 @@ fn fx() -> AcpAdapter {
         })
 }
 
+/// Cursor's own `cursor-agent acp` server, verified against build
+/// `2026.05.20-2b5dd59`. It names neither itself nor its version over the
+/// protocol, so there is no release to hold it to and whatever the account has
+/// installed is what answers.
+///
+/// It refuses every session until the client has asked to sign in, and the one
+/// method it offers spends the sign-in `cursor-agent login` already saved, so
+/// Oga claims that method and supplies no credential of its own. An account
+/// nobody signed in to refuses the sign-in rather than opening a browser.
+///
+/// It runs the `cursor-agent` on the account's path and reads the rules and
+/// MCP servers of the directory the session opens in. Oga's own tools ride the
+/// session's HTTP MCP servers, and it asks before each of their calls, which
+/// the task's scope answers like any other.
+///
+/// The model is a session setting, and its ids belong to the session alone:
+/// each carries its thinking, context, and speed choices in brackets, so no
+/// effort is chosen and `cursor-agent --model` takes none of them. `agent`
+/// gives the session full tool access with no permission prompts of Cursor's
+/// own, as `cursor-agent --force` does, leaving confinement to the runner.
+///
+/// A session it opens is kept on Cursor's side rather than among the account's
+/// chats, so `cursor-agent --resume` reopens none of them and no terminal
+/// session is recorded. The server reports no usage.
+fn cursor() -> AcpAdapter {
+    AcpAdapter::new("cursor-acp", |_| {
+        ["cursor-agent", "acp"].map(str::to_owned).to_vec()
+    })
+    .authentication(CURSOR_LOGIN)
+    .acp_only()
+    .oga_tools(true)
+    .settings(|launch| {
+        let setting = |id: &str, value: &str| AcpSetting {
+            id: id.into(),
+            value: value.into(),
+            required: true,
+        };
+        vec![setting("model", launch.model), setting("mode", "agent")]
+    })
+}
+
+/// The sign-in Cursor's ACP server offers: the credentials `cursor-agent
+/// login` saved for the account.
+pub const CURSOR_LOGIN: &str = "cursor_login";
+
 /// The `~/.fx` an fx started for a profile reads, under the `HOME` it is
 /// started with.
 fn fx_home(profile: &Profile) -> PathBuf {
@@ -850,7 +917,8 @@ mod tests {
         };
 
         let command = adapter.command(&launch);
-        let cli = crate::command_for(&profile, "", &cwd, Some(launch.model), Some("high"), None);
+        let cli = crate::command_for(&profile, "", &cwd, Some(launch.model), Some("high"), None)
+            .expect("a command line");
 
         assert_eq!(command.argv, ["pi-acp"]);
         assert_eq!(
@@ -1041,7 +1109,8 @@ mod tests {
         };
 
         let command = adapter.command(&launch);
-        let cli = crate::command_for(&profile, "", "/repo", Some(launch.model), None, None);
+        let cli = crate::command_for(&profile, "", "/repo", Some(launch.model), None, None)
+            .expect("a command line");
 
         let mut argv = vec!["agy_acp_server.par"];
         if cfg!(target_os = "linux") {
@@ -1297,7 +1366,8 @@ mod tests {
         };
 
         let command = adapter.command(&launch);
-        let cli = crate::command_for(&profile, "", "/repo", Some("gpt-5.5"), Some("xhigh"), None);
+        let cli = crate::command_for(&profile, "", "/repo", Some("gpt-5.5"), Some("xhigh"), None)
+            .expect("a command line");
 
         assert_eq!(command.argv, ["codex-acp"]);
         assert_eq!(
@@ -1426,7 +1496,8 @@ mod tests {
             Some(launch.model),
             Some("high"),
             None,
-        );
+        )
+        .expect("a command line");
         assert_eq!(
             (&command.env, &command.env_remove),
             (&cli.env, &cli.env_remove)
@@ -1500,7 +1571,8 @@ mod tests {
             Some(launch.model),
             Some("high"),
             None,
-        );
+        )
+        .expect("a command line");
 
         assert_eq!(
             command.argv,
@@ -1585,7 +1657,8 @@ mod tests {
             Some("/accounts/work")
         );
         assert_eq!(command, {
-            let cli = crate::command_for(&profile, "", "/repo", Some("opus"), None, None);
+            let cli = crate::command_for(&profile, "", "/repo", Some("opus"), None, None)
+                .expect("a command line");
             ProviderCommand {
                 argv: command.argv.clone(),
                 ..cli

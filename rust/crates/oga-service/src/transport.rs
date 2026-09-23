@@ -145,8 +145,8 @@ fn plan_new_session(
     match (preference, adapter) {
         (TransportPreference::Cli, _) => NewSession::Cli(TransportReason::Preference),
         (TransportPreference::Auto, Some(adapter)) => NewSession::Acp {
+            may_fall_back: !adapter.acp_only,
             adapter,
-            may_fall_back: true,
         },
         (TransportPreference::Auto, None) => NewSession::Cli(TransportReason::NoAdapter),
         (TransportPreference::Acp, Some(adapter)) => NewSession::Acp {

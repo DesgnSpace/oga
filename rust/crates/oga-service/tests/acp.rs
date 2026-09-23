@@ -3121,3 +3121,160 @@ async fn a_pi_task_from_before_acp_resumes_on_its_command_line() {
     );
     assert_eq!(transport(&resumed).reason, Some(TransportReason::Legacy));
 }
+
+/// The session id Cursor's ACP server opens, which is Cursor's own.
+const CURSOR_SESSION: &str = "3c9a1d7e-4b2f-4a8c-91d6-7e5b3f2a8c04";
+
+/// A Cursor profile on the adapters Oga ships, with `cursor-agent` resolving
+/// to a script that starts the scripted agent in `mode`. Cursor has no command
+/// line Oga runs, so nothing here answers one.
+fn cursor_harness(mode: &str) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    fs::create_dir_all(&bin).expect("bin");
+    let log = directory.path().join("agent.log");
+    if mode != "missing" {
+        let agent = bin.join("cursor-agent");
+        fs::write(
+            &agent,
+            format!(
+                "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
+                env!("CARGO_BIN_EXE_fake-acp-agent"),
+                log.display()
+            ),
+        )
+        .expect("fake agent");
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::Cursor,
+        default_model: "claude-sonnet-5[thinking=true,effort=high]".into(),
+        enabled: true,
+        env: BTreeMap::from([("PATH".into(), bin.display().to_string())]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {
+                "claude-sonnet-5[thinking=true,effort=high]": true,
+                "auto-smart[optimize_for=balanced]": true,
+            }}}})
+            .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
+#[tokio::test]
+async fn cursor_runs_over_acp_with_its_sign_in_claimed_before_the_session() {
+    let harness = cursor_harness("cursor");
+
+    let task = harness.run("summarise the readme").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("Done."), "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    assert_eq!(
+        recorded.agent.as_ref().expect("agent identity").adapter,
+        "cursor-acp"
+    );
+    assert_eq!(recorded.acp_session_id.as_deref(), Some(CURSOR_SESSION));
+    assert_eq!(
+        recorded.restore,
+        Some(AcpRestore::Load),
+        "the server loads a session but cannot resume one"
+    );
+    assert_eq!(
+        task.session_id, None,
+        "a Cursor ACP session is not among the account's chats, so no terminal reopens it"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "authenticate",
+            "session/new",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+        "the sign-in is claimed before a session is asked for"
+    );
+    assert_eq!(
+        harness.received("authenticate")[0]["methodId"],
+        "cursor_login",
+        "the method the server advertised, spending the sign-in the account already holds"
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [(
+            "model".to_owned(),
+            "claude-sonnet-5[thinking=true,effort=high]".to_owned()
+        )],
+        "the session already runs with full tool access, so only the model is chosen"
+    );
+    let opened = &harness.received("session/new")[0];
+    assert_eq!(opened["cwd"], task.cwd);
+    assert_eq!(
+        opened["mcpServers"][0]["name"], "oga",
+        "Oga's own tools ride the session's HTTP MCP servers"
+    );
+}
+
+#[tokio::test]
+async fn a_cursor_model_the_account_cannot_reach_never_runs_anywhere_else() {
+    let harness = cursor_harness("cursor-no-model");
+
+    let task = harness.run("summarise the readme").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert!(
+        !methods(&harness).contains(&"session/prompt".to_owned()),
+        "the model is chosen before the prompt goes out"
+    );
+    assert!(
+        harness.cli_runs().is_empty(),
+        "Cursor is reached over ACP alone, so nothing falls back to a command line"
+    );
+}
+
+#[tokio::test]
+async fn a_cursor_sign_in_oga_cannot_claim_never_opens_a_session() {
+    let harness = cursor_harness("cursor-no-sign-in");
+
+    let task = harness.run("summarise the readme").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(
+        methods(&harness),
+        ["initialize"],
+        "a sign-in this client cannot claim stops the run before a session is asked for"
+    );
+    assert!(harness.cli_runs().is_empty());
+}

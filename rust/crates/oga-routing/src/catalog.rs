@@ -371,6 +371,22 @@ pub fn parse_fx_models(raw: &str, profile: &Profile) -> Vec<ModelInfo> {
         .collect()
 }
 
+/// The models a Cursor ACP session offers, read from the answer that opened
+/// it. Each id carries its own thinking, context, and speed choices, so no
+/// effort ladder is offered beside it.
+pub fn cursor_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
+    opened["models"]["availableModels"]
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|model| {
+            let id = model["modelId"].as_str()?.to_owned();
+            let label = model["name"].as_str().unwrap_or(&id).to_owned();
+            Some(ModelMeta::default().into_info(profile, id, label, ModelInfoSource::Discovered))
+        })
+        .collect()
+}
+
 static ANTIGRAVITY_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("(?i)^[a-z0-9][a-z0-9._-]*$").expect("pattern"));
 static PI_COLUMN_SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s{2,}").expect("pattern"));
