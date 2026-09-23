@@ -307,7 +307,7 @@ const HANDOFF_SOURCE_STYLE: React.CSSProperties = {
 const HANDOFF_CONTEXT_STYLE: React.CSSProperties = {
   marginLeft: "calc(14px + var(--space-1))",
   color: "var(--color-text-muted)",
-  fontSize: "var(--text-sm)",
+  fontSize: "var(--text-base)",
   lineHeight: 1.5,
   overflowWrap: "anywhere",
 };
