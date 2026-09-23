@@ -14,6 +14,7 @@ import { type Route, RouterProvider, handlesClick, routePath, useRouter } from "
 import { Modal } from "@/components/primitives/Modal";
 import { ToastViewport } from "@/components/ToastViewport";
 import { TitleBar, type TaskTitleBarInfo } from "./TitleBar";
+import { toggleSidebarAndManageFocus } from "./taskSearch";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAppUpdates } from "./useAppUpdates";
 
@@ -287,7 +288,8 @@ function Shell() {
   );
   const offline = connection !== "connected";
   const handleRetry = useCallback(() => void sidebarController.refresh(), [sidebarController]);
-  useKeyboardShortcuts({ onBack: goBack, onForward: goForward, onSettings: () => openSettings("workers"), onUsage: openUsage, onRefresh: handleRetry });
+  const handleToggleSidebar = useCallback(() => toggleSidebarAndManageFocus(sidebarController), [sidebarController]);
+  useKeyboardShortcuts({ onBack: goBack, onForward: goForward, onSettings: () => openSettings("workers"), onUsage: openUsage, onRefresh: handleRetry, onToggleSidebar: handleToggleSidebar });
   const sidebarCollapsed = useSyncExternalStore(
     sidebarController.subscribe.bind(sidebarController),
     () => sidebarController.snapshot.sidebarCollapsed,
@@ -312,7 +314,7 @@ function Shell() {
           <TitleBar
             route={titleRoute}
             sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={() => sidebarController.toggleSidebar()}
+            onToggleSidebar={handleToggleSidebar}
             canGoBack={canGoBack}
             canGoForward={canGoForward}
             onBack={goBack}

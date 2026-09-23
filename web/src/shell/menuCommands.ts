@@ -8,7 +8,7 @@ import type { MenuCommand } from "@/bridge/types";
 import type { SidebarController } from "@/state";
 import { type Route, routePath } from "@/router";
 import { REFRESH_TASK_DETAIL_EVENT } from "@/screens/task/TaskDetail";
-import { focusTaskSearch } from "./taskSearch";
+import { focusTaskSearch, toggleSidebarAndManageFocus } from "./taskSearch";
 
 const ZOOM_STEPS = [0.75, 0.85, 1, 1.1, 1.25, 1.4, 1.6, 1.8, 2] as const;
 const DEFAULT_ZOOM_INDEX = ZOOM_STEPS.indexOf(1);
@@ -61,7 +61,7 @@ export interface MenuCommandContext {
 function runMenuCommand(command: MenuCommand, context: MenuCommandContext): void {
   switch (command) {
     case "toggle-sidebar":
-      context.sidebar.toggleSidebar();
+      toggleSidebarAndManageFocus(context.sidebar);
       return;
     case "toggle-inspector":
       if (context.route.kind !== "task") return;

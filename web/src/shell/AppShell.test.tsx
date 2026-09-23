@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
 import { AppShell } from "./AppShell";
 
@@ -66,5 +66,39 @@ describe("the app shell", () => {
 
     await waitFor(() => expect(window.location.pathname).toBe("/tasks/two"));
     await waitFor(() => expect(screen.getAllByText(/prompt for two/).length).toBeGreaterThan(0), { timeout: 5000 });
+  });
+
+  it("hides and shows the task list on Cmd+B, focusing the list when it reopens", async () => {
+    setTransport(transport);
+    window.history.replaceState(null, "", "/");
+
+    // jsdom has no rendering loop, so this test's own rAF stands in for the
+    // browser's; the production code only needs it to run after this turn.
+    const originalRaf = globalThis.requestAnimationFrame;
+    // SAFETY: this stub only needs to accept and invoke a FrameRequestCallback, matching the real signature's call shape.
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    }) as typeof requestAnimationFrame;
+
+    try {
+      render(
+        <StrictMode>
+          <AppShell />
+        </StrictMode>,
+      );
+      await screen.findByText("second task");
+      const sidebar = document.querySelector(".task-sidebar")!;
+      expect(sidebar.className).not.toContain("task-sidebar-collapsed");
+
+      fireEvent.keyDown(window, { key: "b", metaKey: true });
+      await waitFor(() => expect(sidebar.className).toContain("task-sidebar-collapsed"));
+
+      fireEvent.keyDown(window, { key: "b", metaKey: true });
+      await waitFor(() => expect(sidebar.className).not.toContain("task-sidebar-collapsed"));
+      expect(document.activeElement?.getAttribute("role")).toBe("option");
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+    }
   });
 });
