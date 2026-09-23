@@ -56,7 +56,17 @@ function ScreenLoading({ route }: { route: Route }) {
   );
 }
 
-function TaskDetailRoute({ taskId, onHeader, focusReply }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void; focusReply: boolean }) {
+interface ReplyFocusRequest {
+  taskId: string;
+  nonce: number;
+}
+
+function TaskDetailRoute({ taskId, onHeader, focusRequest, onFocusRequestConsumed }: {
+  taskId: string;
+  onHeader: (info: TaskTitleBarInfo | undefined) => void;
+  focusRequest?: ReplyFocusRequest;
+  onFocusRequestConsumed: (nonce: number) => void;
+}) {
   const [, forceUpdate] = useState(0);
   // Task detail starts its request during render, so read its snapshot again
   // after the subscription effects have been installed.
@@ -64,7 +74,14 @@ function TaskDetailRoute({ taskId, onHeader, focusReply }: { taskId: string; onH
     const handle = setTimeout(() => forceUpdate((value) => value + 1), 0);
     return () => clearTimeout(handle);
   }, [taskId]);
-  return <TaskDetailPage taskId={taskId} onHeader={onHeader} focusReply={focusReply} />;
+  return (
+    <TaskDetailPage
+      taskId={taskId}
+      onHeader={onHeader}
+      focusRequest={focusRequest}
+      onFocusRequestConsumed={onFocusRequestConsumed}
+    />
+  );
 }
 
 function offlineBannerCopy(connection: ConnectionState): string | undefined {
@@ -296,11 +313,19 @@ function Shell() {
     () => sidebarController.snapshot.sidebarCollapsed,
   );
   const [taskHeader, setTaskHeader] = useState<TaskTitleBarInfo>();
-  const [focusReplyTaskId, setFocusReplyTaskId] = useState<string>();
+  const [focusRequest, setFocusRequest] = useState<ReplyFocusRequest>();
+  const focusRequestNonce = useRef(0);
+  useEffect(() => {
+    if (focusRequest && (route.kind !== "task" || route.id !== focusRequest.taskId)) setFocusRequest(undefined);
+  }, [route, focusRequest]);
   const selectTask = useCallback((id: string) => {
-    setFocusReplyTaskId(id);
+    const nonce = ++focusRequestNonce.current;
+    setFocusRequest({ taskId: id, nonce });
     navigate({ kind: "task", id });
   }, [navigate]);
+  const consumeFocusRequest = useCallback((nonce: number) => {
+    setFocusRequest((current) => current?.nonce === nonce ? undefined : current);
+  }, []);
   const titleRoute = underlyingRoute;
 
   return (
@@ -328,7 +353,12 @@ function Shell() {
           />
           <section className={contentClassName(underlyingRoute)} aria-labelledby="page-title">
             <Suspense fallback={<ScreenLoading route={underlyingRoute} />}>
-              {underlyingRoute.kind === "task" && <TaskDetailRoute taskId={underlyingRoute.id} onHeader={setTaskHeader} focusReply={focusReplyTaskId === underlyingRoute.id} />}
+              {underlyingRoute.kind === "task" && <TaskDetailRoute
+                taskId={underlyingRoute.id}
+                onHeader={setTaskHeader}
+                focusRequest={focusRequest}
+                onFocusRequestConsumed={consumeFocusRequest}
+              />}
               {underlyingRoute.kind === "home" && (
                 <EmptyWorkspace sidebarController={sidebarController} onOpenSettings={openSettings} />
               )}

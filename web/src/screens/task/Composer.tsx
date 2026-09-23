@@ -128,7 +128,8 @@ export interface ConversationComposerProps {
   task: Task;
   events: TaskEventView[];
   contextWindow: number | undefined;
-  focusReply: boolean;
+  focusRequest?: { taskId: string; nonce: number };
+  onFocusRequestConsumed: (nonce: number) => void;
 }
 
 const COMPOSER_MIN_HEIGHT = 44;
@@ -144,7 +145,8 @@ export function ConversationComposer({
   task,
   events,
   contextWindow,
-  focusReply,
+  focusRequest,
+  onFocusRequestConsumed,
 }: ConversationComposerProps) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -156,8 +158,12 @@ export function ConversationComposer({
   const shortcut = submitShortcut();
 
   React.useEffect(() => {
-    if (focusReply) inputRef.current?.focus();
-  }, [focusReply]);
+    if (!focusRequest || focusRequest.taskId !== task.id) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    if (document.activeElement === input) onFocusRequestConsumed(focusRequest.nonce);
+  }, [focusRequest, onFocusRequestConsumed, task.id]);
 
   const submit = async (mode: ComposerSendMode) => {
     if (isSendDisabled(routing, draft) || sending) return;
