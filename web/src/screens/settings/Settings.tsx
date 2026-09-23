@@ -754,7 +754,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     heading: "The task screen",
     rows: [
-      { keys: [["⌘", "/"]], action: "Show or hide the task list" },
+      { keys: [["⌘", "B"]], action: "Show or hide the task list" },
       { keys: [["⌘", "\\"]], action: "Show or hide the changed-files panel" },
       { keys: [["⌘", "R"]], action: "Refresh the task list" },
       { keys: [["⌘", "1"], ["⌘", "2"], ["⌘", "3"]], action: "Jump to the activity, the request, or the response" },

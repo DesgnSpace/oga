@@ -137,7 +137,7 @@ pub fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Me
             app,
             MENU_TOGGLE_SIDEBAR,
             "Toggle Sidebar",
-            "CmdOrCtrl+/",
+            "CmdOrCtrl+B",
         )?)
         .item(
             &tauri::menu::MenuItemBuilder::with_id(MENU_TOGGLE_INSPECTOR, "Toggle Inspector")

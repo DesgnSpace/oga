@@ -14,6 +14,7 @@ import { type Route, RouterProvider, handlesClick, routePath, useRouter } from "
 import { Modal } from "@/components/primitives/Modal";
 import { ToastViewport } from "@/components/ToastViewport";
 import { TitleBar, type TaskTitleBarInfo } from "./TitleBar";
+import { toggleSidebarAndManageFocus } from "./taskSearch";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { useAppUpdates } from "./useAppUpdates";
 
@@ -55,7 +56,17 @@ function ScreenLoading({ route }: { route: Route }) {
   );
 }
 
-function TaskDetailRoute({ taskId, onHeader }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void }) {
+interface ReplyFocusRequest {
+  taskId: string;
+  nonce: number;
+}
+
+function TaskDetailRoute({ taskId, onHeader, focusRequest, onFocusRequestConsumed }: {
+  taskId: string;
+  onHeader: (info: TaskTitleBarInfo | undefined) => void;
+  focusRequest?: ReplyFocusRequest;
+  onFocusRequestConsumed: (nonce: number) => void;
+}) {
   const [, forceUpdate] = useState(0);
   // Task detail starts its request during render, so read its snapshot again
   // after the subscription effects have been installed.
@@ -63,7 +74,14 @@ function TaskDetailRoute({ taskId, onHeader }: { taskId: string; onHeader: (info
     const handle = setTimeout(() => forceUpdate((value) => value + 1), 0);
     return () => clearTimeout(handle);
   }, [taskId]);
-  return <TaskDetailPage taskId={taskId} onHeader={onHeader} />;
+  return (
+    <TaskDetailPage
+      taskId={taskId}
+      onHeader={onHeader}
+      focusRequest={focusRequest}
+      onFocusRequestConsumed={onFocusRequestConsumed}
+    />
+  );
 }
 
 function offlineBannerCopy(connection: ConnectionState): string | undefined {
@@ -287,13 +305,27 @@ function Shell() {
   );
   const offline = connection !== "connected";
   const handleRetry = useCallback(() => void sidebarController.refresh(), [sidebarController]);
-  useKeyboardShortcuts({ onBack: goBack, onForward: goForward, onSettings: () => openSettings("workers"), onUsage: openUsage, onRefresh: handleRetry });
+  const handleToggleSidebar = useCallback(() => toggleSidebarAndManageFocus(sidebarController), [sidebarController]);
+  useKeyboardShortcuts({ onBack: goBack, onForward: goForward, onSettings: () => openSettings("workers"), onUsage: openUsage, onRefresh: handleRetry, onToggleSidebar: handleToggleSidebar });
   const sidebarCollapsed = useSyncExternalStore(
     sidebarController.subscribe.bind(sidebarController),
     () => sidebarController.snapshot.sidebarCollapsed,
     () => sidebarController.snapshot.sidebarCollapsed,
   );
   const [taskHeader, setTaskHeader] = useState<TaskTitleBarInfo>();
+  const [focusRequest, setFocusRequest] = useState<ReplyFocusRequest>();
+  const focusRequestNonce = useRef(0);
+  useEffect(() => {
+    if (focusRequest && (route.kind !== "task" || route.id !== focusRequest.taskId)) setFocusRequest(undefined);
+  }, [route, focusRequest]);
+  const selectTask = useCallback((id: string) => {
+    const nonce = ++focusRequestNonce.current;
+    setFocusRequest({ taskId: id, nonce });
+    navigate({ kind: "task", id });
+  }, [navigate]);
+  const consumeFocusRequest = useCallback((nonce: number) => {
+    setFocusRequest((current) => current?.nonce === nonce ? undefined : current);
+  }, []);
   const titleRoute = underlyingRoute;
 
   return (
@@ -303,7 +335,7 @@ function Shell() {
         <Sidebar
           sidebarController={sidebarController}
           initialTask={initialTask}
-          onSelectTask={(id) => navigate({ kind: "task", id })}
+          onSelectTask={selectTask}
             onOpenSettings={openSettings}
             onOpenUsage={openUsage}
           navigation={{ canGoBack, canGoForward, onBack: goBack, onForward: goForward }}
@@ -312,7 +344,7 @@ function Shell() {
           <TitleBar
             route={titleRoute}
             sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={() => sidebarController.toggleSidebar()}
+            onToggleSidebar={handleToggleSidebar}
             canGoBack={canGoBack}
             canGoForward={canGoForward}
             onBack={goBack}
@@ -321,7 +353,12 @@ function Shell() {
           />
           <section className={contentClassName(underlyingRoute)} aria-labelledby="page-title">
             <Suspense fallback={<ScreenLoading route={underlyingRoute} />}>
-              {underlyingRoute.kind === "task" && <TaskDetailRoute taskId={underlyingRoute.id} onHeader={setTaskHeader} />}
+              {underlyingRoute.kind === "task" && <TaskDetailRoute
+                taskId={underlyingRoute.id}
+                onHeader={setTaskHeader}
+                focusRequest={focusRequest}
+                onFocusRequestConsumed={consumeFocusRequest}
+              />}
               {underlyingRoute.kind === "home" && (
                 <EmptyWorkspace sidebarController={sidebarController} onOpenSettings={openSettings} />
               )}

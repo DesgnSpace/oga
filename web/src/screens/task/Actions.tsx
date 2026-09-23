@@ -833,17 +833,26 @@ export function TaskControls({
   events,
   onChanged,
   thinkingToggle,
+  focusRequest,
+  onFocusRequestConsumed,
 }: {
   task: Task;
   events: TaskEventView[];
   onChanged: () => void;
   thinkingToggle?: { active: boolean; onToggle: () => void };
+  focusRequest?: { taskId: string; nonce: number };
+  onFocusRequestConsumed: (nonce: number) => void;
 }) {
   const [busy, setBusy] = React.useState(false);
   const routing = routingForState(task.state, false, task.question);
   const queued = task.queuedFollowUpItems ?? [];
   const pinnedQuestionRef = React.useRef<HTMLDivElement>(null);
   const pinnedQuestion = routing.type === "reply" ? routing.question : undefined;
+  React.useEffect(() => {
+    if (focusRequest?.taskId === task.id && routing.type === "none") {
+      onFocusRequestConsumed(focusRequest.nonce);
+    }
+  }, [focusRequest, onFocusRequestConsumed, routing.type, task.id]);
   // The model's published window, read once per worker and model. Absent when
   // the catalog names none — the footer then shows no context read at all.
   const [contextWindow, setContextWindow] = React.useState<number | undefined>(undefined);
@@ -979,6 +988,8 @@ export function TaskControls({
           task={task}
           events={events}
           contextWindow={contextWindow}
+          focusRequest={focusRequest?.taskId === task.id ? focusRequest : undefined}
+          onFocusRequestConsumed={onFocusRequestConsumed}
         />
       )}
     </section>

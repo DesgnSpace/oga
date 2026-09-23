@@ -31,11 +31,12 @@ async function freshMenuCommands(transport: Transport) {
   return import("./menuCommands");
 }
 
-function fakeSidebar() {
+function fakeSidebar(sidebarCollapsed = false) {
   return {
     toggleSidebar: mock(),
     refresh: mock(),
     clearSelection: mock(),
+    snapshot: { sidebarCollapsed },
   };
 }
 
@@ -43,13 +44,39 @@ describe("subscribeMenuCommands", () => {
   it("toggles the sidebar on toggle-sidebar", async () => {
     const fake = fakeTransport();
     const { subscribeMenuCommands } = await freshMenuCommands(fake.transport);
-    const sidebar = fakeSidebar();
+    const sidebar = fakeSidebar(false);
     const navigate = mock();
     subscribeMenuCommands(() => ({ sidebar: sidebar as never, route: { kind: "home" }, navigate }));
 
     fake.emit(MENU_EVENT, "toggle-sidebar");
 
     expect(sidebar.toggleSidebar).toHaveBeenCalledOnce();
+  });
+
+  it("opens the sidebar and focuses the task list on toggle-sidebar when collapsed", async () => {
+    const fake = fakeTransport();
+    const { subscribeMenuCommands } = await freshMenuCommands(fake.transport);
+    const sidebar = fakeSidebar(true);
+    const navigate = mock();
+    subscribeMenuCommands(() => ({ sidebar: sidebar as never, route: { kind: "home" }, navigate }));
+
+    // jsdom has no rendering loop, so this test's own rAF stands in for the
+    // browser's; the production code only needs it to run after this turn.
+    const originalRaf = globalThis.requestAnimationFrame;
+    // SAFETY: this stub only needs to accept and invoke a FrameRequestCallback, matching the real signature's call shape.
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    }) as typeof requestAnimationFrame;
+    document.body.innerHTML = '<div id="task-list"><a role="option" tabindex="0" aria-selected="true"></a></div>';
+    try {
+      fake.emit(MENU_EVENT, "toggle-sidebar");
+      expect(sidebar.toggleSidebar).toHaveBeenCalledOnce();
+      expect(document.activeElement).toBe(document.querySelector('#task-list [role="option"]'));
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+      document.body.innerHTML = "";
+    }
   });
 
   it("refreshes tasks on refresh-tasks", async () => {

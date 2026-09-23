@@ -179,7 +179,12 @@ function TaskDetailSecondary({
   );
 }
 
-export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (info: TaskTitleBarInfo | undefined) => void }) {
+export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsumed }: {
+  taskId: string;
+  onHeader: (info: TaskTitleBarInfo | undefined) => void;
+  focusRequest?: { taskId: string; nonce: number };
+  onFocusRequestConsumed: (nonce: number) => void;
+}) {
   const forceUpdate = useForceUpdate();
   const [showingChanges, setShowingChanges] = React.useState(false);
   const [reviewingChanges, setReviewingChanges] = React.useState(false);
@@ -498,6 +503,8 @@ export function TaskDetail({ taskId, onHeader }: { taskId: string; onHeader: (in
             events={events}
             onChanged={refreshDetail}
             thinkingToggle={hasThinking ? { active: showThinking, onToggle: toggleThinking } : undefined}
+            focusRequest={focusRequest}
+            onFocusRequestConsumed={onFocusRequestConsumed}
           />
         )}
       </div>
