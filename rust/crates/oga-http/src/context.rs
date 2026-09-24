@@ -1,7 +1,4 @@
-//! Plain-language code lookup, answered from the project's own index.
-//!
-//! Every lookup reconciles the index against disk first, so files that changed,
-//! moved, or vanished since the last call are re-read before answering.
+//! Plain-language code lookup reconciled against each project's index.
 
 use std::{
     collections::HashMap,
@@ -47,11 +44,6 @@ pub struct InitParams {
     pub force: Option<bool>,
 }
 
-/// Answer a question about a project's code.
-///
-/// A `task` names the checkout the answer must stay inside: the ranking runs
-/// against the origin project's index, but only what that task may read comes
-/// back.
 pub async fn get_query(
     State(state): State<HttpState>,
     Query(query): Query<QueryParams>,
