@@ -419,7 +419,6 @@ impl ProviderRunner {
         })
     }
 
-    /// The transport owns the pipes; the same confinement and process-group rules apply.
     pub async fn spawn_duplex(
         &self,
         request: RunRequest,
@@ -1234,9 +1233,6 @@ fn detach_process_group(command: &mut Command) {
 #[cfg(not(unix))]
 fn detach_process_group(_command: &mut Command) {}
 
-/// Signal a worker's whole process group by identity alone, for a caller that
-/// holds the recorded pid rather than the live handle — recovery after a
-/// broker restart, where the pipes are gone but the process is not.
 pub fn signal_group(identity: &ProcessIdentity, signal: Signal) {
     signal_process_group(identity, signal);
 }
