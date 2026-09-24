@@ -1,4 +1,4 @@
-//! Public task response shaping shared by MCP tools.
+//! Public task response shaping for MCP tools.
 
 use oga_domain::{BranchOutcome, Task, TaskMatch, TaskSummary};
 use serde_json::{Map, Value, json};
@@ -27,8 +27,7 @@ const GROUPS: &[(&str, &[&str])] = &[
         ],
     ),
     ("label", &["title", "tldr"]),
-    // Where the task runs: the project directory, and the checkout it was
-    // given instead when it was delegated with a worktree.
+    // The task's location is its project directory or worktree.
     ("location", &["cwd", "worktree"]),
     (
         "scope",
@@ -89,8 +88,7 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
     {
         view.insert("effortActual".into(), json!(effort));
     }
-    // Only a task whose run opened a session knows how it connects; an older
-    // task that never recorded it has no answer here rather than a guess.
+    // Older tasks have no recorded transport; leave it out rather than guess.
     if want.contains("transport")
         && let Some(transport) = &task.transport
     {
@@ -249,8 +247,7 @@ pub fn summary_view(
     if want.contains("cwd") {
         view.insert("cwd".into(), json!(summary.cwd));
     }
-    // The summary has no checkout path of its own: `cwd` already sits inside
-    // it, and the project the work belongs to is the half that goes missing.
+    // A summary has no checkout path; origin_cwd is the project half.
     if want.contains("worktree")
         && let Some(origin_cwd) = &summary.origin_cwd
     {
@@ -388,8 +385,6 @@ pub fn default_inspect_fields() -> Vec<String> {
     .collect()
 }
 
-/// Adds the moves that fit the task's current state. Nothing is added when
-/// nothing applies, so an empty `next` never has to be read.
 pub fn with_next(mut value: Value, task: &Task, action: hints::Move) -> Value {
     let next = hints::next(task, action);
     if !next.is_empty()

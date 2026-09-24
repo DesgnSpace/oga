@@ -26,7 +26,6 @@ impl LanguageAdapter for Json {
         Separator::Dot
     }
 
-    /// A settings file has no private half.
     fn exported(&self, _node: Node<'_>, _source: &str) -> bool {
         true
     }

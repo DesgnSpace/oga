@@ -1,11 +1,4 @@
-//! Which transport a run uses, and the per-profile preference behind it.
-//!
-//! The decision is made when a run opens a session and is written to the task
-//! before any prompt leaves Oga. A task recorded on the command line stays
-//! there; an ACP task keeps continuing its ACP conversation. Only a run that
-//! opens a new session, on a profile set to `auto`, may move to the command
-//! line, and only while ACP has yet to reach the agent its adapter was
-//! verified against.
+//! Transport selection and per-profile preferences.
 
 use std::collections::BTreeMap;
 
@@ -18,7 +11,6 @@ use oga_providers::{AcpAdapter, AcpAdapters};
 use oga_store::{Store, StoreError};
 use serde::Serialize;
 
-/// The settings key holding every profile's preference, under the global cwd.
 pub const TRANSPORT_SETTINGS_KEY: &str = "transport";
 
 pub fn transport_preference(
@@ -67,7 +59,6 @@ fn settings_scope() -> String {
     canonical_cwd(global_cwd()).display().to_string()
 }
 
-/// What a new session on this profile would run on, before anything starts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveTransport {
@@ -101,7 +92,6 @@ pub fn effective_transport(
     }
 }
 
-/// How one run reaches its provider.
 #[derive(Debug, Clone)]
 pub(crate) enum TransportPlan {
     /// Run the command line. `decision` is what to record when this run is the
@@ -157,13 +147,6 @@ fn plan_new_session(
     }
 }
 
-/// Whether ACP gave up before it reached the agent its adapter was verified
-/// against. The command line is what keeps a provider usable where that agent
-/// cannot run at all: nothing installed to start, an account ACP cannot reach,
-/// a protocol or capability the adapter needs, or an agent that turns out to
-/// be another release. Once it has answered `initialize`, the run holds the
-/// agent Oga verified, and a failure after that is reported where a person can
-/// see it rather than run again on a transport nobody chose.
 pub(crate) fn failed_before_a_verified_agent(stage: Stage) -> bool {
     match stage {
         Stage::Spawn | Stage::Initialize => true,
@@ -171,7 +154,6 @@ pub(crate) fn failed_before_a_verified_agent(stage: Stage) -> bool {
     }
 }
 
-/// Decides one run. `continuing` is the session the run was asked to reopen.
 pub(crate) fn plan(
     task: &Task,
     profile: &Profile,

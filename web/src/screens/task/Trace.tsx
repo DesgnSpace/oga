@@ -1,6 +1,4 @@
 // The activity trace panel: flat rows, expansion, and windowing.
-// Ported from rust/crates/oga-ui/src/trace/mod.rs's view layer — the pure
-// row/expansion composition already lives in @/domain/trace.
 
 import * as React from "react";
 import type { TaskEventView } from "@/bridge/types";

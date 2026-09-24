@@ -1,6 +1,5 @@
-//! Learned routes: the hint phrases workers and people attach to a place in
-//! the code. They outrank everything the parser found, and they follow their
-//! target through a rename or a move.
+//! Learned routes rank taught place names above parser hits and follow targets
+//! through renames and moves.
 
 use std::path::Path;
 
@@ -112,9 +111,8 @@ fn push(aliases: &mut Vec<String>, alias: String) {
     }
 }
 
-/// The bounded alias set, newest words first. A full set that refused the
-/// words just taught would leave the route unable to answer what someone had
-/// only now told it, so the cap trims the oldest instead.
+/// Keep aliases newest-first; at the cap, trim the oldest so newly taught
+/// words remain answerable.
 fn merge(kept: &str, taught: &str) -> String {
     let mut aliases = Vec::new();
     for alias in taught.split_whitespace().chain(kept.split_whitespace()) {
@@ -250,18 +248,8 @@ pub fn matching(
     })
 }
 
-/// Point every route at where its target lives now. A route whose file and
-/// symbol both survived is confirmed; one whose symbol body turns up elsewhere
-/// follows it.
-///
-/// A route with neither is recorded as missing from this checkout and left
-/// exactly as it was taught. A branch that does not carry the code is not
-/// evidence that nobody knows where it lives, and switching back must find the
-/// route waiting.
-///
-/// The count of missing routes covers the ones that went missing on this run,
-/// not every route this checkout cannot resolve: a checkout parked on a branch
-/// that never carried the code reports it once and then stops.
+/// Confirm routes in place, follow symbols by body digest, and mark unresolvable routes missing without deleting them.
+/// A checkout lacking the target is not evidence to drop it; only newly missing routes count.
 pub fn heal(
     store: &Store,
     cwd: &Path,

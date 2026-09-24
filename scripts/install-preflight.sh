@@ -1,6 +1,7 @@
 #!/bin/sh
 # Warn about tasks in flight before the retiring broker stops them.
 # Status 2 means this build cannot read the old database; the install still proceeds.
+# Any other status means the binary did not run (a signal exit means macOS killed it), so the install stops before replacing a working build.
 bin=$1
 
 "$bin" inflight

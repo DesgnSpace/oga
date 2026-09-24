@@ -1,14 +1,4 @@
-//! ACP `session/update` notifications as ordinary activity rows.
-//!
-//! An agent that speaks ACP already describes its work the way a reader wants
-//! it: a call has a kind, a status, a human title, the files it touched, and
-//! the content it produced. So the mapping is a translation, not an
-//! interpretation — the agent's own words become the row's subject, and its
-//! tool-call id becomes the row identity that later updates patch in place.
-//!
-//! Everything a row cannot learn from the protocol stays empty. ACP's stable
-//! surface reports the context window and a session total, never per-call
-//! token counts, so a usage row says how full the window is and nothing more.
+//! ACP `session/update` notifications as activity rows.
 
 use std::{
     borrow::Cow,
@@ -27,21 +17,13 @@ use crate::{
     provider_view, reasoning_view, string_value, text_value, usage_presentation,
 };
 
-/// The reader-facing title of an ACP context-window row.
 const CONTEXT_TITLE: &str = "Context";
 
-/// The longest subject a row shows before it is clipped.
 const SUBJECT_LIMIT: usize = 120;
 
-/// The row identity every recovery update of one turn shares, so an agent
-/// retrying its provider ten times reads as one row moving on.
 const RECOVERY_ACTION_ID: &str = "model-response-recovery";
 
-/// What an agent reports about recovering from a model provider that is
-/// failing under it.
-///
-/// `_meta` is vendor-namespaced, so this reads the one vendor that publishes a
-/// recovery run and leaves every other agent's block alone.
+/// Vendor-namespaced recovery metadata; unknown blocks are ignored.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelRecovery {
     /// The agent has stopped trying and needs something to change.
@@ -55,8 +37,6 @@ pub struct ModelRecovery {
 }
 
 impl ModelRecovery {
-    /// The recovery run an update's `_meta` describes, or `None` when the agent
-    /// reported none.
     pub fn from_meta(meta: &Value) -> Option<Self> {
         let recovery = meta.get("fx")?.get("modelResponseRecovery")?;
         Some(Self {
@@ -70,8 +50,6 @@ impl ModelRecovery {
         })
     }
 
-    /// Whether the provider's own usage limit is what stopped the run, which is
-    /// a wait rather than a failure.
     pub fn rate_limited(&self) -> bool {
         self.paused && self.cause.as_deref() == Some("rate_limited")
     }
@@ -85,8 +63,6 @@ impl ModelRecovery {
     }
 }
 
-/// One ACP update as a row, or `None` when the update is not one this presents
-/// and the generic view should name it.
 pub(crate) fn acp_event_view(
     event: &TaskEvent,
     provider: Provider,
@@ -129,7 +105,6 @@ pub(crate) fn acp_event_view(
     }
 }
 
-/// A row the record keeps and the story leaves out.
 fn bookkeeping_view(
     event: &TaskEvent,
     provider: Provider,
@@ -151,14 +126,6 @@ fn bookkeeping_view(
     )
 }
 
-/// A model provider failing under the agent, as one row a reader can follow
-/// from the first attempt to the last.
-///
-/// Every attempt shares the row, so ten tries move one row on rather than
-/// filling the timeline. The agent's own message is written for a terminal — a
-/// warning glyph, an HTTP code, an upgrade link — so the row says what happened
-/// in the product's words and reads that text out only where it is the reason
-/// the run stopped.
 fn recovery_view(
     event: &TaskEvent,
     provider: Provider,
@@ -199,8 +166,6 @@ fn recovery_view(
     view
 }
 
-/// The text of a content chunk, when it is text at all. An image or an
-/// embedded resource has nothing a row can read out.
 fn chunk_text(payload: &BTreeMap<String, Value>) -> Option<String> {
     let content = payload.get("content")?;
     if text_value(content.get("type")) != Some("text") {
@@ -257,7 +222,6 @@ fn prompt_view(
     )
 }
 
-/// What kind of subject a call's row is about.
 #[derive(PartialEq)]
 enum Subject {
     File,
@@ -265,8 +229,6 @@ enum Subject {
     Other,
 }
 
-/// What a tool call is called and how it reads, chosen from the only
-/// classification ACP guarantees: the call's kind.
 struct Category {
     title: &'static str,
     done: &'static str,
@@ -335,11 +297,6 @@ fn category(kind: Option<&str>) -> Category {
     }
 }
 
-/// One tool call, whether this row opened it or updated it.
-///
-/// A call keeps its id from the first row to the last, so an update patches
-/// the row the reader is already looking at instead of appending a near
-/// duplicate — and a session replay of a finished call folds back into it.
 fn tool_view(
     event: &TaskEvent,
     provider: Provider,
@@ -413,26 +370,14 @@ fn tool_call_id(payload: &BTreeMap<String, Value>) -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
-/// The fields that say what a tool call is and where it stands, as opposed to
-/// what it produced.
 const CALL_FIELDS: [&str; 5] = ["kind", "status", "title", "locations", "rawInput"];
 
-/// The tool calls of one task, as far as its recorded updates have described
-/// them.
-///
-/// ACP sends only what changed about a call, so an update that leaves out the
-/// call's kind or files means they stand as they were. Reading the updates in
-/// order lets each one be presented as the call it patched, while its output
-/// stays its own and never repeats on a later row.
 #[derive(Default)]
 pub(crate) struct AcpCalls {
     known: HashMap<(Option<i64>, String), Map<String, Value>>,
 }
 
 impl AcpCalls {
-    /// The event with the call's earlier fields filled in where it left them
-    /// out, or the event itself when it needs nothing. A call is known only
-    /// within its own turn, and a fresh `tool_call` describes it anew.
     pub(crate) fn patch<'a>(&mut self, event: &'a TaskEvent) -> Cow<'a, TaskEvent> {
         let update = text_value(event.payload.get("sessionUpdate"));
         if !matches!(update, Some("tool_call" | "tool_call_update")) {
@@ -464,12 +409,6 @@ impl AcpCalls {
     }
 }
 
-/// What the call was about, read from the facts ACP publishes in its own
-/// fields first and the provider's raw input only where those run out.
-///
-/// A category with no subject of its own falls back to a plain tool row
-/// carrying the agent's title: a row that names nothing is worse than a row
-/// that names the call the way the agent did.
 fn tool_presentation(
     category: &Category,
     payload: &BTreeMap<String, Value>,
@@ -510,8 +449,6 @@ fn tool_presentation(
     presentation
 }
 
-/// The first file the call named, which is where a reader following along
-/// wants to be.
 fn location_path(payload: &BTreeMap<String, Value>) -> Option<String> {
     let locations = payload.get("locations")?.as_array()?;
     let first = locations.first()?;
@@ -522,8 +459,6 @@ fn location_path(payload: &BTreeMap<String, Value>) -> Option<String> {
     }
 }
 
-/// The diff a call produced, when it produced one. A diff is the strongest
-/// thing a row can say about an edit, so it wins over every other content.
 fn diff_content(payload: &BTreeMap<String, Value>) -> Option<&Map<String, Value>> {
     payload
         .get("content")?
@@ -544,7 +479,6 @@ fn change_summary(diff: &Map<String, Value>) -> Option<String> {
     }
 }
 
-/// What the call produced, from the first text content it reported.
 fn outcome(payload: &BTreeMap<String, Value>) -> Option<String> {
     let content = payload.get("content")?.as_array()?;
     let text = content
@@ -561,9 +495,6 @@ fn outcome(payload: &BTreeMap<String, Value>) -> Option<String> {
     Some(cap(text.trim(), SUBJECT_LIMIT).0)
 }
 
-/// The agent's plan for the turn, as the same checklist every provider's todo
-/// list renders as. A plan replaces the one before it, and the agent gives it
-/// no id, so the row matches the newest open plan by title.
 fn plan_view(
     event: &TaskEvent,
     provider: Provider,
@@ -621,12 +552,6 @@ fn plan_view(
     view
 }
 
-/// How full the agent says its context window is, plus what the session has
-/// cost so far.
-///
-/// Both numbers are running totals for the whole session, not this call's
-/// share, so the row carries them as the freshest reading and nothing is
-/// added up across rows. The window fill is what the footer reads.
 fn context_view(
     event: &TaskEvent,
     provider: Provider,
@@ -666,8 +591,6 @@ fn context_view(
     )
 }
 
-/// The session total in dollars. An agent billing in another currency is left
-/// unknown rather than converted at a rate Oga would have to invent.
 fn session_cost(payload: &BTreeMap<String, Value>) -> Option<f64> {
     let cost = payload.get("cost")?;
     if !text_value(cost.get("currency"))

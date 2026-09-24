@@ -1,11 +1,4 @@
 //! Per-provider ACP adapter registrations.
-//!
-//! An adapter is what turns a profile into an ACP agent process: the argv that
-//! starts it, the session settings that carry a run's model and effort, and
-//! the two facts the task lifecycle cannot learn from the handshake. Account
-//! directories and the rest of a profile's environment come from the same
-//! place the command line gets them, so a profile reaches the same account
-//! whichever transport runs it.
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -22,7 +15,6 @@ use crate::{
     unset_environment_for,
 };
 
-/// What an adapter needs to know to start one agent for one run.
 #[derive(Debug, Clone, Copy)]
 pub struct AcpLaunch<'a> {
     pub profile: &'a Profile,
@@ -38,8 +30,6 @@ type Directories = dyn Fn(&AcpLaunch<'_>) -> Vec<PathBuf> + Send + Sync;
 type Incompatibility = dyn Fn(&AcpLaunch<'_>) -> Option<String> + Send + Sync;
 type NativeSession = dyn Fn(&AcpLaunch<'_>, &str) -> bool + Send + Sync;
 
-/// A session setting the agent has to hold before a run's prompt, named the
-/// way the agent names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpSetting {
     pub id: String,
@@ -49,8 +39,6 @@ pub struct AcpSetting {
     pub required: bool,
 }
 
-/// The released agent an adapter was verified against: the name it reports
-/// and the versions of it Oga accepts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpRelease {
     pub agent: String,
@@ -81,7 +69,6 @@ impl AcpRelease {
     }
 }
 
-/// How Oga starts one provider's ACP agent.
 #[derive(Clone)]
 pub struct AcpAdapter {
     /// Stable name recorded on every task this adapter runs.
@@ -275,7 +262,6 @@ impl AcpAdapter {
     }
 }
 
-/// The ACP adapters a broker can launch, one per provider.
 #[derive(Debug, Clone, Default)]
 pub struct AcpAdapters {
     adapters: HashMap<Provider, AcpAdapter>,
@@ -310,37 +296,7 @@ impl AcpAdapters {
     }
 }
 
-/// Claude's released ACP adapter, `@agentclientprotocol/claude-agent-acp`,
-/// which runs the Claude Agent SDK, verified against 0.78.0. Oga starts the
-/// installed binary; an account without one falls back before any prompt.
-///
-/// The adapter drives the same `claude` executable the command line does, and
-/// reads the user, project, and local settings that executable reads, so the
-/// account, project instructions, hooks, and configured MCP servers are the
-/// ones `CLAUDE_CONFIG_DIR` already names. Oga's own tools ride the session's
-/// HTTP MCP servers, where `--mcp-config` carries them on the command line,
-/// and the skills directory rides the session's workspace roots, where
-/// `--add-dir` carries it. The command line's Oga hooks are not installed
-/// here: an ACP session reports its own tool calls and subagents, so the same
-/// work would arrive twice.
-///
-/// The model is the launch's own `ANTHROPIC_MODEL`, which both the adapter and
-/// the executable behind it resolve the way `--model` resolves a name, since
-/// the session's model choices are the CLI's short aliases rather than the
-/// catalogue ids a task carries. The effort is a session setting, taking the
-/// same level `--effort` does; a run that names none leaves the setting alone,
-/// as a command line without the flag does.
-///
-/// A session it opens is a Claude Code session, created under the id it
-/// answers with, so `claude --resume` reopens the conversation in a terminal.
-/// Left alone, the adapter drives the Claude Code build it ships rather than
-/// the one on the account's path, so a model the account's own `claude` was
-/// updated for can be one the bundled build has never heard of.
-/// `CLAUDE_CODE_EXECUTABLE` is the SDK's own escape hatch for that — it names
-/// the executable to launch instead of the bundled one — so the adapter is
-/// pointed at `claude` and lets the same `PATH` lookup the command line uses
-/// find it, unless the account's own environment already sets that variable
-/// to something more specific.
+/// Claude's ACP adapter uses the account's `claude` executable and reports its session id.
 fn claude() -> AcpAdapter {
     AcpAdapter::new("claude-agent-acp", |_| vec!["claude-agent-acp".to_owned()])
         .oga_tools(true)
@@ -366,37 +322,7 @@ fn claude() -> AcpAdapter {
         })
 }
 
-/// Codex's released ACP adapter, `@agentclientprotocol/codex-acp`, which drives
-/// Codex's own app server, verified against 1.12.0. Oga starts the installed
-/// binary and accepts only that release line's patch releases; any other agent
-/// is turned away before a session opens, and an account without the adapter
-/// falls back before any prompt.
-///
-/// The adapter runs the Codex build it ships (0.154.0 for 1.12.0) rather than
-/// the `codex` on the account's path, and never changes that one. Both keep
-/// their threads under the profile's `CODEX_HOME`, which is what the command
-/// line and a terminal resume from.
-///
-/// The model and effort ride `CODEX_CONFIG`, which the adapter hands to Codex
-/// as the same config overrides `--model` and `-c model_reasoning_effort` are,
-/// so Codex resolves them the way the command line would. The session settings
-/// then confirm the session holds them, and choose `agent-full-access`: no
-/// approvals and no sandbox of Codex's own, which is what
-/// `--dangerously-bypass-approvals-and-sandbox` asks for, leaving confinement
-/// to the runner.
-///
-/// Oga's own tools ride the session's HTTP MCP servers, where `-c
-/// mcp_servers.oga.*` carries them on the command line. The adapter drops a
-/// session server named like one the account already configures, so
-/// `DISABLE_MCP_CONFIG_FILTERING` merges it into that one instead, the way `-c`
-/// does, rather than losing the header that binds the tools to this task.
-///
-/// A session it opens is a Codex thread under the id it answers with, the
-/// thread id `codex exec --json` reports and `codex exec resume` takes.
-///
-/// `codex exec` signs in with `CODEX_API_KEY` ahead of the account's saved
-/// login, and the app server never reads it, so an account that sets it keeps
-/// to its command line.
+/// Codex's ACP adapter uses the released app server and preserves its thread id.
 fn codex() -> AcpAdapter {
     const AGENT: &str = "@agentclientprotocol/codex-acp";
     AcpAdapter::new("codex-acp", |_| vec!["codex-acp".to_owned()])
@@ -434,8 +360,7 @@ fn codex() -> AcpAdapter {
         })
 }
 
-/// Whether a Codex started for this profile sees a `CODEX_API_KEY`: the
-/// profile's own value, or else the broker's, which a worker inherits.
+/// Whether a Codex started for this profile sees a `CODEX_API_KEY`.
 fn signs_in_with_codex_api_key(profile: &Profile) -> bool {
     environment_for(profile)
         .get("CODEX_API_KEY")
@@ -444,20 +369,9 @@ fn signs_in_with_codex_api_key(profile: &Profile) -> bool {
         .is_some_and(|key| !key.trim().is_empty())
 }
 
-/// The adapter that speaks to OpenCode's own ACP server.
 pub const OPENCODE_ADAPTER: &str = "opencode-acp";
 
-/// OpenCode's own `opencode acp` server, verified against OpenCode 1.18.31.
-/// The executable is the one [`opencode_executable`] picks for the profile; a
-/// profile with no OpenCode 1 is refused before any adapter starts.
-///
-/// The session it opens is the OpenCode session itself, so its id is the one
-/// `opencode --session` continues. Its command line runs without Oga's tools,
-/// and so does this. The model and the effort are session settings rather than
-/// flags: `model` takes the same `provider/model` id `--model` does, and
-/// `effort` takes the same variant `--variant` does. A run that names no
-/// effort asks for `default`, the variant the command line uses when it is
-/// given none, rather than letting the agent pick one.
+/// OpenCode 1's own `acp` server uses the profile's OpenCode 1 executable.
 fn opencode() -> AcpAdapter {
     AcpAdapter::new(OPENCODE_ADAPTER, |launch| {
         let executable =
@@ -481,25 +395,7 @@ fn opencode() -> AcpAdapter {
     })
 }
 
-/// OpenCode 2's own `acp` server, verified against OpenCode 2.0.1. OpenCode 1
-/// reports the same agent name, so Oga accepts the 2.0 release line alone and
-/// turns any other away before a session opens.
-///
-/// The executable is the one [`opencode2_executable`] picks for the profile,
-/// never whatever answers to `opencode`. It starts a private OpenCode server
-/// with the profile's own environment rather than joining the shared
-/// background service, and loads the configuration, instructions, skills, and
-/// MCP servers of the directory the session opens in. The session it opens is
-/// the OpenCode session itself, so its id is the one `opencode2 --session`
-/// continues. Its command line runs without Oga's tools, and so does this.
-///
-/// `--model` takes `provider/model#effort`; here the model and the effort are
-/// separate session settings, `model` taking the `provider/model` part and
-/// `effort` the variant after `#`. A run that names no effort leaves the
-/// variant to OpenCode, as `--model` without one does.
-///
-/// Unlike OpenCode 1 it refuses a second prompt while a turn is running, so an
-/// instruction for a running task waits for the turn to end.
+/// OpenCode 2's own `acp` server uses the profile's OpenCode 2 executable.
 fn opencode2() -> AcpAdapter {
     AcpAdapter::new("opencode2-acp", |launch| {
         vec![opencode2_executable(launch.profile), "acp".to_owned()]
@@ -520,30 +416,7 @@ fn opencode2() -> AcpAdapter {
     })
 }
 
-/// Google's Antigravity ACP server, `agy_acp_server.par`, the `antigravity-acp`
-/// release in the ACP registry, verified against 1.1.1. It reports that
-/// release as the build label `agy_acp_server_1.1.1`, so Oga accepts that
-/// build alone and turns any other away before a session opens. Oga starts the
-/// binary from the account's path, where it finds the harness shipped beside
-/// it; an account without it falls back before any prompt.
-///
-/// The server keeps its sign-in, settings, and conversations in
-/// `antigravity-acp/` under the Gemini home, apart from the command line's
-/// `antigravity-cli/`. A session it opens is therefore not a conversation
-/// `agy --conversation` can reopen, and no terminal session is recorded.
-///
-/// It refuses every session until its `settings.json` names a sign-in method,
-/// and a Google sign-in with no saved token opens a browser instead of
-/// answering. An account whose server has neither keeps to its command line,
-/// which signs in on its own. On macOS a Google sign-in lives in the login
-/// keychain, shared by every Gemini home, so a profile with a home of its own
-/// has its server read that home's token file instead of another account's.
-///
-/// The model is a session setting taking the same id `--model` does, and that
-/// id carries its thinking level, so no effort is chosen. `yolo` approves
-/// every tool call, as `--dangerously-skip-permissions` does, leaving
-/// confinement to the runner. Its command line runs without Oga's tools, and so
-/// does this. The server reports no usage over ACP.
+/// Antigravity's ACP server uses the account's Gemini home and verified build.
 fn antigravity() -> AcpAdapter {
     const AGENT: &str = "antigravity-acp";
     AcpAdapter::new(AGENT, |_| {
@@ -574,22 +447,7 @@ fn antigravity() -> AcpAdapter {
     })
 }
 
-/// fx's own `fx acp` server, verified against fx 0.0.10. Its 0.0.x releases
-/// promise nothing between them, so Oga accepts that build alone and turns any
-/// other away before a session opens.
-///
-/// It runs the `fx` on the account's path and reads the settings, workspaces,
-/// skills, and MCP servers of the `~/.fx` its environment names, so a profile
-/// with a `HOME` of its own reaches its own account. Oga's own tools ride the
-/// session's HTTP MCP servers, which fx accepts.
-///
-/// The model is a session setting taking the same id `--model` does, and `code`
-/// gives the session full tool access with no permission prompts, as
-/// `fx ask --full-access` does, leaving confinement to the runner. fx carries
-/// its thinking level in the model id, so no effort is chosen.
-///
-/// A session it opens is fx's own session under fx's own id, the one
-/// `fx --resume` reopens, saved in the account's session directory.
+/// fx's ACP server uses the profile's fx home and verified build.
 fn fx() -> AcpAdapter {
     const AGENT: &str = "fx";
     AcpAdapter::new("fx-acp", |_| ["fx", "acp"].map(str::to_owned).to_vec())
@@ -617,30 +475,7 @@ fn fx() -> AcpAdapter {
         })
 }
 
-/// Cursor's own `cursor-agent acp` server, verified against build
-/// `2026.05.20-2b5dd59`. It names neither itself nor its version over the
-/// protocol, so there is no release to hold it to and whatever the account has
-/// installed is what answers.
-///
-/// It refuses every session until the client has asked to sign in, and the one
-/// method it offers spends the sign-in `cursor-agent login` already saved, so
-/// Oga claims that method and supplies no credential of its own. An account
-/// nobody signed in to refuses the sign-in rather than opening a browser.
-///
-/// It runs the `cursor-agent` on the account's path and reads the rules and
-/// MCP servers of the directory the session opens in. Oga's own tools ride the
-/// session's HTTP MCP servers, and it asks before each of their calls, which
-/// the task's scope answers like any other.
-///
-/// The model is a session setting, and its ids belong to the session alone:
-/// each carries its thinking, context, and speed choices in brackets, so no
-/// effort is chosen and `cursor-agent --model` takes none of them. `agent`
-/// gives the session full tool access with no permission prompts of Cursor's
-/// own, as `cursor-agent --force` does, leaving confinement to the runner.
-///
-/// A session it opens is kept on Cursor's side rather than among the account's
-/// chats, so `cursor-agent --resume` reopens none of them and no terminal
-/// session is recorded. The server reports no usage.
+/// Cursor's ACP server requires the account's saved login and keeps no resumable session.
 fn cursor() -> AcpAdapter {
     AcpAdapter::new("cursor-acp", |_| {
         ["cursor-agent", "acp"].map(str::to_owned).to_vec()
@@ -658,12 +493,8 @@ fn cursor() -> AcpAdapter {
     })
 }
 
-/// The sign-in Cursor's ACP server offers: the credentials `cursor-agent
-/// login` saved for the account.
 pub const CURSOR_LOGIN: &str = "cursor_login";
 
-/// The `~/.fx` an fx started for a profile reads, under the `HOME` it is
-/// started with.
 fn fx_home(profile: &Profile) -> PathBuf {
     let home = environment_for(profile)
         .get("HOME")
@@ -673,8 +504,6 @@ fn fx_home(profile: &Profile) -> PathBuf {
     PathBuf::from(home).join(".fx")
 }
 
-/// Whether the account's settings name the credentials fx signs in with. An
-/// account without them opens a browser instead of answering a session.
 fn fx_signed_in(fx_home: &Path) -> bool {
     std::fs::read_to_string(fx_home.join("settings.json"))
         .ok()
@@ -687,11 +516,8 @@ fn fx_signed_in(fx_home: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Makes Antigravity's ACP server keep its sign-in in the Gemini home's token
-/// file rather than the macOS login keychain.
 const FORCE_FILE_STORAGE: &str = "AGY_ACP_FORCE_FILE_STORAGE";
 
-/// The Gemini home an Antigravity server started for a profile reads.
 struct GeminiHome {
     path: PathBuf,
     /// The profile names the home itself, so its sign-in is its own.
@@ -701,9 +527,6 @@ struct GeminiHome {
 }
 
 impl GeminiHome {
-    /// `$GEMINI_HOME`, else `~/.gemini`, read the way the server reads them in
-    /// the environment it is started with: the profile's own values over the
-    /// broker's.
     fn of(profile: &Profile) -> Self {
         let env = environment_for(profile);
         let profiles = |key: &str| env.get(key).filter(|value| !value.is_empty()).cloned();
@@ -725,9 +548,6 @@ impl GeminiHome {
         }
     }
 
-    /// Why the server would refuse a session or ask a person to sign in: its
-    /// settings name no sign-in method, or they name a Google sign-in whose
-    /// token file does not exist where the server reads one.
     fn missing_sign_in(&self) -> Option<String> {
         let server = self.path.join("antigravity-acp");
         let method = std::fs::read_to_string(server.join("settings.json"))
@@ -750,33 +570,7 @@ impl GeminiHome {
     }
 }
 
-/// Pi's ACP adapter from the ACP registry, `pi-acp` 0.0.33, which runs the
-/// account's own `pi --mode rpc --no-themes` in the session's directory with
-/// the profile's environment, so the agent directory, sign-in, settings,
-/// extensions, and skills are the ones the command line uses. Its 0.0.x
-/// releases promise nothing between them, so Oga accepts that release alone
-/// and turns any other away before a session opens. Its command line gets no
-/// Oga tools, and so does this.
-///
-/// It cannot pass `--no-approve`, which keeps the command line from loading a
-/// project's own Pi settings, extensions, and skills, so a project that has
-/// any keeps to its command line.
-///
-/// A session it opens is Pi's own session under Pi's own id, the one
-/// `pi --session-id` continues, which it records in its session map. It falls
-/// back to an id of its own when Pi does not report one, so only an id the map
-/// ties to a session file in the profile's session directory is recorded for
-/// a terminal.
-///
-/// The model is the `model` session setting, taking the same `provider/model`
-/// id `--model` does, and the thinking level is `thought_level`, taking the
-/// level `--thinking` does. It does not offer `max`, so a run asking for it
-/// keeps to the command line. It writes a startup summary into a new session
-/// after answering, and announces its commands once the session is ready.
-///
-/// Pi has no permission prompts of its own; the adapter asks only when an
-/// extension wants a person to confirm or choose, which the command line runs
-/// without, so Oga declines. It reports no usage over ACP.
+/// Pi's ACP adapter uses the profile's Pi environment and verified build.
 fn pi() -> AcpAdapter {
     const AGENT: &str = "pi-acp";
     AcpAdapter::new(AGENT, |_| vec![AGENT.to_owned()])
@@ -807,10 +601,6 @@ fn pi() -> AcpAdapter {
         })
 }
 
-/// The first of a project's own Pi resources that Pi loads only for a trusted
-/// project: `.pi` settings, resources, and system prompts in the directory,
-/// and `.agents/skills` there or above it, up to the repository root. The
-/// account's own `~/.agents/skills` is loaded either way, so it is not one.
 fn pi_project_resource(profile: &Profile, cwd: &Path) -> Option<PathBuf> {
     const PROJECT: [&str; 7] = [
         ".pi/settings.json",
@@ -845,8 +635,6 @@ fn pi_project_resource(profile: &Profile, cwd: &Path) -> Option<PathBuf> {
     None
 }
 
-/// The Pi session file `pi-acp` recorded for a session id, when it lies in the
-/// profile's session directory under that id, as `pi --session-id` finds it.
 fn pi_session_file(profile: &Profile, session_id: &str) -> Option<PathBuf> {
     let env = environment_for(profile);
     let home = env.get("HOME").cloned().unwrap_or_else(home);

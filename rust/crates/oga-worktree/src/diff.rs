@@ -1,9 +1,4 @@
-//! Reading a task's real diff out of git.
-//!
-//! Every command here only reads: no index writes, no checkout, no refs
-//! moved. Output is capped on both sides — a per-file line budget and a
-//! ceiling on how much of git's stdout is consumed at all — so a checkout
-//! holding a generated tree cannot turn one panel into a whole-repo read.
+//! Read-only git diffs with bounded output.
 
 use std::collections::HashSet;
 use std::fs;
@@ -16,25 +11,19 @@ use tokio::process::Command;
 
 use crate::{WorktreeError, repository_root, require_worktree_paths};
 
-/// How many files one read carries before the rest is reported as truncated.
+// 400 files keeps one diff read bounded.
 const MAX_FILES: usize = 400;
-/// How many diff lines a single file carries before its body is dropped.
+// 2,000 lines keeps one file's body bounded.
 const MAX_FILE_LINES: usize = 2_000;
-/// How much of git's stdout is consumed before the read stops.
+// 4 MiB caps git output before parsing.
 const MAX_PATCH_BYTES: usize = 4 * 1024 * 1024;
-/// How large an untracked file can be before its contents are dropped.
+// 256 KiB bounds an untracked file body.
 const MAX_UNTRACKED_BYTES: u64 = 256 * 1024;
-/// How many untracked files one read carries.
+// 200 untracked files keeps one read bounded.
 const MAX_UNTRACKED_FILES: usize = 200;
-/// How many branches the base picker is offered.
+// 400 branches bounds the base picker.
 const MAX_BRANCHES: usize = 400;
 
-/// Reads what a task actually changed in the checkout it ran in.
-///
-/// `against` names the side to compare the checkout with: `HEAD` for work that
-/// is not committed yet, a branch to see everything this checkout carries that
-/// the branch does not. Left out, the task's own shape decides — a worktree
-/// task against the commit its branch was cut from, any other against `HEAD`.
 pub async fn task_diff(task: &Task, against: Option<&str>) -> Result<TaskDiff, WorktreeError> {
     let cwd = PathBuf::from(&task.cwd);
     let worktree = task.worktree.as_ref();
@@ -63,7 +52,6 @@ pub async fn task_diff(task: &Task, against: Option<&str>) -> Result<TaskDiff, W
     read_diff(&cwd, basis, &against, base, &pathspecs).await
 }
 
-/// The branches a checkout offers as a diff base.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BranchChoices {
     pub branches: Vec<String>,
@@ -71,11 +59,6 @@ pub struct BranchChoices {
     pub default: Option<String>,
 }
 
-/// Lists the branches a task's checkout can be compared against, newest first.
-///
-/// Remote-tracking branches come along, since the base a reader wants may not
-/// be checked out here, but one that only mirrors a local branch is left out,
-/// as are the symbolic refs standing for a remote's own head.
 pub async fn branch_choices(cwd: &Path) -> Result<BranchChoices, WorktreeError> {
     let (listing, _) = git_capped(
         cwd,
@@ -119,14 +102,10 @@ pub async fn branch_choices(cwd: &Path) -> Result<BranchChoices, WorktreeError> 
     Ok(BranchChoices { branches, default })
 }
 
-/// A remote-tracking branch without its remote: `origin/main` is `main`.
 fn remote_tail(name: &str) -> &str {
     name.split_once('/').map_or(name, |(_, tail)| tail)
 }
 
-/// The repository's trunk: what the remote points its own head at, falling
-/// back to a conventional trunk name the checkout has, and past that to any
-/// branch other than the one the checkout is already on.
 async fn default_branch(cwd: &Path, branches: &[String], current: Option<&str>) -> Option<String> {
     let head = git_capped(
         cwd,
@@ -160,8 +139,6 @@ async fn default_branch(cwd: &Path, branches: &[String], current: Option<&str>) 
         })
 }
 
-/// A revision a caller named. Anything that could read as a git option is
-/// refused rather than handed to git.
 fn checked_revision(raw: &str) -> Result<&str, WorktreeError> {
     let usable = !raw.is_empty()
         && raw.len() <= 255
@@ -186,12 +163,6 @@ async fn require_repository(cwd: &Path) -> Result<(), WorktreeError> {
     )))
 }
 
-/// The commit a task branch was cut from, taken from its first reflog entry.
-///
-/// A branch's oldest reflog line is the one that created it, and its recorded
-/// value is the commit it started at. Reflogs can be pruned or switched off,
-/// in which case the caller falls back to `HEAD` and shows only uncommitted
-/// work rather than guessing at a base.
 async fn branch_base(cwd: &Path, branch: &str) -> Option<String> {
     let (output, _) = git_capped(
         cwd,
@@ -211,8 +182,6 @@ async fn branch_base(cwd: &Path, branch: &str) -> Option<String> {
     looks_like_a_commit.then(|| commit.to_owned())
 }
 
-/// Turns a task's write scope into git pathspecs. An unrestricted scope
-/// narrows to nothing extra: the task's own directory is already the limit.
 fn scope_pathspecs(rules: &[String]) -> Vec<String> {
     let mut pathspecs = Vec::new();
     for rule in rules {
@@ -274,7 +243,6 @@ async fn read_diff(
     })
 }
 
-/// Splits one `git diff` body into a file per `diff --git` header.
 fn split_patch(patch: &str) -> Vec<TaskDiffFile> {
     let mut files = Vec::new();
     let mut chunk: Vec<&str> = Vec::new();
@@ -357,7 +325,6 @@ fn patch_file(chunk: &[&str]) -> Option<TaskDiffFile> {
     })
 }
 
-/// The path off a `--- a/x` or `+++ b/x` line, absent for the `/dev/null` side.
 fn header_path(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw == "/dev/null" {
@@ -373,8 +340,6 @@ fn header_path(raw: &str) -> Option<String> {
     )
 }
 
-/// Last resort for a chunk with no usable `---`/`+++`, which is how a binary
-/// or mode-only change arrives: the `b/` half of the `diff --git` line.
 fn pair_path(header: &str) -> Option<String> {
     let at = header
         .rfind(" b/")
@@ -404,8 +369,6 @@ fn unquote(raw: &str) -> String {
     out
 }
 
-/// Files in the checkout git has never been told about. They carry no diff of
-/// their own, so their contents stand in as one added block.
 async fn untracked_files(
     cwd: &Path,
     pathspecs: &[String],
@@ -463,8 +426,6 @@ fn untracked_file(cwd: &Path, path: &str) -> TaskDiffFile {
     }
 }
 
-/// Runs git and reads at most `cap` bytes of its stdout, stopping it once the
-/// cap is reached. The flag reports whether output was left behind.
 async fn git_capped(
     cwd: &Path,
     args: &[String],

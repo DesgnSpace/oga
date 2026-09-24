@@ -1,5 +1,4 @@
-// Task mutations, the header actions menu, and blocked-task explanations.
-// Ported from rust/crates/oga-ui/src/actions/mod.rs — keep behavior and copy identical.
+// Task mutations, header actions, and blocked-task explanations.
 
 import * as React from "react";
 import { createPortal } from "react-dom";

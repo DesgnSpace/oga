@@ -15,7 +15,7 @@ const DEFAULT_ZOOM_INDEX = ZOOM_STEPS.indexOf(1);
 // Zoom lasts for the window's lifetime.
 let zoomIndex = DEFAULT_ZOOM_INDEX;
 
-// The desktop shell zooms the webview; CSS is the fallback outside it.
+// The desktop shell zooms the webview; CSS `zoom` on the root leaves an empty band when zoomed out, so it is only the fallback outside the shell.
 function applyZoom(): void {
   if (typeof document === "undefined") return;
   const scale = ZOOM_STEPS[zoomIndex];

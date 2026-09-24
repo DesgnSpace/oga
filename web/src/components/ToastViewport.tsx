@@ -113,7 +113,7 @@ export function ToastViewport() {
     }
     setPositions(next);
     const front = rendered.length ? itemRefs.current.get(rendered[rendered.length - 1].id)?.offsetHeight ?? 0 : 0;
-    // Collapsed peek is 12px per toast (like Sonner/pluk's --space-md), expanded gap is 8px (--space-sm).
+    // Keep the collapsed stack's peek explicit: 12px per toast.
     const collapsedPeek = 12;
     const overflowRoom = more ? 16 : 0;
     setStackHeight(expanded ? offset : front + Math.min(rendered.length, 3) * collapsedPeek + overflowRoom);

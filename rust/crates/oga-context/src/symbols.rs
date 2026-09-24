@@ -1,6 +1,5 @@
-//! The parsing engine: run one adapter's capture query over a parsed tree and
-//! turn the matches into symbols. Everything here is language-agnostic; what a
-//! language declares, and what counts as public in it, lives in `lang`.
+//! Run language-adapter capture queries and turn tree matches into symbols.
+/// Parsing stays language-agnostic; language semantics live in `lang`.
 
 use oga_domain::SymbolKind;
 use streaming_iterator::StreamingIterator;

@@ -1,7 +1,4 @@
-// Read-only code/diff card rendering used by task detail panels.
-// Ported from rust/crates/oga-ui/src/review/mod.rs — the data derivation
-// (`buildCodeCard`/`buildDiffCard`/`highlight`) already lives in @/domain/review;
-// this file only draws it.
+// Read-only code/diff card rendering.
 
 import type { CodeLanguage } from "@/domain/review";
 import { resolveCodeLanguage } from "@/domain/review";
