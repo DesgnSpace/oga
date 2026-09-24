@@ -715,7 +715,8 @@ export interface ChangedFilesPanelProps extends ChangedFilesProps {
   onClose: () => void;
   onExpand: () => void;
   width: number;
-  onResizeStart: (clientX: number) => void;
+  /** Starts a drag from the panel's rendered width, which can exceed the stored one while the panel fills spare room. */
+  onResizeStart: (clientX: number, renderedWidth: number) => void;
   onResetWidth: () => void;
   onResizeStep: (deltaWidth: number) => void;
 }
@@ -734,7 +735,6 @@ export function ChangedFilesPanel({
       id="changed-files-panel"
       className="changed-files-panel"
       aria-label="Changed files"
-      style={{ width: `${width}px` }}
     >
       <div
         className="changed-files-resize-handle"
@@ -747,7 +747,8 @@ export function ChangedFilesPanel({
         tabIndex={0}
         onPointerDown={(event) => {
           event.preventDefault();
-          onResizeStart(event.clientX);
+          const panel = event.currentTarget.parentElement;
+          onResizeStart(event.clientX, panel?.getBoundingClientRect().width ?? width);
         }}
         onDoubleClick={onResetWidth}
         title="Drag to resize · double-click to reset"

@@ -58,6 +58,7 @@
     --z-raised: 2;
     --z-popover: 3;
     --z-context-menu: 4;
+    --z-drawer: 50;
     --z-menu: 100;
     --z-modal: 200;
     --z-toast: 1100;
@@ -478,6 +479,26 @@ a {
     min-height: 0;
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
+}
+
+/* Narrow, the open sidebar floats over the content from the left rather than
+   squeezing it, and a click anywhere in the content closes it again. */
+@media (max-width: 900px) {
+    .app-layout {
+        position: relative;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .task-sidebar {
+        position: absolute;
+        z-index: var(--z-drawer);
+        top: 0;
+        bottom: 0;
+        left: 0;
+        max-width: calc(100% - var(--space-7));
+        border-right: 1px solid var(--color-border);
+        box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
+    }
 }
 
 .app-main {
@@ -1347,7 +1368,9 @@ h1 {
 }
 
 /* The changed files stand beside the whole task column, header and composer
-   included, and take their width only while they are open. */
+   included, and take their width only while they are open. Open, the reading
+   column keeps its measure and the panel takes the rest of the pane, so a wide
+   window leaves no empty margin on either side of the conversation. */
 .task-detail {
     display: grid;
     width: 100%;
@@ -1359,7 +1382,7 @@ h1 {
 }
 
 .task-detail-with-changes {
-    grid-template-columns: minmax(0, 1fr) var(--changed-files-width, 380px);
+    grid-template-columns: minmax(0, var(--measure-log)) minmax(var(--changed-files-width, 380px), 1fr);
 }
 
 /* The activity takes the room that is left and scrolls inside it, so the

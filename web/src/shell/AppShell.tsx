@@ -232,6 +232,20 @@ function contentClassName(route: Route): string {
   }
 }
 
+/** Below this width the open sidebar floats over the content instead of
+ * taking a column from it. Matches the media query in oga.css. */
+const SIDEBAR_FLOAT_QUERY = "(max-width: 900px)";
+
+function subscribeSidebarFloat(listener: () => void): () => void {
+  const query = globalThis.matchMedia?.(SIDEBAR_FLOAT_QUERY);
+  query?.addEventListener("change", listener);
+  return () => query?.removeEventListener("change", listener);
+}
+
+function sidebarFloats(): boolean {
+  return globalThis.matchMedia?.(SIDEBAR_FLOAT_QUERY).matches ?? false;
+}
+
 function isOverlayRoute(route: Route): boolean {
   return route.kind === "settings" || route.kind === "usage";
 }
@@ -312,6 +326,11 @@ function Shell() {
     () => sidebarController.snapshot.sidebarCollapsed,
     () => sidebarController.snapshot.sidebarCollapsed,
   );
+  const narrowWindow = useSyncExternalStore(subscribeSidebarFloat, sidebarFloats, () => false);
+  const sidebarFloating = narrowWindow && !sidebarCollapsed;
+  const closeFloatingSidebar = useCallback(() => {
+    if (sidebarFloating) toggleSidebarAndManageFocus(sidebarController);
+  }, [sidebarFloating, sidebarController]);
   const [taskHeader, setTaskHeader] = useState<TaskTitleBarInfo>();
   const [focusRequest, setFocusRequest] = useState<ReplyFocusRequest>();
   const focusRequestNonce = useRef(0);
@@ -322,7 +341,8 @@ function Shell() {
     const nonce = ++focusRequestNonce.current;
     setFocusRequest({ taskId: id, nonce });
     navigate({ kind: "task", id });
-  }, [navigate]);
+    closeFloatingSidebar();
+  }, [navigate, closeFloatingSidebar]);
   const consumeFocusRequest = useCallback((nonce: number) => {
     setFocusRequest((current) => current?.nonce === nonce ? undefined : current);
   }, []);
@@ -340,7 +360,7 @@ function Shell() {
             onOpenUsage={openUsage}
           navigation={{ canGoBack, canGoForward, onBack: goBack, onForward: goForward }}
         />
-        <div className="app-main">
+        <div className="app-main" onPointerDown={closeFloatingSidebar}>
           <TitleBar
             route={titleRoute}
             sidebarCollapsed={sidebarCollapsed}
