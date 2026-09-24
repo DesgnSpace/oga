@@ -833,7 +833,7 @@ fn account_dir(profile: &Profile, key: &str, default: &str) -> String {
         |value| expand_home(value, &home),
     )
 }
-/// Claude's account directory for this profile.
+/// Claude's account directory for this profile; profiles without one get separate credentials and limits.
 pub fn claude_config_dir(profile: &Profile) -> String {
     let default = if profile.id == "claude" {
         "/.claude".to_owned()
@@ -852,7 +852,7 @@ fn claude_config_override(profile: &Profile) -> Option<String> {
 pub fn codex_home(profile: &Profile) -> String {
     account_dir(profile, "CODEX_HOME", "/.codex")
 }
-/// Variables a provider process must not see at all.
+/// A worker inherits the broker's environment, so "absent" must mean removed, not left unset.
 pub fn unset_environment_for(profile: &Profile) -> BTreeSet<String> {
     match profile.provider {
         Provider::Claude if claude_config_override(profile).is_none() => {
