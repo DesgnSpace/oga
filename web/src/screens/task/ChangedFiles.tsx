@@ -1,8 +1,4 @@
-// The changed-files view: files a run touched, with bounded per-file diffs.
-// Two chromes over one body — a side panel beside the transcript, and a
-// full-screen review with the file tree kept open beside the diffs.
-// Ported from rust/crates/oga-ui/src/changes/mod.rs's view layer — the pure
-// derivation (`collectRunChanges`) already lives in @/domain/changes.
+// The changed-files view: files a run touched, with bounded diffs.
 
 import * as React from "react";
 import type { TaskDiffFileStatus } from "@/bridge/types";

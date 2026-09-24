@@ -1,4 +1,4 @@
-// Small display helpers shared across the task detail screen.
+// Task detail display helpers.
 
 import type { TaskHoldView } from "@/bridge/types";
 import { absoluteTime, relativeTime } from "@/ui/time";
