@@ -11,16 +11,12 @@ pub const FTS_STOP_WORDS: &[&str] = &[
     "by", "is", "it", "of", "on", "or", "to", "use",
 ];
 
-/// Two letters is enough to name something — `db`, `fs`, `ui`, `os`, `go` are
-/// all symbols in real projects — and these are the two-letter words that
-/// never are.
+// Two letters can name a real symbol; these two-letter words are filler.
 const SHORT_STOP_WORDS: &[&str] = &[
     "am", "an", "as", "at", "be", "by", "do", "he", "if", "in", "is", "it", "me", "my", "no", "of",
     "on", "or", "so", "to", "up", "us", "we",
 ];
 
-/// Whether a word narrows a search at all, against the filler list its caller
-/// works from.
 fn searchable(word: &str, filler: &[&str]) -> bool {
     word.len() >= 2 && !SHORT_STOP_WORDS.contains(&word) && !filler.contains(&word)
 }
@@ -127,9 +123,6 @@ pub fn words(text: &str) -> Vec<String> {
     raw_words(text).iter().map(normalize_word).collect()
 }
 
-/// The one key an exact-name lookup compares against, so `extractSymbols`,
-/// `extract_symbols`, and the question "extract symbols" all fold together.
-/// Order and filler words are dropped; a name made only of filler keeps it.
 pub fn name_key(text: &str) -> String {
     let all = words(text);
     let mut parts = all
@@ -176,8 +169,6 @@ pub fn prompt_terms(text: &str) -> Vec<String> {
     terms.into_iter().collect()
 }
 
-/// The words of a hint worth storing or matching on, normalized so the hint
-/// someone taught and the question someone types fold together.
 pub fn hint_words(text: &str) -> Vec<String> {
     raw_words(text)
         .iter()
@@ -186,8 +177,6 @@ pub fn hint_words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// One phrase folded to the key it answers to: sorted, deduplicated, filler
-/// dropped, so word order never decides whether a hint matches.
 pub fn hint_key(hints: &[String]) -> String {
     hints
         .iter()
