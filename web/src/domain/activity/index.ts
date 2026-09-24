@@ -6,7 +6,7 @@
 // halfway through ("Terminal" → the command it ran, "Preparing file…" → the
 // file it wrote) still gets exactly one row for it.
 
-import type { TaskEventPresentation, TaskEventView, TaskState } from "@/bridge/types";
+import type { SubagentLink, TaskEventPresentation, TaskEventView, TaskState } from "@/bridge/types";
 import {
   ogaCall,
   ogaResultSummary,
@@ -83,7 +83,7 @@ export type ActivityNode =
   | { type: "message"; id: string; event: TaskEventView }
   | { type: "thinking"; id: string; pulse: ReasoningPulse }
   | { type: "notice"; id: string; event: TaskEventView }
-  | { type: "subagent"; subagent: ActivitySubagent };
+  | { type: "subagents"; id: string; subagents: ActivitySubagent[] };
 
 /** One tool call, however many rows the provider sent for it. */
 export interface ActivityCall {
@@ -101,13 +101,18 @@ export interface ActivityCall {
   endedAt?: string;
 }
 
-/** A subagent run, bracketed by the pair of rows that share its agent id. */
+/**
+ * One subagent run, keyed by the id its rows share. `nodes` is empty when the
+ * provider reports only the launch and the answer, not the work in between.
+ */
 export interface ActivitySubagent {
-  /** `subagent:<agent id>`. */
+  /** `subagent:<subagent id>`. */
   id: string;
-  label: string;
-  start: TaskEventView;
+  label?: string;
+  /** The rows that launched it, then the rows that delivered its report. */
+  events: TaskEventView[];
   nodes: ActivityNode[];
+  report?: string;
   status: ActivityStatus;
 }
 
@@ -121,9 +126,13 @@ function nodeEvents(node: ActivityNode): TaskEventView[] {
       return [node.event];
     case "thinking":
       return [];
-    case "subagent":
-      return [node.subagent.start, ...node.subagent.nodes.flatMap(nodeEvents)];
+    case "subagents":
+      return [...new Set(node.subagents.flatMap(subagentEvents))].sort((left, right) => left.id - right.id);
   }
+}
+
+function subagentEvents(subagent: ActivitySubagent): TaskEventView[] {
+  return [...subagent.events, ...subagent.nodes.flatMap(nodeEvents)].sort((left, right) => left.id - right.id);
 }
 
 function callEvents(call: ActivityCall): TaskEventView[] {
@@ -136,7 +145,7 @@ function turnCalls(turn: ActivityTurn): ActivityCall[] {
   const collect = (nodes: ActivityNode[]): ActivityCall[] =>
     nodes.flatMap((node) => {
       if (node.type === "call") return withChildren(node.call);
-      if (node.type === "subagent") return collect(node.subagent.nodes);
+      if (node.type === "subagents") return node.subagents.flatMap((subagent) => collect(subagent.nodes));
       return [];
     });
   return turn.segments.flatMap((segment) => collect(segment.nodes));
@@ -152,13 +161,20 @@ export function nodesCallCount(nodes: ActivityNode[]): number {
   const countCall = (call: ActivityCall): number => 1 + call.children.reduce((sum, child) => sum + countCall(child), 0);
   return nodes.reduce((count, node) => {
     if (node.type === "call") return count + countCall(node.call);
-    if (node.type === "subagent") return count + nodesCallCount(node.subagent.nodes);
+    if (node.type === "subagents") {
+      return node.subagents.reduce((sum, subagent) => sum + nodesCallCount(subagent.nodes), count);
+    }
     return count;
   }, 0);
 }
 
 export function nodesDurationMs(nodes: ActivityNode[]): number | undefined {
   const events = nodes.flatMap(nodeEvents);
+  return spanMs(events[0]?.createdAt, events[events.length - 1]?.createdAt);
+}
+
+export function subagentDurationMs(subagent: ActivitySubagent): number | undefined {
+  const events = subagentEvents(subagent);
   return spanMs(events[0]?.createdAt, events[events.length - 1]?.createdAt);
 }
 
@@ -461,16 +477,17 @@ function composeTimeline(
 }
 
 /**
- * Closes a turn: a subagent's stretch moves under the row that started it,
+ * Closes a turn: each subagent's work moves under the launch that started it,
  * and once the turn itself has closed, a call it never ended reads as
  * interrupted rather than as work still in flight.
  */
 function finishTurn(draft: TurnDraft, closed: boolean): ActivityTurn | undefined {
+  const nested = nestSubagents(draft.segments.map((segment) => segment.nodes));
   const segments = draft.segments
     .map((segment, index) => ({
       id: `segment:${draft.ordinal}:${index}`,
       lead: segment.lead,
-      nodes: closed ? markInterrupted(nestSubagents(segment.nodes)) : nestSubagents(segment.nodes),
+      nodes: closed ? markInterrupted(nested[index]) : nested[index],
     }))
     .filter((segment) => segment.nodes.length > 0);
   if (segments.length === 0) return undefined;
@@ -508,7 +525,9 @@ function titleFromMessage(event: TaskEventView): string | undefined {
 
 function turnStatus(segments: ActivitySegment[], closed: boolean): ActivityStatus {
   const flatten = (nodes: ActivityNode[]): ActivityNode[] =>
-    nodes.flatMap((node) => (node.type === "subagent" ? [node, ...flatten(node.subagent.nodes)] : [node]));
+    nodes.flatMap((node) =>
+      node.type === "subagents" ? [node, ...flatten(node.subagents.flatMap((subagent) => subagent.nodes))] : [node],
+    );
   const nodes = flatten(segments.flatMap((segment) => segment.nodes));
   if (nodes.some((node) => node.type === "notice" && node.event.type === "needs_input")) return "needs_input";
   if (nodes.some(nodeFailed)) return "failed";
@@ -519,10 +538,12 @@ function turnStatus(segments: ActivitySegment[], closed: boolean): ActivityStatu
 function nodeFailed(node: ActivityNode): boolean {
   if (node.type === "call") return node.call.status === "failed";
   if (node.type === "notice") return node.event.phase === "failed";
+  if (node.type === "subagents") return node.subagents.some((subagent) => subagent.status === "failed");
   return false;
 }
 
 function nodeRunning(node: ActivityNode): boolean {
+  if (node.type === "subagents") return node.subagents.some((subagent) => subagent.status === "running");
   return node.type === "call" && node.call.status === "running";
 }
 
@@ -612,6 +633,8 @@ function foldCalls(events: TaskEventView[]): CallFolds {
   const first = new Map<string, CallFold>();
   for (const call of opened) if (!first.has(call.actionId)) first.set(call.actionId, call);
   for (const call of opened) {
+    // A subagent's own call belongs to its subagent, not under the launching call.
+    if (call.events.some((event) => links(event, "member").length > 0)) continue;
     const parent = parentActionId(call.row);
     const owner = parent === undefined ? undefined : first.get(parent);
     if (owner === undefined || owner === call) continue;
@@ -647,9 +670,13 @@ function markInterrupted(nodes: ActivityNode[]): ActivityNode[] {
     children: value.children.map(call),
   });
   return nodes.map((node) => {
-    if (node.type === "subagent") {
-      const status = node.subagent.status === "running" ? "interrupted" : node.subagent.status;
-      return { ...node, subagent: { ...node.subagent, status, nodes: markInterrupted(node.subagent.nodes) } };
+    if (node.type === "subagents") {
+      const subagents = node.subagents.map((subagent) => ({
+        ...subagent,
+        status: subagent.status === "running" ? ("interrupted" as const) : subagent.status,
+        nodes: markInterrupted(subagent.nodes),
+      }));
+      return { ...node, subagents };
     }
     return node.type === "call" ? { type: "call", call: call(node.call) } : node;
   });
@@ -659,115 +686,164 @@ function markInterrupted(nodes: ActivityNode[]): ActivityNode[] {
 // Subagents
 // ---------------------------------------------------------------------------
 
-export const SUBAGENT_STARTED_TITLE = "Subagent started";
-export const SUBAGENT_FINISHED_TITLE = "Subagent finished";
+function links(event: TaskEventView, role: SubagentLink["role"]): SubagentLink[] {
+  return event.subagents?.filter((link) => link.role === role) ?? [];
+}
+
+/** Every row a node was folded from, not only the one it shows. */
+function nodeRows(node: ActivityNode): TaskEventView[] {
+  switch (node.type) {
+    case "call":
+      return node.call.events;
+    case "message":
+    case "notice":
+      return [node.event];
+    case "thinking":
+    case "subagents":
+      return [];
+  }
+}
+
+interface SubagentDraft {
+  id: string;
+  /** Every id the launch carried, so rows that named it early still find it. */
+  ids: Set<string>;
+  label?: string;
+  launch: ActivityNode;
+  nodes: ActivityNode[];
+  reports: SubagentReport[];
+}
+
+interface SubagentReport {
+  row: TaskEventView;
+  link: SubagentLink;
+}
 
 /**
- * Subagent runs nest by bracketing: a start opens a group, its stop closes it,
- * and a start that arrives while another group is still open sits inside it.
- * A row that names the run it belongs to (a hook `agent_id`, or a call whose
- * parent is the launching call) goes there even when the groups interleave;
- * any other row goes to the innermost open group. A start that never stops
- * closes with everything that followed it, still marked as running.
+ * Moves each subagent's own calls and report rows under its launch, by link, across the turn's
+ * segments; launches that start back to back share one node.
  */
-function nestSubagents(nodes: ActivityNode[]): ActivityNode[] {
-  interface Frame {
-    id: string;
-    start: TaskEventView;
-    parent: Frame | undefined;
-    nodes: ActivityNode[];
-    belongs: (event: TaskEventView) => boolean;
-    done: boolean;
+function nestSubagents(segments: ActivityNode[][]): ActivityNode[][] {
+  const drafts: SubagentDraft[] = [];
+  const byId = new Map<string, SubagentDraft>();
+  const launched = new Map<ActivityNode, SubagentDraft[]>();
+  for (const node of segments.flat()) {
+    const started = launchedBy(node);
+    if (started.length === 0) continue;
+    for (const draft of started) for (const id of draft.ids) byId.set(id, draft);
+    drafts.push(...started);
+    launched.set(node, started);
   }
-  const root: ActivityNode[] = [];
-  const open: Frame[] = [];
-  const wrap = (frame: Frame): ActivityNode => ({
-    type: "subagent",
-    subagent: {
-      id: `subagent:${frame.id}`,
-      label: subagentLabel(frame.start),
-      start: frame.start,
-      nodes: frame.nodes,
-      status: frame.done ? "done" : "running",
-    },
-  });
-  const close = (frame: Frame) => {
-    const index = open.indexOf(frame);
-    open.splice(index, 1);
-    for (const inner of open.slice(index)) {
-      if (inner.parent === frame) inner.parent = frame.parent;
-    }
-    (frame.parent && open.includes(frame.parent) ? frame.parent.nodes : root).push(wrap(frame));
-  };
+  if (drafts.length === 0) return segments;
 
-  for (const node of nodes) {
-    const boundary = node.type === "notice" ? subagentBoundary(node.event) : undefined;
-    if (node.type === "notice" && boundary?.role === "start" && !open.some((frame) => frame.id === boundary.id)) {
-      open.push({
-        id: boundary.id,
-        start: node.event,
-        parent: open.at(-1),
-        nodes: [],
-        belongs: subagentMembership(node.event, boundary.id),
-        done: false,
-      });
-      continue;
-    }
-    if (boundary?.role === "stop") {
-      const frame = innermost(open, (candidate) => candidate.id === boundary.id);
-      if (frame !== undefined) {
-        frame.nodes.push(node);
-        frame.done = true;
-        close(frame);
-        continue;
+  const resolve = (link: SubagentLink): SubagentDraft | undefined => {
+    const found = byId.get(link.id);
+    if (found !== undefined || link.label === undefined) return found;
+    // Until a launch settles, its members name the subagent only by its label.
+    const named = drafts.filter((draft) => draft.label === link.label);
+    return named.length === 1 ? named[0] : undefined;
+  };
+  const ownerOf = (node: ActivityNode): SubagentDraft | undefined => {
+    const own = launched.get(node) ?? [];
+    for (const row of nodeRows(node)) {
+      for (const link of links(row, "member")) {
+        const owner = resolve(link);
+        if (owner !== undefined && !own.includes(owner)) return owner;
       }
     }
-    const events = nodeEvents(node);
-    const owner = innermost(open, (frame) => events.some(frame.belongs)) ?? open.at(-1);
-    (owner?.nodes ?? root).push(node);
-  }
-  while (open.length > 0) close(open[open.length - 1]);
-  return root;
+    return undefined;
+  };
+
+  const batches: { node: Extract<ActivityNode, { type: "subagents" }>; drafts: SubagentDraft[] }[] = [];
+  const nested = segments.map((nodes) => {
+    const root: ActivityNode[] = [];
+    let batch: { target: ActivityNode[]; drafts: SubagentDraft[] } | undefined;
+    for (const node of nodes) {
+      const owner = ownerOf(node);
+      const target = owner?.nodes ?? root;
+      const started = launched.get(node);
+      if (started !== undefined) {
+        if (batch?.target === target) {
+          batch.drafts.push(...started);
+          continue;
+        }
+        const group = { type: "subagents" as const, id: `subagents:${nodeRows(node)[0]?.id}`, subagents: [] };
+        batch = { target, drafts: [...started] };
+        batches.push({ node: group, drafts: batch.drafts });
+        target.push(group);
+        continue;
+      }
+      batch = undefined;
+      if (owner !== undefined) {
+        owner.nodes.push(node);
+        continue;
+      }
+      const reports = nodeRows(node).flatMap((row) =>
+        links(row, "report").map((link) => ({ row, link, draft: resolve(link) })),
+      );
+      for (const { row, link, draft } of reports) draft?.reports.push({ row, link });
+      if (reports.length > 0 && reports.every((report) => report.draft !== undefined)) continue;
+      root.push(node);
+    }
+    return root;
+  });
+  for (const { node, drafts } of batches) node.subagents.push(...drafts.map(finishSubagent));
+  return nested;
 }
 
-function innermost<T>(frames: T[], matches: (frame: T) => boolean): T | undefined {
-  for (let index = frames.length - 1; index >= 0; index--) {
-    if (matches(frames[index])) return frames[index];
+/** The subagents a node launches, as its latest launching row names them. */
+function launchedBy(node: ActivityNode): SubagentDraft[] {
+  const rows = nodeRows(node).filter((row) => links(row, "launch").length > 0);
+  const latest = rows.at(-1);
+  if (latest === undefined) return [];
+  const earlier = rows.flatMap((row) => links(row, "launch"));
+  const started = links(latest, "launch").map((link): SubagentDraft => ({
+    id: link.id,
+    ids: new Set([link.id]),
+    launch: node,
+    nodes: [],
+    reports: [],
+  }));
+  // A launch still running can carry a placeholder id it swaps for the real one on completion.
+  if (started.length === 1) for (const link of earlier) started[0].ids.add(link.id);
+  for (const draft of started) {
+    draft.label = findLast(earlier, (link) => draft.ids.has(link.id) && link.label !== undefined)?.label;
   }
-  return undefined;
+  return started;
 }
 
-function subagentBoundary(event: TaskEventView): { id: string; role: "start" | "stop" } | undefined {
-  if (event.title === "SubagentStart" || event.title === "SubagentStop" || event.title === "Spawned subagent") {
-    const id = rawString(event, "agent_id");
-    if (id === undefined) return undefined;
-    return { id, role: event.title === "SubagentStop" ? "stop" : "start" };
-  }
-  if (event.title === SUBAGENT_STARTED_TITLE || event.title === SUBAGENT_FINISHED_TITLE) {
-    // The streamed pair shares `task_id`; the hook pair shares `agent_id`
-    // under the same normalized titles since Rust aligns them.
-    const id = rawString(event, "task_id") ?? rawString(event, "agent_id");
-    return id === undefined ? undefined : { id, role: event.title === SUBAGENT_STARTED_TITLE ? "start" : "stop" };
-  }
-  return undefined;
+function finishSubagent(draft: SubagentDraft): ActivitySubagent {
+  const launchRows = nodeRows(draft.launch);
+  const reports = draft.reports.slice().sort((left, right) => left.row.id - right.row.id);
+  const carried = [
+    ...launchRows.flatMap((row) => links(row, "launch")).filter((link) => draft.ids.has(link.id)),
+    ...reports.map((report) => report.link),
+  ];
+  const report = findLast(carried, (link) => link.report !== undefined && link.report.trim() !== "")?.report;
+  return {
+    id: `subagent:${draft.id}`,
+    label: draft.label,
+    events: [...new Set([...launchRows, ...reports.map((entry) => entry.row)])],
+    nodes: draft.nodes,
+    report,
+    status: subagentStatus(draft.launch, reports, report),
+  };
 }
 
-/**
- * A hook pair stamps every row it owns with the same `agent_id`. A streamed
- * pair does not: it names the tool call that launched the subagent, and the
- * subagent's own calls point back at it as their parent.
- */
-function subagentMembership(start: TaskEventView, id: string): (event: TaskEventView) => boolean {
-  if (rawString(start, "agent_id") !== undefined) {
-    return (event) => rawString(event, "agent_id") === id;
+/** Done once its report arrives; a report row still waiting keeps it running, and without one the launch decides. */
+function subagentStatus(launch: ActivityNode, reports: SubagentReport[], report: string | undefined): ActivityStatus {
+  const row = launch.type === "call" ? launch.call.event : launch.type === "notice" ? launch.event : undefined;
+  if (row?.phase === "failed") return "failed";
+  const last = reports.at(-1);
+  if (last !== undefined) {
+    if (last.row.phase === "failed") return "failed";
+    if (last.link.report !== undefined) return "done";
+    return last.row.phase === "started" ? "running" : "done";
   }
-  const toolUseId = rawString(start, "tool_use_id");
-  return (event) => toolUseId !== undefined && parentActionId(event) === toolUseId;
-}
-
-function subagentLabel(event: TaskEventView): string {
-  const name = rawString(event, "agent_type") ?? (event.title === SUBAGENT_STARTED_TITLE ? event.detail : undefined);
-  return name !== undefined && name !== "" ? `Subagent · ${name}` : "Subagent";
+  if (report !== undefined) return "done";
+  // A notice only announces a launch; a call is what reports finishing it.
+  const settled = launch.type === "call" && (row?.phase === "completed" || row?.complete === true);
+  return settled ? "done" : "running";
 }
 
 // ---------------------------------------------------------------------------
@@ -810,6 +886,8 @@ function isTechnical(event: TaskEventView): boolean {
   if (event.title === USAGE_WINDOW_TITLE && (event.detail === undefined || event.detail === event.title)) {
     return true;
   }
+  // A row that launches a subagent or delivers its report says so through its links alone.
+  if (event.subagents !== undefined && event.subagents.length > 0) return false;
   return event.kind === "tool" && event.detail === undefined && event.presentation === undefined;
 }
 
@@ -846,7 +924,11 @@ function mergeReasoning(events: TaskEventView[]): string | undefined {
 /** Whether anything in this run is worth turning "Show thinking" on for. */
 export function compositionHasThinking(composition: ActivityComposition): boolean {
   const inNodes = (nodes: ActivityNode[]): boolean =>
-    nodes.some((node) => (node.type === "subagent" ? inNodes(node.subagent.nodes) : node.type === "thinking"));
+    nodes.some((node) =>
+      node.type === "subagents"
+        ? node.subagents.some((subagent) => inNodes(subagent.nodes))
+        : node.type === "thinking",
+    );
   return composition.blocks.some(
     (block) => block.type === "turn" && block.turn.segments.some((segment) => inNodes(segment.nodes)),
   );

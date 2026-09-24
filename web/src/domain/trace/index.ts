@@ -16,6 +16,7 @@ import {
   nodesCallCount,
   nodesDurationMs,
   ReasoningPulse,
+  subagentDurationMs,
   turnDurationMs,
   type ActivityCall,
   type ActivityComposition,
@@ -199,6 +200,7 @@ export type EventExpansion =
   | { type: "skill"; text: string }
   | { type: "prose"; text: string }
   | { type: "thinking"; text: string }
+  | { type: "report"; text: string }
   | { type: "detail"; text: string }
   | { type: "content"; text: string; hiddenLines: number; language: CodeLanguage; preview?: ContentPreview }
   | { type: "todo"; items: TodoItem[] }
@@ -322,6 +324,7 @@ export function expansionOffers(expansion: EventExpansion, event: TaskEventView)
     case "prose":
       return false;
     case "thinking":
+    case "report":
       return true;
     case "detail":
       return event.title === "Resumed" || isLong(expansion.text);
@@ -343,6 +346,8 @@ export function expansionLabel(expansion: EventExpansion, expanded: boolean): st
       case "prose":
       case "thinking":
         return "full text";
+      case "report":
+        return "answer";
       case "detail":
         return "full details";
       case "content":
@@ -389,9 +394,9 @@ export function traceRowWeight(row: TraceRow): number {
 export function traceRowOffersExpansion(row: TraceRow): boolean {
   if (row.children.length > 0) return true;
   if (!row.expansion) return false;
-  // A stretch of thinking is folded from many events, so it has no single one
-  // of its own to judge.
-  if (row.expansion.type === "thinking") return true;
+  // A stretch of thinking or a subagent's report is folded from many events,
+  // so it has no single one of its own to judge.
+  if (row.expansion.type === "thinking" || row.expansion.type === "report") return true;
   if (!row.event) return false;
   return expansionOffers(row.expansion, row.event);
 }
@@ -490,9 +495,9 @@ function segmentRows(segment: ActivitySegment, cwd: string, live: boolean): Trac
   }];
 }
 
-function nodesSummary(nodes: ActivityNode[]): string | undefined {
+function nodesSummary(nodes: ActivityNode[], durationMs = nodesDurationMs(nodes)): string | undefined {
   const calls = nodesCallCount(nodes);
-  const duration = formatDuration(nodesDurationMs(nodes));
+  const duration = formatDuration(durationMs);
   const parts = [calls > 0 ? `${calls} call${calls === 1 ? "" : "s"}` : undefined, duration];
   const summary = parts.filter((part): part is string => part !== undefined).join(" · ");
   return summary !== "" ? summary : undefined;
@@ -517,8 +522,8 @@ function nodeRow(node: ActivityNode, cwd: string, live: boolean): TraceRow {
       };
     case "thinking":
       return { ...thinkingRow(node.pulse), nodeId: node.id };
-    case "subagent":
-      return subagentRow(node.subagent, cwd, live);
+    case "subagents":
+      return subagentsRow(node, cwd, live);
   }
 }
 
@@ -531,8 +536,8 @@ function nodeAnchorId(node: ActivityNode): number | undefined {
       return node.event.id;
     case "thinking":
       return node.pulse.id;
-    case "subagent":
-      return node.subagent.start.id;
+    case "subagents":
+      return node.subagents[0]?.events[0]?.id;
   }
 }
 
@@ -553,17 +558,33 @@ function callState(call: ActivityCall, live: boolean): TraceState {
   return call.status === "running" && live ? "running" : "done";
 }
 
+/** Subagents launched back to back sit under one row; a lone one stands alone. */
+function subagentsRow(node: Extract<ActivityNode, { type: "subagents" }>, cwd: string, live: boolean): TraceRow {
+  const rows = node.subagents.map((subagent) => subagentRow(subagent, cwd, live));
+  const [only] = rows;
+  if (only !== undefined && rows.length === 1) return only;
+  return {
+    ...blankRow(rows[0]?.id ?? 0),
+    nodeId: node.id,
+    target: `${rows.length} subagents`,
+    result: formatDuration(nodesDurationMs([node])),
+    state: rowsState(rows, live),
+    children: rows,
+  };
+}
+
+/** Opens onto the subagent's own calls when its provider sent them, and onto its report. */
 function subagentRow(subagent: ActivitySubagent, cwd: string, live: boolean): TraceRow {
   const children = subagent.nodes
     .map((node) => dropEmpty(nodeRow(node, cwd, live)))
     .filter((row): row is TraceRow => row !== undefined);
   return {
-    ...blankRow(subagent.start.id),
+    ...blankRow(subagent.events[0]?.id ?? 0),
     nodeId: subagent.id,
-    style: "notice",
-    target: subagent.label,
-    result: nodesSummary(subagent.nodes),
+    target: subagent.label !== undefined ? `Subagent · ${subagent.label}` : "Subagent",
+    result: nodesSummary(subagent.nodes, subagentDurationMs(subagent)),
     state: topState(subagent.status, live),
+    expansion: subagent.report !== undefined ? { type: "report", text: subagent.report } : undefined,
     children,
   };
 }
