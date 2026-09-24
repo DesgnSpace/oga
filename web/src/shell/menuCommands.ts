@@ -3,6 +3,7 @@
 // does nothing is a dead menu item, so every case below acts on the page.
 
 import { onMenuCommand } from "@/bridge";
+import { getTransport } from "@/bridge/transport";
 import { setMenuItemEnabled } from "@/bridge/client";
 import type { MenuCommand } from "@/bridge/types";
 import type { SidebarController } from "@/state";
@@ -16,9 +17,18 @@ const DEFAULT_ZOOM_INDEX = ZOOM_STEPS.indexOf(1);
 // Zoom lasts for the window's lifetime; every launch opens at actual size.
 let zoomIndex = DEFAULT_ZOOM_INDEX;
 
+// In the desktop shell the web view zooms itself, the way a browser does: the
+// page is laid out again at the new size and still fills the window. CSS
+// `zoom` on the root only scales the page, which left an empty band beside it
+// when zoomed out, so it is kept for running outside the shell.
 function applyZoom(): void {
   if (typeof document === "undefined") return;
-  (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(ZOOM_STEPS[zoomIndex]);
+  const scale = ZOOM_STEPS[zoomIndex];
+  if ("__TAURI__" in window) {
+    void getTransport().invoke("plugin:webview|set_webview_zoom", { label: "main", value: scale }).catch(() => undefined);
+    return;
+  }
+  (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(scale);
 }
 
 function zoomIn(): void {

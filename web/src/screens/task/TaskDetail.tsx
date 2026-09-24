@@ -515,7 +515,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
           onClose={() => setShowingChanges(false)}
           onExpand={() => setReviewingChanges(true)}
           width={changedFilesWidth}
-          onResizeStart={(clientX, renderedWidth) => setResizeStart({ x: clientX, width: renderedWidth })}
+          onResizeStart={(clientX) => setResizeStart({ x: clientX, width: changedFilesWidth })}
           onResetWidth={() => applyChangedFilesWidth(CHANGED_FILES_DEFAULT_WIDTH)}
           onResizeStep={(deltaWidth) => applyChangedFilesWidth(changedFilesWidth + deltaWidth)}
         />

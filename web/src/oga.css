@@ -1368,9 +1368,7 @@ h1 {
 }
 
 /* The changed files stand beside the whole task column, header and composer
-   included, and take their width only while they are open. Open, the reading
-   column keeps its measure and the panel takes the rest of the pane, so a wide
-   window leaves no empty margin on either side of the conversation. */
+   included, and take their width only while they are open. */
 .task-detail {
     display: grid;
     width: 100%;
@@ -1382,7 +1380,7 @@ h1 {
 }
 
 .task-detail-with-changes {
-    grid-template-columns: minmax(0, var(--measure-log)) minmax(var(--changed-files-width, 380px), 1fr);
+    grid-template-columns: minmax(0, 1fr) var(--changed-files-width, 380px);
 }
 
 /* The activity takes the room that is left and scrolls inside it, so the
