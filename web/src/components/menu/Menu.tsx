@@ -1,6 +1,4 @@
-// The compact, native-feeling menu shared by the task header's "more actions"
-// trigger and the sidebar row context menu. One presentational component,
-// different items per caller.
+// Shared compact menu panel.
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 

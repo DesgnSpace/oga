@@ -5,7 +5,6 @@ import { useDiffView } from "@/state/diff-preferences";
 
 const THEME_NAME = "oga";
 
-/** The app's own code colours, named rather than spelled out. */
 const THEME: ThemeRegistration = {
   name: THEME_NAME,
   colors: {
@@ -56,7 +55,6 @@ const THEME: ThemeRegistration = {
 
 registerCustomTheme(THEME_NAME, () => Promise.resolve(THEME));
 
-/** Both schemes take the one theme: the colours behind it already switch. */
 const THEMES = { light: THEME_NAME, dark: THEME_NAME };
 
 export interface CodeDiffProps {
@@ -68,7 +66,6 @@ export interface CodeDiffProps {
   wrap?: boolean;
 }
 
-/** A file's change, unified or side by side, in the app's own code colours. */
 export function CodeDiff({ patch, numbered = false, wrap = false }: CodeDiffProps) {
   const [view] = useDiffView();
   const fileDiff = React.useMemo(() => processFile(patch), [patch]);
