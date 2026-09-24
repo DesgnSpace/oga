@@ -1,6 +1,6 @@
 #!/bin/sh
 # Warn about tasks in flight before the retiring broker stops them.
-# Status 2 means this build cannot read the old database; the install still proceeds.
+# Any status other than 0/1/2 means the binary did not run, so stop before replacing a working build.
 bin=$1
 
 "$bin" inflight
