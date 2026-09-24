@@ -589,9 +589,16 @@ function ChangedFilesView({
       <header className={`changed-files-header${full ? " changed-files-header-full" : ""}`}>
         <div className="changed-files-header-row">
           <div className="changed-files-header-title">
-            <h2 id={full ? FULL_SCREEN_TITLE_ID : undefined}>
-              {`Changed files (${fileCount(grouped ? turns.turns.reduce((count, turn) => count + turn.files.length, 0) : changes.files.length)})`}
+            <h2 className="visually-hidden" id={full ? FULL_SCREEN_TITLE_ID : undefined}>
+              Changed files
             </h2>
+            <SourcePicker
+              source={source}
+              base={base}
+              branches={branches}
+              onSourceChange={onSourceChange}
+              onBaseChange={onBaseChange}
+            />
             {activePath !== undefined ? (
               <p className="changed-files-active-file" title={activePath}>
                 {activePath}
@@ -599,6 +606,7 @@ function ChangedFilesView({
             ) : (
               changes.files.length > 0 && (
                 <p className="changed-files-summary">
+                  {`${fileCount(grouped ? turns.turns.reduce((count, turn) => count + turn.files.length, 0) : changes.files.length)} · `}
                   <span className="diff-stat-added">{`+${added}`}</span>
                   {" · "}
                   <span className="diff-stat-removed">{`-${removed}`}</span>
@@ -608,13 +616,6 @@ function ChangedFilesView({
           </div>
           <div className="changed-files-header-actions">
             {full && <DiffHeader />}
-            <SourcePicker
-              source={source}
-              base={base}
-              branches={branches}
-              onSourceChange={onSourceChange}
-              onBaseChange={onBaseChange}
-            />
             {source === "run" ? (
               <label className="changed-files-group">
                 <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />
