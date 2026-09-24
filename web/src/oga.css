@@ -39,7 +39,7 @@
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --gutter: var(--space-4);
     --measure: 78ch;
-    --measure-log: 76ch;
+    --measure-log: 88ch;
     --content-max: 62.5rem;
     --nav-item-height: 40px;
     --radius-sm: 4px;
@@ -481,28 +481,11 @@ a {
     grid-template-rows: minmax(0, 1fr);
 }
 
-/* Narrow, the open sidebar floats over the content from the left rather than
-   squeezing it, and a click anywhere in the content closes it again. */
-@media (max-width: 900px) {
-    .app-layout {
-        position: relative;
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .task-sidebar {
-        position: absolute;
-        z-index: var(--z-drawer);
-        top: 0;
-        bottom: 0;
-        left: 0;
-        max-width: calc(100% - var(--space-7));
-        border-right: 1px solid var(--color-border);
-        box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
-    }
-}
-
 .app-main {
     display: flex;
+    /* Always the second column, so a hidden or floating sidebar leaves its
+       auto-sized column empty instead of the content shrinking into it. */
+    grid-column: 2;
     flex: 1;
     min-width: 0;
     min-height: 0;
@@ -651,6 +634,25 @@ a {
 /* Collapsed, the sidebar gives up its column entirely. */
 .task-sidebar-collapsed {
     display: none;
+}
+
+/* Narrow, the open sidebar floats over the content from the left rather than
+   squeezing it, and a click anywhere in the content closes it again. */
+@media (max-width: 900px) {
+    .app-layout {
+        position: relative;
+    }
+
+    .task-sidebar {
+        position: absolute;
+        z-index: var(--z-drawer);
+        top: 0;
+        bottom: 0;
+        left: 0;
+        max-width: calc(100% - var(--space-7));
+        border-right: 1px solid var(--color-border);
+        box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
+    }
 }
 
 /* The band the window is dragged by. On macOS the traffic lights sit over its
@@ -865,14 +867,6 @@ a {
 .icon-button:focus-visible {
     background: var(--color-bg);
     color: var(--color-text);
-}
-
-.text-button {
-    padding: var(--space-1) 0;
-    background: transparent;
-    color: var(--color-accent);
-    font-size: var(--text-base);
-    font-weight: 600;
 }
 
 .sidebar-list-shell {
@@ -1689,14 +1683,6 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-header h2 {
-    margin: 0;
-    font-size: var(--text-base);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .changed-files-summary {
     margin: var(--space-1) 0 0;
     color: var(--color-text-muted);
@@ -1716,28 +1702,17 @@ h1 {
     gap: var(--space-3);
 }
 
+.changed-files-header-title .changed-files-source-picker {
+    margin-left: calc(-1 * var(--space-4));
+}
+
 .changed-files-source-picker {
     position: relative;
 }
 
 .changed-files-source-trigger {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
     max-width: 200px;
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    background: var(--color-bg);
-    color: var(--color-text);
-    font: inherit;
     font-size: var(--text-md);
-    cursor: pointer;
-}
-
-.changed-files-source-trigger:hover,
-.changed-files-source-trigger:focus-visible {
-    background: var(--color-surface);
 }
 
 .changed-files-source-label {
@@ -3223,7 +3198,7 @@ h1 {
 }
 
 .trace-state-failed .trace-result {
-    color: var(--color-danger);
+    color: color-mix(in srgb, var(--color-danger) 70%, var(--color-text-muted));
 }
 
 .trace-disclosure {
@@ -3235,10 +3210,6 @@ h1 {
     place-items: center;
     color: var(--color-text-muted);
     line-height: 1;
-}
-
-.trace-state-failed {
-    background: color-mix(in srgb, var(--color-danger) 4%, var(--color-surface));
 }
 
 .trace-children {
@@ -4596,36 +4567,53 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     margin: 0;
 }
 
-.settings-button {
+.settings-button,
+.text-button,
+.changed-files-source-trigger {
     display: inline-flex;
     min-height: var(--control-height);
     align-items: center;
     justify-content: center;
-    padding: var(--space-2) var(--space-3);
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-4);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
     font-size: var(--text-base);
-    font-weight: 600;
+    font-weight: 400;
     white-space: nowrap;
     cursor: pointer;
 }
 
 .settings-button:not(:disabled):hover,
-.settings-button:focus-visible {
-    border-color: var(--color-accent);
+.settings-button:focus-visible,
+.text-button:not(:disabled):hover,
+.text-button:focus-visible,
+.changed-files-source-trigger:hover,
+.changed-files-source-trigger:focus-visible {
+    background: var(--color-surface);
 }
 
+/* The filled/accent button keeps a smaller, bolder form than the secondary
+   shape above. */
 .settings-button-primary {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius);
+    font-weight: 600;
     border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
     background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
     color: var(--color-accent);
 }
 
+.settings-button-primary:not(:disabled):hover,
+.settings-button-primary:focus-visible {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+}
+
 .settings-button-danger {
-    border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
     color: var(--color-danger);
 }
 
