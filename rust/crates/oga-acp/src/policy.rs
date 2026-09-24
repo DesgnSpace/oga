@@ -11,9 +11,7 @@ use serde_json::Value;
 
 pub type PolicyFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// The callbacks the client offers the agent. Every field starts `false`, and
-/// the handshake advertises exactly what is set here, so an agent never learns
-/// about a door the caller did not open.
+/// The handshake advertises only capabilities the caller has granted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Grants {
     pub read_text_file: bool,
@@ -38,8 +36,6 @@ impl Grants {
     }
 }
 
-/// The client's answer to a permission request. The agent offers the options;
-/// the policy picks one, treats the turn as cancelled, or refuses to answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     Select(PermissionOptionId),
@@ -47,8 +43,6 @@ pub enum Decision {
     Refuse { message: String },
 }
 
-/// A terminal call, handed over whole so a policy that grants terminals owns
-/// their semantics rather than inheriting any from the transport.
 #[derive(Debug, Clone)]
 pub enum TerminalCall {
     Create(Box<CreateTerminalRequest>),
@@ -58,12 +52,6 @@ pub enum TerminalCall {
     Release(ReleaseTerminalRequest),
 }
 
-/// The decisions a client makes while a turn is running.
-///
-/// Every method denies by default. Granting access takes two deliberate steps:
-/// setting the matching flag in [`Grants`], which is what the handshake
-/// advertises, and overriding the matching method, which is what actually
-/// answers. A policy that does one without the other still denies.
 pub trait AcpPolicy: Send + Sync + 'static {
     fn grants(&self) -> Grants {
         Grants::default()
@@ -107,8 +95,6 @@ pub(crate) fn denied(capability: &str) -> Error {
     )))
 }
 
-/// The policy a session gets when the caller names none: it advertises nothing
-/// and answers nothing.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DenyAll;
 
