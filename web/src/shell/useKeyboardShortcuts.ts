@@ -21,8 +21,6 @@ function isTextField(target: EventTarget | null): boolean {
     || (target instanceof HTMLElement && target.isContentEditable);
 }
 
-/** In the desktop app these same shortcuts are menu accelerators, so binding
- * them here as well would run each action twice. */
 export function useKeyboardShortcuts({ onBack, onForward, onSettings, onUsage, onRefresh, onToggleSidebar }: KeyboardShortcutHandlers): void {
   useEffect(() => {
     if (hasDesktopBridge()) return;

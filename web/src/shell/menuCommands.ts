@@ -1,6 +1,4 @@
-// Wires the native menu bar (`oga-menu-command`, see
-// rust/apps/oga-desktop/src/commands.rs) to the running app. A command that
-// does nothing is a dead menu item, so every case below acts on the page.
+// Native menu commands dispatched into the running app.
 
 import { onMenuCommand } from "@/bridge";
 import { getTransport } from "@/bridge/transport";
@@ -14,13 +12,10 @@ import { focusTaskSearch, toggleSidebarAndManageFocus } from "./taskSearch";
 const ZOOM_STEPS = [0.75, 0.85, 1, 1.1, 1.25, 1.4, 1.6, 1.8, 2] as const;
 const DEFAULT_ZOOM_INDEX = ZOOM_STEPS.indexOf(1);
 
-// Zoom lasts for the window's lifetime; every launch opens at actual size.
+// Zoom lasts for the window's lifetime.
 let zoomIndex = DEFAULT_ZOOM_INDEX;
 
-// In the desktop shell the web view zooms itself, the way a browser does: the
-// page is laid out again at the new size and still fills the window. CSS
-// `zoom` on the root only scales the page, which left an empty band beside it
-// when zoomed out, so it is kept for running outside the shell.
+// The desktop shell zooms the webview; CSS is the fallback outside it.
 function applyZoom(): void {
   if (typeof document === "undefined") return;
   const scale = ZOOM_STEPS[zoomIndex];

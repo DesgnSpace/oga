@@ -1,6 +1,4 @@
-// A plain value in a box that can be watched. No reducer framework: every
-// controller in this module holds one of these and replaces its snapshot
-// wholesale on each update, the same shape the Leptos signal had.
+// A plain observable value; each update replaces the snapshot.
 
 type Listener = () => void;
 
@@ -25,7 +23,6 @@ export class Store<T> {
     this.set(updater(this.state));
   }
 
-  /** Matches `useSyncExternalStore`'s subscribe signature. */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => {
