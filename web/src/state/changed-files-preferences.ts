@@ -1,4 +1,4 @@
-// Changed-files panel width, persisted the same way as the task sidebar width.
+// Changed-files panel preferences.
 
 import { readStorage, writeStorage } from "./storage";
 

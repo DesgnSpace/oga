@@ -47,19 +47,15 @@ use crate::{
 
 const MAX_PREREQUISITES: usize = 16;
 const DEPENDENCY_EXPIRY_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
-/// Default wait before retrying a rate-limited task whose provider message
-/// carried no parseable reset time.
+/// 15 min fallback when a provider gives no reset time.
 const RATE_LIMIT_DEFAULT_DELAY_MS: i64 = 15 * 60 * 1_000;
-/// How soon a parked run first tries the connection again. Later tries back off
-/// from here inside the sweep.
+/// First retry for a parked network failure; later retries back off.
 const NETWORK_FIRST_CHECK_MS: i64 = 30 * 1_000;
 const RATE_LIMIT_HOLD_EXPIRY_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
-/// What a released resume hold tells the worker when the hold itself carried
-/// no instruction of its own.
+/// The fallback instruction for a released resume hold.
 pub(crate) const CONTINUE_INSTRUCTION: &str =
     "Continue the original task from where the previous run stopped.";
-/// Slack over the wake-watch interval before a tick counts as a suspend rather
-/// than a slow scheduler.
+/// A tick this far behind the wake interval is a suspend, not slow scheduling.
 const WAKE_GAP_TOLERANCE: Duration = Duration::from_secs(60);
 
 /// Errors raised before or while a task is dispatched.
@@ -75,7 +71,6 @@ pub enum DispatchError {
     Lifecycle(#[from] lifecycle::LifecycleError),
 }
 
-/// Input accepted by the Rust equivalent of `delegate`.
 #[derive(Debug, Clone)]
 pub struct DispatchRequest {
     pub profile_id: String,
@@ -190,7 +185,6 @@ impl DispatchRequest {
 
 pub type DelegateRequest = DispatchRequest;
 
-/// The complete row and launch context produced by planning.
 #[derive(Debug, Clone)]
 pub struct DispatchPlan {
     pub task: Task,
@@ -206,14 +200,12 @@ pub struct DispatchPlan {
     pub joined_task_id: Option<String>,
 }
 
-/// Result returned after the row is persisted. The worker itself is detached.
 #[derive(Debug, Clone)]
 pub struct DispatchResult {
     pub task: Task,
     pub launched: bool,
 }
 
-/// Dispatch coordinator. It owns the store, runner, and live run handles.
 #[derive(Clone)]
 pub struct Dispatcher {
     store: Arc<Store>,
@@ -234,7 +226,6 @@ impl Dispatcher {
         }
     }
 
-    /// Replaces the ACP adapters this broker launches.
     pub fn with_acp_adapters(mut self, adapters: AcpAdapters) -> Self {
         self.acp = adapters;
         self
@@ -700,10 +691,6 @@ impl Dispatcher {
         });
     }
 
-    /// The two endings nobody should have to watch for: the account ran out of
-    /// usage, and the connection went away. Both park the task on a hold the
-    /// sweep picks back up, so the run continues without anyone noticing it
-    /// stopped. Every other ending stands as it is.
     async fn park_unattended_failure(&self, task: &Task) -> bool {
         if task.state != TaskState::Failed {
             return false;
@@ -718,10 +705,6 @@ impl Dispatcher {
         }
     }
 
-    /// The provider refused the session the run was told to reopen — it was
-    /// another account's, or it has aged out. The work itself is untouched, so
-    /// the session is forgotten and the same task runs again from a rebuilt
-    /// brief. Clearing it first is what stops the retry repeating the failure.
     async fn restart_without_rejected_session(&self, task: &Task) -> bool {
         // An ACP task forgets a conversation its agent cannot reopen when the
         // run settles, and waits for a person to resume it.
@@ -775,9 +758,6 @@ impl Dispatcher {
         }
     }
 
-    /// A rate-limited task waits for the reset the provider named. When the
-    /// project asked for it and another worker of the same calibre is free, it
-    /// moves there instead of waiting at all.
     async fn park_rate_limited(&self, task: &Task) -> bool {
         let settings = waiting::wait_settings(&self.store);
         if settings.move_on_rate_limit && self.move_to_free_worker(task).await {
@@ -812,9 +792,6 @@ impl Dispatcher {
         HoldSweep::new(self.store.clone()).arm(&hold).is_ok()
     }
 
-    /// A run the network killed waits for the connection instead of dying with
-    /// it. The give-up budget is cumulative across parks, so a connection that
-    /// keeps flapping cannot hold one task forever.
     fn park_disconnected(&self, task: &Task) -> bool {
         let settings = waiting::wait_settings(&self.store);
         let spent = self.network_parks(&task.id);
@@ -882,8 +859,6 @@ impl Dispatcher {
         true
     }
 
-    /// How much of the give-up budget this task has already spent. The hold row
-    /// is gone once it releases, so the count lives in the trace.
     fn network_parks(&self, task_id: &str) -> u32 {
         self.store
             .repositories()
@@ -975,9 +950,6 @@ impl Dispatcher {
         }
     }
 
-    /// Settle every run the store still believes is in flight against what is
-    /// actually true of its worker, and park the ones worth continuing. Safe to
-    /// call at any time: a run this broker is supervising is never touched.
     pub fn reconcile(
         &self,
         trigger: reconcile::ReconcileTrigger,
@@ -990,9 +962,6 @@ impl Dispatcher {
         )?)
     }
 
-    /// Notice the machine having been suspended and check every run against it.
-    /// Nothing else fires while the host is asleep, so the first tick after
-    /// waking is where a wall clock far ahead of the tick interval shows up.
     pub fn start_wake_watch(&self, interval: Duration) -> tokio::task::JoinHandle<()> {
         let dispatcher = self.clone();
         tokio::spawn(async move {

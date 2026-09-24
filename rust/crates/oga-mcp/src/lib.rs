@@ -38,8 +38,6 @@ pub use protocol::{EARLIEST_PROTOCOL_VERSION, LEGACY_PROTOCOL_VERSION, MCP_PROTO
 enum McpError {
     #[error("{0}")]
     Message(String),
-    /// A refusal that already knows what the caller should do instead. The
-    /// hints ride on the error result, where the caller is looking.
     #[error("{message}")]
     Refused { message: String, next: Vec<Value> },
     #[error("method not found: {0}")]
@@ -70,9 +68,6 @@ impl From<oga_service::DispatchError> for McpError {
 pub struct McpServer {
     state: HttpState,
     orchestrator_id: Option<String>,
-    /// The directory the caller's editor launched this server from. It is the
-    /// only project this connection ever knows: `initialize` and `tools/list`
-    /// carry no cwd, and both have to answer with the project's brief rules.
     project: Option<PathBuf>,
 }
 
@@ -95,10 +90,7 @@ impl McpServer {
         self
     }
 
-    /// What this caller is told about writing a brief: the project's rules
-    /// when the connection knows one, otherwise what every project inherits.
-    /// An unreadable `.oga.yaml` falls back to the shipped text rather than
-    /// failing a handshake over a config typo.
+    /// An unreadable project config falls back to shipped brief guidance.
     fn caller_prompt(&self) -> String {
         let cwd = self
             .project
@@ -114,8 +106,6 @@ impl McpServer {
         &self.state
     }
 
-    /// Whether the task on the other end may hand work onward. A caller that
-    /// names no task is a person's own session and always may.
     fn caller_may_delegate(&self) -> bool {
         let Some(caller_id) = self.orchestrator_id.as_deref() else {
             return true;

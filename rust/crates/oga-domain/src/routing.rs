@@ -62,9 +62,6 @@ impl TaskClass {
     }
 }
 
-/// What the work is about, orthogonal to how hard the router judges it. A
-/// task has at most one: the strongest subject signal in the prompt wins, and
-/// a prompt with none has no topic rather than a guessed one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskTopic {
@@ -124,10 +121,6 @@ impl TaskTopic {
     }
 }
 
-/// One entry of a love rule's `when` list: either a class of work or a topic.
-/// The class names are the five the router always knew; the topic names are
-/// the subjects callers actually ask about. Existing files naming only
-/// classes read back unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkKind {
@@ -238,10 +231,6 @@ impl WorkKind {
     }
 }
 
-/// How hard the router reads the prompt as being: a purely internal signal
-/// that sets the capability floor and the cost/quality preference for
-/// automatic routing. Never a caller input — which model runs is `kind` and
-/// a loved rule's call, not a hardness score.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Difficulty {
@@ -262,7 +251,6 @@ impl Difficulty {
     }
 }
 
-/// Where a candidate fell out of selection, most-informative first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionStage {
@@ -283,8 +271,6 @@ pub enum SelectionStage {
     Profile,
 }
 
-/// A constraint selection dropped to reach any destination at all. Settings,
-/// tool-calling capability, and recorded unavailability are never dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionRelaxation {

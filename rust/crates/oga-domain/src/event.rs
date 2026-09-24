@@ -7,7 +7,6 @@ use serde_json::Value;
 
 use crate::task::{Provider, TaskState};
 
-/// A stored task_events row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskEvent {
@@ -39,9 +38,6 @@ pub enum TaskTurnStatus {
     Interrupted,
 }
 
-/// One round of work: begins only where the broker actually spawns a worker —
-/// dispatch, resume, delivered follow-up, restarting handoff. A steer or live
-/// model switch folds into the open turn: no new process, no new turn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskTurn {
@@ -55,7 +51,6 @@ pub struct TaskTurn {
     pub ended_at: Option<String>,
 }
 
-/// The coarse classification every consumer tests first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
@@ -97,7 +92,6 @@ pub enum EventPhase {
     Failed,
 }
 
-/// Who wrote an event row: the broker itself, or the task's provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventSource {
     Broker,
@@ -157,7 +151,6 @@ pub enum EventLevel {
     Error,
 }
 
-/// What one event looks like rendered: provider-neutral, ready to display.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskEventView {
@@ -214,7 +207,6 @@ pub struct TaskEventView {
     pub minor: Option<bool>,
 }
 
-/// Structured facts an interface renders without re-parsing JSON.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskEventPresentation {
@@ -259,8 +251,6 @@ pub struct TaskEventPresentation {
     pub level: Option<EventLevel>,
 }
 
-/// An event row as a waiter returns it, plus what a reader needs to decide
-/// whether the row is worth showing: `kind` and `minor`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WaitedTaskEvent {
@@ -276,7 +266,6 @@ pub struct WaitedTaskEvent {
     pub minor: Option<bool>,
 }
 
-/// A pointer frame on the broker's SSE stream: cursor-ordered, no payloads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventPointer {

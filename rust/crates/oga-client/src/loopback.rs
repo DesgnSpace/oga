@@ -1,7 +1,4 @@
 //! The loopback HTTP and SSE transport.
-//!
-//! Native only. The desktop web view runs in WebAssembly and reaches the
-//! broker through the shell's bridge instead, so nothing here compiles there.
 
 use std::{env, time::Duration};
 
@@ -27,7 +24,6 @@ use crate::{
     SteerRequest, TaskActionResponse, TaskEventPage, TaskEventsQuery, TurnsResponse, UsageResponse,
 };
 
-/// Errors returned by the loopback transport or by a broker response.
 #[derive(Debug, Error)]
 pub enum ClientError {
     #[error("invalid broker URL: {0}")]
@@ -60,7 +56,6 @@ pub enum ClientError {
 }
 
 impl ClientError {
-    /// Returns the HTTP status when the broker answered with an error.
     pub fn status(&self) -> Option<StatusCode> {
         match self {
             Self::Http { status, .. } => Some(*status),
@@ -71,7 +66,6 @@ impl ClientError {
 
 type EventBody = BoxStream<'static, Result<Bytes, reqwest::Error>>;
 
-/// A cursor-aware global event stream that reconnects after EOF or a read error.
 pub struct EventStream {
     client: LoopbackClient,
     query: EventStreamQuery,
@@ -166,7 +160,6 @@ impl EventStream {
     }
 }
 
-/// HTTP/SSE access to a running loopback broker.
 #[derive(Clone)]
 pub struct LoopbackClient {
     http: reqwest::Client,

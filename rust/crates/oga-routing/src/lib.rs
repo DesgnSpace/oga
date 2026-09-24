@@ -1,7 +1,4 @@
-//! Task classification, the internal difficulty heuristic and the model's
-//! own default effort, routing policy, model selection with quota and
-//! availability awareness, provider catalog parsing, and the `/api/models`
-//! row shape — the decision half of dispatch.
+//! Task classification, routing policy, model selection, and provider catalogs.
 
 pub mod catalog;
 pub mod classify;
@@ -47,8 +44,6 @@ pub use usage::{
 pub(crate) mod test_support {
     use oga_domain::{ModelCost, ModelInfo, ModelInfoSource, Provider};
 
-    /// Optional fields for building a `ModelInfo` in tests; everything absent
-    /// stays `None`, and `configured_only` picks a source.
     #[derive(Default)]
     pub struct ModelInfoFields {
         pub cost: Option<ModelCost>,

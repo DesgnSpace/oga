@@ -1,8 +1,4 @@
-//! Typed broker access shared by the CLI, Oga, the desktop shell, and the UI.
-//!
-//! This module holds the wire types every consumer needs. The HTTP and SSE
-//! transport lives in [`loopback`] and is native only; the desktop web view
-//! reaches the broker through the shell's [`bridge`] instead.
+//! Typed broker access shared by the CLI, desktop shell, and web bridge.
 
 pub mod bridge;
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,7 +33,6 @@ pub enum TaskBranchSource {
     Recorded,
 }
 
-/// The branches a task's checkout can be compared against.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskBranches {
@@ -45,7 +40,6 @@ pub struct TaskBranches {
     pub default: Option<String>,
 }
 
-/// Query parameters for the broker state snapshot.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StateQuery {
@@ -78,7 +72,6 @@ impl StateQuery {
     }
 }
 
-/// Query parameters for a task or agent event read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TaskEventsQuery {
@@ -128,7 +121,6 @@ impl TaskEventsQuery {
     }
 }
 
-/// Filters for the cursor-ordered global event stream.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventStreamQuery {
     pub after: i64,
@@ -161,7 +153,6 @@ impl EventStreamQuery {
     }
 }
 
-/// The typed state returned by `GET /api/state`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerState {
@@ -177,7 +168,6 @@ pub struct BrokerState {
     pub spend: Option<SpendTotals>,
 }
 
-/// The lighter state returned by `GET /api/state?view=summary`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerSummaryState {

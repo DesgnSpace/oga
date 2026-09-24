@@ -30,21 +30,9 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const PROMPTS_KEY: &str = "prompts";
 pub const CALLER_PROMPTS_KEY: &str = "callerPrompts";
-/// What the agent calling `delegate` is told about writing a brief, editable
-/// in Settings or overridden per project from `.oga.yaml`. It reaches the
-/// caller on the other side of the tool surface, appended to the server's
-/// instructions and to the `prompt` field's own description. `{{default}}`
-/// stands for this text and `{{project}}` for the directory it was resolved
-/// from; a value naming neither replaces this outright.
+/// The prompt guidance for callers writing a `delegate` brief.
 pub const DEFAULT_CALLER_PROMPT: &str = "A brief is the only account of the work the worker gets. It cannot see your conversation, and it is a smaller model with no judgment under ambiguity. Write down every fact you already hold and decide every choice it would otherwise guess. Do not go discover more: if writing the brief needs new reading, the task is too vague or too big. One deliverable per task; two deliverables is two tasks. A good brief carries: the deliverable in one sentence; why it matters; what you already know (entry points, symbols, conventions, dead ends); decisions made; what not to touch; checks it can run to know it is done; and the output shape. Length is fine, vagueness is not.";
-/// The worker prompt a fresh settings file starts from, editable in Settings
-/// or overridden per project from `.oga.yaml`. It is a default, not a frame:
-/// plain text that is sent as written once `{{brief}}`, `{{scope}}`,
-/// `{{memories}}`, `{{attribution}}`, and `{{reporting}}`
-/// are filled in per task, with the run itself as `{{task_id}}`,
-/// `{{provider}}`, `{{model}}`, `{{effort}}`. A user who deletes everything
-/// and writes one sentence gets one sentence sent. Code adds nothing except
-/// the task slot itself, first, when it is missing.
+/// The default worker prompt, with task context filled in per run.
 pub const DEFAULT_WORKER_PROMPT: &str = concat!(
     "Worker mode: you are executing an assigned Oga task.\n",
     "Continue the assigned brief directly.\n",
@@ -140,10 +128,6 @@ pub struct ModelOverrides {
     #[serde(rename = "byProfile")]
     pub by_profile: BTreeMap<String, BTreeMap<String, ModelOverride>>,
 }
-/// One place work can go: a worker, a model on it, and the thinking level it
-/// uses. Written `worker:model:effort` with the model or the effort left out:
-/// a missing model means the worker's own default, a missing effort means the
-/// kind of work prices it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoveDestination {

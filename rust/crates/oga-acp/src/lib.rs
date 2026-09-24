@@ -1,20 +1,4 @@
-//! Talking ACP to a provider process.
-//!
-//! The CLI runner reads a provider to exit; this one holds a JSON-RPC
-//! conversation with it instead. Both share [`oga_runner`]'s spawning, so
-//! confinement, environment filtering, and the detached process group are the
-//! same either way.
-//!
-//! Three things shape the surface:
-//!
-//! - The wire types are [`agent_client_protocol_schema`], pinned to the
-//!   released stable protocol. No unstable feature is required, so an agent's
-//!   token usage stays unknown rather than guessed at.
-//! - A caller supplies an [`AcpPolicy`]. Filesystem and terminal callbacks are
-//!   denied and unadvertised until that policy grants them.
-//! - A failure says whether the prompt was ever written. Only
-//!   [`AcpError::Unavailable`] happens strictly before that, so it is the only
-//!   one another transport may pick up.
+//! ACP client protocol transport, policy, sessions, and outcomes.
 
 mod outcome;
 mod policy;

@@ -1,5 +1,4 @@
-//! Estimates provider spend from public model pricing (models.dev) when a
-//! provider reports token counts but no dollar amount.
+//! Estimates provider spend from public model pricing when no amount is reported.
 
 use std::{
     collections::BTreeMap,
@@ -18,7 +17,6 @@ const CATALOGUE_URL: &str = "https://models.dev/api.json";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_FILE: &str = "models-dev-pricing.json";
 
-/// USD per one million tokens, as models.dev publishes it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ModelRate {
     pub input: f64,
@@ -27,14 +25,12 @@ pub struct ModelRate {
     pub cache_write: f64,
 }
 
-/// A model entry published by models.dev.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
 }
 
-/// What models.dev says a model is and can take in, beyond its price.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModelFacts {
     pub description: Option<String>,
@@ -49,7 +45,6 @@ pub struct ModelFacts {
     pub release_date: Option<String>,
 }
 
-/// Model pricing indexed for lookup, built once per fetch from `api.json`.
 #[derive(Debug, Clone, Default)]
 pub struct PricingCatalogue {
     /// Keyed `"<models.dev provider>/<model id>"`, for ids that already carry

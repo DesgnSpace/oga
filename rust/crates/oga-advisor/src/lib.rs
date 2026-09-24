@@ -1,10 +1,4 @@
-//! Asks TypeSafe's Jev which connected worker should run a task, reading the
-//! brief the caller already typed and nothing else.
-//!
-//! Its pick decides where the task runs. Every outcome short of a pick of
-//! one of the destinations offered — a refused call, a slow one, an answer
-//! naming something that was never on the table — comes back as the reason
-//! there was no pick, and the routing rules decide as they always have.
+//! Optional advisor that chooses a connected worker from a task brief.
 
 use std::time::Duration;
 
@@ -17,9 +11,7 @@ const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 /// The flagship build. A pinned one (`jev-1.13.0`) answers the same shape.
 const MODEL: &str = "jev-latest";
 
-/// Long enough for a long brief weighed against every enabled model, which
-/// takes a few seconds on its own; short enough that a stalled advisor delays
-/// a dispatch instead of holding it.
+/// A stalled advisor must not hold up dispatch.
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The worker question's key, in the request and in the answer.
@@ -116,8 +108,7 @@ impl std::fmt::Display for NoAdvice {
     }
 }
 
-/// A signed-in advisor. Holds the key, so it is never printed: no `Debug`,
-/// and nothing here writes the key anywhere but the request header.
+/// The advisor key is sent only in the authorization header.
 pub struct Advisor {
     endpoint: String,
     api_key: String,

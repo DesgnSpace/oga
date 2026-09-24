@@ -1,4 +1,4 @@
-// Page layout pieces; docs/design.md holds the rules behind their classes.
+// Page layout primitives.
 
 import type { ReactNode } from "react";
 
@@ -55,7 +55,6 @@ export function Card({ className, children }: { className?: string; children: Re
   return <div className={className ? `card ${className}` : "card"}>{children}</div>;
 }
 
-/** As a `label`, a click anywhere on the row reaches its control. */
 export function CardRow({
   as: Element = "div",
   title,

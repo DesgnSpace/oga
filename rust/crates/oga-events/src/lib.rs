@@ -33,14 +33,9 @@ const MIN_TRUNCATABLE_BYTES: usize = 256;
 const MARKER_RESERVE_BYTES: usize = 80;
 pub const RETRY_REPEAT_THRESHOLD: usize = 3;
 
-/// Maximum number of event keys retained by one feed.
 pub const MAX_TRACKED_EVENTS: usize = 4_096;
 const DEFAULT_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// A shared, lossless hint that the durable event log may have advanced.
-///
-/// The feed retains only event ids and task ids. Readers still load the rows
-/// from SQLite, so a coalesced or evicted hint can never discard history.
 #[derive(Clone)]
 pub struct EventFeed {
     store: Arc<Store>,
@@ -57,7 +52,6 @@ struct FeedState {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-/// Counters for the feed's durable polling and bounded key window.
 pub struct EventFeedStats {
     pub database_queries: u64,
     pub poll_queries: u64,
@@ -87,7 +81,6 @@ struct TrackedEvent {
     task_id: String,
 }
 
-/// Keeps the shared feed alive while a stream or waiter uses it.
 pub struct EventFeedGuard {
     state: Arc<FeedState>,
 }
@@ -118,7 +111,6 @@ impl EventFeed {
         }
     }
 
-    /// Retain one bounded change feed user and start its shared poller.
     pub fn retain(&self) -> Result<EventFeedGuard, StoreError> {
         self.state.users.fetch_add(1, Ordering::AcqRel);
         if self
@@ -160,11 +152,6 @@ impl EventFeed {
         })
     }
 
-    /// Waits for a durable event after `after` that matches `task_ids`.
-    ///
-    /// The shared poller wakes all potentially interested readers once per
-    /// observed batch. A bounded task-id window avoids unrelated SQLite
-    /// existence queries; an unknown window falls back to the durable check.
     pub async fn wait_for_change(
         &self,
         after: i64,
