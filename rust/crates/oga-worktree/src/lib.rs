@@ -25,7 +25,6 @@ pub struct CreatedWorktree {
     pub cwd: PathBuf,
 }
 
-/// A checkout whose destination and branch are known before files are copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedWorktree {
     pub created: CreatedWorktree,
@@ -188,9 +187,7 @@ fn checkout_cwd(checkout: &Path, root: &Path, origin_cwd: &Path) -> Result<PathB
             origin_cwd.display()
         ))
     })?;
-    // `Path::join` on an empty offset — the task's own project is the
-    // repository root — appends a trailing separator rather than nothing, so
-    // every reader of a stored cwd would otherwise have to tolerate one.
+    // `Path::join` appends a trailing separator for an empty offset.
     if offset.as_os_str().is_empty() {
         Ok(checkout.to_path_buf())
     } else {
@@ -220,11 +217,7 @@ fn create_symlink(target: &Path, destination: &Path) -> io::Result<()> {
     }
 }
 
-/// Every loader that resolves a path — PHP's `__DIR__`, Node's module
-/// resolution, a virtualenv's `sys.prefix` — resolves it through symlinks, so a
-/// borrowed directory puts the original repository back in the checkout's own
-/// paths. The checkout holds its own entries instead, and `fs::copy` shares the
-/// storage behind them wherever the filesystem can clone rather than duplicate.
+// Copying must preserve symlink-resolved paths for language loaders.
 fn copy_path(source: &Path, destination: &Path) -> Result<(), WorktreeError> {
     let metadata =
         fs::metadata(source).map_err(|error| file_system_error("inspect", source, error))?;
@@ -805,8 +798,6 @@ pub async fn plan_task_worktree_at(
     })
 }
 
-/// Create a planned checkout. The repository lock belongs only to this
-/// detached operation, including its potentially slow file copy.
 pub async fn prepare_task_worktree(planned: &PlannedWorktree) -> Result<(), WorktreeError> {
     let lock = repository_lock(&planned.root);
     let _guard = lock.lock().await;
