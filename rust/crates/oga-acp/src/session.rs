@@ -37,25 +37,17 @@ use crate::{
 };
 
 pub const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-/// `initialize` only exchanges capabilities, so an agent that has not answered
-/// long after the slowest healthy start is stuck rather than busy. It is held
-/// well short of the rest of the handshake, which may replay a conversation
-/// before it answers.
+/// `initialize` only exchanges capabilities, so it uses a shorter timeout than the rest of the handshake.
 pub const DEFAULT_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
 pub const DEFAULT_PROMPT_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-/// How long an agent has to say what it did with an instruction. The turn it
-/// is running is not waited on, only the answer about the instruction.
+/// The turn is not waited on; only the answer about the instruction is.
 const STEER_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a prompt that joined a turn is given to answer once that turn has
-/// ended. It answers off the same idle event as the turn's own prompt, so an
-/// answer that is coming is already in flight and a longer wait only holds the
-/// run open behind an agent that will never send one.
+/// A joined prompt answers off the turn's idle event, so waiting longer can only hold the run open.
 const JOINED_TIMEOUT: Duration = Duration::from_secs(5);
 /// The extension request that carries an instruction into a running turn,
 /// advertised at `_meta.steering.supported` on the initialize response.
 const STEER_METHOD: &str = "_session/steering";
 
-/// What an agent did with an instruction sent into the turn it is running.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Steered {
     /// It went into the turn that is running.
@@ -64,20 +56,14 @@ pub enum Steered {
     Elsewhere(String),
 }
 
-/// A prompt the agent has been given and not yet answered, sent to carry an
-/// instruction into a turn already under way.
 pub struct SentPrompt(Sent<PromptResponse>);
 
 impl SentPrompt {
-    /// Reads the answer and lets it go. It reports the turn the instruction
-    /// joined, which that turn's own prompt has already settled, so reading it
-    /// clears the frame rather than producing an outcome.
     pub async fn settled(self) {
         let _: Result<PromptResponse, RpcError> = self.0.answer(JOINED_TIMEOUT).await;
     }
 }
 
-/// How the transport behaves, independent of which agent it is talking to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcpConfig {
     pub protocol_version: ProtocolVersion,
@@ -106,8 +92,6 @@ impl Default for AcpConfig {
     }
 }
 
-/// Which conversation the turn belongs to. An ACP session id is the agent's
-/// own and is not the provider session id Oga already records.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionStart {
     New,
@@ -117,7 +101,6 @@ pub enum SessionStart {
     Resume(SessionId),
 }
 
-/// Everything about the session to open, apart from who answers for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
     /// The agent process to start.
