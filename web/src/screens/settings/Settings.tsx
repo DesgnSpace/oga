@@ -254,7 +254,7 @@ export default function SettingsPage({
     ) {
       void loadCallerPromptScope({ kind: "global" }, state.projects);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // This effect must run only when the overview becomes ready.
   }, [state.overview]);
 
   useEffect(() => {
@@ -519,7 +519,6 @@ function SettingsSkeleton() {
   );
 }
 
-/// Which of the workers tab's three pages is on screen.
 type WorkersView = { kind: "list" } | { kind: "add" } | { kind: "worker"; id: string };
 
 function WaitingPanel() {
