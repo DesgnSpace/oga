@@ -432,8 +432,6 @@ async fn run_query(args: &[String]) -> CliResult<i32> {
     }
 }
 
-/// What the caller spelled out. Anything left unset is the index's own default:
-/// the place without its source, seven answers.
 #[derive(Debug, Default)]
 struct QueryCliOptions {
     limit: Option<u64>,
@@ -487,9 +485,6 @@ fn split_paths(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// Only a transport failure means the broker is down. Every other failure
-/// answered over a live connection, so reporting it as "not running" sends the
-/// reader after the wrong problem.
 fn query_broker_error(client: &LoopbackClient, error: oga_client::ClientError) -> CliError {
     match &error {
         oga_client::ClientError::Transport { .. } => CliError::new(format!(
@@ -1003,9 +998,6 @@ fn parse_delegate_args(args: &[String]) -> CliResult<(DelegateOptions, Vec<Strin
     Ok((options, values))
 }
 
-/// Name the kind of work — a class or a subject — so a love rule for it
-/// applies even when the task text never reads that way. Unknown names fail
-/// here, not at dispatch.
 fn parse_kind(value: &str) -> CliResult<WorkKind> {
     WorkKind::parse(value).ok_or_else(|| {
         CliError::new(format!(
@@ -1019,7 +1011,6 @@ fn parse_kind(value: &str) -> CliResult<WorkKind> {
     })
 }
 
-/// The first line of the brief, which is where a caller states what the work is.
 fn brief_summary(prompt: &str, max: usize) -> String {
     let line = prompt
         .lines()
@@ -3119,10 +3110,6 @@ fn config_routes_json(policy: Option<&RoutingPolicy>, layers: &oga_config::Confi
     Value::Object(routes)
 }
 
-/// The worker rules and brief rules a directory ends up with, in the order a
-/// dispatch resolves them: its own `.oga.yaml`, what Settings saved for it,
-/// the all-projects file, then what Settings saved there. `source` names the
-/// project file when that file writes the worker rules.
 fn worker_config_json(
     layers: &oga_config::ConfigLayers,
     saved: &SavedWorkerPrompts,
@@ -3192,8 +3179,6 @@ fn stored_worker_prompts(cwd: &Path) -> SavedWorkerPrompts {
     saved
 }
 
-/// The love rules a directory ends up with: its own file's list, else the
-/// all-projects one, parsed by the same reader routing uses.
 fn love_rules_from_layers(
     layers: &oga_config::ConfigLayers,
     cwd: &Path,
@@ -3207,7 +3192,6 @@ fn love_rules_from_layers(
     })
 }
 
-/// The love rules written in the one file `oga love` is about to edit.
 fn love_rules_for_scope(
     layers: &oga_config::ConfigLayers,
     cwd: &Path,
@@ -3492,8 +3476,6 @@ fn parse_work_kinds(value: &str) -> CliResult<Vec<WorkKind>> {
     Ok(kinds)
 }
 
-/// The rules a new rule takes work away from: the ones holding those kinds, or
-/// the catch-all when no kind was named.
 fn replaced_rules<'a>(
     current: &'a oga_config::LoveRules,
     when: &[WorkKind],
@@ -3507,8 +3489,6 @@ fn replaced_rules<'a>(
         .collect()
 }
 
-/// The rules a clear removes: the ones holding those kinds, or every rule when
-/// no kind was named.
 fn cleared_rules<'a>(
     current: &'a oga_config::LoveRules,
     when: &[WorkKind],
@@ -3519,8 +3499,6 @@ fn cleared_rules<'a>(
     }
 }
 
-/// What a kind of work is called where someone reads it, never the router's own
-/// name for it.
 fn work_label(when: &[WorkKind]) -> String {
     if when.is_empty() {
         return "Every other kind of work".into();
@@ -3549,8 +3527,6 @@ fn work_label(when: &[WorkKind]) -> String {
     label
 }
 
-/// Rules in the order they win a task, so the table reads the way routing
-/// decides: subject rules, then class rules, then the one that takes the rest.
 fn by_precedence(rules: &oga_config::LoveRules) -> Vec<&oga_config::LoveRule> {
     let tier = |rule: &oga_config::LoveRule| {
         if rule.when.is_empty() {
@@ -3615,10 +3591,6 @@ fn love_table(rules: &oga_config::LoveRules) -> Vec<String> {
     lines
 }
 
-/// One `oga love` destination, checked while it is written: the worker must be
-/// connected and on, the effort must be a real level, and the model must be
-/// one the worker lists. Answers the destination plus whether writing it
-/// switched the model back on and whether no catalog ever listed it.
 async fn love_target_destination(
     target: &str,
     profiles: &ResolvedProfiles,
@@ -3659,7 +3631,6 @@ async fn love_target_destination(
     Ok((destination, was_off, unlisted))
 }
 
-/// The model a worker runs when a destination leaves it out.
 fn profile_default<'a>(
     profiles: &'a ResolvedProfiles,
     profile_id: Option<&str>,
@@ -3672,8 +3643,6 @@ fn profile_default<'a>(
         .map(|profile| profile.default_model.as_str())
 }
 
-/// Whether a rule being replaced already sends work to one of the
-/// destinations just written, in which case there is nothing to announce.
 fn rule_names_new_destination(
     rule: &oga_config::LoveRule,
     destinations: &[LoveDestination],
