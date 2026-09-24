@@ -1,5 +1,4 @@
 // Sidebar state and its loopback client operations.
-// Ported from rust/crates/oga-ui/src/state/mod.rs — keep behavior identical.
 
 import { broker } from "@/bridge/client";
 import type {
@@ -30,7 +29,7 @@ import { Store } from "./store";
 
 export const TASK_PAGE_SIZE = 50;
 export const ATTENTION_PAGE_SIZE = 100;
-/** The slowest the list is read again in full while the log keeps moving. */
+// 15s avoids rereading the list on every event while it keeps moving.
 const REREAD_INTERVAL_MS = 15_000;
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
@@ -58,8 +57,6 @@ export interface SidebarState {
   loadState: LoadState;
   error: string | undefined;
   eventCursor: number;
-  /** When the list was last read again in full, so a moving log cannot ask
-   * for another one every few seconds. */
   lastReread: number | undefined;
 }
 
