@@ -22,16 +22,12 @@ use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
-/// Opens a link the app itself owns, such as a Help menu destination.
 fn open_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &str) {
     if let Err(error) = app.opener().open_url(url, None::<&str>) {
         eprintln!("could not open {url}: {error}");
     }
 }
 
-/// Links leave the webview rather than replacing the app with a web page.
-/// Only web pages and addresses go out: any other scheme would hand an
-/// arbitrary local handler whatever a rendered document asked for.
 #[tauri::command]
 fn open_external_link<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -66,8 +62,6 @@ fn read_image_preview(path: String) -> Result<ImagePreview, String> {
     Ok(ImagePreview { bytes, mime })
 }
 
-/// Opens an attachment with the OS's default handler for its file type,
-/// same as double-clicking it in Finder or Explorer.
 #[tauri::command]
 fn open_attachment<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -184,9 +178,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 notifier,
             );
 
-            // connect_or_start both reconnects and respawns, but nothing
-            // called it after startup: a broker that died left the app
-            // running against nothing until someone reached for the UI.
+            // The supervisor must reconnect after a broker dies.
             tauri::async_runtime::spawn(async move {
                 loop {
                     if let Err(error) = ensure_broker_inner(&state).await {
