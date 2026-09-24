@@ -1,5 +1,4 @@
-// Task detail screen: header, transcript, controls, and the changed-files panel.
-// Ported from rust/crates/oga-ui/src/task_detail/mod.rs's `TaskDetail` component.
+// Task detail screen: header, transcript, controls, and changed files.
 
 import * as React from "react";
 import { broker } from "@/bridge/client";
@@ -33,16 +32,11 @@ import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
 import { activityIsSettled, buildTranscript, WorkSegmentCache } from "./transcriptModel";
 
-/** Dispatched by the native "Refresh" menu command to reload the open task alongside the sidebar. */
 export const REFRESH_TASK_DETAIL_EVENT = "oga-refresh-task-detail";
 
 const FRAME_MS = 16;
 
-/**
- * Redraws at most once a frame. A busy worker pushes updates faster than the
- * transcript can be recomposed, and a reader cannot see more than a frame's
- * worth anyway, so a burst costs one recomposition instead of one each.
- */
+// A busy worker can push more updates than a reader can see per frame.
 function useForceUpdate(): () => void {
   const [, setTick] = React.useState(0);
   const scheduled = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -62,11 +56,7 @@ interface GitDiffState {
   error?: string;
 }
 
-/**
- * Reads the task's checkout while the panel is comparing against git, and
- * again on demand. A live task is not re-read on its own: the run's own edits
- * are what follows a worker, and every re-read costs a git process.
- */
+// Git diff reads are explicit because each one starts a process.
 function useGitDiff(taskId: string, against: string | undefined): GitDiffState & { reload: () => void } {
   const [state, setState] = React.useState<GitDiffState>({ loading: false });
   const [attempt, setAttempt] = React.useState(0);
@@ -91,7 +81,6 @@ interface BranchChoices {
   default?: string;
 }
 
-/** The branches the checkout offers as a comparison, read once the panel opens. */
 function useTaskBranches(taskId: string, active: boolean): BranchChoices {
   const [state, setState] = React.useState<BranchChoices>({ loading: false, branches: [] });
   React.useEffect(() => {
@@ -142,8 +131,7 @@ function taskDetailStatItems(task: NonNullable<TaskDetailState["task"]>, events:
   return items;
 }
 
-/** The title bar's secondary strip: status, model, and usage detail in one
- * row that scrolls sideways instead of wrapping the title bar underneath it. */
+// The title bar's secondary strip scrolls instead of wrapping the bar.
 function TaskDetailSecondary({
   task,
   events,
@@ -201,8 +189,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     storeChangedFilesWidth(clamped);
   }, []);
 
-  // The changed-files panel is dragged from its left edge, so moving the
-  // pointer right shrinks it and moving left grows it.
+// The panel is dragged from its left edge: right shrinks, left grows.
   React.useEffect(() => {
     if (!resizeStart) return;
     const onMove = (event: PointerEvent) => {
