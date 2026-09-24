@@ -1,5 +1,4 @@
-//! Connection ownership: how the broker opens its one writable handle and
-//! how everyone else opens a read-only observe handle.
+//! Connection ownership for writable and read-only stores.
 
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -14,7 +13,6 @@ pub const BUSY_TIMEOUT_MS: u64 = 5000;
 
 #[derive(Debug)]
 pub enum StoreError {
-    /// A refusal raised before touching the database.
     Refusal(String),
     Sqlite(rusqlite::Error),
     Io(std::io::Error),
@@ -52,10 +50,6 @@ impl From<std::io::Error> for StoreError {
     }
 }
 
-/// The store handle. The writable variant owns the database the way the
-/// broker does: created if missing, configured for writing, migrated to the
-/// current schema. The observe variant is a pure reader that refuses to
-/// touch the file.
 pub struct Store {
     path: PathBuf,
     observe: bool,
@@ -66,9 +60,6 @@ pub struct Store {
 }
 
 impl Store {
-    /// Open (creating if needed) the broker's database. Creates parent
-    /// directories with owner-only permissions, configures WAL, brings a new
-    /// database to the current schema version.
     pub fn open_writable(path: impl Into<PathBuf>) -> Result<Store, StoreError> {
         let path = path.into();
         if let Some(directory) = path.parent() {
@@ -98,8 +89,6 @@ impl Store {
         })
     }
 
-    /// Open an existing database for maintenance writes without seeding
-    /// profiles, recovering interrupted tasks, or recording a broker session.
     pub fn open_maintenance(path: impl Into<PathBuf>) -> Result<Store, StoreError> {
         let path = path.into();
         if !path.exists() {
@@ -165,17 +154,6 @@ impl Store {
         Self::require_current_schema(connection, path)
     }
 
-    /// Open the database as a pure reader: no create, no migration, no write
-    /// of any kind. A watcher must be unable to change the file it is
-    /// watching, even by accident.
-    ///
-    /// `SQLITE_OPEN_READ_ONLY` cannot create or open-for-writing the file at
-    /// all, and it reads WAL databases natively; `query_only` is defense in
-    /// depth on top, so any write attempt fails instead of mutating. The
-    /// ledger check keeps an old binary honest in both directions: a schema
-    /// ahead of [`LATEST_SCHEMA_VERSION`] was migrated by a newer broker,
-    /// and one behind it needs a migration only a writable broker run can
-    /// apply, so exactly the built-for version is observable.
     pub fn open_observe(path: impl Into<PathBuf>) -> Result<Store, StoreError> {
         let path = path.into();
         if !path.exists() {
@@ -230,15 +208,10 @@ impl Store {
         &self.path
     }
 
-    /// True when this handle must never write, schema work included.
     pub fn is_observe(&self) -> bool {
         self.observe
     }
 
-    /// Run a read against its own connection from the reader pool, never the
-    /// single writer lock. WAL lets any number of readers proceed alongside
-    /// the one writer and each other, so a slow read no longer holds up
-    /// every other caller sharing this `Store`.
     pub fn with_connection<T>(
         &self,
         work: impl FnOnce(&Connection) -> Result<T, StoreError>,
@@ -247,8 +220,6 @@ impl Store {
         work(&connection)
     }
 
-    /// Run a group of writes atomically while retaining the store's single
-    /// writer lock for the whole transaction.
     pub fn with_transaction<T>(
         &self,
         work: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, StoreError>,
@@ -276,9 +247,6 @@ impl Store {
         }
     }
 
-    /// Run a write transaction on the blocking pool. The executor never waits
-    /// on the writer lock: a slow commit or a queue of writers costs a
-    /// blocking thread, not one of the few threads every request shares.
     pub async fn write<T, F>(self: &Arc<Self>, work: F) -> Result<T, StoreError>
     where
         T: Send + 'static,
@@ -290,9 +258,6 @@ impl Store {
             .map_err(|error| StoreError::Refusal(format!("write stopped: {error}")))?
     }
 
-    /// Fold the WAL back into the main file without waiting on readers.
-    /// SQLite's automatic checkpoint gives up whenever a reader is open, and
-    /// the broker always has one, so the log grows until something asks.
     pub fn checkpoint(&self) -> Result<(), StoreError> {
         if self.observe {
             return Ok(());
@@ -302,8 +267,6 @@ impl Store {
         Ok(())
     }
 
-    /// Close the handle. Only a writable handle pays for `PRAGMA optimize`:
-    /// it can run ANALYZE, which writes.
     pub fn close(self) -> Result<(), StoreError> {
         let connection = self
             .connection
@@ -321,8 +284,6 @@ impl Store {
             .map_err(|_| StoreError::Refusal("store connection lock poisoned".to_string()))
     }
 
-    /// Run an exclusive maintenance operation while all broker writes wait.
-    /// The same connection is kept open for the rewrite and checkpoint.
     pub fn with_maintenance<T>(
         &self,
         work: impl FnOnce(&mut Connection) -> Result<T, StoreError>,
@@ -362,9 +323,6 @@ impl Store {
     }
 }
 
-/// The writable profile: busy timeout, WAL journaling, normal synchronous
-/// mode, foreign keys enforced. Order matters only for readability; WAL is
-/// set through its own query because the pragma reports the applied mode.
 pub fn configure_writable(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(concat!(
         "PRAGMA busy_timeout = 5000;\n",
@@ -376,10 +334,6 @@ pub fn configure_writable(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// The subset of [`configure_writable`] safe on a read-only handle. WAL is
-/// deliberately absent: switching journal modes needs a writable connection,
-/// and the broker that owns the file has already set it. Busy timeout and
-/// foreign keys are per-connection settings and never write to the file.
 pub fn configure_read_only(connection: &Connection) -> Result<(), StoreError> {
     Ok(connection.execute_batch(concat!(
         "PRAGMA busy_timeout = 5000;\n",
@@ -387,9 +341,6 @@ pub fn configure_read_only(connection: &Connection) -> Result<(), StoreError> {
     ))?)
 }
 
-/// Open one reader: read-only at the OS level, `query_only` on top as
-/// defense in depth, native to a WAL file so it never contends with the
-/// writer or with another reader.
 fn open_reader(path: &Path) -> Result<Connection, StoreError> {
     let connection = Connection::open_with_flags(
         path,
@@ -400,14 +351,9 @@ fn open_reader(path: &Path) -> Result<Connection, StoreError> {
     Ok(connection)
 }
 
-/// A cap on idle connections, not on concurrency: a burst past this many
-/// simultaneous reads just opens extra handles and lets them go afterward,
-/// so no reader ever queues behind another.
+// Idle reader cap; excess connections close after use.
 const MAX_IDLE_READERS: usize = 8;
 
-/// Every read pulls its own connection from here instead of sharing the
-/// writer's lock. WAL mode is built for exactly this: many readers and one
-/// writer, none of them blocking each other.
 struct ReaderPool {
     path: PathBuf,
     idle: Mutex<Vec<Connection>>,
