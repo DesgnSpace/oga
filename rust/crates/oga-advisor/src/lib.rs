@@ -5,16 +5,13 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-/// Where the question goes unless a caller points it somewhere else.
 const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 
-/// The flagship build. A pinned one (`jev-1.13.0`) answers the same shape.
 const MODEL: &str = "jev-latest";
 
 /// A stalled advisor must not hold up dispatch.
 const TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The worker question's key, in the request and in the answer.
 const QUESTION: &str = "worker";
 
 const INSTRUCTIONS: &str = "Pick the worker that should run this task. The state is the brief \
@@ -23,7 +20,6 @@ const INSTRUCTIONS: &str = "Pick the worker that should run this task. The state
      unused allowance resets soon, so it is spent rather than lost; avoid one close to its limit \
      or out of credits. Never trade away a worker the job needs to save money.";
 
-/// The effort question's key, in the request and in the answer.
 const EFFORT_QUESTION: &str = "effort";
 
 const EFFORT_INSTRUCTIONS: &str = "Pick how hard the worker should think on this task. The state \
@@ -47,7 +43,6 @@ const EFFORTS: [(&str, &str); 6] = [
     ),
 ];
 
-/// One destination the advisor may pick, as it is described to the advisor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Destination {
     pub profile_id: String,
@@ -59,14 +54,11 @@ pub struct Destination {
 }
 
 impl Destination {
-    /// The name this destination answers to in the criteria and the answer.
     fn key(&self) -> String {
         format!("{}:{}", self.profile_id, self.model)
     }
 }
 
-/// Where the advisor would send this task, and how much of its probability
-/// went to that pick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
     pub profile_id: String,
@@ -77,8 +69,6 @@ pub struct Choice {
     pub effort: Option<String>,
 }
 
-/// Why the advisor gave no pick. Its `Display` is the reason recorded on the
-/// task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NoAdvice {
     /// Fewer than two destinations, so there was nothing to choose between.
@@ -122,15 +112,12 @@ impl Advisor {
         }
     }
 
-    /// Send the question to a stub instead of TypeSafe, so no test reaches
-    /// the real endpoint.
     #[cfg(test)]
     fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoint = endpoint.into();
         self
     }
 
-    /// Ask where `state` should run, or say why there is no pick.
     pub async fn choose(
         &self,
         state: &str,
@@ -171,9 +158,6 @@ impl Advisor {
     }
 }
 
-/// The body TypeSafe reads: the brief as the state, a Choice question whose
-/// criteria are the destinations and what each is good at, and a second one
-/// for the effort when any destination accepts one.
 fn request_body(state: &str, destinations: &[Destination]) -> Value {
     let criteria: serde_json::Map<String, Value> = destinations
         .iter()
@@ -220,10 +204,6 @@ struct ChoiceAnswer {
     confidence: f64,
 }
 
-/// Reads an answer back to the destination it names. A missing answer, a key
-/// no destination carries, or a body of another shape all read as no advice.
-/// An effort answer that is missing or names a level the picked destination
-/// does not accept leaves the effort to the rules.
 fn read_choice(body: &Value, destinations: &[Destination]) -> Result<Choice, NoAdvice> {
     let answers = body.get("answers").ok_or(NoAdvice::Unreadable)?;
     let answer: ChoiceAnswer = answers
@@ -271,8 +251,6 @@ mod tests {
         ]
     }
 
-    /// Serves one canned response on a loopback port and hands back its URL,
-    /// so the failure paths are exercised without reaching TypeSafe.
     fn stub(status: &str, payload: &str) -> String {
         let response = format!(
             "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
