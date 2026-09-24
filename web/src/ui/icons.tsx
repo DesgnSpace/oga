@@ -408,6 +408,69 @@ export function OpenExternalIcon({ size = 16, className }: IconProps) {
   );
 }
 
+// -- settings sections -----------------------------------------------------
+
+export function LinkIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M7 9a2.5 2.5 0 0 0 3.5 0l2-2A2.5 2.5 0 0 0 9 3.5l-.6.6" />
+      <path d="M9 7a2.5 2.5 0 0 0-3.5 0l-2 2A2.5 2.5 0 0 0 7 12.5l.6-.6" />
+    </Svg>
+  );
+}
+
+export function BellIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M4.5 11.5V7.5a3.5 3.5 0 0 1 7 0v4" />
+      <path d="M3.2 11.5h9.6M6.8 13.5h2.4M8 2.5V4" />
+    </Svg>
+  );
+}
+
+export function BookmarkIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M4.5 2.5h7v11L8 10.8l-3.5 2.7Z" />
+    </Svg>
+  );
+}
+
+export function InstructionsIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x={2.5} y={2.5} width={11} height={11} rx={2.5} />
+      <path d="M5.5 5.8h5M5.5 8h5M5.5 10.2h3" />
+    </Svg>
+  );
+}
+
+export function ListIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M3.5 4.5h.01M3.5 8h.01M3.5 11.5h.01M6.5 4.5h6.5M6.5 8h6.5M6.5 11.5h6.5" />
+    </Svg>
+  );
+}
+
+export function HistoryIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M2.8 8A5.2 5.2 0 1 0 4.4 4.3M2.6 2.9v2.4H5" />
+      <path d="M8 5.3V8l1.8 1.2" />
+    </Svg>
+  );
+}
+
+export function KeyboardIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x={2} y={4} width={12} height={8} rx={2.5} />
+      <path d="M5 6.8h.01M8 6.8h.01M11 6.8h.01M5.5 9.4h5" />
+    </Svg>
+  );
+}
+
 // Toast-semantic aliases — same strokes, callers pick by intent.
 export const ToastPendingIcon = RefreshIcon;
 export const ToastSuccessIcon = CheckIcon;
@@ -454,6 +517,13 @@ export const iconRegistry: Array<{ name: string; Component: React.ComponentType<
   { name: "ExclamationIcon", Component: ExclamationIcon },
   { name: "UsageIcon", Component: UsageIcon },
   { name: "AttachmentIcon", Component: AttachmentIcon },
+  { name: "LinkIcon", Component: LinkIcon },
+  { name: "BellIcon", Component: BellIcon },
+  { name: "BookmarkIcon", Component: BookmarkIcon },
+  { name: "InstructionsIcon", Component: InstructionsIcon },
+  { name: "ListIcon", Component: ListIcon },
+  { name: "HistoryIcon", Component: HistoryIcon },
+  { name: "KeyboardIcon", Component: KeyboardIcon },
   { name: "DisclosureIcon", Component: DisclosureIcon },
   { name: "DiffMarkIcon", Component: DiffMarkIcon },
 ];

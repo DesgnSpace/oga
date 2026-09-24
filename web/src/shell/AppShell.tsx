@@ -373,6 +373,7 @@ function Shell() {
         onClose={closeSettings}
         labelledBy="settings-modal-title"
         className="modal-dialog-settings"
+        overlayClassName="modal-overlay-settings"
       >
         <Suspense fallback={<ScreenLoading route={route} />}>
           <SettingsPage

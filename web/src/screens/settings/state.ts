@@ -43,6 +43,13 @@ export const SETTINGS_TABS: SettingsTab[] = [
   "about",
  ];
 
+/** Tabs stay in `SETTINGS_TABS` order: the arrow keys move through that list. */
+export const SETTINGS_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
+  { label: "General", tabs: ["workers", "connections", "notifications"] },
+  { label: "Instructions", tabs: ["memories", "prompts", "callerPrompts"] },
+  { label: "App", tabs: ["storage", "shortcuts", "about"] },
+];
+
 export function tabLabel(tab: SettingsTab): string {
   switch (tab) {
     case "workers":

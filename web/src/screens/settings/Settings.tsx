@@ -6,7 +6,21 @@ import { SearchField } from "@/components/SearchField";
 import { ProviderLogo } from "@/components/atoms/ProviderLogo";
 import { Switch } from "@/components/atoms/Switch";
 import { SyntaxCode } from "@/components/SyntaxCode";
-import { BackArrowIcon, ChevronIcon, CloseIcon } from "@/ui/icons";
+import {
+  BackArrowIcon,
+  BellIcon,
+  BookmarkIcon,
+  ChevronIcon,
+  CloseIcon,
+  HistoryIcon,
+  InfoIcon,
+  InstructionsIcon,
+  KeyboardIcon,
+  LinkIcon,
+  ListIcon,
+  TerminalIcon,
+} from "@/ui/icons";
+import { Card, CardRow, PageHeader, Section } from "@/components/primitives/Page";
 import { MarkdownContent } from "@/domain/markdown";
 import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
@@ -64,7 +78,7 @@ import {
   writeCachedSettingsState,
 } from "./state";
 import type { ProjectSettingsScope, PromptsModel, SettingsState, SettingsTab } from "./state";
-import { SETTINGS_TABS, tabLabel } from "./state";
+import { SETTINGS_GROUPS, SETTINGS_TABS, tabLabel } from "./state";
 
 function defaultModelFor(provider: Provider): string {
   switch (provider) {
@@ -279,158 +293,193 @@ export default function SettingsPage({
           {visibleTabs.length === 0 ? (
             <p className="settings-rail-empty">No sections match &ldquo;{sectionQuery}&rdquo;.</p>
           ) : (
-            visibleTabs.map((tab) => (
-              <button
-                key={tab}
-                className={`settings-tab${activeTab === tab ? " settings-tab-active" : ""}`}
-                type="button"
-                role="tab"
-                id={`settings-tab-${tab}`}
-                tabIndex={activeTab === tab ? 0 : -1}
-                aria-controls={`settings-panel-${tab}`}
-                aria-selected={activeTab === tab}
-                ref={(element) => {
-                  tabRefs.current[tab] = element;
-                }}
-                onKeyDown={(event) => handleTabKeyDown(event, tab)}
-                onClick={() => setActiveTab(tab)}
-              >
-                <span>{tabLabel(tab)}</span>
-              </button>
-            ))
+            SETTINGS_GROUPS.map((group) => {
+              const tabs = group.tabs.filter((tab) => visibleTabs.includes(tab));
+              if (tabs.length === 0) return null;
+              return (
+                <div key={group.label} className="settings-nav-group" role="presentation">
+                  <p className="settings-nav-label" aria-hidden="true">{group.label}</p>
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab}
+                      className={`settings-tab${activeTab === tab ? " settings-tab-active" : ""}`}
+                      type="button"
+                      role="tab"
+                      id={`settings-tab-${tab}`}
+                      tabIndex={activeTab === tab ? 0 : -1}
+                      aria-controls={`settings-panel-${tab}`}
+                      aria-selected={activeTab === tab}
+                      ref={(element) => {
+                        tabRefs.current[tab] = element;
+                      }}
+                      onKeyDown={(event) => handleTabKeyDown(event, tab)}
+                      onClick={() => setActiveTab(tab)}
+                    >
+                      <TabIcon tab={tab} />
+                      <span>{tabLabel(tab)}</span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })
           )}
         </nav>
       </aside>
 
       <div className="settings-content">
-        {state.error ? (
-          <div className="settings-message settings-message-error" role="alert">
-            <strong>Couldn&apos;t load workspace settings</strong>
-            <p>{state.error}</p>
-            <button className="settings-button" type="button" onClick={handleRefresh}>
-              Try again
-            </button>
-          </div>
-        ) : null}
+        <div className="page-column">
+          {state.error ? (
+            <div className="settings-message settings-message-error" role="alert">
+              <strong>Couldn&apos;t load workspace settings</strong>
+              <p>{state.error}</p>
+              <button className="settings-button" type="button" onClick={handleRefresh}>
+                Try again
+              </button>
+            </div>
+          ) : null}
 
-        <div
-          id="settings-panel-workers"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-workers"
-          hidden={activeTab !== "workers"}
-          className={activeTab !== "workers" ? "settings-tab-panel-hidden" : "settings-workers-panel"}
-        >
-          <WorkersPanel
-            state={state}
-            setState={setState}
-            loadModelScope={loadModelScope}
-            onRefresh={handleRefresh}
-            refreshing={refreshing}
-            offline={offline}
-          />
-        </div>
-        <div
-          id="settings-panel-connections"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-connections"
-          hidden={activeTab !== "connections"}
-          className={activeTab !== "connections" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <McpIntegrationPanel state={state} setState={setState} offline={offline} />
-        </div>
-        <div
-          id="settings-panel-notifications"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-notifications"
-          hidden={activeTab !== "notifications"}
-          className={activeTab !== "notifications" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <NotificationsPanel />
-        </div>
-        <div
-          id="settings-panel-memories"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-memories"
-          hidden={activeTab !== "memories"}
-          className={activeTab !== "memories" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <MemoriesPanel state={state} setState={setState} />
-        </div>
-        <div
-          id="settings-panel-prompts"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-prompts"
-          hidden={activeTab !== "prompts"}
-          className={activeTab !== "prompts" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <PromptsPanel
-            state={state}
-            setState={setState}
-            loadPromptScope={loadPromptScope}
-            offline={offline}
-            surface={WORKER_PROMPT_SURFACE}
-          />
-        </div>
-        <div
-          id="settings-panel-callerPrompts"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-callerPrompts"
-          hidden={activeTab !== "callerPrompts"}
-          className={activeTab !== "callerPrompts" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <PromptsPanel
-            state={state}
-            setState={setState}
-            loadPromptScope={loadCallerPromptScope}
-            offline={offline}
-            surface={CALLER_PROMPT_SURFACE}
-          />
-        </div>
-        <div
-          id="settings-panel-storage"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-storage"
-          hidden={activeTab !== "storage"}
-          className={activeTab !== "storage" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <CleanupPanel state={state} setState={setState} reload={loadCleanup} offline={offline} />
-        </div>
-        <div
-          id="settings-panel-shortcuts"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-shortcuts"
-          hidden={activeTab !== "shortcuts"}
-          className={activeTab !== "shortcuts" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <ShortcutsPanel />
-        </div>
-        <div
-          id="settings-panel-about"
-          role="tabpanel"
-          tabIndex={0}
-          aria-labelledby="settings-tab-about"
-          hidden={activeTab !== "about"}
-          className={activeTab !== "about" ? "settings-tab-panel-hidden" : undefined}
-        >
-          <AboutPanel
-            state={state}
-            setState={setState}
-            updateStatus={updateStatus}
-            onCheckForUpdates={onCheckForUpdates}
-            onInstallUpdate={onInstallUpdate}
-          />
+          <div
+            id="settings-panel-workers"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-workers"
+            hidden={activeTab !== "workers"}
+            className={activeTab !== "workers" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <WorkersPanel
+              state={state}
+              setState={setState}
+              loadModelScope={loadModelScope}
+              onRefresh={handleRefresh}
+              refreshing={refreshing}
+              offline={offline}
+            />
+          </div>
+          <div
+            id="settings-panel-connections"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-connections"
+            hidden={activeTab !== "connections"}
+            className={activeTab !== "connections" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <McpIntegrationPanel state={state} setState={setState} offline={offline} />
+          </div>
+          <div
+            id="settings-panel-notifications"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-notifications"
+            hidden={activeTab !== "notifications"}
+            className={activeTab !== "notifications" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <NotificationsPanel />
+          </div>
+          <div
+            id="settings-panel-memories"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-memories"
+            hidden={activeTab !== "memories"}
+            className={activeTab !== "memories" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <MemoriesPanel state={state} setState={setState} />
+          </div>
+          <div
+            id="settings-panel-prompts"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-prompts"
+            hidden={activeTab !== "prompts"}
+            className={activeTab !== "prompts" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <PromptsPanel
+              state={state}
+              setState={setState}
+              loadPromptScope={loadPromptScope}
+              offline={offline}
+              surface={WORKER_PROMPT_SURFACE}
+            />
+          </div>
+          <div
+            id="settings-panel-callerPrompts"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-callerPrompts"
+            hidden={activeTab !== "callerPrompts"}
+            className={activeTab !== "callerPrompts" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <PromptsPanel
+              state={state}
+              setState={setState}
+              loadPromptScope={loadCallerPromptScope}
+              offline={offline}
+              surface={CALLER_PROMPT_SURFACE}
+            />
+          </div>
+          <div
+            id="settings-panel-storage"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-storage"
+            hidden={activeTab !== "storage"}
+            className={activeTab !== "storage" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <CleanupPanel state={state} setState={setState} reload={loadCleanup} offline={offline} />
+          </div>
+          <div
+            id="settings-panel-shortcuts"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-shortcuts"
+            hidden={activeTab !== "shortcuts"}
+            className={activeTab !== "shortcuts" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <ShortcutsPanel />
+          </div>
+          <div
+            id="settings-panel-about"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-about"
+            hidden={activeTab !== "about"}
+            className={activeTab !== "about" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <AboutPanel
+              state={state}
+              setState={setState}
+              updateStatus={updateStatus}
+              onCheckForUpdates={onCheckForUpdates}
+              onInstallUpdate={onInstallUpdate}
+            />
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+function TabIcon({ tab }: { tab: SettingsTab }) {
+  switch (tab) {
+    case "workers":
+      return <TerminalIcon />;
+    case "connections":
+      return <LinkIcon />;
+    case "notifications":
+      return <BellIcon />;
+    case "memories":
+      return <BookmarkIcon />;
+    case "prompts":
+      return <InstructionsIcon />;
+    case "callerPrompts":
+      return <ListIcon />;
+    case "storage":
+      return <HistoryIcon />;
+    case "shortcuts":
+      return <KeyboardIcon />;
+    case "about":
+      return <InfoIcon />;
+  }
 }
 
 function SettingsSkeleton() {
@@ -442,22 +491,29 @@ function SettingsSkeleton() {
           <span className="settings-skeleton-block settings-skeleton-search" />
         </div>
         <nav className="settings-tabs">
-          {SETTINGS_TABS.map((tab) => (
-            <span key={tab} className="settings-skeleton-block settings-skeleton-tab" />
+          {SETTINGS_GROUPS.map((group) => (
+            <div key={group.label} className="settings-nav-group">
+              <p className="settings-nav-label">{group.label}</p>
+              {group.tabs.map((tab) => (
+                <span key={tab} className="settings-skeleton-block settings-skeleton-tab" />
+              ))}
+            </div>
           ))}
         </nav>
       </aside>
       <div className="settings-content">
-        <header className="settings-header">
-          <p className="settings-description">Choose how Oga works with your projects and command-line tools.</p>
-        </header>
-        <section className="settings-section">
-          <div className="settings-worker-rows" aria-hidden="true">
-            {[0, 1, 2, 3].map((row) => (
-              <span key={row} className="settings-skeleton-block settings-skeleton-row" />
-            ))}
+        <div className="page-column">
+          <div className="page-header">
+            <span className="settings-skeleton-block settings-skeleton-title" />
           </div>
-        </section>
+          <Card>
+            {[0, 1, 2, 3].map((row) => (
+              <div key={row} className="card-row">
+                <span className="settings-skeleton-block settings-skeleton-row" />
+              </div>
+            ))}
+          </Card>
+        </div>
       </div>
     </div>
   );
@@ -518,16 +574,10 @@ function WaitingPanel() {
   };
 
   return (
-    <section className="settings-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Interruptions</p>
-          <h2>When a task is interrupted</h2>
-        </div>
-      </div>
-      <p className="settings-helper">
-        Tasks that lose the connection, or run out of usage, wait and pick up on their own.
-      </p>
+    <Section
+      title="Interruptions"
+      description="Tasks that lose the connection, or run out of usage, wait and pick up on their own."
+    >
       {error ? (
         <div className="settings-message settings-message-error" role="alert">
           <strong>Couldn&apos;t load these choices</strong>
@@ -538,24 +588,33 @@ function WaitingPanel() {
         </div>
       ) : null}
       {settings ? (
-        <div className="settings-option-list">
-          <label className="settings-option">
-            <span>
-              <strong>Move the task to another worker</strong>
-              <small>When usage runs out, hand the task to another worker you turned on that is at least as strong.</small>
-            </span>
+        <Card>
+          <CardRow
+            as="label"
+            title="Move the task to another worker"
+            description="When usage runs out, hand the task to another worker you turned on that is at least as strong."
+          >
             <input
               type="checkbox"
               checked={settings.moveOnRateLimit}
               disabled={saving}
               onChange={(event) => void save({ ...settings, moveOnRateLimit: event.target.checked })}
             />
-          </label>
-          <label className="settings-option settings-option-field">
-            <span>
-              <strong>Wait for the connection up to</strong>
-              <small>After this, the task stops and tells you the connection never came back.</small>
-            </span>
+          </CardRow>
+          <CardRow
+            as="label"
+            title="Wait for the connection up to"
+            description={
+              <>
+                After this, the task stops and tells you the connection never came back.
+                {minutesError ? (
+                  <span className="settings-form-error" role="alert">
+                    {minutesError}
+                  </span>
+                ) : null}
+              </>
+            }
+          >
             <span className="settings-number-field">
               <input
                 type="number"
@@ -575,15 +634,10 @@ function WaitingPanel() {
               />
               <span>minutes</span>
             </span>
-            {minutesError ? (
-              <p className="settings-form-error" role="alert">
-                {minutesError}
-              </p>
-            ) : null}
-          </label>
-        </div>
+          </CardRow>
+        </Card>
       ) : null}
-    </section>
+    </Section>
   );
 }
 
@@ -634,17 +688,10 @@ function AdvisorPanel() {
   const hasKey = Boolean(settings?.apiKey);
 
   return (
-    <section className="settings-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Choosing a worker</p>
-          <h2>When you name no worker</h2>
-        </div>
-      </div>
-      <p className="settings-helper">
-        Your rules decide today. Turn this on and Oga reads the brief first, so the work lands on the
-        worker that suits it.
-      </p>
+    <Section
+      title="Choosing a worker"
+      description="Your rules decide today. Turn this on and Oga reads the brief first, so the work lands on the worker that suits it."
+    >
       {error ? (
         <div className="settings-message settings-message-error" role="alert">
           <strong>Couldn&apos;t load these choices</strong>
@@ -655,14 +702,10 @@ function AdvisorPanel() {
         </div>
       ) : null}
       {settings ? (
-        <div className="settings-option-list">
-          <label className="settings-option settings-option-field">
-            <span>
-              <strong>TypeSafe key</strong>
-              <small>From your TypeSafe account. It stays on this machine.</small>
-            </span>
+        <Card>
+          <CardRow as="label" title="TypeSafe key" description="From your TypeSafe account. It stays on this machine.">
             <input
-              className="settings-mono"
+              className="settings-mono settings-text-input"
               type="password"
               spellCheck={false}
               autoComplete="off"
@@ -679,22 +722,22 @@ function AdvisorPanel() {
                 }
               }}
             />
-          </label>
-          <label className="settings-option">
-            <span>
-              <strong>Match the worker to the brief</strong>
-              <small>{hasKey ? "Your rules still decide when no answer comes back." : "Add your key first."}</small>
-            </span>
+          </CardRow>
+          <CardRow
+            as="label"
+            title="Match the worker to the brief"
+            description={hasKey ? "Your rules still decide when no answer comes back." : "Add your key first."}
+          >
             <input
               type="checkbox"
               checked={settings.enabled}
               disabled={saving || !hasKey}
               onChange={(event) => void save({ ...settings, enabled: event.target.checked })}
             />
-          </label>
-        </div>
+          </CardRow>
+        </Card>
       ) : null}
-    </section>
+    </Section>
   );
 }
 
@@ -702,26 +745,19 @@ function NotificationsPanel() {
   const [enabled, setEnabled] = useTaskNotifications();
 
   return (
-    <section className="settings-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Notifications</p>
-          <h2>When a task stops</h2>
-        </div>
-      </div>
-      <p className="settings-helper">
-        Oga can tell you a task finished, stopped short, or is waiting on your answer, even with the window closed.
-      </p>
-      <div className="settings-option-list">
-        <label className="settings-option">
-          <span>
-            <strong>Tell me when a task stops</strong>
-            <small>Click the notification to open that task.</small>
-          </span>
-          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-        </label>
-      </div>
-    </section>
+    <>
+      <PageHeader title={tabLabel("notifications")} />
+      <Section
+        title="When a task stops"
+        description="Oga can tell you a task finished, stopped short, or is waiting on your answer, even with the window closed."
+      >
+        <Card>
+          <CardRow as="label" title="Tell me when a task stops" description="Click the notification to open that task.">
+            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+          </CardRow>
+        </Card>
+      </Section>
+    </>
   );
 }
 
@@ -809,36 +845,31 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
 
 function ShortcutsPanel() {
   return (
-    <section className="settings-section" aria-labelledby="settings-shortcuts-heading">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Reference</p>
-          <h2 id="settings-shortcuts-heading">Keyboard shortcuts</h2>
-        </div>
+    <>
+      <PageHeader title={tabLabel("shortcuts")} description="What you can press, grouped by what you are doing." />
+      <div className="page-sections">
+        {SHORTCUT_GROUPS.map((group) => (
+          <Section key={group.heading} title={group.heading}>
+            <ul className="card">
+              {group.rows.map((row) => (
+                <li key={row.action} className="card-row">
+                  <span className="card-row-text">{row.action}</span>
+                  <span className="card-row-control settings-shortcut-keys">
+                    {row.keys.map((combo) => (
+                      <span key={combo.join("+")} className="settings-shortcut-combo">
+                        {combo.map((key) => (
+                          <kbd key={key}>{key}</kbd>
+                        ))}
+                      </span>
+                    ))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        ))}
       </div>
-      <p className="settings-helper">What you can press, grouped by what you are doing.</p>
-      {SHORTCUT_GROUPS.map((group) => (
-        <div key={group.heading} className="settings-shortcuts-group">
-          <h3>{group.heading}</h3>
-          <ul className="settings-shortcuts-list">
-            {group.rows.map((row) => (
-              <li key={row.action} className="settings-shortcut-row">
-                <span className="settings-shortcut-action">{row.action}</span>
-                <span className="settings-shortcut-keys">
-                  {row.keys.map((combo) => (
-                    <span key={combo.join("+")} className="settings-shortcut-combo">
-                      {combo.map((key) => (
-                        <kbd key={key}>{key}</kbd>
-                      ))}
-                    </span>
-                  ))}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </section>
+    </>
   );
 }
 
@@ -894,19 +925,22 @@ function byPrecedence(rules: LoveRule[]): LoveRule[] {
 function FavouriteModels({ rules }: { rules: LoveRule[] }) {
   if (rules.length === 0) return null;
   return (
-    <div className="settings-favourites">
-      <p className="eyebrow">Favourite models</p>
-      <ul className="settings-favourite-rules">
+    <Section
+      title="Favourite models"
+      description="A task that names no model goes to the first listed model for that kind of work that can take it."
+    >
+      <ul className="card">
         {byPrecedence(rules).map((rule, index) => (
-          <li className="settings-favourite-rule" key={`${rule.model}-${index}`}>
-            <span className="settings-favourite-work">{workLabel(rule.when)}</span>
-            <span className="settings-favourite-model">{modelLabel(rule)}</span>
-            <span className="settings-muted">{effortLabel(rule)}</span>
+          <li className="card-row" key={`${rule.model}-${index}`}>
+            <span className="card-row-text">
+              <span className="card-row-title">{workLabel(rule.when)}</span>
+              <span className="card-row-description settings-favourite-model">{modelLabel(rule)}</span>
+            </span>
+            <span className="card-row-control settings-muted">{effortLabel(rule)}</span>
           </li>
         ))}
       </ul>
-      <p className="settings-helper">A task that names no model goes to the first listed model for that kind of work that can take it.</p>
-    </div>
+    </Section>
   );
 }
 
@@ -1070,19 +1104,16 @@ function WorkersPanel({
   }
 
   return (
-    <div className="settings-stack">
-      <section className="settings-section">
-        <div className="settings-section-heading">
-          <div>
-            <p className="eyebrow">Workers</p>
-            <h2>Command-line workers</h2>
-            <p className="settings-helper">Each worker keeps its own provider account, model, and environment.</p>
-          </div>
-          <div className="settings-inline-actions">
+    <>
+      <PageHeader
+        title={tabLabel("workers")}
+        description="Each worker keeps its own provider account, model, and environment."
+        actions={
+          <>
             {checkedAt !== undefined ? (
               <span className="settings-muted">Checked <span title={absoluteTime(checkedAt)}>{relativeTime(checkedAt)}</span></span>
             ) : null}
-            <button className="text-button" type="button" onClick={handleRefresh} disabled={refreshing}>
+            <button className="settings-button" type="button" onClick={handleRefresh} disabled={refreshing}>
               Refresh
             </button>
             <button
@@ -1093,42 +1124,44 @@ function WorkersPanel({
             >
               Add worker
             </button>
-          </div>
-        </div>
+          </>
+        }
+      />
+      <div className="page-sections">
+        <Section title="Command-line workers">
+          <Card>
+            {state.overview === "loading" ? (
+              <p className="settings-status">Loading workers…</p>
+            ) : state.overview === "error" ? (
+              <p className="settings-status">
+                Couldn&apos;t load workers. <button className="text-button" type="button" onClick={() => void onRefresh()}>Try again</button>
+              </p>
+            ) : state.profiles.length === 0 ? (
+              <EmptyState
+                title="No workers yet"
+                hint="Add a worker to choose where tasks run."
+                className="settings-empty"
+              />
+            ) : (
+              state.profiles.map((profile) => (
+                <WorkerRow
+                  key={profile.id}
+                  profile={profile}
+                  worker={state.modelSettings.snapshot?.workers.find((w) => w.id === profile.id)}
+                  onOpen={() => setView({ kind: "worker", id: profile.id })}
+                  onToggle={handleToggle}
+                  offline={offline}
+                />
+              ))
+            )}
+          </Card>
+        </Section>
 
         <FavouriteModels rules={state.modelSettings.snapshot?.love ?? []} />
-
-        <div className="settings-worker-rows">
-          {state.overview === "loading" ? (
-            <p className="settings-status">Loading workers…</p>
-          ) : state.overview === "error" ? (
-            <p className="settings-status">
-              Couldn&apos;t load workers. <button className="text-button" type="button" onClick={() => void onRefresh()}>Try again</button>
-            </p>
-          ) : state.profiles.length === 0 ? (
-            <EmptyState
-              title="No workers yet"
-              hint="Add a worker to choose where tasks run."
-              className="settings-empty"
-            />
-          ) : (
-            state.profiles.map((profile) => (
-              <WorkerRow
-                key={profile.id}
-                profile={profile}
-                worker={state.modelSettings.snapshot?.workers.find((w) => w.id === profile.id)}
-                onOpen={() => setView({ kind: "worker", id: profile.id })}
-                onToggle={handleToggle}
-                offline={offline}
-              />
-            ))
-          )}
-        </div>
-      </section>
-
-      <AdvisorPanel />
-      <WaitingPanel />
-    </div>
+        <AdvisorPanel />
+        <WaitingPanel />
+      </div>
+    </>
   );
 }
 
@@ -1159,37 +1192,35 @@ function WorkerRow({
   const binaryPath = profile.command?.join(" ");
 
   return (
-    <div className="settings-worker-row">
-      <div className="settings-worker-row-header">
-        <button className="settings-worker-row-main" type="button" onClick={onOpen}>
-          <span className="settings-worker-row-mark">
-            <ProviderLogo provider={profile.provider} size={22} />
-            <span
-              className={`settings-worker-row-dot${available ? " settings-worker-row-dot-on" : ""}`}
-              aria-hidden="true"
-            />
-            <span className="visually-hidden">{available ? "Available" : "Unavailable"}</span>
-          </span>
-          <span className="settings-worker-row-copy">
-            <strong>{profile.label}</strong>
-            <small>
-              {binaryPath ? <span className="settings-mono">{binaryPath}</span> : null}
-              {binaryPath ? " · " : ""}
-              {modelCount} {modelCount === 1 ? "model" : "models"}
-            </small>
-          </span>
-          <ChevronIcon className="settings-worker-row-chevron" size={16} />
-        </button>
-        <div className="settings-worker-row-actions">
-          <Switch
-            className="settings-worker-row-switch"
-            checked={profile.enabled}
-            accessibleName={`${profile.enabled ? "Disable" : "Enable"} ${profile.label} for tasks`}
-            disabled={offline}
-            onChange={(e) => onToggle(profile.id, e.target.checked)}
+    <div className="card-row settings-worker-row">
+      <button className="settings-worker-row-main" type="button" onClick={onOpen}>
+        <span className="settings-worker-row-mark">
+          <ProviderLogo provider={profile.provider} size={22} />
+          <span
+            className={`settings-worker-row-dot${available ? " settings-worker-row-dot-on" : ""}`}
+            aria-hidden="true"
           />
-        </div>
-      </div>
+          <span className="visually-hidden">{available ? "Available" : "Unavailable"}</span>
+        </span>
+        <span className="card-row-text settings-worker-row-copy">
+          <span className="card-row-title">{profile.label}</span>
+          <span className="card-row-description">
+            {binaryPath ? <span className="settings-mono">{binaryPath}</span> : null}
+            {binaryPath ? " · " : ""}
+            {modelCount} {modelCount === 1 ? "model" : "models"}
+          </span>
+        </span>
+      </button>
+      <span className="card-row-control">
+        <Switch
+          className="settings-worker-row-switch"
+          checked={profile.enabled}
+          accessibleName={`${profile.enabled ? "Disable" : "Enable"} ${profile.label} for tasks`}
+          disabled={offline}
+          onChange={(e) => onToggle(profile.id, e.target.checked)}
+        />
+        <ChevronIcon className="settings-worker-row-chevron" size={16} />
+      </span>
     </div>
   );
 }
@@ -1286,9 +1317,10 @@ function WorkerModelsSection({
   );
 
   return (
-    <section className="settings-worker-models">
-      <div className="settings-section-heading">
-        <h3>Models</h3>
+    <Section
+      className="settings-worker-models"
+      title="Models"
+      actions={
         <label className="settings-scope-picker">
           <span>Applies to</span>
           <select value={scopeKey(state.modelScope)} onChange={(e) => handleScopeChange(e.target.value)}>
@@ -1300,7 +1332,8 @@ function WorkerModelsSection({
             ))}
           </select>
         </label>
-      </div>
+      }
+    >
       {state.modelSettings.loading ? (
         <p className="settings-status" role="status">Discovering models…</p>
       ) : state.modelSettings.loadError ? (
@@ -1324,7 +1357,7 @@ function WorkerModelsSection({
           {worker.models.length > 8 ? (
             <SearchField className="settings-search" value={filter} onChange={setFilter} placeholder="Search models" />
           ) : null}
-          <div className="settings-model-list">
+          <Card className="settings-model-list">
             {models.map((model) => (
               <WorkerModelRow
                 key={model.id}
@@ -1336,7 +1369,7 @@ function WorkerModelsSection({
                 onToggle={toggleModel}
               />
             ))}
-          </div>
+          </Card>
         </>
       )}
       {state.modelSettings.saveError ? (
@@ -1344,7 +1377,7 @@ function WorkerModelsSection({
           {state.modelSettings.saveError}
         </p>
       ) : null}
-    </section>
+    </Section>
   );
 }
 
@@ -1531,8 +1564,8 @@ function ProfileEditor({
 
   return (
     <article className="settings-worker-form-card" aria-label={isNew ? "Add worker" : `Edit ${profile?.label ?? "worker"}`}>
-      <header className="settings-worker-form-heading">
-        <h3>{isNew ? "Add worker" : "Edit worker"}</h3>
+      <header className="page-header">
+        <h2 className="page-title">{isNew ? "Add worker" : "Edit worker"}</h2>
       </header>
       <form
         className="settings-worker-form"
@@ -1542,11 +1575,11 @@ function ProfileEditor({
           void handleSave();
         }}
       >
-        <section className="settings-worker-form-section" aria-labelledby="worker-form-identity">
-          <h4 id="worker-form-identity">Identity</h4>
-          <div className="settings-worker-form-grid">
+        <section className="section settings-worker-form-section" aria-labelledby="worker-form-identity">
+          <h3 className="section-title" id="worker-form-identity">Identity</h3>
+          <div className="card">
             {isNew ? (
-              <div className="settings-worker-form-row">
+              <div className="card-row settings-worker-form-row">
                 <div className="settings-worker-form-label">
                   <label htmlFor="worker-form-id">Worker ID</label>
                   <small id="worker-form-id-help">Lowercase letters, numbers, and dashes. Set once.</small>
@@ -1573,7 +1606,7 @@ function ProfileEditor({
                 </div>
               </div>
             ) : null}
-            <div className="settings-worker-form-row">
+            <div className="card-row settings-worker-form-row">
               <div className="settings-worker-form-label">
                 <label htmlFor="worker-form-name">Display name</label>
                 <small id="worker-form-name-help">Shown in the workers list.</small>
@@ -1599,7 +1632,7 @@ function ProfileEditor({
                 ) : null}
               </div>
             </div>
-            <div className="settings-worker-form-row">
+            <div className="card-row settings-worker-form-row">
               <div className="settings-worker-form-label">
                 <span id="worker-form-available-label">Available for tasks</span>
                 <small>Turn off to pause new tasks on this worker.</small>
@@ -1619,10 +1652,10 @@ function ProfileEditor({
           </div>
         </section>
 
-        <section className="settings-worker-form-section" aria-labelledby="worker-form-runs">
-          <h4 id="worker-form-runs">Where it runs</h4>
-          <div className="settings-worker-form-grid">
-            <div className="settings-worker-form-row">
+        <section className="section settings-worker-form-section" aria-labelledby="worker-form-runs">
+          <h3 className="section-title" id="worker-form-runs">Where it runs</h3>
+          <div className="card">
+            <div className="card-row settings-worker-form-row">
               <div className="settings-worker-form-label">
                 <label htmlFor="worker-form-tool">Command-line tool</label>
                 <small id="worker-form-tool-help">The tool this worker signs in with.</small>
@@ -1649,7 +1682,7 @@ function ProfileEditor({
                 </span>
               </div>
             </div>
-            <div className="settings-worker-form-row">
+            <div className="card-row settings-worker-form-row">
               <div className="settings-worker-form-label">
                 <label htmlFor="worker-form-model">Default model</label>
                 <small id="worker-form-model-help">Leave blank for the tool default. Type to search known models.</small>
@@ -1679,10 +1712,10 @@ function ProfileEditor({
           </div>
         </section>
 
-        <section className="settings-worker-form-section" aria-labelledby="worker-form-env">
-          <h4 id="worker-form-env">Environment variables</h4>
-          <div className="settings-worker-form-grid">
-            <div className="settings-worker-form-row">
+        <section className="section settings-worker-form-section" aria-labelledby="worker-form-env">
+          <h3 className="section-title" id="worker-form-env">Environment variables</h3>
+          <div className="card">
+            <div className="card-row settings-worker-form-row">
               <div className="settings-worker-form-label">
                 <span id="worker-form-env-label">Variables</span>
                 <small>One row per variable. Values stay on this device.</small>
@@ -1704,7 +1737,7 @@ function ProfileEditor({
               </div>
             </div>
             {envRows.length > 0 || shownEnvError ? (
-              <div className="settings-worker-form-row settings-worker-form-row-stack">
+              <div className="card-row settings-worker-form-row settings-worker-form-row-stack">
                 <div className="settings-worker-form-field" role="group" aria-labelledby="worker-form-env-label">
                   {envRows.map((row) => (
                     <div key={row.id} className="settings-env-editor-row">
@@ -1760,10 +1793,10 @@ function ProfileEditor({
           </div>
         </section>
 
-        <section className="settings-worker-form-section" aria-labelledby="worker-form-tags">
-          <h4 id="worker-form-tags">Tags</h4>
-          <div className="settings-worker-form-grid">
-            <div className="settings-worker-form-row">
+        <section className="section settings-worker-form-section" aria-labelledby="worker-form-tags">
+          <h3 className="section-title" id="worker-form-tags">Tags</h3>
+          <div className="card">
+            <div className="card-row settings-worker-form-row">
               <div className="settings-worker-form-label">
                 <label htmlFor="worker-form-tags-input">Tags</label>
                 <small id="worker-form-tags-help">Tags help Oga pick this worker for matching work. Separate with commas.</small>
@@ -1839,47 +1872,49 @@ function McpIntegrationPanel({
   }, [state.integrations.loading, state.profiles, setState]);
 
   return (
-    <section className="settings-section settings-integration-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Connections</p>
-          <h2>Connect command-line tools</h2>
-        </div>
-        <button
-          className="settings-button settings-button-primary"
-          type="button"
-          onClick={handleInstall}
-          disabled={state.integrations.loading || offline}
-        >
-          {state.integrations.loading ? "Connecting…" : "Connect tools"}
-        </button>
-      </div>
-      <p className="settings-helper">Add Oga to the supported client config files. Existing files are backed up before they change.</p>
-      {state.integrations.results.length ? (
-        <div className="settings-install-results" aria-live="polite">
-          {state.integrations.results.map((result: McpInstallResult) => (
-            <InstallResultRow key={result.path} result={result} />
-          ))}
-        </div>
-      ) : null}
-    </section>
+    <>
+      <PageHeader title={tabLabel("connections")} />
+      <Section
+        title="Connect command-line tools"
+        description="Add Oga to the supported client config files. Existing files are backed up before they change."
+        actions={
+          <button
+            className="settings-button settings-button-primary"
+            type="button"
+            onClick={handleInstall}
+            disabled={state.integrations.loading || offline}
+          >
+            {state.integrations.loading ? "Connecting…" : "Connect tools"}
+          </button>
+        }
+      >
+        {state.integrations.results.length ? (
+          <div className="card" aria-live="polite">
+            {state.integrations.results.map((result: McpInstallResult) => (
+              <InstallResultRow key={result.path} result={result} />
+            ))}
+          </div>
+        ) : null}
+      </Section>
+    </>
   );
 }
 
 function InstallResultRow({ result }: { result: McpInstallResult }) {
   return (
-    <div className={`settings-install-result${result.success ? "" : " settings-install-result-error"}`}>
-      <span className="settings-install-mark" aria-hidden="true">
-        {result.success ? "OK" : "!"}
-      </span>
-      <span className="visually-hidden">{result.success ? "Connected" : "Failed"}</span>
-      <div>
-        <strong>{result.client}</strong>
-        <p>
-          {result.message} · {result.path}
-        </p>
-      </div>
-    </div>
+    <CardRow
+      className={`settings-install-result${result.success ? "" : " settings-install-result-error"}`}
+      leading={
+        <>
+          <span className="settings-install-mark" aria-hidden="true">
+            {result.success ? "OK" : "!"}
+          </span>
+          <span className="visually-hidden">{result.success ? "Connected" : "Failed"}</span>
+        </>
+      }
+      title={result.client}
+      description={`${result.message} · ${result.path}`}
+    />
   );
 }
 
@@ -1928,92 +1963,96 @@ function MemoriesPanel({
   }, [state.memories.entries, query]);
 
   return (
-    <section className="settings-section settings-memory-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Memories</p>
-          <h2>Project memories</h2>
+    <>
+      <PageHeader title={tabLabel("memories")} />
+      <Section
+        title="Project memories"
+        description="These notes are shared with workers in the project. Values stay in Oga until you open a project."
+        actions={<SearchField className="settings-search" value={query} onChange={setQuery} placeholder="Search memories" />}
+      >
+        <div className="settings-memory-layout">
+          <nav className="card settings-memory-projects" aria-label="Projects with memories">
+            {state.memories.projects.length === 0 ? (
+              <EmptyState
+                title="No memories yet"
+                hint="Memories appear here after you add one to this project."
+                className="settings-empty"
+              />
+            ) : (
+              state.memories.projects.map((project) => (
+                <button
+                  key={project.cwd}
+                  className={`card-row settings-memory-project${state.memories.selectedProject === project.cwd ? " settings-memory-project-active" : ""}`}
+                  type="button"
+                  aria-pressed={state.memories.selectedProject === project.cwd}
+                  onClick={() => void handleSelect(project.cwd)}
+                >
+                  <span className="card-row-text">
+                    <span className="card-row-title">{projectName(project.cwd)}</span>
+                    <span className="card-row-description">
+                      {project.count} {project.count === 1 ? "memory" : "memories"}
+                    </span>
+                  </span>
+                </button>
+              ))
+            )}
+          </nav>
+          <div className="settings-memory-detail">
+            {state.memories.loading ? (
+              <p className="settings-status">Loading memories…</p>
+            ) : state.memories.error ? (
+              <div className="settings-message settings-message-error" role="alert">
+                <strong>Couldn&apos;t read memories</strong>
+                <p>{state.memories.error}</p>
+                <button className="settings-button" type="button" onClick={handleReload}>
+                  Try again
+                </button>
+              </div>
+            ) : !state.memories.selectedProject ? (
+              <div className="settings-placeholder">
+                <h3>Choose a project</h3>
+                <p>Select a project to read its memories.</p>
+              </div>
+            ) : state.memories.entries.length === 0 ? (
+              <EmptyState
+                title="No memories yet"
+                hint="Memories appear here after you add one to this project."
+                className="settings-empty"
+              />
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                title="No memories match"
+                hint="Try a different filter."
+                className="settings-placeholder"
+                action={<button className="text-button" type="button" onClick={() => setQuery("")}>Clear filter</button>}
+              />
+            ) : (
+              <div className="settings-memory-list">
+                {filtered.map((entry: MemoryEntry) => (
+                  <article key={entry.key} className="card settings-memory-card">
+                    <header>
+                      <SyntaxCode source={entry.key} inline />
+                      <small>Version {entry.version}</small>
+                    </header>
+                    <p>{entry.value}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <SearchField className="settings-search" value={query} onChange={setQuery} placeholder="Search memories" />
-      </div>
-      <p className="settings-helper">These notes are shared with workers in the project. Values stay in Oga until you open a project.</p>
-      <div className="settings-memory-layout">
-        <nav className="settings-memory-projects" aria-label="Projects with memories">
-          {state.memories.projects.length === 0 ? (
-            <EmptyState
-              title="No memories yet"
-              hint="Memories appear here after you add one to this project."
-              className="settings-empty"
-            />
-          ) : (
-            state.memories.projects.map((project) => (
-              <button
-                key={project.cwd}
-                className={`settings-memory-project${state.memories.selectedProject === project.cwd ? " settings-memory-project-active" : ""}`}
-                type="button"
-                aria-pressed={state.memories.selectedProject === project.cwd}
-                onClick={() => void handleSelect(project.cwd)}
-              >
-                <strong>{projectName(project.cwd)}</strong>
-                <small>
-                  {project.count} {project.count === 1 ? "memory" : "memories"}
-                </small>
-              </button>
-            ))
-          )}
-        </nav>
-        <div className="settings-memory-detail">
-          {state.memories.loading ? (
-            <p className="settings-status">Loading memories…</p>
-          ) : state.memories.error ? (
-            <div className="settings-message settings-message-error" role="alert">
-              <strong>Couldn&apos;t read memories</strong>
-              <p>{state.memories.error}</p>
-              <button className="settings-button" type="button" onClick={handleReload}>
-                Try again
-              </button>
-            </div>
-          ) : !state.memories.selectedProject ? (
-            <div className="settings-placeholder">
-              <h3>Choose a project</h3>
-              <p>Select a project to read its memories.</p>
-            </div>
-          ) : state.memories.entries.length === 0 ? (
-            <EmptyState
-              title="No memories yet"
-              hint="Memories appear here after you add one to this project."
-              className="settings-empty"
-            />
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              title="No memories match"
-              hint="Try a different filter."
-              className="settings-placeholder"
-              action={<button className="text-button" type="button" onClick={() => setQuery("")}>Clear filter</button>}
-            />
-          ) : (
-            <div className="settings-memory-list">
-              {filtered.map((entry: MemoryEntry) => (
-                <article key={entry.key} className="settings-memory-card">
-                  <header>
-                    <SyntaxCode source={entry.key} inline />
-                    <small>Version {entry.version}</small>
-                  </header>
-                  <p>{entry.value}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
+      </Section>
+    </>
   );
 }
 
 
 /** The two texts the Prompts tabs edit, told apart by what each one reads and writes. */
 interface PromptSurface {
+  tab: SettingsTab;
   label: string;
+  /** Shown over the editor when the label differs from the tab's. */
+  heading?: string;
   helper: React.ReactNode;
   model: (state: SettingsState) => PromptsModel;
   scope: (state: SettingsState) => ProjectSettingsScope;
@@ -2022,6 +2061,7 @@ interface PromptSurface {
 }
 
 const WORKER_PROMPT_SURFACE: PromptSurface = {
+  tab: "prompts",
   label: "Worker instructions",
   helper: (
     <>
@@ -2036,7 +2076,9 @@ const WORKER_PROMPT_SURFACE: PromptSurface = {
 };
 
 const CALLER_PROMPT_SURFACE: PromptSurface = {
+  tab: "callerPrompts",
   label: "How briefs are written",
+  heading: "How briefs are written",
   helper: (
     <>
       What your agent reads before it writes up work to hand off. Use {"{{default}}"} to keep Oga&apos;s own wording,
@@ -2112,75 +2154,76 @@ function PromptsPanel({
   );
 
   return (
-    <section className="settings-section settings-prompts-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Prompts</p>
-          <h2>{surface.label}</h2>
-        </div>
-        <label className="settings-scope-picker">
-          <span>Applies to</span>
-          <select value={scopeKey(surface.scope(state))} onChange={(e) => handleScopeChange(e.target.value)}>
-            <option value="global">All projects</option>
-            {state.projects?.projects.map((path) => (
-              <option key={path} value={path}>
-                {projectName(path)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {prompts.loadError ? (
-        <div className="settings-message settings-message-error" role="alert">
-          <strong>Couldn&apos;t read these instructions</strong>
-          <p>{prompts.loadError}</p>
-          <button className="settings-button" type="button" onClick={handleReload}>
-            Try again
-          </button>
-        </div>
-      ) : !prompts.loaded ? (
-        <p className="settings-status">Loading instructions…</p>
-      ) : (
-        <div className="settings-prompt-editor">
-          <div className="settings-prompt-meta">
-            <span className="settings-muted">
-              {prompts.configPath ? "Set by the project file" : prompts.written ? "Set for this project" : "Using the default for all projects"}
-            </span>
-            {prompts.configPath === undefined && prompts.written ? (
-              <button className="text-button" type="button" onClick={handleReset}>
-                Use inherited
-              </button>
-            ) : null}
+    <>
+      <PageHeader
+        title={tabLabel(surface.tab)}
+        actions={
+          <label className="settings-scope-picker">
+            <span>Applies to</span>
+            <select value={scopeKey(surface.scope(state))} onChange={(e) => handleScopeChange(e.target.value)}>
+              <option value="global">All projects</option>
+              {state.projects?.projects.map((path) => (
+                <option key={path} value={path}>
+                  {projectName(path)}
+                </option>
+              ))}
+            </select>
+          </label>
+        }
+      />
+      <Section title={surface.heading}>
+        {prompts.loadError ? (
+          <div className="settings-message settings-message-error" role="alert">
+            <strong>Couldn&apos;t read these instructions</strong>
+            <p>{prompts.loadError}</p>
+            <button className="settings-button" type="button" onClick={handleReload}>
+              Try again
+            </button>
           </div>
-          <textarea
-            value={prompts.text}
-            onChange={(e) => handleTextChange(e.target.value)}
-            readOnly={prompts.configPath !== undefined}
-            aria-label={surface.label}
-          />
-          <p className="settings-helper">{surface.helper}</p>
-          {prompts.configPath !== undefined ? (
-            <p className="settings-helper">Set by the project file. Edit that file to change them.</p>
-          ) : (
-            <div className="settings-form-footer">
-              {isPromptDirty(prompts) ? (
-                <span className="settings-muted">Unsaved changes</span>
-              ) : prompts.saved ? (
-                <span className="settings-muted">Saved for new tasks</span>
+        ) : !prompts.loaded ? (
+          <p className="settings-status">Loading instructions…</p>
+        ) : (
+          <div className="settings-prompt-editor">
+            <div className="settings-prompt-meta">
+              <span className="settings-muted">
+                {prompts.configPath ? "Set by the project file" : prompts.written ? "Set for this project" : "Using the default for all projects"}
+              </span>
+              {prompts.configPath === undefined && prompts.written ? (
+                <button className="text-button" type="button" onClick={handleReset}>
+                  Use inherited
+                </button>
               ) : null}
-              <button
-                className="settings-button settings-button-primary"
-                type="button"
-                onClick={handleSave}
-                disabled={prompts.saving || !isPromptDirty(prompts) || offline}
-              >
-                {prompts.saving ? "Saving…" : "Save changes"}
-              </button>
             </div>
-          )}
-        </div>
-      )}
-    </section>
+            <textarea
+              value={prompts.text}
+              onChange={(e) => handleTextChange(e.target.value)}
+              readOnly={prompts.configPath !== undefined}
+              aria-label={surface.label}
+            />
+            <p className="settings-helper">{surface.helper}</p>
+            {prompts.configPath !== undefined ? (
+              <p className="settings-helper">Set by the project file. Edit that file to change them.</p>
+            ) : (
+              <div className="settings-form-footer">
+                <button
+                  className="settings-button settings-button-primary"
+                  type="button"
+                  onClick={handleSave}
+                  disabled={prompts.saving || !isPromptDirty(prompts) || offline}
+                >
+                  {prompts.saving ? "Saving…" : "Save changes"}
+                </button>
+                {isPromptDirty(prompts) ? (
+                  <span className="settings-muted">Unsaved changes</span>
+                ) : prompts.saved ? (
+                  <span className="settings-muted">Saved for new tasks</span>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
+    </>
   );
 }
 
@@ -2255,99 +2298,91 @@ function CleanupPanel({
   };
 
   return (
-    <section className="settings-section settings-storage-section">
-      <div className="settings-section-heading">
-        <div>
-          <p className="eyebrow">Task history</p>
-          <h2>What Oga keeps</h2>
-        </div>
-        <button className="text-button" type="button" onClick={() => void reload()} disabled={state.cleanup.loading}>
-          Refresh
-        </button>
-      </div>
-      <p className="settings-helper">Oga keeps each task&apos;s request and answer. These choices remove only its detailed activity.</p>
+    <>
+      <PageHeader
+        title={tabLabel("storage")}
+        description="Oga keeps each task's request and answer. These choices remove only its detailed activity."
+        actions={
+          <button className="settings-button" type="button" onClick={() => void reload()} disabled={state.cleanup.loading}>
+            Refresh
+          </button>
+        }
+      />
       {state.cleanup.loading && !settings ? <p className="settings-status">Checking stored activity…</p> : null}
       {settings ? (
-        <>
-          <div className="settings-option-list">
-            <label className="settings-option">
-              <span>
-                <strong>Remove old logs automatically</strong>
-                <small>Remove logs after they reach the age you choose.</small>
-              </span>
-              <input type="checkbox" checked={settings.enabled} onChange={(event) => updateDraft({ enabled: event.target.checked })} />
-            </label>
-            <label className="settings-option settings-option-field">
-              <span>
-                <strong>Keep logs for</strong>
-                <small>Logs older than this can be removed.</small>
-              </span>
-              <span className="settings-number-field">
-                <input
-                  type="number"
-                  min={1}
-                  max={3650}
-                  value={settings.olderThanDays}
-                  onChange={(event) => updateDraft({ olderThanDays: Number(event.target.value) })}
-                  aria-label="Days to keep logs"
-                />
-                <span>days</span>
-              </span>
-            </label>
-            <label className="settings-option">
-              <span>
-                <strong>Remove logs only for archived tasks</strong>
-                <small>Logs for active and unarchived tasks stay.</small>
-              </span>
-              <input type="checkbox" checked={settings.archivedOnly} onChange={(event) => updateDraft({ archivedOnly: event.target.checked })} />
-            </label>
-          </div>
-          <div className="settings-inline-actions">
-            {hasUnsavedChanges ? <span className="settings-muted">Unsaved changes</span> : null}
-            <button
-              className="settings-button settings-button-primary"
-              type="button"
-              onClick={() => void save()}
-              disabled={state.cleanup.saving || offline || !hasUnsavedChanges}
-            >
-              {state.cleanup.saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-          {snapshot ? <CleanupPreview plan={snapshot.plan} /> : null}
-          <div className="settings-cleanup-actions">
-            {confirming ? (
-              <div className="settings-confirmation" role="alert">
-                <div>
-                  <strong>Remove these old logs?</strong>
-                  <p>This cannot be undone. Task requests and answers stay.</p>
-                </div>
-                <div className="settings-confirmation-actions">
-                  <button className="settings-button settings-button-danger" type="button" onClick={() => void run()} disabled={state.cleanup.running || offline}>Remove logs now</button>
-                  <button className="settings-button" type="button" onClick={() => setConfirming(false)}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <button className="settings-button settings-button-danger" type="button" onClick={() => setConfirming(true)} disabled={state.cleanup.running || hasUnsavedChanges || !snapshot?.plan.events || offline}>
-                {state.cleanup.running ? "Removing…" : "Review and remove now"}
+        <div className="page-sections">
+          <Section title="What Oga keeps">
+            <Card>
+              <CardRow as="label" title="Remove old logs automatically" description="Remove logs after they reach the age you choose.">
+                <input type="checkbox" checked={settings.enabled} onChange={(event) => updateDraft({ enabled: event.target.checked })} />
+              </CardRow>
+              <CardRow as="label" title="Keep logs for" description="Logs older than this can be removed.">
+                <span className="settings-number-field">
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={settings.olderThanDays}
+                    onChange={(event) => updateDraft({ olderThanDays: Number(event.target.value) })}
+                    aria-label="Days to keep logs"
+                  />
+                  <span>days</span>
+                </span>
+              </CardRow>
+              <CardRow as="label" title="Remove logs only for archived tasks" description="Logs for active and unarchived tasks stay.">
+                <input type="checkbox" checked={settings.archivedOnly} onChange={(event) => updateDraft({ archivedOnly: event.target.checked })} />
+              </CardRow>
+            </Card>
+            <div className="settings-form-footer">
+              <button
+                className="settings-button settings-button-primary"
+                type="button"
+                onClick={() => void save()}
+                disabled={state.cleanup.saving || offline || !hasUnsavedChanges}
+              >
+                {state.cleanup.saving ? "Saving…" : "Save"}
               </button>
-            )}
-          </div>
-          {!confirming && removeDisabledReason ? <p className="settings-muted">{removeDisabledReason}</p> : null}
-          {state.cleanup.result ? <p className="settings-success" role="status">Removed {state.cleanup.result.plan.events.toLocaleString()} logs and reclaimed {formatBytes(state.cleanup.result.fileBytesBefore - state.cleanup.result.fileBytesAfter)}.</p> : null}
-        </>
+              {hasUnsavedChanges ? <span className="settings-muted">Unsaved changes</span> : null}
+            </div>
+          </Section>
+          {snapshot ? (
+            <Section title={snapshot.plan.events ? "Logs ready to remove" : "Nothing to remove"}>
+              <CleanupPreview plan={snapshot.plan} />
+              <div className="settings-cleanup-actions">
+                {confirming ? (
+                  <div className="settings-confirmation" role="alert">
+                    <div>
+                      <strong>Remove these old logs?</strong>
+                      <p>This cannot be undone. Task requests and answers stay.</p>
+                    </div>
+                    <div className="settings-confirmation-actions">
+                      <button className="settings-button settings-button-danger" type="button" onClick={() => void run()} disabled={state.cleanup.running || offline}>Remove logs now</button>
+                      <button className="settings-button" type="button" onClick={() => setConfirming(false)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="settings-button settings-button-danger" type="button" onClick={() => setConfirming(true)} disabled={state.cleanup.running || hasUnsavedChanges || !snapshot.plan.events || offline}>
+                    {state.cleanup.running ? "Removing…" : "Review and remove now"}
+                  </button>
+                )}
+                {!confirming && removeDisabledReason ? <p className="settings-muted">{removeDisabledReason}</p> : null}
+              </div>
+              {state.cleanup.result ? <p className="settings-success" role="status">Removed {state.cleanup.result.plan.events.toLocaleString()} logs and reclaimed {formatBytes(state.cleanup.result.fileBytesBefore - state.cleanup.result.fileBytesAfter)}.</p> : null}
+            </Section>
+          ) : null}
+        </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
 function CleanupPreview({ plan }: { plan: CleanupSnapshot["plan"] }) {
   return (
-    <div className="settings-cleanup-preview" aria-live="polite">
-      <h3>{plan.events ? "Logs ready to remove" : "Nothing to remove"}</h3>
-      <dl className="settings-health-list">
-        <div><dt>Tasks</dt><dd>{plan.tasks.toLocaleString()}</dd></div>
-        <div><dt>Logs</dt><dd>{plan.events.toLocaleString()}</dd></div>
-        <div><dt>Space to free</dt><dd>{formatBytes(plan.bytes)}</dd></div>
+    <div aria-live="polite">
+      <dl className="card">
+        <div className="card-row"><dt>Tasks</dt><dd>{plan.tasks.toLocaleString()}</dd></div>
+        <div className="card-row"><dt>Logs</dt><dd>{plan.events.toLocaleString()}</dd></div>
+        <div className="card-row"><dt>Space to free</dt><dd>{formatBytes(plan.bytes)}</dd></div>
       </dl>
       {plan.heldBack ? <p className="settings-muted">{plan.heldBack.toLocaleString()} task{plan.heldBack === 1 ? "" : "s"} held back because related work is not ready.</p> : null}
     </div>
@@ -2385,97 +2420,98 @@ function AboutPanel({
   }, [setState]);
 
   return (
-    <section className="settings-section settings-about-section">
-      <div className="settings-about-hero">
-        <div>
-          <p className="eyebrow">About</p>
-          <h2>Oga</h2>
-          <p className="settings-mono">Desktop client</p>
-        </div>
-      </div>
-      <div className="settings-about-card">
-        {state.overview === "loading" ? (
-          <p className="settings-status">Checking Oga…</p>
-        ) : state.health ? (
-          <>
-            <div className="settings-health-heading">
-              <span className="settings-health-dot" />
-              <strong>Oga is running</strong>
+    <>
+      <PageHeader title={tabLabel("about")} />
+      <div className="page-sections">
+        <Section title="Oga" description="Desktop client">
+          {state.overview === "loading" ? (
+            <p className="settings-status">Checking Oga…</p>
+          ) : state.health ? (
+            <>
+              <dl className="card">
+                <div className="card-row">
+                  <dt className="settings-health-heading">
+                    <span className="settings-health-dot" />
+                    <strong>Oga is running</strong>
+                  </dt>
+                </div>
+                <div className="card-row">
+                  <dt>Version</dt>
+                  <dd>{state.health.version}</dd>
+                </div>
+                <div className="card-row">
+                  <dt>Connection version</dt>
+                  <dd>v{state.health.mcpContractVersion}</dd>
+                </div>
+                <div className="card-row">
+                  <dt>Build</dt>
+                  <dd className="settings-mono">{state.health.build}</dd>
+                </div>
+              </dl>
+              {state.health.stale ? (
+                <p className="settings-form-error">{state.health.hint ?? "A newer source build is available."}</p>
+              ) : null}
+            </>
+          ) : (
+            <div className="settings-message settings-message-error">
+              <strong>Oga is unreachable</strong>
+              <p>Check that Oga is running, then try again.</p>
+              <button className="settings-button" type="button" onClick={handleRefresh}>
+                Try again
+              </button>
             </div>
-            <dl className="settings-health-list">
-              <div>
-                <dt>Version</dt>
-                <dd>{state.health.version}</dd>
+          )}
+        </Section>
+        <Section title="Keep Oga current">
+          <div className="card settings-update-card" aria-live="polite">
+            {updateStatus.kind === "available" ? (
+              <>
+                <CardRow title={`Version ${updateStatus.version} is ready to install.`} description="Oga restarts when the update finishes.">
+                  <button className="settings-button settings-button-primary" type="button" onClick={onInstallUpdate}>
+                    Install and restart Oga
+                  </button>
+                </CardRow>
+                {updateStatus.notes ? (
+                  <div className="card-row">
+                    <MarkdownContent source={updateStatus.notes} />
+                  </div>
+                ) : null}
+              </>
+            ) : updateStatus.kind === "checking" ? (
+              <CardRow title="Checking for a new version…" />
+            ) : updateStatus.kind === "downloading" ? (
+              <CardRow
+                title={`Downloading version ${updateStatus.version}${updateStatus.progress === undefined ? "…" : ` (${updateStatus.progress}%)`}`}
+              />
+            ) : updateStatus.kind === "installing" ? (
+              <CardRow title={`Installing version ${updateStatus.version}…`} />
+            ) : updateStatus.kind === "up-to-date" ? (
+              <CardRow title="You have the latest version.">
+                <button className="settings-button" type="button" onClick={onCheckForUpdates}>
+                  Check for updates
+                </button>
+              </CardRow>
+            ) : updateStatus.kind === "failed" ? (
+              <CardRow
+                className="settings-update-failed"
+                title={updateStatus.reason === "check" ? "We couldn't check for a new version. Try again in a moment." : "We couldn't install the update. Try again."}
+              >
+                <button className="settings-button" type="button" onClick={updateStatus.reason === "check" ? onCheckForUpdates : onInstallUpdate}>
+                  Try again
+                </button>
+              </CardRow>
+            ) : updateStatus.kind === "unavailable" ? (
+              <CardRow title="Update Oga from the desktop app." />
+            ) : (
+              <div className="card-row">
+                <button className="settings-button" type="button" onClick={onCheckForUpdates}>
+                  Check for updates
+                </button>
               </div>
-              <div>
-                <dt>Connection version</dt>
-                <dd>v{state.health.mcpContractVersion}</dd>
-              </div>
-              <div>
-                <dt>Build</dt>
-                <dd className="settings-mono">{state.health.build}</dd>
-              </div>
-            </dl>
-            {state.health.stale ? (
-              <p className="settings-form-error">{state.health.hint ?? "A newer source build is available."}</p>
-            ) : null}
-          </>
-        ) : (
-          <div className="settings-message settings-message-error">
-            <strong>Oga is unreachable</strong>
-            <p>Check that Oga is running, then try again.</p>
-            <button className="settings-button" type="button" onClick={handleRefresh}>
-              Try again
-            </button>
+            )}
           </div>
-        )}
+        </Section>
       </div>
-      <div className="settings-about-card" aria-live="polite">
-        <div>
-          <p className="eyebrow">Updates</p>
-          <h3>Keep Oga current</h3>
-        </div>
-        {updateStatus.kind === "available" ? (
-          <>
-            <p>Version {updateStatus.version} is ready to install.</p>
-            {updateStatus.notes ? <MarkdownContent source={updateStatus.notes} /> : null}
-            <button className="settings-button settings-button-primary" type="button" onClick={onInstallUpdate}>
-              Install and restart Oga
-            </button>
-            <p className="settings-muted">Oga restarts when the update finishes.</p>
-          </>
-        ) : updateStatus.kind === "checking" ? (
-          <p className="settings-status">Checking for a new version…</p>
-        ) : updateStatus.kind === "downloading" ? (
-          <p className="settings-status">
-            Downloading version {updateStatus.version}{updateStatus.progress === undefined ? "…" : ` (${updateStatus.progress}%)`}
-          </p>
-        ) : updateStatus.kind === "installing" ? (
-          <p className="settings-status">Installing version {updateStatus.version}…</p>
-        ) : updateStatus.kind === "up-to-date" ? (
-          <>
-            <p className="settings-status">You have the latest version.</p>
-            <button className="settings-button" type="button" onClick={onCheckForUpdates}>
-              Check for updates
-            </button>
-          </>
-        ) : updateStatus.kind === "failed" ? (
-          <>
-            <p className="settings-form-error">
-              {updateStatus.reason === "check" ? "We couldn't check for a new version. Try again in a moment." : "We couldn't install the update. Try again."}
-            </p>
-            <button className="settings-button" type="button" onClick={updateStatus.reason === "check" ? onCheckForUpdates : onInstallUpdate}>
-              Try again
-            </button>
-          </>
-        ) : updateStatus.kind === "unavailable" ? (
-          <p className="settings-status">Update Oga from the desktop app.</p>
-        ) : (
-          <button className="settings-button" type="button" onClick={onCheckForUpdates}>
-            Check for updates
-          </button>
-        )}
-      </div>
-    </section>
+    </>
   );
 }

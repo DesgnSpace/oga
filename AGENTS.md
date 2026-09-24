@@ -17,3 +17,4 @@
 15. Changelog lines say what the user can now do, in their words. No languages, frameworks, file names, internal parts, or how it was built — if a line only makes sense to someone who has read the code, rewrite it.
 16. Never add a changelog entry for the landing page, `landing/docs`, marketing copy, README, or internal docs, however visible the change is. If the only thing that changed is a page on the site, the PR adds no changelog line at all.
 17. A PR that changes a feature updates the affected `landing/docs` page in the same PR. The changelog page is generated at deploy time, so never commit `landing/docs/changelog.html`.
+18. UI follows `docs/design.md`: spacing, radii, and type come from its tokens in `web/src/oga.css`, and settings-style pages are built from `PageHeader`, `Section`, `Card`, and `CardRow`. No raw pixel values for spacing.
