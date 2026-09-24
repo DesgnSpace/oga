@@ -1,6 +1,4 @@
-// The changes panel's two extra shapes: the reported view split by the turn
-// that produced each file, and a real git diff mapped onto the same
-// file-and-hunk model. Both stay pure so the panel only renders.
+// Grouped reported changes and git changes share the panel's file-and-hunk model.
 
 import type { TaskDiff, TaskEventView } from "@/bridge/types";
 import {
@@ -57,10 +55,6 @@ interface BucketState {
   turn?: ChangeTurn;
 }
 
-/**
- * Keeps the grouped reported view append-only while the panel is visible.
- * Pages, replays, and inferred turn boundaries use the exact rebuild path.
- */
 export class RunChangeByTurnProjection {
   private source: TaskEventView[] | undefined;
   private length = 0;

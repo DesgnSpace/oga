@@ -1,7 +1,4 @@
 // Changed-file derivation and the bounded diff model used by the task detail UI.
-// Ported from rust/crates/oga-ui/src/changes/mod.rs — keep behavior identical.
-// Rendering (the changed-files panel, syntax highlighting) is out of scope here;
-// this module only ports the pure event -> file/diff derivation.
 
 import type { TaskDiffFileStatus, TaskEventView } from "@/bridge/types";
 
@@ -27,12 +24,7 @@ const NEW_KEYS = ["new_string", "newString", "new_text", "newText"];
 const CONTENT_KEYS = ["content", "text"];
 const INPUT_KEYS = ["tool_input", "input", "arguments", "args"];
 
-/**
- * Row titles that mean the worker changed a file, in the words the presenter
- * gives every provider. A worker that reports which file it touched but not
- * what it wrote is taken at its word only for these — a read names a file too,
- * and listing it would say the run changed something it only looked at.
- */
+// A read names a file too, so only these titles count as a change.
 const CHANGE_TITLES = new Set([
   "edit file",
   "edit files",
@@ -58,7 +50,6 @@ const EDIT_MARKER_KEYS = [
   "*** Begin Patch",
 ];
 
-/** Cheap gate used before decoding every provider payload in a trace. */
 export function fileChangeMayContainEdit(raw: string): boolean {
   return EDIT_MARKER_KEYS.some((key) => raw.includes(key));
 }
@@ -91,10 +82,6 @@ export function fileChangeRemoved(change: FileChange): number {
   return countDiffLines(change, "removed");
 }
 
-/**
- * Builds a line-oriented replacement. Small replacements retain context;
- * large replacements are represented as one removed block and one added block.
- */
 export function diffLines(oldText: string, newText: string): DiffLine[] {
   const before = splitLines(oldText);
   const after = splitLines(newText);
@@ -135,9 +122,7 @@ function search(value: unknown, inheritedPath: string | undefined, inInput: bool
     }
   }
 
-  // A body counts as a write only where it is what the worker passed in or what
-  // it says it created. A file it merely read carries a body too, and listing
-  // that would say the run changed something it only looked at.
+  // A body in a tool input or create event is a write; a file read can carry a body too.
   if ((inInput || fields.type === "create") && path !== undefined) {
     const content = stringValue(fields, CONTENT_KEYS);
     if (content !== undefined) return addedWholeFile(path, content);
@@ -164,16 +149,10 @@ function search(value: unknown, inheritedPath: string | undefined, inInput: bool
   return merge(found, path);
 }
 
-/** A body reported with nothing it replaced, so every line of it is new. */
 function addedWholeFile(path: string | undefined, body: string): FileChange {
   return { path, blocks: [collapse(splitLines(body).map((text): DiffLine => ({ kind: "added", text })))] };
 }
 
-/**
- * The file a change row names when its payload carries no diff to read — a
- * worker that reports only that it wrote something, and where. The lines stay
- * unknown; comparing against git is what fills them in.
- */
 function namedFile(event: TaskEventView): FileChange | undefined {
   if (event.kind !== "file" || !CHANGE_TITLES.has(event.title.trim().toLowerCase())) return undefined;
   const path = event.presentation?.path;

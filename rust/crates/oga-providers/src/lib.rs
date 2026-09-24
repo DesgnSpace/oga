@@ -825,11 +825,7 @@ fn expand_home(value: &str, home: &str) -> String {
     }
     value.to_owned()
 }
-/// Where a provider keeps the account it is signed in as: the profile's own
-/// override when it sets one, otherwise the provider's default directory
-/// under the home folder. Read from the profile alone, never from this
-/// process, so a broker launched with the variable exported cannot lend its
-/// account to a profile that never asked for it.
+/// The account directory comes from the profile, never from the broker's own environment.
 fn account_dir(profile: &Profile, key: &str, default: &str) -> String {
     let home = home();
     profile.env.get(key).map_or_else(
@@ -837,9 +833,7 @@ fn account_dir(profile: &Profile, key: &str, default: &str) -> String {
         |value| expand_home(value, &home),
     )
 }
-/// Claude's account directory for this profile. Credentials and limits live
-/// below it, so a profile that names no directory gets one of its own rather
-/// than sharing the default with every other Claude profile.
+/// Claude's account directory for this profile.
 pub fn claude_config_dir(profile: &Profile) -> String {
     let default = if profile.id == "claude" {
         "/.claude".to_owned()
@@ -848,12 +842,8 @@ pub fn claude_config_dir(profile: &Profile) -> String {
     };
     account_dir(profile, "CLAUDE_CONFIG_DIR", &default)
 }
-/// The value `CLAUDE_CONFIG_DIR` has to carry for this profile, or `None` when
-/// the profile wants the directory Claude already reads by default. Claude
-/// keys the keychain entry holding the account off whether the variable is set
-/// at all, not off where it points: set to any path, that default one
-/// included, it looks under an entry named for the path and finds nothing. So
-/// the default profile has to reach Claude with the variable absent.
+/// The default profile must leave `CLAUDE_CONFIG_DIR` unset: Claude keys the
+/// keychain entry off whether the variable exists, not where it points.
 fn claude_config_override(profile: &Profile) -> Option<String> {
     let dir = claude_config_dir(profile);
     (dir != format!("{}/.claude", home())).then_some(dir)
@@ -862,9 +852,7 @@ fn claude_config_override(profile: &Profile) -> Option<String> {
 pub fn codex_home(profile: &Profile) -> String {
     account_dir(profile, "CODEX_HOME", "/.codex")
 }
-/// Variables a provider process must not merely be given a value for, but must
-/// not see at all. A worker inherits the broker's own environment, so absent
-/// means removed rather than left unset.
+/// Variables a provider process must not see at all.
 pub fn unset_environment_for(profile: &Profile) -> BTreeSet<String> {
     match profile.provider {
         Provider::Claude if claude_config_override(profile).is_none() => {
@@ -873,11 +861,7 @@ pub fn unset_environment_for(profile: &Profile) -> BTreeSet<String> {
         _ => BTreeSet::new(),
     }
 }
-/// The environment a provider process receives: the profile's own env with
-/// `$HOME` and `~` expanded before they reach `execve`, plus the provider's
-/// account directory set explicitly, so an inherited broker value cannot join
-/// otherwise separate profiles. Pair it with `unset_environment_for`, which
-/// covers the directories this map deliberately names nothing for.
+/// Provider environment with profile values expanded and account directories set explicitly.
 pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
     let home = home();
     let mut env = profile

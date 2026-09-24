@@ -1,5 +1,4 @@
-// The sidebar's search field and task list, reachable from both the native
-// File/View menus and the in-page shortcuts without either owning the other.
+// Sidebar focus helpers for native menus and in-page shortcuts.
 
 import type { SidebarController } from "@/state";
 
@@ -17,8 +16,6 @@ export function focusTaskList(): void {
   row?.focus();
 }
 
-/** Toggles the sidebar and keeps focus sane either way: opening it focuses
- * the task list, and hiding it moves focus off whatever was inside it. */
 export function toggleSidebarAndManageFocus(sidebar: SidebarController): void {
   const wasCollapsed = sidebar.snapshot.sidebarCollapsed;
   sidebar.toggleSidebar();
