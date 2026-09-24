@@ -1,4 +1,4 @@
-//! Task lifecycle types: identity, state, scope, completion, holds, worktrees.
+//! Task lifecycle, scope, completion, hold, and worktree types.
 
 use serde::{Deserialize, Serialize};
 
@@ -32,12 +32,6 @@ impl Provider {
     }
 }
 
-/// Task states. `pending` is held: the broker knows when or on what condition
-/// the task starts, and it is not before then; it survives restarts untouched.
-/// `answered` has no writer — answering moves a row back to `queued` and
-/// records an event instead — but the string is pinned by the live schema's
-/// `CHECK(state IN (…))` and the desktop app, so it stays until a migration
-/// removes it everywhere at once.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
@@ -56,9 +50,6 @@ pub enum TaskState {
 }
 
 impl TaskState {
-    /// The states a watcher stops following: the work can no longer move on
-    /// its own. Deliberately wider than cleanup's deletable states, which
-    /// exclude `blocked` and `needs_input` because that history still matters.
     pub fn settled(self) -> bool {
         matches!(
             self,
@@ -87,8 +78,6 @@ impl TaskState {
     }
 }
 
-/// How Oga talks to a provider: an ACP conversation over stdio, or the
-/// provider's own command line read to exit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
@@ -105,8 +94,6 @@ impl Transport {
     }
 }
 
-/// Which transport a profile asks for. `auto` uses ACP where this provider has
-/// an adapter that starts, and the command line otherwise.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportPreference {
@@ -126,7 +113,6 @@ impl TransportPreference {
     }
 }
 
-/// Why a task runs on the command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportReason {
@@ -143,7 +129,6 @@ pub enum TransportReason {
     Unavailable,
 }
 
-/// The ACP agent that answered a task's session, as it described itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcpAgentIdentity {
@@ -156,7 +141,6 @@ pub struct AcpAgentIdentity {
     pub protocol_version: u16,
 }
 
-/// How a session is picked back up on the agent that holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AcpRestore {
@@ -166,9 +150,6 @@ pub enum AcpRestore {
     Load,
 }
 
-/// How an instruction reaches a turn that is already running, settled when the
-/// session opened. Absent means it cannot, and the instruction waits for the
-/// run to finish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AcpSteering {
@@ -180,9 +161,6 @@ pub enum AcpSteering {
     Prompt,
 }
 
-/// The transport a task's runs use, decided when a run first opens a session
-/// and kept from then on. A command-line decision is never revisited, so a
-/// fallback cannot flip a task back and forth between transports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskTransport {
@@ -257,9 +235,6 @@ pub enum CompletionCode {
     Unverified,
 }
 
-/// A caller's correction of a completion the worker never attested. The state
-/// moves to `completed` while the original completion survives untouched, so
-/// an asserted success stays visibly different from a verified one forever.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskCompletionOverride {
@@ -298,7 +273,6 @@ pub struct TaskCompletion {
     pub dependency_blocked: Option<bool>,
 }
 
-/// One worker run or terminal dependency outcome, kept for later runs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskAttempt {
