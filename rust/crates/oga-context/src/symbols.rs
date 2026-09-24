@@ -82,10 +82,6 @@ struct Captured<'tree> {
     name: String,
 }
 
-/// Nest the captures by byte containment, then let that nesting settle the
-/// three things it decides: the qualified name, whether a function is really a
-/// method, and whether a declaration is local to a body and not worth
-/// indexing.
 fn nest(
     captured: Vec<Captured<'_>>,
     adapter: &dyn LanguageAdapter,
@@ -149,9 +145,7 @@ fn nest(
     symbols
 }
 
-/// The last line the declaration actually covers. A node that ends at the
-/// first column of a line — a markdown section handing over to the next
-/// heading — stopped on the line before.
+/// A node ending at column zero stopped on the previous line.
 fn end_line(node: Node<'_>) -> u64 {
     let end = node.end_position();
     if end.column == 0 && end.row > node.start_position().row {
@@ -170,8 +164,6 @@ struct Enclosing {
     opaque: bool,
 }
 
-/// A function declared inside a type is a method; a stored value declared
-/// outside one is a constant, not a field.
 fn settle_kind(kind: SymbolKind, parent: Option<SymbolKind>) -> SymbolKind {
     match (kind, parent) {
         (SymbolKind::Fn, Some(parent)) if holds_members(parent) => SymbolKind::Method,
@@ -180,9 +172,6 @@ fn settle_kind(kind: SymbolKind, parent: Option<SymbolKind>) -> SymbolKind {
     }
 }
 
-/// Nothing inside a body or a value is a symbol of its own: a local variable,
-/// a parameter's inline type, a helper closure. They belong to the
-/// declaration that holds them.
 fn is_opaque(kind: SymbolKind) -> bool {
     matches!(
         kind,
@@ -201,8 +190,6 @@ fn holds_members(kind: SymbolKind) -> bool {
     )
 }
 
-/// The declaration up to its body, on one line. A node with no body — a
-/// constant, a heading — contributes its first line instead.
 fn signature(node: Node<'_>, source: &str) -> String {
     let end = node
         .child_by_field_name("body")
@@ -212,8 +199,6 @@ fn signature(node: Node<'_>, source: &str) -> String {
     one_line(source.get(node.start_byte()..end).unwrap_or_default())
 }
 
-/// A declaration's first line, collapsed to single spaces and capped. What a
-/// signature looks like once it is a searchable string.
 pub fn one_line(text: &str) -> String {
     let text = text.split('\n').next().unwrap_or(text);
     text.split_whitespace()
@@ -224,8 +209,7 @@ pub fn one_line(text: &str) -> String {
         .collect()
 }
 
-/// The comment block directly above the declaration, markers stripped.
-/// Attributes and decorators sit between the two and are stepped over.
+/// The comment block above a declaration, with attributes and decorators skipped.
 fn doc_comment(node: Node<'_>, adapter: &dyn LanguageAdapter, source: &str) -> Option<String> {
     let node = outermost_at_start(node);
     let mut blocks = Vec::new();
@@ -248,9 +232,6 @@ fn doc_comment(node: Node<'_>, adapter: &dyn LanguageAdapter, source: &str) -> O
     clean_comment(&blocks.join("\n")).map(|doc| doc.chars().take(MAX_DOC_CHARS).collect())
 }
 
-/// A declaration's doc comment sits above whatever wraps it — `export`, a
-/// `const` binding — not above the declaration node itself. Climb out of the
-/// wrappers that open on the same line and lead with a keyword.
 fn outermost_at_start(node: Node<'_>) -> Node<'_> {
     let mut outermost = node;
     while let Some(parent) = outermost.parent() {
@@ -276,9 +257,7 @@ fn slice<'a>(source: &'a str, node: Node<'_>) -> Option<&'a str> {
     source.get(node.byte_range())
 }
 
-/// Names arrive with whatever the grammar handed back around them: a markdown
-/// heading's closing `#`, a Swift backtick escape. A backtick pair only comes
-/// off when it wraps the whole name, so a heading that quotes code keeps it.
+/// Strip a markdown heading marker or a Swift backtick pair from a captured name.
 fn clean_name(raw: &str) -> String {
     let name = raw.trim().trim_end_matches('#').trim();
     name.strip_prefix('`')
