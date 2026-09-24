@@ -1,17 +1,10 @@
-//! What a caller can do next, given the state the task is now in.
-//!
-//! Every task action answers with these instead of spending a tool description
-//! on advice that only applies once: the moves are read off this task's state,
-//! its checkout, and how its last run ended.
+//! Task-state hints for MCP responses.
 
 use std::path::Path;
 
 use oga_domain::{CompletionCode, HoldViewKind, Task, TaskState};
 use serde_json::{Value, json};
 
-/// The call the hints ride on. Actions that leave a task in the same shape
-/// share one arm: what the caller can do next comes from the state, not from
-/// which tool got it there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Move {
     /// delegate, resume, reply, handoff — a run is under way or waiting to be.
