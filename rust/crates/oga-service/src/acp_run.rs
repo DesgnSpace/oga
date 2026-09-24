@@ -48,12 +48,9 @@ use crate::{
     transport::{self, AcpStart},
 };
 
-/// How long a turn may run when the task names no timeout of its own. The
-/// longest timeout a task can ask for, so no run outlives what a caller could
-/// have chosen.
+/// The longest task timeout bounds a turn with no explicit timeout.
 const LONGEST_TURN: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// How a run over ACP ended, from the lifecycle's point of view.
 pub(crate) enum AcpEnd {
     Settled(Box<RunOutcome>),
     /// ACP never became usable, no prompt was written, and this run may use
@@ -61,7 +58,6 @@ pub(crate) enum AcpEnd {
     FallBack(TaskTransport),
 }
 
-/// Everything one ACP run needs from the lifecycle that claimed it.
 pub(crate) struct AcpTurn<'a> {
     pub(crate) store: &'a Arc<Store>,
     pub(crate) runner: &'a ProviderRunner,
@@ -78,7 +74,6 @@ pub(crate) struct AcpTurn<'a> {
     pub(crate) active: &'a ActiveRuns,
 }
 
-/// Where an instruction sent to a live run ended up.
 pub(crate) enum Delivered {
     /// The worker took it into the turn it is running.
     InTurn,
@@ -86,7 +81,6 @@ pub(crate) enum Delivered {
     Missed(String),
 }
 
-/// A live ACP run, as cancel, steer and handoff reach it.
 pub(crate) struct AcpRun {
     session: AcpSession,
     /// How this agent takes an instruction into a turn it is already running.
@@ -97,16 +91,12 @@ pub(crate) struct AcpRun {
 }
 
 impl AcpRun {
-    /// Asks the agent to stop, then ends its process the way a command-line
-    /// run is ended, so a stop never depends on the agent cooperating.
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         self.session.cancel();
         self.session.process().terminate(Termination::Cancelled);
     }
 
-    /// Hands the running turn an instruction, by whichever way this agent
-    /// takes one. An agent that takes none is never asked.
     pub(crate) async fn steer(&self, instruction: &str) -> Delivered {
         let blocks = vec![ContentBlock::from(instruction.to_owned())];
         match self.steering {
@@ -129,9 +119,6 @@ impl AcpRun {
         }
     }
 
-    /// Reads the answers to instructions sent as their own prompt, once the
-    /// turn they joined has ended. They answer for that same turn, which the
-    /// run's own prompt has already settled, so nothing here is counted twice.
     async fn drain_joined(&self) {
         let sent = std::mem::take(
             &mut *self
@@ -149,18 +136,12 @@ impl AcpRun {
     }
 }
 
-/// How this run takes an instruction into a turn already under way. An agent
-/// that advertises the extension is taken at its word. OpenCode advertises
-/// nothing, but folds a second prompt into the run it is already on, so it is
-/// known by the adapter that speaks to it.
 fn steering_for(adapter: &AcpAdapter, session: &AcpSession) -> Option<AcpSteering> {
     session
         .steering()
         .or_else(|| (adapter.id == OPENCODE_ADAPTER).then_some(AcpSteering::Prompt))
 }
 
-/// What the agent said it did with the instruction instead of taking it, put
-/// in words that read outside the protocol.
 fn missed(outcome: &str) -> String {
     match outcome {
         "promptRequired" => "the run had already finished",
@@ -405,8 +386,6 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
 
 const CONTINUE_AFTER_TURN_ERROR: &str = "Your last step stopped on an error inside the worker, not in your work. Continue from where you stopped, without redoing finished steps.";
 
-/// Writes down that the turn ended on the agent's own error and is being
-/// picked back up, after everything the agent sent before it.
 async fn record_turn_retry(
     turn: &AcpTurn<'_>,
     transcript: &mut Transcript,
@@ -433,8 +412,6 @@ async fn record_turn_retry(
     Ok(())
 }
 
-/// Sends one prompt and records the agent's updates until it answers or the
-/// task's time runs out.
 async fn converse(
     turn: &AcpTurn<'_>,
     run: &AcpRun,
@@ -466,8 +443,6 @@ async fn converse(
     }
 }
 
-/// Takes updates until one of the `kind` given arrives, and says how many that
-/// took, or `None` when the agent closes or the bound passes first.
 async fn wait_for_update(
     updates: &mut mpsc::UnboundedReceiver<SessionNotification>,
     kind: &str,
@@ -487,9 +462,6 @@ async fn wait_for_update(
     tokio::time::timeout(bound, waiting).await.ok().flatten()
 }
 
-/// ACP could not be used for this run. Only a run allowed to fall back, that
-/// never reached the agent its adapter was verified against, moves to the
-/// command line; everything else is settled where a person can see it.
 fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleError> {
     let now = now_iso();
     let (worker, forget_session) = match error {
@@ -591,8 +563,6 @@ fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleE
     })))
 }
 
-/// Writes the transport this run settled on and the process behind it before
-/// the prompt goes out, so a broker that stops mid-turn still finds both.
 fn record_session(
     turn: &AcpTurn<'_>,
     launch: &AcpLaunch<'_>,
@@ -689,7 +659,6 @@ fn record_session(
     Ok(())
 }
 
-/// Resume replays nothing, so it is preferred wherever the agent offers it.
 fn restore_for(capabilities: &AgentCapabilities) -> Option<AcpRestore> {
     if capabilities.session_capabilities.resume.is_some() {
         Some(AcpRestore::Resume)
@@ -700,9 +669,6 @@ fn restore_for(capabilities: &AgentCapabilities) -> Option<AcpRestore> {
     }
 }
 
-/// Oga's own tools, bound to this task by header so the broker answers as the
-/// task rather than trusting an id the worker names. Added to the servers the
-/// agent already loads from its own configuration, never in place of them.
 fn oga_mcp_server(task_id: &str) -> McpServer {
     McpServer::Http(
         McpServerHttp::new("oga", format!("{}/mcp", broker_base_url()))
@@ -830,7 +796,6 @@ fn cancelled() -> WorkerOutcome {
     }
 }
 
-/// Records one event on the running turn.
 async fn append_turn_event(
     store: &Arc<Store>,
     task_id: &str,
@@ -856,9 +821,7 @@ async fn append_turn_event(
         .await
 }
 
-/// The agent's updates as trace events. Streamed message and thought chunks
-/// are joined while they keep coming, so a sentence is one event rather than
-/// one per token.
+// Streamed message and thought chunks become one event per sentence.
 #[derive(Default)]
 struct Transcript {
     pending: Option<(&'static str, String)>,
@@ -945,9 +908,7 @@ impl Transcript {
         Ok(())
     }
 
-    /// How the run ended when the agent gave up on a provider that was rate
-    /// limiting it, which is a wait rather than a failure: the work is untouched
-    /// and the same worker can finish it once the limit clears.
+    // A rate-limited provider leaves the work untouched; wait for its reset.
     fn rate_limit_wait(&self) -> Option<WorkerOutcome> {
         let reason = self
             .recovery
@@ -974,15 +935,7 @@ impl Transcript {
         }
     }
 
-    /// What this turn spent, from the totals the agent reported.
-    ///
-    /// ACP's released protocol publishes the session's own running totals, not
-    /// one turn's share, so the charge is the growth over what the task has
-    /// been charged already and never the whole total a second time. A session
-    /// that counts from zero again — a new conversation after one was
-    /// rejected — charges nothing until it passes what is already recorded.
-    /// Token counts are not part of that surface, so they stay unknown rather
-    /// than being guessed from the context window.
+    // ACP reports session totals, so charge only the growth since the last charge.
     fn usage(&self, charged: Option<f64>) -> Usage {
         Usage {
             cost_usd: self
@@ -993,13 +946,6 @@ impl Transcript {
     }
 }
 
-/// Answers the agent's permission requests from the task's own authorization.
-///
-/// A task is already allowed to act inside its scope, which the runner's
-/// sandbox enforces on the process itself; this policy only keeps the answers
-/// the agent is given consistent with that scope. It grants no filesystem or
-/// terminal callbacks, so the agent works through its own tools, inside the
-/// same confinement a command-line run gets.
 struct TaskPolicy {
     store: Arc<Store>,
     task_id: String,
@@ -1066,8 +1012,6 @@ impl AcpPolicy for TaskPolicy {
     }
 }
 
-/// Picks the one-time option matching the verdict, so an answer never outlives
-/// the request it was given for.
 fn choose(options: &[PermissionOption], allowed: bool) -> Decision {
     let preferred = if allowed {
         [
@@ -1095,9 +1039,6 @@ fn choose(options: &[PermissionOption], allowed: bool) -> Decision {
         )
 }
 
-/// Whether a scope's rules cover a path, read the way the sandbox reads them:
-/// relative to the task's directory, `**` for all of it, `dir/**` or a bare
-/// directory for everything below, and a bare file for itself.
 fn scope_covers(cwd: &Path, rules: &[String], path: &Path) -> bool {
     let Some(relative) = relative_inside(cwd, path) else {
         return false;
@@ -1116,7 +1057,6 @@ fn scope_covers(cwd: &Path, rules: &[String], path: &Path) -> bool {
     })
 }
 
-/// The path relative to `cwd`, or `None` when it lies outside it.
 fn relative_inside(cwd: &Path, path: &Path) -> Option<String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
