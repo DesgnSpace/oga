@@ -37,7 +37,7 @@ const DELEGATE_DESCRIPTION: &str = concat!(
 
 const MODELS_DESCRIPTION: &str = concat!(
     "List the models this machine can send work to, and the rules that pick one when a caller names none. ",
-    "Answers `{ love, models }`. Each `models` row carries the profile id and model id to pass to delegate, the model's capabilities, whether it is enabled, preferred, or named by a rule, the effort levels it accepts, and — unless `usage` is off — how much of that account's quota is spent. ",
+    "Answers `{ love, models }`. Each `models` row carries the profile id and model id to pass to delegate, the model's capabilities, whether it is enabled, preferred, or named by a rule, the effort levels it accepts, and — unless `usage` is off — how much of that account's quota is spent. A row with `unavailable` belongs to a worker that cannot start a task as installed, and says why. ",
     "`love` is the routing rules. A rule's `when` names the kinds of work it takes: classes, or subjects such as ui, backend, database, docs, tests, review, research, refactor. An empty `when` takes every kind no other rule claimed, and a subject match outranks a class match. A rule's `models` is the ordered chain tried first to last. ",
     "Only enabled profiles are listed. By default only preferred, enabled models come back: widen with `onlyPreferred: false`, or `onlyEnabled: false` to see what is switched off."
 );

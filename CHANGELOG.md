@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.
 - OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.
 - Picking a task from the list now puts you straight in its reply box.
 - ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.

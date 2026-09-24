@@ -114,7 +114,9 @@ worker ID, display name, command-line tool, default model, capabilities, and
 environment variables. The supported provider names are exactly:
 `claude`, `codex`, `opencode`, `opencode-2`, `antigravity`, and `pi`.
 `opencode-2` is OpenCode 2; see [docs/opencode-2.md](docs/opencode-2.md) for
-which install it runs and how to point it at another one.
+which install it runs and how to point it at another one. `opencode` runs
+OpenCode 1: the first `opencode` that reports version 1, or the path in the
+worker's `OPENCODE_BIN`.
 
 Each worker is one provider account. The account directory always comes from
 the worker, never from the shell Oga was started in. Claude workers each get

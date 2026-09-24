@@ -135,9 +135,14 @@ fn opencode2_harness_named(executable: &str, mode: &str) -> Harness {
 }
 
 /// `--version` answers the way the release behind `mode` prints it: `opencode`
-/// is OpenCode 1, anything else on an OpenCode 2 profile is OpenCode 2.
+/// is OpenCode 1, anything else on an OpenCode 2 profile is OpenCode 2, and on
+/// an OpenCode profile a mode starting `opencode2` is OpenCode 2.
 fn opencode_harness_on(provider: Provider, executable: &str, mode: &str) -> Harness {
-    let version = if provider == Provider::OpenCode2 && mode != "opencode" {
+    let reports_v2 = match provider {
+        Provider::OpenCode2 => mode != "opencode",
+        _ => mode.starts_with("opencode2"),
+    };
+    let version = if reports_v2 {
         "opencode v2.0.1"
     } else {
         "1.18.31"
@@ -1322,6 +1327,25 @@ async fn opencode_without_an_acp_server_runs_on_its_command_line_before_any_prom
     assert_eq!(recorded.kind, Transport::Cli);
     assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
     assert!(missing.agent_log().is_empty());
+}
+
+#[tokio::test]
+async fn an_opencode_worker_whose_only_opencode_is_v2_fails_before_starting_it() {
+    for preference in [TransportPreference::Auto, TransportPreference::Cli] {
+        let harness = opencode_harness("opencode2");
+        set_transport_preference(&harness.store, "work", preference, NOW).expect("preference");
+
+        let task = harness.run("do the work").await;
+
+        assert_eq!(task.state, TaskState::Failed, "{preference:?}: {task:?}");
+        let error = task.error.as_deref().unwrap_or_default();
+        assert!(
+            error.contains("is version 2.0.1") && error.contains("opencode-2 worker"),
+            "{preference:?}: {error}"
+        );
+        assert!(harness.agent_log().is_empty(), "{preference:?}");
+        assert!(harness.cli_runs().is_empty(), "{preference:?}");
+    }
 }
 
 #[tokio::test]

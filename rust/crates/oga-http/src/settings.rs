@@ -25,7 +25,8 @@ use oga_domain::{
 };
 use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{
-    CURSOR_LOGIN, codex_home, environment_for, opencode2_executable, unset_environment_for,
+    CURSOR_LOGIN, cannot_start, codex_home, environment_for, opencode_executable,
+    opencode2_executable, unset_environment_for,
 };
 use oga_routing::{
     claude_models, claude_models_from_catalog, cursor_models, format_rfc3339_ms, now_ms,
@@ -586,6 +587,10 @@ pub async fn model_rows(
         .collect::<Vec<_>>();
     let models = discover_catalog(&profiles, query.refresh == Some(true)).await;
     let empty_overrides = Default::default();
+    let unavailable = profiles
+        .iter()
+        .filter_map(|profile| cannot_start(profile).map(|reason| (profile.id.clone(), reason)))
+        .collect::<HashMap<_, _>>();
     let rows = select_model_rows(
         &models,
         settings.overrides.as_ref().unwrap_or(&empty_overrides),
@@ -601,7 +606,13 @@ pub async fn model_rows(
             query: query.query.clone(),
         },
         &profiles,
-    );
+    )
+    .into_iter()
+    .map(|mut row| {
+        row.unavailable = unavailable.get(&row.profile).cloned();
+        row
+    })
+    .collect::<Vec<_>>();
     if !include_usage || rows.is_empty() {
         return Ok(rows);
     }
@@ -1159,7 +1170,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
             format!("location[directory]={cwd}"),
         ],
         Provider::OpenCode => vec![
-            "opencode".into(),
+            opencode_executable(profile).map_err(|_| ())?,
             "models".into(),
             "--verbose".into(),
             "--refresh".into(),

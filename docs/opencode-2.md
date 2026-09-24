@@ -32,6 +32,15 @@ program in this order:
 With none of them, the task fails before it starts and names `opencode2` as
 missing. An OpenCode 1 install is never run as OpenCode 2.
 
+The `opencode` provider does the reverse. It runs the path in the worker's
+`OPENCODE_BIN`, else the first `opencode` that reports version 1, looking on
+the worker's `PATH` and then, when the worker sets no `PATH` of its own, in
+`/opt/homebrew/bin`, `/usr/local/bin`, `~/.opencode/bin`, `~/.bun/bin`, and
+`~/.local/bin`. If every `opencode` it finds reports another version, the task
+fails before it starts, names each one with its version, and the model list
+shows the same message on that worker's rows. Each install's version is asked
+once and asked again only after the file changes.
+
 ```yaml
 # Settings → Workers → Environment, when the install is somewhere else
 OPENCODE2_BIN: /Users/me/.opencode/bin/opencode2

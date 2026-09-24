@@ -472,6 +472,7 @@ pub fn select_model_rows(
                 efforts: model.efforts.clone(),
                 default_effort: model.default_effort.clone(),
                 usage: None,
+                unavailable: None,
             }
         })
         .collect();

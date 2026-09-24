@@ -451,6 +451,9 @@ pub(crate) async fn run_task_with_session_and_active(
     } else {
         assemble_worker_prompt(&prompt)
     };
+    if let Some(reason) = oga_providers::cannot_start(&profile) {
+        return refuse_run(&store, task, &shipped_prompt, reason);
+    }
     let preference = transport::transport_preference(&store, &profile.id)?;
     let plan = transport::plan(
         &task,

@@ -480,6 +480,9 @@ pub struct ModelSettingsRow {
     /// is unknown — an included-but-unknown read still reports `known: false`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ModelUsageSummary>,
+    /// Why this row's worker cannot start a task as installed; absent when it can.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
 }
 
 /// A compact usage read for one model row: enough to weigh budget against

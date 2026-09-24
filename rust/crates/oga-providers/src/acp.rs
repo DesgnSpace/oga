@@ -18,7 +18,8 @@ use oga_domain::{Profile, Provider};
 use serde_json::Value;
 
 use crate::{
-    ProviderCommand, environment_for, home, opencode2_executable, skills_dir, unset_environment_for,
+    ProviderCommand, environment_for, home, opencode_executable, opencode2_executable, skills_dir,
+    unset_environment_for,
 };
 
 /// What an adapter needs to know to start one agent for one run.
@@ -447,6 +448,8 @@ fn signs_in_with_codex_api_key(profile: &Profile) -> bool {
 pub const OPENCODE_ADAPTER: &str = "opencode-acp";
 
 /// OpenCode's own `opencode acp` server, verified against OpenCode 1.18.31.
+/// The executable is the one [`opencode_executable`] picks for the profile; a
+/// profile with no OpenCode 1 is refused before any adapter starts.
 ///
 /// The session it opens is the OpenCode session itself, so its id is the one
 /// `opencode --session` continues. Its command line runs without Oga's tools,
@@ -457,9 +460,9 @@ pub const OPENCODE_ADAPTER: &str = "opencode-acp";
 /// given none, rather than letting the agent pick one.
 fn opencode() -> AcpAdapter {
     AcpAdapter::new(OPENCODE_ADAPTER, |launch| {
-        ["opencode", "acp", "--cwd", launch.cwd]
-            .map(str::to_owned)
-            .to_vec()
+        let executable =
+            opencode_executable(launch.profile).unwrap_or_else(|_| "opencode".to_owned());
+        vec![executable, "acp".into(), "--cwd".into(), launch.cwd.into()]
     })
     .native_sessions_from("OpenCode")
     .settings(|launch| {
@@ -1480,9 +1483,14 @@ mod tests {
     fn opencode_starts_its_own_acp_server_in_the_profiles_account() {
         let adapters = AcpAdapters::builtin();
         let adapter = adapters.get(Provider::OpenCode).expect("opencode adapter");
+        let bin = tempfile::tempdir().expect("bin");
+        let executable = crate::opencode::tests::script(bin.path(), "opencode", "1.18.31");
         let profile = profile(
             Provider::OpenCode,
-            BTreeMap::from([("XDG_DATA_HOME".into(), "~/.opencode-work/data".into())]),
+            BTreeMap::from([
+                ("XDG_DATA_HOME".into(), "~/.opencode-work/data".into()),
+                ("PATH".into(), bin.path().display().to_string()),
+            ]),
         );
         let launch = AcpLaunch {
             profile: &profile,
@@ -1493,7 +1501,15 @@ mod tests {
 
         let command = adapter.command(&launch);
 
-        assert_eq!(command.argv, ["opencode", "acp", "--cwd", "/repo"]);
+        assert_eq!(
+            command.argv,
+            [
+                executable.display().to_string(),
+                "acp".into(),
+                "--cwd".into(),
+                "/repo".into()
+            ]
+        );
         let cli = crate::command_for(
             &profile,
             "",

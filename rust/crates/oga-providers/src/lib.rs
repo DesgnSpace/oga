@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod acp;
+mod opencode;
 mod opencode2;
 pub mod worker_path;
 
@@ -17,6 +18,7 @@ pub use acp::{
     AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, CURSOR_LOGIN,
     OPENCODE_ADAPTER,
 };
+pub use opencode::{NoOpenCode1, OPENCODE_BIN, cannot_start, opencode_executable};
 pub use opencode2::{OPENCODE2_BIN, opencode2_executable};
 
 pub const NO_FINAL_MESSAGE: &str =
@@ -90,6 +92,8 @@ pub enum ProviderError {
     CannotResume(String),
     #[error("{0} has no command line Oga can run: it connects over ACP only")]
     NoCommandLine(&'static str),
+    #[error(transparent)]
+    NoOpenCode1(#[from] NoOpenCode1),
 }
 
 pub fn command_for(
@@ -190,7 +194,15 @@ pub fn command_for_with_options(
                 a.into_iter().map(String::from).collect()
             }
             Provider::OpenCode => {
-                let mut a = vec!["opencode", "run", "--format", "json", "--model", model];
+                let executable = opencode_executable(profile)?;
+                let mut a = vec![
+                    executable.as_str(),
+                    "run",
+                    "--format",
+                    "json",
+                    "--model",
+                    model,
+                ];
                 if let Some(e) = effort {
                     a.extend(["--variant", e]);
                 }
@@ -379,7 +391,15 @@ pub fn resume_command_for_with_options(
             a.into_iter().map(String::from).collect()
         }
         Provider::OpenCode => {
-            let mut a = vec!["opencode", "run", "--format", "json", "--model", model];
+            let executable = opencode_executable(profile)?;
+            let mut a = vec![
+                executable.as_str(),
+                "run",
+                "--format",
+                "json",
+                "--model",
+                model,
+            ];
             if let Some(e) = effort {
                 a.extend(["--variant", e]);
             }
