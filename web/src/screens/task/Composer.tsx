@@ -1,5 +1,4 @@
-// The conversation composer: one input that routes to reply/steer/queue/resume.
-// Ported from rust/crates/oga-ui/src/composer/mod.rs — keep behavior and copy identical.
+// The conversation composer routes one input to reply, steer, queue, or resume.
 
 import * as React from "react";
 import { createPortal } from "react-dom";

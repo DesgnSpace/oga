@@ -1,6 +1,4 @@
-// Read-only code/diff card data derivation used by task detail panels.
-// Ported from rust/crates/oga-ui/src/review/mod.rs — keep behavior identical.
-// This module only builds the data a renderer consumes: no components, no DOM.
+// Read-only code/diff card data for task detail panels.
 
 import { refractor } from "refractor/core";
 import bash from "refractor/bash";
@@ -63,17 +61,10 @@ refractor.register(typescript);
 refractor.register(toml);
 refractor.register(yaml);
 
-/** A card renders at most this many lines. Everything past it is reported as a
- * count rather than built, so opening one row costs a bounded amount of DOM. */
 export const MAX_CARD_LINES = 200;
 
-/** The highlighter spends at most this many spans across a whole card. Once the
- * budget is gone the remaining lines render as one plain token each, so a file
- * of long lines cannot multiply the node count past this. */
 export const MAX_CARD_TOKENS = 4_000;
 
-/** Past this a line is not read as an edit to another line, so the two are not
- * compared character by character to find the span that changed. */
 const MAX_SPAN_CHARS = 400;
 
 export interface CodeCardLine {
@@ -88,8 +79,6 @@ export interface CodeCardData {
   hidden: number;
 }
 
-/** A file's contents under its name, with a line-number gutter and syntax
- * highlighting. `startLine` is the file line the first rendered line holds. */
 export function buildCodeCard(
   source: string,
   options: { path?: string; language?: CodeLanguage; startLine?: number; hiddenLines?: number } = {},
@@ -128,10 +117,6 @@ export interface DiffCardData {
   code?: { lines: CodeCardLine[] };
 }
 
-/** A replacement shown the way the reference draws it: removed rows tinted and
- * marked, added rows beneath them, and the span that actually changed picked
- * out inside the line. `code` is the text after the change — when it is there
- * the card offers the Code/Diff toggle. */
 export function buildDiffCard(
   blocks: DiffLine[][],
   options: { path?: string; language?: CodeLanguage; code?: string; hiddenLines?: number } = {},
@@ -154,8 +139,6 @@ function codeLines(source: string, language: CodeLanguage, path: string | undefi
     .map((tokens, index) => ({ lineNumber: index + 1, tokens: withinBudget(tokens, budget) }));
 }
 
-/** Builds the diff body: each removed line is paired with the added line that
- * replaced it so the changed span can be marked on both. */
 function diffRows(lines: DiffLine[], language: CodeLanguage, path: string | undefined): DiffCardRow[] {
   const budget = { remaining: MAX_CARD_TOKENS };
   const spans = changedSpans(lines);
@@ -169,8 +152,6 @@ function diffRows(lines: DiffLine[], language: CodeLanguage, path: string | unde
   });
 }
 
-/** Pairs each removed line with the added line that replaced it — the runs are
- * already ordered removed-then-added — and returns the span to mark on each. */
 function changedSpans(lines: DiffLine[]): (Range | undefined)[] {
   const spans: (Range | undefined)[] = [];
   spans.length = lines.length;

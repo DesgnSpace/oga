@@ -1,5 +1,4 @@
-// The broker, as the web view sees it. Every method wraps one `BrokerCall`
-// and never throws — a failure comes back as a typed `BridgeResult`.
+// The broker, as the web view sees it. Every method returns a typed result.
 
 import { getTransport } from "./transport";
 import type {
@@ -133,7 +132,6 @@ export const broker = {
 
 };
 
-/** The shell's current view of its single broker stream connection. */
 export function streamStatus(): Promise<BridgeResult<StreamStatus>> {
   return command<StreamStatus>("broker_stream_status");
 }
@@ -147,12 +145,10 @@ export function watchTask(taskId: string, events: number): Promise<BridgeResult<
   return command<TaskSnapshot>("broker_watch_task", { taskId, events });
 }
 
-/** Tells the shell to stop following a task. */
 export function unwatchTask(taskId: string): Promise<BridgeResult<void>> {
   return command<void>("broker_unwatch_task", { taskId });
 }
 
-/** Writes Oga's MCP config into every detected agent host, filesystem-side. */
 export function installMcpConfigs(
   profiles: ProfileView[],
 ): Promise<BridgeResult<McpInstallResult[]>> {
@@ -163,17 +159,14 @@ export function readImagePreview(path: string): Promise<BridgeResult<ImagePrevie
   return command<ImagePreview>("read_image_preview", { path });
 }
 
-/** Opens an attachment in its OS default app, same as double-clicking it. */
 export function openAttachment(path: string): Promise<BridgeResult<void>> {
   return command<void>("open_attachment", { path });
 }
 
-/** Tells the shell whether to raise a notification when a task stops. */
 export function setTaskNotifications(enabled: boolean): Promise<BridgeResult<void>> {
   return command<void>("set_task_notifications", { enabled });
 }
 
-/** Grays out or re-enables a native menu item by its `oga-menu-command` id. */
 export function setMenuItemEnabled(id: string, enabled: boolean): Promise<BridgeResult<void>> {
   return command<void>("set_menu_item_enabled", { id, enabled });
 }

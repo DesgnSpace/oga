@@ -1,6 +1,4 @@
-// The transport a client sends `invoke` calls through. Swappable so the app
-// runs and tests outside the Tauri webview instead of crashing on a missing
-// `window.__TAURI__`.
+// The transport for bridge calls, swappable for tests and non-Tauri hosts.
 
 import type { BridgeError } from "./types";
 
@@ -16,7 +14,6 @@ function tauriGlobal(): Record<string, any> | undefined {
   return (window as unknown as { __TAURI__?: Record<string, any> }).__TAURI__;
 }
 
-/** Reads the shell's rejection back into the typed error it was thrown as. */
 function toBridgeError(error: unknown): BridgeError {
   if (error && typeof error === "object" && "message" in error) {
     const candidate = error as { message: unknown; status?: unknown };
@@ -52,12 +49,10 @@ export const tauriTransport: Transport = {
 
 let activeTransport: Transport = tauriTransport;
 
-/** The transport every bridge call and subscription goes through. */
 export function getTransport(): Transport {
   return activeTransport;
 }
 
-/** Swaps the transport, for tests and for any host other than the Tauri shell. */
 export function setTransport(transport: Transport): void {
   activeTransport = transport;
 }
