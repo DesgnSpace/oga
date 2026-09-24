@@ -12,8 +12,7 @@ TAG="v$VERSION"
 TARGET="universal-apple-darwin"
 APP_PATH="rust/target/$TARGET/release/bundle/macos/Oga.app"
 BUNDLE_DIR="rust/target/$TARGET/release/bundle"
-# The repo is private, so releases live on R2 under the prefix install.sh and
-# the updater endpoint already point at.
+# Releases live on R2 under the prefix used by install.sh and the updater.
 BASE_URL="${R2_PUBLIC_BASE_URL%/}/oga"
 : "${APPLE_SIGNING_IDENTITY:?APPLE_SIGNING_IDENTITY required}"
 : "${APPLE_ID:?APPLE_ID required}"
@@ -39,8 +38,7 @@ echo "Building Oga $VERSION ($TARGET)"
 bash rust/packaging/build.sh --target "$TARGET" --bundles app,dmg --signed
 [[ -d "$APP_PATH" ]] || { echo "error: app bundle not found at $APP_PATH"; exit 1; }
 [[ -f "$APP_PATH/Contents/MacOS/oga-server" ]] || { echo "error: sidecar not found in app bundle"; exit 1; }
-# Tauri signs, notarizes, and staples the app itself from the APPLE_* variables;
-# only the dmg still needs a notary ticket.
+# Tauri signs and notarizes the app; the DMG still needs a notary ticket.
 DMG_PATH="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
 UPDATER_ARCHIVE="$(find "$BUNDLE_DIR/macos" -maxdepth 1 -name '*.app.tar.gz' -print -quit)"
 [[ -f "$DMG_PATH" && -f "$UPDATER_ARCHIVE" && -f "$UPDATER_ARCHIVE.sig" ]] || { echo "error: release artifacts missing"; exit 1; }
@@ -52,7 +50,7 @@ xcrun stapler validate "$DMG_PATH"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-# install.sh unpacks a zip of the stapled app; the dmg is for people.
+# install.sh unpacks a zip of the stapled app.
 ZIP_PATH="$TMP_DIR/Oga-$VERSION.zip"
 ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
 
@@ -62,7 +60,7 @@ ARCHIVE_NAME="Oga-$VERSION.app.tar.gz"
 RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 SIGNATURE="$(<"$UPDATER_ARCHIVE.sig")"
 
-# The Tauri updater manifest, the install.sh pointer, and the release history.
+# The updater manifest, install pointer, and release history.
 MANIFEST="$TMP_DIR/latest.json"
 LATEST="$TMP_DIR/latest"
 RELEASES_JSON="$TMP_DIR/releases.json"
@@ -120,8 +118,7 @@ upload "$LATEST" "latest" application/json "public, max-age=300"
 upload "$RELEASES_JSON" "releases.json" application/json "public, max-age=60"
 upload scripts/install.sh "install.sh" text/x-shellscript "public, max-age=300"
 
-# The Homebrew cask installs the same zip install.sh does; the tap repo gets
-# the regenerated file straight from here.
+# The Homebrew cask installs the same zip install.sh does.
 ZIP_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"
 cat > Casks/oga.rb <<EOF
 cask "oga" do

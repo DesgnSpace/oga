@@ -1,14 +1,6 @@
 #!/bin/sh
-# Warn about tasks in flight before the retiring broker stops them. The new
-# build's `inflight` answers:
-#   0  nothing in flight — continue silently
-#   1  tasks in flight — warn and continue
-#   2  could not check — the running broker's database is not readable by
-#      this build, which is the normal case on an upgrade (the new binary
-#      refuses an older schema); warn and continue, the install is about to
-#      start the new broker anyway.
-# Anything else means the binary did not run at all — a signal exit says macOS
-# killed it — so the install stops before it replaces a working one.
+# Warn about tasks in flight before the retiring broker stops them.
+# Status 2 means this build cannot read the old database; the install still proceeds.
 bin=$1
 
 "$bin" inflight
