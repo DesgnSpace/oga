@@ -86,7 +86,6 @@ impl RunnerConfig {
     }
 }
 
-/// A provider invocation before any task-store state is involved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRequest {
     pub provider: Provider,
@@ -126,8 +125,6 @@ impl RunRequest {
         }
     }
 
-    /// Task-scoped values win over the profile's own: a profile can set `PWD`
-    /// or an API key, but it cannot tell the worker it is a different task.
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env.extend(env);
         self
@@ -212,8 +209,6 @@ impl ProcessIdentity {
     }
 }
 
-/// Whether a pid is a running process, for a caller holding a number the
-/// database recorded rather than a handle it owns.
 pub fn process_liveness(pid: u32) -> Liveness {
     probe_process(pid)
 }
@@ -321,8 +316,6 @@ impl ProviderRunner {
         self.spawn_with_scope(request, Default::default()).await
     }
 
-    /// Applies confinement, the worker `PATH`, and the request's own
-    /// environment, then starts the child in its own process group.
     async fn spawn_child(
         &self,
         request: &RunRequest,
@@ -333,8 +326,7 @@ impl ProviderRunner {
             return Err(RunnerError::EmptyCommand);
         }
 
-        // Confinement resolves the executable off this same PATH, so the
-        // merge has to happen before prepare rather than at spawn.
+        // Confinement resolves the executable from this PATH.
         let mut env = BTreeMap::from([("PATH".to_owned(), worker_path::worker_path())]);
         env.extend(request.env.clone());
         let prepared = self.confinement.prepare(
@@ -427,10 +419,7 @@ impl ProviderRunner {
         })
     }
 
-    /// Starts a provider with its stdin open and hands back the pipes, for a
-    /// transport that speaks a protocol to the child rather than reading it to
-    /// exit. Confinement, environment filtering, and the detached process
-    /// group are the same as for a captured run.
+    /// The transport owns the pipes; the same confinement and process-group rules apply.
     pub async fn spawn_duplex(
         &self,
         request: RunRequest,
@@ -479,8 +468,6 @@ impl ProviderRunner {
     }
 }
 
-/// A provider process whose pipes belong to the caller. Dropping it leaves the
-/// child running, so a transport is expected to terminate and reap it.
 pub struct DuplexProcess {
     identity: ProcessIdentity,
     control: Arc<Control>,
@@ -504,8 +491,6 @@ impl DuplexProcess {
         &self.identity
     }
 
-    /// A handle that can signal the process from somewhere other than whoever
-    /// owns the child and is waiting on it.
     pub fn control(&self) -> ProcessControl {
         ProcessControl {
             identity: self.identity.clone(),
@@ -513,8 +498,6 @@ impl DuplexProcess {
         }
     }
 
-    /// Hands over the three pipes. A second call yields `None`, so a transport
-    /// cannot end up with two readers on one stream.
     pub fn take_pipes(&mut self) -> Option<(ChildStdin, ChildStdout, ChildStderr)> {
         let stdin = self.stdin.take()?;
         let stdout = self.stdout.take()?;
@@ -529,7 +512,6 @@ impl DuplexProcess {
     }
 }
 
-/// Signals a running provider without owning it.
 #[derive(Debug, Clone)]
 pub struct ProcessControl {
     identity: ProcessIdentity,
@@ -545,8 +527,6 @@ impl ProcessControl {
         self.identity.liveness()
     }
 
-    /// Signals the whole process group, escalating through `SIGTERM` and
-    /// `SIGKILL` on the runner's configured grace periods.
     pub fn terminate(&self, reason: Termination) {
         self.control.request(reason);
     }
