@@ -1,5 +1,4 @@
-// Task detail controller: loads, follows, and folds updates for one task.
-// Ported from rust/crates/oga-ui/src/task_detail/mod.rs — keep behavior identical.
+// Task detail controller for one task.
 
 import { broker, streamStatus, unwatchTask, watchTask } from "@/bridge/client";
 import { onBrokerStatus, onTaskDelta } from "@/bridge/events";
@@ -52,8 +51,7 @@ export class TaskDetailController {
     return this.store.snapshot;
   }
 
-  /** Reads the activity in place. Nothing copies it out. */
-  withEvents<R>(read: (events: TaskEventView[]) => R): R {
+    withEvents<R>(read: (events: TaskEventView[]) => R): R {
     return read(this.events);
   }
 
@@ -86,13 +84,6 @@ export class TaskDetailController {
     await this.resync();
   }
 
-  /**
-   * Asks the shell to follow this task and takes the state it answers with,
-   * which is also how the view recovers from a gap or a dropped stream.
-   *
-   * Outside the shell there is nothing to follow, so the same reads go
-   * straight to the broker and the view stays still.
-   */
   async resync(): Promise<void> {
     if (this.managed && !this.active) return;
     const activation = this.activation;
@@ -113,13 +104,11 @@ export class TaskDetailController {
     await tracked;
   }
 
-  /** Releases the shell's hold on this task when the view goes away. */
-  async release(): Promise<void> {
+    async release(): Promise<void> {
     await this.deactivate();
   }
 
-  /** Starts one shell watch for all views currently using this task. */
-  activate(): void {
+    activate(): void {
     if (this.active) return;
     this.managed = true;
     this.active = true;
@@ -150,8 +139,7 @@ export class TaskDetailController {
     void this.loadInitial();
   }
 
-  /** Stops the shell watch while leaving a last-known snapshot in memory. */
-  async deactivate(): Promise<void> {
+    async deactivate(): Promise<void> {
     if (!this.managed || !this.active) return;
     this.active = false;
     this.activation += 1;

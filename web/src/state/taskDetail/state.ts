@@ -1,5 +1,4 @@
 // Task detail state and delta/connection folding.
-// Ported from rust/crates/oga-ui/src/task_detail/mod.rs — keep behavior identical.
 
 import type { StreamStatus, Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
 
@@ -19,7 +18,6 @@ export function connectionLabel(connection: DetailConnection): string {
   }
 }
 
-/** What a delta the shell pushed did to the view. */
 export type DeltaOutcome =
   /** Already held, or about another task. Nothing to redraw. */
   | "ignored"
@@ -29,14 +27,6 @@ export type DeltaOutcome =
    * the task has to be read again. */
   | "gap";
 
-/**
- * What the detail view holds about a task, minus its activity.
- *
- * Activity is held separately from this state so that folding an update in,
- * and handing the current state to a view, both cost the same whether the
- * task has ten events or ten thousand. `revision` moves whenever the
- * activity does, which is how a view knows to recompose.
- */
 export interface TaskDetailState {
   task: Task | undefined;
   revision: number;
@@ -63,14 +53,6 @@ export function defaultTaskDetailState(): TaskDetailState {
   };
 }
 
-/**
- * Folds arriving activity into what is already held.
- *
- * Activity that is wholly newer than everything held is an append, which is
- * the live case and costs what arrived. Anything else — an earlier page, a
- * replay, an overlap, activity that did not arrive in id order — merges by
- * id, which also drops duplicates.
- */
 export function mergeEvents(held: TaskEventView[], arriving: TaskEventView[]): TaskEventView[] {
   if (arriving.length === 0) return held;
   const newest = held.length > 0 ? held[held.length - 1].id : Number.NEGATIVE_INFINITY;
@@ -93,13 +75,11 @@ export function mergeEvents(held: TaskEventView[], arriving: TaskEventView[]): T
   return Array.from(merged.values()).sort((a, b) => a.id - b.id);
 }
 
-/** Activity and state after folding something new in. */
 export interface FoldedEvents {
   events: TaskEventView[];
   state: TaskDetailState;
 }
 
-/** Folds one page of activity in and moves the marks that came with it. */
 export function absorbPage(events: TaskEventView[], state: TaskDetailState, page: TaskEventPage): FoldedEvents {
   const nextEvents = mergeEvents(events, page.events);
   const firstId = nextEvents.length > 0 ? nextEvents[0].id : undefined;
@@ -117,13 +97,6 @@ export function absorbPage(events: TaskEventView[], state: TaskDetailState, page
   };
 }
 
-/**
- * Takes the state the shell answered a watch with.
- *
- * Activity already held is kept when the snapshot reaches back far enough to
- * touch it. When it does not, the two are not one run of history, so what
- * was held is dropped rather than left with a hole in it.
- */
 export function adopt(events: TaskEventView[], state: TaskDetailState, snapshot: TaskSnapshot): FoldedEvents {
   const newest = events.length > 0 ? events[events.length - 1] : undefined;
   const joinsUp = newest === undefined || snapshot.oldestId === undefined || snapshot.oldestId <= newest.id + 1;
@@ -154,11 +127,6 @@ export interface AppliedDelta {
   outcome: DeltaOutcome;
 }
 
-/**
- * Folds one update the shell pushed into what is held.
- *
- * The work is the size of the update, never the size of the task.
- */
 export function applyDelta(
   events: TaskEventView[],
   state: TaskDetailState,
