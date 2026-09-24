@@ -1,5 +1,4 @@
-//! SQLite persistence for the Rust broker: one writable handle, strict
-//! observe mode and the current database schema.
+//! SQLite persistence for the broker.
 
 pub mod connection;
 pub mod maintenance;
