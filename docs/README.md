@@ -13,3 +13,4 @@ source of truth.
 | [worker-rules.md](worker-rules.md) | Project instructions for workers |
 | [worktree.md](worktree.md) | Separate checkouts and branches |
 | [cleanup.md](cleanup.md) | Removing old task activity and worktrees |
+| [opencode-2.md](opencode-2.md) | Adding an OpenCode 2 worker |

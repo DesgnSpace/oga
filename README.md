@@ -113,6 +113,8 @@ Open Oga's Settings screen after the first launch. Add or edit a worker with a
 worker ID, display name, command-line tool, default model, capabilities, and
 environment variables. The supported provider names are exactly:
 `claude`, `codex`, `opencode`, `opencode-2`, `antigravity`, and `pi`.
+`opencode-2` is OpenCode 2; see [docs/opencode-2.md](docs/opencode-2.md) for
+which install it runs and how to point it at another one.
 
 Each worker is one provider account. The account directory always comes from
 the worker, never from the shell Oga was started in. Claude workers each get

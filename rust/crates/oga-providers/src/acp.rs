@@ -17,7 +17,9 @@ use std::{
 use oga_domain::{Profile, Provider};
 use serde_json::Value;
 
-use crate::{ProviderCommand, environment_for, home, skills_dir, unset_environment_for};
+use crate::{
+    ProviderCommand, environment_for, home, opencode2_executable, skills_dir, unset_environment_for,
+};
 
 /// What an adapter needs to know to start one agent for one run.
 #[derive(Debug, Clone, Copy)]
@@ -476,27 +478,30 @@ fn opencode() -> AcpAdapter {
     })
 }
 
-/// OpenCode 2's own `opencode2 acp` server, verified against build
-/// `0.0.0-beta-18999`. OpenCode 2 is published only as numbered builds that
-/// promise nothing between them, so Oga accepts that build alone and turns any
-/// other away before a session opens.
+/// OpenCode 2's own `acp` server, verified against OpenCode 2.0.1. OpenCode 1
+/// reports the same agent name, so Oga accepts the 2.0 release line alone and
+/// turns any other away before a session opens.
 ///
-/// It starts a private OpenCode server with the profile's own environment
-/// rather than joining the shared background service, and loads the
-/// configuration, instructions, skills, and MCP servers of the directory the
-/// session opens in. The session it opens is the OpenCode session itself, so
-/// its id is the one `opencode2 --session` continues. Its command line runs
-/// without Oga's tools, and so does this.
+/// The executable is the one [`opencode2_executable`] picks for the profile,
+/// never whatever answers to `opencode`. It starts a private OpenCode server
+/// with the profile's own environment rather than joining the shared
+/// background service, and loads the configuration, instructions, skills, and
+/// MCP servers of the directory the session opens in. The session it opens is
+/// the OpenCode session itself, so its id is the one `opencode2 --session`
+/// continues. Its command line runs without Oga's tools, and so does this.
 ///
 /// `--model` takes `provider/model#effort`; here the model and the effort are
 /// separate session settings, `model` taking the `provider/model` part and
 /// `effort` the variant after `#`. A run that names no effort leaves the
 /// variant to OpenCode, as `--model` without one does.
+///
+/// Unlike OpenCode 1 it refuses a second prompt while a turn is running, so an
+/// instruction for a running task waits for the turn to end.
 fn opencode2() -> AcpAdapter {
-    AcpAdapter::new("opencode2-acp", |_| {
-        ["opencode2", "acp"].map(str::to_owned).to_vec()
+    AcpAdapter::new("opencode2-acp", |launch| {
+        vec![opencode2_executable(launch.profile), "acp".to_owned()]
     })
-    .release(AcpRelease::build("OpenCode", "0.0.0-beta-18999"))
+    .release(AcpRelease::line("OpenCode", "2.0"))
     .native_sessions_from("OpenCode")
     .settings(|launch| {
         let setting = |id: &str, value: &str| AcpSetting {
@@ -1552,13 +1557,24 @@ mod tests {
         let adapter = adapters
             .get(Provider::OpenCode2)
             .expect("opencode2 adapter");
+        let bin = tempfile::tempdir().expect("bin");
+        let executable = bin.path().join("opencode2");
+        std::fs::write(&executable, "#!/bin/sh\n").expect("opencode2");
+        std::fs::set_permissions(
+            &executable,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("executable");
         let profile = profile(
             Provider::OpenCode2,
-            BTreeMap::from([("XDG_DATA_HOME".into(), "~/.opencode2-work/data".into())]),
+            BTreeMap::from([
+                ("XDG_DATA_HOME".into(), "~/.opencode2-work/data".into()),
+                ("PATH".into(), bin.path().display().to_string()),
+            ]),
         );
         let launch = AcpLaunch {
             profile: &profile,
-            model: "opencode/x-preview-f-free",
+            model: "opencode/space-bunny-free",
             effort: Some("high"),
             cwd: "/repo",
         };
@@ -1576,7 +1592,7 @@ mod tests {
 
         assert_eq!(
             command.argv,
-            ["opencode2", "acp"],
+            [executable.display().to_string(), "acp".to_owned()],
             "the session names its directory, so the server takes no --cwd"
         );
         assert_eq!(
@@ -1589,8 +1605,8 @@ mod tests {
         );
         assert_eq!(
             adapter.release,
-            Some(AcpRelease::build("OpenCode", "0.0.0-beta-18999")),
-            "OpenCode 1 reports the same name, so only the verified build opens a session"
+            Some(AcpRelease::line("OpenCode", "2.0")),
+            "OpenCode 1 reports the same name, so only the verified line opens a session"
         );
         assert_eq!(adapter.native_sessions_from.as_deref(), Some("OpenCode"));
         assert!(

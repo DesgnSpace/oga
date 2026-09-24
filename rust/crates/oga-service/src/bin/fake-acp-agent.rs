@@ -11,9 +11,9 @@
 //! how its turns go, or `no-model` for an agent that does not offer the
 //! model a test asks for.
 //!
-//! A mode starting `opencode2` answers the way `opencode2 acp` build
-//! `0.0.0-beta-18999` does: as OpenCode does, under that version. `next` is a
-//! build Oga was not verified against.
+//! OpenCode 1 reports version 1.18.31. A mode starting `opencode2` answers
+//! the way OpenCode 2.0.1's `acp` does: as OpenCode does, under that version.
+//! `next` is a release line Oga was not verified against.
 //!
 //! A mode starting `claude` answers the way `claude-agent-acp` does: it reports
 //! itself as that adapter, names its session the way Claude Code names one, and
@@ -722,12 +722,13 @@ fn main() {
     let version = match (codex, opencode2, antigravity, pi) {
         (true, ..) if next => "1.13.0",
         (true, ..) => "1.12.0",
-        (_, true, ..) if next => "0.0.0-beta-19000",
-        (_, true, ..) => "0.0.0-beta-18999",
+        (_, true, ..) if next => "2.1.0",
+        (_, true, ..) => "2.0.1",
         (.., true, _) if next => "agy_acp_server_1.1.2",
         (.., true, _) => "agy_acp_server_1.1.1",
         (.., true) if next => "0.0.34",
         (.., true) => "0.0.33",
+        _ if opencode => "1.18.31",
         _ => "2.1.0",
     };
     let turns = mode

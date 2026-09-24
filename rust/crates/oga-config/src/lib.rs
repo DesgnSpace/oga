@@ -15,7 +15,7 @@ const DEFAULT_MODELS: &[(Provider, &str)] = &[
     (Provider::Claude, "sonnet"),
     (Provider::Codex, "gpt-5"),
     (Provider::OpenCode, "opencode/big-pickle"),
-    (Provider::OpenCode2, "opencode/x-preview-f-free"),
+    (Provider::OpenCode2, "opencode/space-bunny-free"),
     (Provider::Antigravity, "gemini-3.6-flash-medium"),
     (Provider::Pi, "opencode-go/deepseek-v4-flash"),
     (Provider::Fx, "openai/gpt-5.2"),

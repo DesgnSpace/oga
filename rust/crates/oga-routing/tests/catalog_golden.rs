@@ -220,6 +220,14 @@ fn normalizes_opencode2_server_catalog_rows() {
           "variants":[{"id":"low"},{"id":"high"},{"id":"max"}],
           "cost":[{"input":0,"output":0}],
           "limit":{"context":200000,"output":128000}
+        },
+        {
+          "id":"gpt-6-luna-fast","providerID":"openai","modelID":"gpt-6-luna","name":"GPT-6 Luna Fast",
+          "enabled":true,
+          "capabilities":{"tools":true},
+          "variants":[{"id":"none"},{"id":"high"}],
+          "cost":[],
+          "limit":{"context":400000}
         }
     ]}"#;
     let parsed = parse_opencode_v2_models(raw, &p).unwrap();
@@ -228,8 +236,10 @@ fn normalizes_opencode2_server_catalog_rows() {
         ids,
         vec![
             "opencode/x-preview-f-free",
-            "opencode/deepseek-v4-flash-free"
-        ]
+            "opencode/deepseek-v4-flash-free",
+            "openai/gpt-6-luna-fast"
+        ],
+        "a configured flavour is addressed by its own id, not the upstream model it wraps"
     );
     assert_eq!(parsed[0].label, "Ox Alpha Free (Unlimited)");
     assert_eq!(parsed[0].tool_call, Some(true));

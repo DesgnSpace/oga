@@ -120,19 +120,27 @@ printf '%s\n' '{"type":"step_start","sessionID":"ses_cli1"}' '{"type":"text","pa
 /// command line records that it ran. `without-acp` is an OpenCode with no ACP
 /// server, and `missing` is no OpenCode at all.
 fn opencode_harness(mode: &str) -> Harness {
-    opencode_harness_on(Provider::OpenCode, mode)
+    opencode_harness_on(Provider::OpenCode, "opencode", mode)
 }
 
 /// The same for an OpenCode 2 profile, whose executable is `opencode2`.
 fn opencode2_harness(mode: &str) -> Harness {
-    opencode_harness_on(Provider::OpenCode2, mode)
+    opencode2_harness_named("opencode2", mode)
 }
 
-fn opencode_harness_on(provider: Provider, mode: &str) -> Harness {
-    let executable = if provider == Provider::OpenCode2 {
-        "opencode2"
+/// An OpenCode 2 profile whose only executable is `executable`. A name other
+/// than `opencode` or `opencode2` is one the profile names in `OPENCODE2_BIN`.
+fn opencode2_harness_named(executable: &str, mode: &str) -> Harness {
+    opencode_harness_on(Provider::OpenCode2, executable, mode)
+}
+
+/// `--version` answers the way the release behind `mode` prints it: `opencode`
+/// is OpenCode 1, anything else on an OpenCode 2 profile is OpenCode 2.
+fn opencode_harness_on(provider: Provider, executable: &str, mode: &str) -> Harness {
+    let version = if provider == Provider::OpenCode2 && mode != "opencode" {
+        "opencode v2.0.1"
     } else {
-        "opencode"
+        "1.18.31"
     };
     let directory = tempfile::tempdir().expect("temporary directory");
     let cwd = directory.path().join("project");
@@ -152,7 +160,9 @@ fn opencode_harness_on(provider: Provider, mode: &str) -> Harness {
         let cli = bin.join(executable);
         fs::write(
             &cli,
-            format!("#!/bin/sh\nif [ \"$1\" = acp ]; then\n  {acp}\nfi\n{OPENCODE_CLI}"),
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then\n  echo '{version}'; exit 0\nfi\nif [ \"$1\" = acp ]; then\n  {acp}\nfi\n{OPENCODE_CLI}"
+            ),
         )
         .expect("fake opencode");
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).expect("executable");
@@ -175,6 +185,13 @@ fn opencode_harness_on(provider: Provider, mode: &str) -> Harness {
         capabilities: vec![],
         command: None,
     };
+    let mut profile = profile;
+    if !["opencode", "opencode2"].contains(&executable) {
+        profile.env.insert(
+            oga_providers::OPENCODE2_BIN.into(),
+            bin.join(executable).display().to_string(),
+        );
+    }
     store
         .repositories()
         .profiles()
@@ -1444,12 +1461,12 @@ async fn opencode2_runs_over_acp_by_default_with_its_model_effort_and_account() 
     assert_eq!(recorded.kind, Transport::Acp);
     let agent = recorded.agent.as_ref().expect("agent identity");
     assert_eq!(agent.adapter, "opencode2-acp");
-    assert_eq!(agent.version.as_deref(), Some("0.0.0-beta-18999"));
+    assert_eq!(agent.version.as_deref(), Some("2.0.1"));
     assert_eq!(recorded.acp_session_id.as_deref(), Some("ses_acp1"));
     assert_eq!(
         task.session_id.as_deref(),
         Some("ses_acp1"),
-        "the verified build's ACP session is the session `opencode2 --session` continues"
+        "the verified release's ACP session is the session `opencode2 --session` continues"
     );
     assert_eq!(
         methods(&harness),
@@ -1503,10 +1520,20 @@ async fn opencode2_without_acp_runs_on_its_command_line_before_any_prompt() {
     assert_eq!(recorded.reason, Some(TransportReason::Unavailable));
     assert_eq!(task.session_id.as_deref(), Some("ses_cli1"));
     let ran = harness.cli_runs();
-    assert!(
-        ran.windows(2)
-            .any(|pair| pair == ["--model", "opencode/deep#high"]),
-        "{ran:?}"
+    assert_eq!(
+        ran[..9],
+        [
+            "run",
+            "--standalone",
+            "--format",
+            "json",
+            "--model",
+            "opencode/deep#high",
+            "--auto",
+            "--",
+            "Worker mode: you are executing an assigned Oga task.",
+        ],
+        "a private server, the effort after `#`, and no directory flag: it ran in the task's directory"
     );
     assert!(
         harness
@@ -1526,7 +1553,7 @@ async fn opencode2_without_acp_runs_on_its_command_line_before_any_prompt() {
 }
 
 #[tokio::test]
-async fn an_opencode2_build_oga_was_not_verified_against_never_opens_a_session() {
+async fn an_opencode2_release_oga_was_not_verified_against_never_opens_a_session() {
     // `opencode` is an OpenCode 1 release answering as `opencode2`, under the
     // same name.
     for mode in ["opencode2-next", "opencode", "opencode2-renamed"] {
@@ -1541,7 +1568,7 @@ async fn an_opencode2_build_oga_was_not_verified_against_never_opens_a_session()
             recorded
                 .detail
                 .as_deref()
-                .is_some_and(|detail| detail.contains("OpenCode 0.0.0-beta-18999")),
+                .is_some_and(|detail| detail.contains("OpenCode 2.0.x")),
             "{mode}: {recorded:?}"
         );
         assert_eq!(methods(&harness), ["initialize"], "{mode}");
@@ -1558,11 +1585,71 @@ async fn an_opencode2_build_oga_was_not_verified_against_never_opens_a_session()
     assert!(
         task.error
             .as_deref()
-            .is_some_and(|error| error.contains("not OpenCode 0.0.0-beta-19000")),
+            .is_some_and(|error| error.contains("not OpenCode 2.1.0")),
         "{task:?}"
     );
     assert_eq!(methods(&explicit), ["initialize"]);
     assert!(explicit.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn opencode2_runs_an_opencode_that_reports_v2_and_never_an_opencode_1() {
+    let harness = opencode2_harness_named("opencode", "opencode2");
+
+    let task = harness.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(transport(&task).kind, Transport::Acp);
+    assert_eq!(task.session_id.as_deref(), Some("ses_acp1"));
+
+    let v1 = opencode2_harness_named("opencode", "opencode");
+    let task = v1.run("do the work").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(transport(&task).reason, Some(TransportReason::Unavailable));
+    assert!(v1.agent_log().is_empty(), "OpenCode 1 was never started");
+    assert!(v1.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn opencode2_runs_the_executable_its_profile_names() {
+    let harness = opencode2_harness_named("opencode-next", "opencode2");
+    let mut request = DispatchRequest::new("work", "do the work", &harness.cwd);
+    request.effort = Some("high".into());
+
+    let task = harness.run_with(request).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(transport(&task).kind, Transport::Acp);
+    assert_eq!(
+        chosen_settings(&harness),
+        [
+            ("model".to_owned(), "opencode/deep".to_owned()),
+            ("effort".to_owned(), "high".to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_opencode2_command_line_task_resumes_its_session_in_the_task_directory() {
+    let harness = opencode2_harness("without-acp");
+    let first = harness.run("start").await;
+    assert_eq!(first.session_id.as_deref(), Some("ses_cli1"));
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    let ran = harness.cli_runs();
+    assert!(
+        ran.windows(2).any(|pair| pair == ["--session", "ses_cli1"]),
+        "{ran:?}"
+    );
 }
 
 #[tokio::test]

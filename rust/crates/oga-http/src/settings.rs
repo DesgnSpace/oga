@@ -24,7 +24,9 @@ use oga_domain::{
     UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
-use oga_providers::{CURSOR_LOGIN, codex_home, environment_for, unset_environment_for};
+use oga_providers::{
+    CURSOR_LOGIN, codex_home, environment_for, opencode2_executable, unset_environment_for,
+};
 use oga_routing::{
     claude_models, claude_models_from_catalog, cursor_models, format_rfc3339_ms, now_ms,
     parse_antigravity_models, parse_codex_models, parse_fx_models, parse_opencode_models,
@@ -1149,7 +1151,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         Provider::Pi => vec!["pi".into(), "--list-models".into()],
         Provider::Fx => vec!["fx".into(), "models".into()],
         Provider::OpenCode2 => vec![
-            "opencode2".into(),
+            opencode2_executable(profile),
             "api".into(),
             "GET".into(),
             "/api/model".into(),
@@ -1175,14 +1177,29 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     apply_profile_environment(&mut command, profile);
-    let output = timeout(PROVIDER_TIMEOUT, command.output())
-        .await
-        .map_err(|_| ())?
-        .map_err(|_| ())?;
+    // OpenCode 2 exits before a pipe drains, cutting a long answer short, so
+    // its catalogue is written to a file instead.
+    let answer_file = dir.path().join("models.json");
+    if profile.provider == Provider::OpenCode2 {
+        let file = std::fs::File::create(&answer_file).map_err(|_| ())?;
+        command.stdout(file);
+    }
+    // `output` would replace that file with a pipe.
+    let output = timeout(PROVIDER_TIMEOUT, async {
+        command.spawn()?.wait_with_output().await
+    })
+    .await
+    .map_err(|_| ())?
+    .map_err(|_| ())?;
     if !output.status.success() {
         return Err(());
     }
-    let raw = String::from_utf8_lossy(&output.stdout);
+    let stdout = if profile.provider == Provider::OpenCode2 {
+        std::fs::read(&answer_file).map_err(|_| ())?
+    } else {
+        output.stdout
+    };
+    let raw = String::from_utf8_lossy(&stdout);
     let parsed = match profile.provider {
         Provider::Codex => parse_codex_models(&raw, profile).map_err(|_| ())?,
         Provider::Antigravity => parse_antigravity_models(&raw, profile),

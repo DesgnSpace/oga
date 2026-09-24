@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub mod worker_path;
+pub use oga_providers::worker_path;
 
 use oga_domain::Provider;
 use oga_providers::{ParsedEvent, ProviderCommand, Usage, parse_stream};

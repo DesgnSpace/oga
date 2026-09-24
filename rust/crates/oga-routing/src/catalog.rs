@@ -216,9 +216,9 @@ fn opencode_metadata(raw: &str) -> ModelMeta {
 }
 
 /// The v2 server answers `GET /api/model` with `{location, data: [Model.Info]}`.
-/// A row's addressable id is `providerID/modelID` — the spelling `run --model`
-/// takes — and a model's published `variants` are its reasoning-effort ladder,
-/// each variant carrying one `reasoningEffort`.
+/// A row is addressed as `providerID/id`: `id` names a configured flavour such
+/// as `gpt-6-luna-fast`, where `modelID` names the upstream `gpt-6-luna`. A
+/// model's `variants` are its reasoning-effort ladder.
 pub fn parse_opencode_v2_models(
     raw: &str,
     profile: &Profile,
@@ -231,7 +231,11 @@ pub fn parse_opencode_v2_models(
         .iter()
         .filter_map(|item| {
             let provider_id = item.get("providerID")?.as_str()?;
-            let model_id = item.get("modelID")?.as_str()?;
+            let model_id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .or_else(|| item.get("modelID").and_then(Value::as_str))?;
             if provider_id.is_empty() || model_id.is_empty() {
                 return None;
             }

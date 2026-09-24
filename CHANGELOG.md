@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.
 - Picking a task from the list now puts you straight in its reply box.
 - ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.
 - The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.

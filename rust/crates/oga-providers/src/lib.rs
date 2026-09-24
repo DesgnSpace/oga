@@ -10,11 +10,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod acp;
+mod opencode2;
+pub mod worker_path;
 
 pub use acp::{
     AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, CURSOR_LOGIN,
     OPENCODE_ADAPTER,
 };
+pub use opencode2::{OPENCODE2_BIN, opencode2_executable};
 
 pub const NO_FINAL_MESSAGE: &str =
     "(no final message: the provider stream carried no assistant text)";
@@ -194,19 +197,7 @@ pub fn command_for_with_options(
                 a.extend(["--dir", cwd, "--auto", prompt]);
                 a.into_iter().map(String::from).collect()
             }
-            Provider::OpenCode2 => {
-                let selected = effort.map_or_else(|| model.to_owned(), |e| format!("{model}#{e}"));
-                vec![
-                    "opencode2".into(),
-                    "run".into(),
-                    "--format".into(),
-                    "json".into(),
-                    "--model".into(),
-                    selected,
-                    "--auto".into(),
-                    prompt.into(),
-                ]
-            }
+            Provider::OpenCode2 => opencode2_run(profile, model, effort, None, prompt),
             Provider::Antigravity => vec![
                 "agy",
                 "--print",
@@ -252,6 +243,34 @@ fn run_environment_for(profile: &Profile, model: &str) -> BTreeMap<String, Strin
         env.insert("FX_MODEL".to_owned(), model.to_owned());
     }
     env
+}
+
+/// `run` has no directory flag, so it relies on the runner's working directory.
+/// `--standalone` keeps it off the shared background service, whose
+/// environment is not the profile's.
+fn opencode2_run(
+    profile: &Profile,
+    model: &str,
+    effort: Option<&str>,
+    session: Option<&str>,
+    prompt: &str,
+) -> Vec<String> {
+    let selected = effort.map_or_else(|| model.to_owned(), |e| format!("{model}#{e}"));
+    let mut a = vec![
+        opencode2_executable(profile),
+        "run".into(),
+        "--standalone".into(),
+        "--format".into(),
+        "json".into(),
+        "--model".into(),
+        selected,
+        "--auto".into(),
+    ];
+    if let Some(session) = session {
+        a.extend(["--session".into(), session.into()]);
+    }
+    a.extend(["--".into(), prompt.into()]);
+    a
 }
 
 /// One noninteractive fx request, answering with the single JSON object
@@ -367,21 +386,7 @@ pub fn resume_command_for_with_options(
             a.extend(["--dir", cwd, "--auto", "--session", session, prompt]);
             a.into_iter().map(String::from).collect()
         }
-        Provider::OpenCode2 => {
-            let selected = effort.map_or_else(|| model.to_owned(), |e| format!("{model}#{e}"));
-            vec![
-                "opencode2".into(),
-                "run".into(),
-                "--format".into(),
-                "json".into(),
-                "--model".into(),
-                selected,
-                "--auto".into(),
-                "--session".into(),
-                session.into(),
-                prompt.into(),
-            ]
-        }
+        Provider::OpenCode2 => opencode2_run(profile, model, effort, Some(session), prompt),
         Provider::Antigravity => vec![
             "agy",
             "--print",
@@ -468,11 +473,12 @@ pub fn session_id_from(provider: Provider, event: &Value) -> Option<String> {
         Provider::Codex if event.get("type").and_then(Value::as_str) == Some("thread.started") => {
             event.get("thread_id")
         }
-        Provider::OpenCode | Provider::OpenCode2
-            if event.get("type").and_then(Value::as_str) == Some("step_start") =>
-        {
+        Provider::OpenCode if event.get("type").and_then(Value::as_str) == Some("step_start") => {
             event.get("sessionID")
         }
+        // OpenCode 2 can answer a short turn with a lone `text` event, and
+        // every event it prints names its session.
+        Provider::OpenCode2 => event.get("sessionID"),
         Provider::Antigravity
             if matches!(
                 event.get("event").and_then(Value::as_str),
@@ -563,10 +569,10 @@ pub fn parse_stream(provider: Provider, raw: &str) -> Result<Vec<ParsedEvent>, P
                 provider,
                 session_id: session_id_from(provider, &payload),
                 write_targets: write_targets_from(&payload),
-                usage: if provider == Provider::Fx {
-                    fx_usage(&payload)
-                } else {
-                    usage_from_event(&payload)
+                usage: match provider {
+                    Provider::Fx => fx_usage(&payload),
+                    Provider::OpenCode2 => opencode2_usage(&payload),
+                    _ => usage_from_event(&payload),
                 },
                 payload,
             })
@@ -716,6 +722,24 @@ fn fx_usage(event: &Value) -> Usage {
     Usage {
         tokens_in: number(usage.and_then(|v| v.get("input_tokens"))),
         tokens_out: number(usage.and_then(|v| v.get("output_tokens"))),
+        ..Usage::default()
+    }
+}
+
+/// A `step_finish` counts cache reads apart from `input`; reasoning bills as output.
+fn opencode2_usage(event: &Value) -> Usage {
+    if event.get("type").and_then(Value::as_str) != Some("step_finish") {
+        return Usage::default();
+    }
+    let part = event.get("part");
+    let tokens = part.and_then(|v| v.get("tokens"));
+    let output = number(tokens.and_then(|v| v.get("output")));
+    let reasoning = number(tokens.and_then(|v| v.get("reasoning"))).unwrap_or_default();
+    Usage {
+        tokens_in: number(tokens.and_then(|v| v.get("input"))),
+        tokens_out: output.map(|value| value + reasoning),
+        cached_tokens: number(tokens.and_then(|v| v.pointer("/cache/read"))),
+        cost_usd: number(part.and_then(|v| v.get("cost"))).filter(|cost| *cost >= 0.0),
         ..Usage::default()
     }
 }
@@ -1013,6 +1037,65 @@ mod tests {
             resumed[resumed.len() - 2..],
             ["--".to_owned(), "go".to_owned()]
         );
+    }
+    #[test]
+    fn opencode2_runs_standalone_with_its_effort_after_a_hash() {
+        let mut oc2 = profile(Provider::OpenCode2);
+        oc2.env
+            .insert(OPENCODE2_BIN.into(), "/opt/opencode2/bin/opencode".into());
+        let argv = command_for(
+            &oc2,
+            "-go",
+            "/repo",
+            Some("opencode/space-bunny-free"),
+            Some("low"),
+            None,
+        )
+        .expect("a command line")
+        .argv;
+        assert_eq!(
+            argv,
+            [
+                "/opt/opencode2/bin/opencode",
+                "run",
+                "--standalone",
+                "--format",
+                "json",
+                "--model",
+                "opencode/space-bunny-free#low",
+                "--auto",
+                "--",
+                "-go",
+            ],
+            "no --dir: the runner starts it in the task's directory"
+        );
+        let resumed = resume_command_for(&oc2, "go", "/repo", "ses_1", None, None, None)
+            .expect("opencode 2 resumes")
+            .argv;
+        assert_eq!(
+            resumed[resumed.len() - 4..],
+            ["--session", "ses_1", "--", "go"]
+        );
+        assert_eq!(
+            resumed[6], "model",
+            "no effort leaves the variant to OpenCode"
+        );
+    }
+    #[test]
+    fn opencode2_reads_its_session_and_step_usage_from_json_lines() {
+        let raw = concat!(
+            r#"{"type":"text","sessionID":"ses_a","part":{"type":"text","text":"PONG"}}"#,
+            "\n",
+            r#"{"type":"step_finish","sessionID":"ses_a","part":{"type":"step-finish","cost":0.25,"tokens":{"input":14811,"output":42,"reasoning":67,"cache":{"read":447,"write":0}}}}"#,
+        );
+        let parsed = parse_stream(Provider::OpenCode2, raw).expect("events");
+        assert_eq!(parsed[0].session_id.as_deref(), Some("ses_a"));
+        let usage = &parsed[1].usage;
+        assert_eq!(usage.tokens_in, Some(14811.0));
+        assert_eq!(usage.tokens_out, Some(109.0));
+        assert_eq!(usage.cached_tokens, Some(447.0));
+        assert_eq!(usage.cost_usd, Some(0.25));
+        assert_eq!(final_text(Provider::OpenCode2, raw), "PONG");
     }
     #[test]
     fn command_uses_provider_program() {
