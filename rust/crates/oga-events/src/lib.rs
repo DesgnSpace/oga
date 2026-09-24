@@ -15,8 +15,8 @@ use std::{
 
 use oga_domain::{
     BatchEvent, BatchTask, EventKind, EventLevel, EventPhase, EventSource, MAX_EVENT_OUTCOME,
-    MAX_EVENT_TITLE, OUTCOME_STATES, PresentationType, Provider, Task, TaskEvent,
-    TaskEventPresentation, TaskEventView, TaskState, WireTaskOutcome,
+    MAX_EVENT_TITLE, OUTCOME_STATES, PresentationType, Provider, SubagentLink, SubagentRole, Task,
+    TaskEvent, TaskEventPresentation, TaskEventView, TaskState, WireTaskOutcome,
 };
 use oga_store::{Store, StoreError};
 use serde_json::{Map, Value};
@@ -651,13 +651,15 @@ pub fn task_to_batch(task: &Task) -> BatchTask {
 pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventView> {
     let mut calls = acp::AcpCalls::default();
     let mut ended = HashMap::<String, Option<i64>>::new();
+    let mut claude_stream_subagents = HashMap::<String, String>::new();
     let mut turn = None;
     events
         .iter()
         .map(|event| {
             turn = event.turn_id.or(turn);
             let patched = calls.patch(event);
-            let mut view = event_view(&patched, provider);
+            let mut view = event_view_base(&patched, provider);
+            annotate_subagents(&mut view, &patched, provider, &mut claude_stream_subagents);
             if matches!(patched, Cow::Owned(_)) {
                 view.raw_text = raw_payload_text(&event.payload);
             }
@@ -675,6 +677,333 @@ pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventVie
             view
         })
         .collect()
+}
+
+fn annotate_subagents(
+    view: &mut TaskEventView,
+    event: &TaskEvent,
+    provider: Provider,
+    claude_stream_subagents: &mut HashMap<String, String>,
+) {
+    let payload = &event.payload;
+    let is_acp = payload.contains_key("sessionUpdate");
+    let tool_call_id = tree_value(payload, &["toolCallId"]);
+    let raw_input = payload.get("rawInput").and_then(Value::as_object);
+
+    if provider == Provider::Claude && is_acp {
+        let claude = payload.get("_meta").and_then(|meta| meta.get("claudeCode"));
+        if claude
+            .and_then(|meta| meta.get("subagent"))
+            .and_then(Value::as_bool)
+            == Some(true)
+            && let Some(id) = tool_call_id.clone()
+        {
+            view.kind = EventKind::Tool;
+            view.title = "Subagent".into();
+            view.subagents.push(SubagentLink {
+                id,
+                role: SubagentRole::Launch,
+                label: subagent_label(raw_input),
+                report: completed(event, payload)
+                    .then(|| acp_content_text(payload))
+                    .flatten(),
+            });
+        }
+        if let Some(id) = claude
+            .and_then(Value::as_object)
+            .and_then(|meta| string_value(meta, &["parentToolUseId"]))
+        {
+            view.parent_action_id = Some(id.clone());
+            view.subagents.push(SubagentLink {
+                id,
+                role: SubagentRole::Member,
+                label: None,
+                report: None,
+            });
+        }
+    }
+
+    if is_acp && matches!(provider, Provider::OpenCode | Provider::OpenCode2) {
+        let title = text_value(payload.get("title"));
+        let launch = match provider {
+            Provider::OpenCode => title == Some("task"),
+            Provider::OpenCode2 => title == Some("subagent"),
+            _ => false,
+        };
+        if launch {
+            view.kind = EventKind::Tool;
+            view.title = "Subagent".into();
+            let content = acp_content_text(payload);
+            let (id, report) = if provider == Provider::OpenCode2 {
+                opencode2_report(content.as_deref()).unwrap_or_else(|| {
+                    (
+                        format!("launch:{}", tool_call_id.clone().unwrap_or_default()),
+                        None,
+                    )
+                })
+            } else {
+                (
+                    tool_call_id.clone().unwrap_or_default(),
+                    opencode_report(content.as_deref()),
+                )
+            };
+            if !id.is_empty() {
+                view.subagents.push(SubagentLink {
+                    id,
+                    role: SubagentRole::Launch,
+                    label: subagent_label(raw_input),
+                    report,
+                });
+            }
+        }
+        if provider == Provider::OpenCode2
+            && let Some(child) = payload
+                .get("_meta")
+                .and_then(|meta| meta.get("opencode/child-session"))
+                .and_then(Value::as_object)
+            && let Some(id) = string_value(child, &["id"])
+        {
+            view.subagents.push(SubagentLink {
+                id,
+                role: SubagentRole::Member,
+                label: string_value(child, &["title"]).and_then(one_line),
+                report: None,
+            });
+        }
+    }
+
+    if provider == Provider::Fx
+        && is_acp
+        && text_value(payload.get("name")) == Some("subagent")
+        && let Some(id) = tool_call_id.clone()
+    {
+        view.subagents.push(SubagentLink {
+            id,
+            role: SubagentRole::Launch,
+            label: fx_label(raw_input),
+            report: fx_report(acp_content_text(payload).as_deref()),
+        });
+    }
+
+    if provider == Provider::Antigravity
+        && is_acp
+        && text_value(payload.get("title")) == Some("Running start_subagent")
+        && let Some(id) = tool_call_id
+    {
+        view.subagents.push(SubagentLink {
+            id,
+            role: SubagentRole::Launch,
+            label: None,
+            report: None,
+        });
+    }
+
+    if provider == Provider::Codex {
+        let item = payload.get("item").and_then(Value::as_object);
+        if item.and_then(|item| text_value(item.get("type"))) == Some("collab_tool_call") {
+            let tool = item.and_then(|item| text_value(item.get("tool")));
+            let item_id = item.and_then(|item| string_value(item, &["id"]));
+            let receiver_ids = item
+                .and_then(|item| item.get("receiver_thread_ids"))
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| text_value(Some(id)).map(str::to_owned))
+                .collect::<Vec<_>>();
+            match tool {
+                Some("spawn_agent") => {
+                    view.kind = EventKind::Tool;
+                    view.title = "Started subagent".into();
+                    let ids = if receiver_ids.is_empty() {
+                        item_id
+                            .map(|id| vec![format!("launch:{id}")])
+                            .unwrap_or_default()
+                    } else {
+                        receiver_ids
+                    };
+                    for id in ids {
+                        view.subagents.push(SubagentLink {
+                            id,
+                            role: SubagentRole::Launch,
+                            label: item
+                                .and_then(|item| string_value(item, &["prompt"]))
+                                .and_then(one_line),
+                            report: None,
+                        });
+                    }
+                }
+                Some("wait" | "close_agent") => {
+                    view.kind = EventKind::Tool;
+                    view.title = if tool == Some("wait") {
+                        "Waiting for subagents"
+                    } else {
+                        "Closed subagent"
+                    }
+                    .into();
+                    let states = item
+                        .and_then(|item| item.get("agents_states"))
+                        .and_then(Value::as_object);
+                    for id in receiver_ids {
+                        let report = states
+                            .and_then(|states| states.get(&id))
+                            .and_then(Value::as_object)
+                            .filter(|state| text_value(state.get("status")) == Some("completed"))
+                            .and_then(|state| string_value(state, &["message"]));
+                        view.subagents.push(SubagentLink {
+                            id,
+                            role: SubagentRole::Report,
+                            label: None,
+                            report,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if provider == Provider::Claude
+        && event.kind == "agent.hook"
+        && let Some(id) = tree_value(payload, &["agent_id", "agentId"])
+    {
+        let hook = tree_value(payload, &["hook_event_name", "hookEventName"]);
+        view.subagents.push(SubagentLink {
+            id,
+            role: match hook.as_deref() {
+                Some("SubagentStart") => SubagentRole::Launch,
+                Some("SubagentStop") => SubagentRole::Report,
+                _ => SubagentRole::Member,
+            },
+            label: tree_value(payload, &["agent_type", "agentType"]).and_then(one_line),
+            report: tree_value(payload, &["last_assistant_message"]),
+        });
+    }
+
+    if provider == Provider::Claude && text_value(payload.get("type")) == Some("system") {
+        match text_value(payload.get("subtype")) {
+            Some("task_started") => {
+                if let Some(id) = tree_value(payload, &["task_id", "taskId"]) {
+                    if let Some(tool_use_id) = tree_value(payload, &["tool_use_id", "toolUseId"]) {
+                        claude_stream_subagents.insert(tool_use_id, id.clone());
+                    }
+                    view.subagents.push(SubagentLink {
+                        id,
+                        role: SubagentRole::Launch,
+                        label: tree_value(payload, &["description"]).and_then(one_line),
+                        report: None,
+                    });
+                }
+            }
+            Some("task_notification") => {
+                if let Some(id) = tree_value(payload, &["task_id", "taskId"]) {
+                    view.subagents.push(SubagentLink {
+                        id,
+                        role: SubagentRole::Report,
+                        label: None,
+                        report: tree_value(payload, &["message", "result"]),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if provider == Provider::Claude
+        && !is_acp
+        && let Some(parent) = tree_value(payload, &["parent_tool_use_id", "parentToolUseId"])
+        && let Some(id) = claude_stream_subagents.get(&parent)
+    {
+        view.parent_action_id = Some(parent);
+        view.subagents.push(SubagentLink {
+            id: id.clone(),
+            role: SubagentRole::Member,
+            label: None,
+            report: None,
+        });
+    }
+}
+
+fn completed(event: &TaskEvent, payload: &BTreeMap<String, Value>) -> bool {
+    event.state.settled()
+        || matches!(
+            text_value(payload.get("status")),
+            Some("completed" | "success")
+        )
+}
+
+fn one_line(value: String) -> Option<String> {
+    let line = value.lines().find(|line| !line.trim().is_empty())?.trim();
+    (!line.is_empty()).then(|| cap(line, 80).0)
+}
+
+fn subagent_label(input: Option<&Map<String, Value>>) -> Option<String> {
+    input.and_then(|input| {
+        string_value(input, &["description", "task", "prompt", "subagent_type"]).and_then(one_line)
+    })
+}
+
+fn fx_label(input: Option<&Map<String, Value>>) -> Option<String> {
+    let request = input?.get("request")?;
+    let task = request
+        .get("task")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            request
+                .as_str()
+                .and_then(|request| serde_json::from_str::<Value>(request).ok())
+                .and_then(|request| string_value(request.as_object()?, &["task"]))
+        });
+    task.and_then(one_line)
+}
+
+fn acp_content_text(payload: &BTreeMap<String, Value>) -> Option<String> {
+    payload
+        .get("content")?
+        .as_array()?
+        .iter()
+        .find_map(|entry| {
+            entry
+                .get("content")
+                .and_then(|content| text_value(content.get("text")))
+                .map(str::to_owned)
+        })
+}
+
+fn opencode2_report(text: Option<&str>) -> Option<(String, Option<String>)> {
+    let text = text?.trim();
+    let header = text.strip_prefix("<subagent sessionID=\"")?;
+    let (id, after_id) = header.split_once('"')?;
+    let (_, report) = after_id.split_once('>')?;
+    Some((
+        id.to_owned(),
+        (!report.trim().is_empty())
+            .then(|| report.trim_end_matches("</subagent>").trim().to_owned()),
+    ))
+}
+
+fn opencode_report(text: Option<&str>) -> Option<String> {
+    let text = text?;
+    let (_, report) = text.split_once("<task_result>")?;
+    Some(
+        report
+            .trim_end_matches("</task_result>\n</task>")
+            .trim()
+            .to_owned(),
+    )
+}
+
+fn fx_report(text: Option<&str>) -> Option<String> {
+    let text = text?;
+    if let Ok(value) = serde_json::from_str::<Value>(text) {
+        return (value.get("ok").and_then(Value::as_bool) == Some(true))
+            .then(|| string_value(value.as_object()?, &["result"]))
+            .flatten();
+    }
+    // Stored event payloads are bounded. Preserve a successful report even
+    // when that bound cut the JSON string before its closing quote.
+    text.strip_prefix("{\"ok\":true,\"result\":\"")
+        .map(|report| report.replace("\\n", "\n").replace("\\\"", "\""))
+        .filter(|report| !report.trim().is_empty())
 }
 
 fn raw_payload_text(payload: &BTreeMap<String, Value>) -> Option<String> {
@@ -730,6 +1059,13 @@ fn ordinal(value: usize) -> String {
 /// Produces a provider-neutral view for events whose payload already carries a
 /// normalized `kind`, `phase`, and `title`. Provider adapters can enrich it.
 pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
+    let mut view = event_view_base(event, provider);
+    let mut claude_stream_subagents = HashMap::new();
+    annotate_subagents(&mut view, event, provider, &mut claude_stream_subagents);
+    view
+}
+
+fn event_view_base(event: &TaskEvent, provider: Provider) -> TaskEventView {
     let hook_name = (event.kind == "agent.hook")
         .then(|| {
             text_value(event.payload.get("hook_event_name"))
@@ -858,6 +1194,7 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
             .get("minor")
             .and_then(Value::as_bool)
             .or_else(|| is_minor_event(&event.kind, &event.payload)),
+        subagents: Vec::new(),
     }
 }
 
@@ -2532,6 +2869,7 @@ fn provider_view(
         source_id: None,
         complete: None,
         minor: options.minor,
+        subagents: Vec::new(),
     }
 }
 
@@ -7575,6 +7913,7 @@ mod tests {
             source_id: None,
             complete: None,
             minor: None,
+            subagents: Vec::new(),
         };
         let views = mark_repeated_retries(vec![view(1), view(2), view(3)]);
         assert_eq!(views[2].kind, EventKind::Error);

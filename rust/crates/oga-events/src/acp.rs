@@ -415,7 +415,7 @@ fn tool_call_id(payload: &BTreeMap<String, Value>) -> Option<String> {
 
 /// The fields that say what a tool call is and where it stands, as opposed to
 /// what it produced.
-const CALL_FIELDS: [&str; 5] = ["kind", "status", "title", "locations", "rawInput"];
+const CALL_FIELDS: [&str; 6] = ["kind", "status", "title", "name", "locations", "rawInput"];
 
 /// The tool calls of one task, as far as its recorded updates have described
 /// them.

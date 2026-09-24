@@ -16,8 +16,9 @@ pub use context::SymbolKind;
 pub use delivery::{ConsumerCursor, ConsumerDelivery, DeliveryStatus};
 pub use diff::{TaskDiff, TaskDiffBasis, TaskDiffFile, TaskDiffFileStatus};
 pub use event::{
-    EventKind, EventLevel, EventPhase, EventPointer, EventSource, PresentationType, TaskEvent,
-    TaskEventPresentation, TaskEventView, TaskTurn, TaskTurnStatus, WaitedTaskEvent,
+    EventKind, EventLevel, EventPhase, EventPointer, EventSource, PresentationType, SubagentLink,
+    SubagentRole, TaskEvent, TaskEventPresentation, TaskEventView, TaskTurn, TaskTurnStatus,
+    WaitedTaskEvent,
 };
 pub use health::{HealthReport, MCP_CONTRACT_VERSION, Staleness, VERSION};
 pub use profile::{Config, MemoryEntry, MemoryProject, Profile, ProfileView, ScopeGrant};
