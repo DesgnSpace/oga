@@ -1,18 +1,4 @@
-//! Shared domain types for the Rust rewrite: tasks, profiles, events,
-//! scopes, worktrees, holds, completions — and the JSON casing every surface
-//! must agree on.
-//!
-//! Casing rules, defined once here:
-//!
-//! - Struct field names are camelCase (`#[serde(rename_all = "camelCase")]`),
-//!   matching the broker's JSON output exactly.
-//! - Enum values keep their TypeScript literal spellings: snake_case state
-//!   and code names (`needs_input`, `permission_denied`), kebab-case for
-//!   provider-adjacent sources (`caller-profile`, `claude-cli`), and the one
-//!   hyphenated provider id `opencode-2`.
-//! - Optional fields are omitted, never null; nullable non-optional fields
-//!   serialize as explicit `null`. That distinction is load-bearing: clients
-//!   treat a present-but-null key differently from an absent one.
+//! Shared domain types and the JSON casing used by every surface.
 
 pub mod context;
 pub mod delivery;
