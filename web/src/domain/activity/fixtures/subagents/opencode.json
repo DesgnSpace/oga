@@ -112,9 +112,9 @@
     "taskId": "subagent-fixture",
     "source": "opencode",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Survey Rust crates",
     "presentation": {
       "type": "message",
@@ -124,7 +124,15 @@
     "createdAt": "2026-09-24T19:15:54.992Z",
     "actionId": "call_hhEWhxsMXSc3BsT4LY7OKlR3",
     "sourceId": "call_hhEWhxsMXSc3BsT4LY7OKlR3",
-    "complete": true
+    "complete": true,
+    "subagents": [
+      {
+        "id": "call_hhEWhxsMXSc3BsT4LY7OKlR3",
+        "role": "launch",
+        "label": "Survey Rust crates",
+        "report": "- `/Users/malico/desgn/oga/rust/crates/oga-acp` — Integrates with the Agent Client Protocol and runs agent sessions.\n- `/Users/malico/desgn/oga/rust/crates/oga-advisor` — Makes requests to an advisor service.\n- `/Users/malico/desgn/oga/rust/crates/oga-client` — Provides a client for calling Oga APIs.\n- `/Users/malico/desgn/oga/rust/crates/oga-config` — Defines and loads application configuration.\n- `/Users/malico/desgn/oga/rust/crates/oga-context` — Builds searchable code context using parsers for multiple languages.\n- `/Users/malico/desgn/oga/rust/crates/oga-domain` — Holds shared domain types and data models.\n- `/Users/malico/desgn/oga/rust/crates/oga-events` — Handles application events and event storage.\n- `/Users/malico/desgn/oga/rust/crates/oga-http` — Provides the HTTP API.\n- `/Users/malico/desgn/oga/rust/crates/oga-mcp` — Provides the MCP server and tools.\n- `/Users/malico/desgn/oga/rust/crates/oga-pricing` — Fetches and manages pricing data.\n- `/Users/malico/desgn/oga/rust/crates/oga-providers` — Defines integrations with agent providers.\n- `/Users/malico/desgn/oga/rust/crates/oga-routing` — Loads and applies routing rules.\n- `/Users/malico/desgn/oga/rust/crates/oga-runner` — Runs provider processes and manages their I/O.\n- `/Users/malico/desgn/oga/rust/crates/oga-service` — Coordinates application services and workflows.\n- `/Users/malico/desgn/oga/rust/crates/oga-store` — Provides SQLite-backed persistence.\n- `/Users/malico/desgn/oga/rust/crates/oga-worktree` — Manages Git worktrees and related operations."
+      }
+    ]
   },
   {
     "id": 500320,
@@ -194,9 +202,9 @@
     "taskId": "subagent-fixture",
     "source": "opencode",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Survey activity domain",
     "presentation": {
       "type": "message",
@@ -206,7 +214,15 @@
     "createdAt": "2026-09-24T19:16:19.923Z",
     "actionId": "call_JTg8zYEvvRmtBDS8gYEkc010",
     "sourceId": "call_JTg8zYEvvRmtBDS8gYEkc010",
-    "complete": true
+    "complete": true,
+    "subagents": [
+      {
+        "id": "call_JTg8zYEvvRmtBDS8gYEkc010",
+        "role": "launch",
+        "label": "Survey activity domain",
+        "report": "`/Users/malico/desgn/oga/web/src/domain/activity/` contains:\n\n- `index.ts` — Main module. Exports `ActivityStory` and `ActivityStoryProjection`; activity and handoff types such as `ActivityComposition`, `ActivityTurn`, `ActivityCall`, and `ActivityNode`; helpers including `compositionCalls`, `nodesCallCount`, `nodesDurationMs`, `turnDurationMs`, `callDurationMs`, `compositionHasThinking`, `withoutDuplicateHookCalls`, `normalizeAntigravityEvents`, and `deriveTurnIds`; and constants for subagent titles, skipped activity, and reasoning.\n- `acp.test.ts` — Tests for streamed ACP activity rows; no main exports.\n- `index.test.ts` — Tests for activity composition; no main exports.\n- `fixtures/` — JSON/JSONL sample data: `claude-acp-resumed.json`, `probe-rows.json`, `antigravity-acp-probe.json`, and `antigravity-run.jsonl`."
+      }
+    ]
   },
   {
     "id": 500423,
@@ -276,9 +292,9 @@
     "taskId": "subagent-fixture",
     "source": "opencode",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Read unreleased notes",
     "presentation": {
       "type": "message",
@@ -288,7 +304,15 @@
     "createdAt": "2026-09-24T19:17:01.273Z",
     "actionId": "call_iNGXcH6dlum91tkqjp7CnSGp",
     "sourceId": "call_iNGXcH6dlum91tkqjp7CnSGp",
-    "complete": true
+    "complete": true,
+    "subagents": [
+      {
+        "id": "call_iNGXcH6dlum91tkqjp7CnSGp",
+        "role": "launch",
+        "label": "Read unreleased notes",
+        "report": "- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\n- Picking a task from the list now puts you straight in its reply box.\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes."
+      }
+    ]
   },
   {
     "id": 500474,

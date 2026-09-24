@@ -993,9 +993,9 @@
     "taskId": "subagent-fixture",
     "source": "claude",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Survey web activity domain files",
     "presentation": {
       "type": "message",
@@ -1005,16 +1005,24 @@
     "createdAt": "2026-09-24T19:15:19.783Z",
     "actionId": "toolu_01HgT1Pwy5WpUznENr5N6N7c",
     "sourceId": "toolu_01HgT1Pwy5WpUznENr5N6N7c",
-    "complete": false
+    "complete": false,
+    "subagents": [
+      {
+        "id": "toolu_01HgT1Pwy5WpUznENr5N6N7c",
+        "role": "launch",
+        "label": "Survey web activity domain files",
+        "report": "Files in `/Users/malico/desgn/oga/web/src/domain/activity/`:\n\n- `acp.test.ts` — test file, no exports\n- `fixtures` — directory (not a file)\n- `index.test.ts` — test file, no exports\n- `index.ts` — main implementation file:\n  - `ActivityComposition` (interface)\n  - `ActivityEnding` (interface)\n  - `ReasoningPulse` (interface)\n  - `ActivityStatus` (type: `\"running\" | \"needs_input\" | \"failed\" | \"interrupted\" | \"done\"`)\n  - `ActivityBlock` (type)\n  - `ActivityTurn` (interface)\n  - `ActivitySegment` (interface)\n  - `ActivityNode` (type)\n  - `ActivityCall` (interface)\n  - `ActivitySubagent` (interface)\n  - `compositionCalls(blocks)` — function\n  - `nodesCallCount(nodes)` — function\n  - `nodesDurationMs(nodes)` — function\n  - `turnDurationMs(turn)` — function\n  - `callDurationMs(call)` — function\n  - `HandoffBriefTier` (type: `\"verbatim\" | \"digest\"`)\n  - `HandoffBoundary` (interface)\n  - `HandoffRun` (interface)\n  - `Hop` (interface)\n  - `ActivityStory` (const)\n  - `ActivityStoryProjection` (class)\n  - `SUBAGENT_STARTED_TITLE` (const)\n  - `SUBAGENT_FINISHED_TITLE` (const)\n  - `ACTIVITY_SKIPPED_TITLE` (const)\n  - `REASONING_TITLE` (const)\n  - `compositionHasThinking(composition)` — function\n  - `withoutDuplicateHookCalls(events)` — function\n  - `normalizeAntigravityEvents(events)` — function\n  - `deriveTurnIds(events)` — function\n\nThe `fixtures` subdirectory contains additional files not covered above; let me know if you'd like those enumerated as well."
+      }
+    ]
   },
   {
     "id": 499714,
     "taskId": "subagent-fixture",
     "source": "claude",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Survey web activity domain files",
     "presentation": {
       "type": "message",
@@ -1024,16 +1032,24 @@
     "createdAt": "2026-09-24T19:15:19.787Z",
     "actionId": "toolu_01HgT1Pwy5WpUznENr5N6N7c",
     "sourceId": "toolu_01HgT1Pwy5WpUznENr5N6N7c",
-    "complete": true
+    "complete": true,
+    "subagents": [
+      {
+        "id": "toolu_01HgT1Pwy5WpUznENr5N6N7c",
+        "role": "launch",
+        "label": "Survey web activity domain files",
+        "report": "Files in `/Users/malico/desgn/oga/web/src/domain/activity/`:\n\n- `acp.test.ts` — test file, no exports\n- `fixtures` — directory (not a file)\n- `index.test.ts` — test file, no exports\n- `index.ts` — main implementation file:\n  - `ActivityComposition` (interface)\n  - `ActivityEnding` (interface)\n  - `ReasoningPulse` (interface)\n  - `ActivityStatus` (type: `\"running\" | \"needs_input\" | \"failed\" | \"interrupted\" | \"done\"`)\n  - `ActivityBlock` (type)\n  - `ActivityTurn` (interface)\n  - `ActivitySegment` (interface)\n  - `ActivityNode` (type)\n  - `ActivityCall` (interface)\n  - `ActivitySubagent` (interface)\n  - `compositionCalls(blocks)` — function\n  - `nodesCallCount(nodes)` — function\n  - `nodesDurationMs(nodes)` — function\n  - `turnDurationMs(turn)` — function\n  - `callDurationMs(call)` — function\n  - `HandoffBriefTier` (type: `\"verbatim\" | \"digest\"`)\n  - `HandoffBoundary` (interface)\n  - `HandoffRun` (interface)\n  - `Hop` (interface)\n  - `ActivityStory` (const)\n  - `ActivityStoryProjection` (class)\n  - `SUBAGENT_STARTED_TITLE` (const)\n  - `SUBAGENT_FINISHED_TITLE` (const)\n  - `ACTIVITY_SKIPPED_TITLE` (const)\n  - `REASONING_TITLE` (const)\n  - `compositionHasThinking(composition)` — function\n  - `withoutDuplicateHookCalls(events)` — function\n  - `normalizeAntigravityEvents(events)` — function\n  - `deriveTurnIds(events)` — function\n\nThe `fixtures` subdirectory contains additional files not covered above; let me know if you'd like those enumerated as well."
+      }
+    ]
   },
   {
     "id": 499722,
     "taskId": "subagent-fixture",
     "source": "claude",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Read CHANGELOG unreleased section",
     "presentation": {
       "type": "message",
@@ -1043,16 +1059,24 @@
     "createdAt": "2026-09-24T19:15:22.105Z",
     "actionId": "toolu_01PwwXMTx4H7CzSko8uroWvy",
     "sourceId": "toolu_01PwwXMTx4H7CzSko8uroWvy",
-    "complete": false
+    "complete": false,
+    "subagents": [
+      {
+        "id": "toolu_01PwwXMTx4H7CzSko8uroWvy",
+        "role": "launch",
+        "label": "Read CHANGELOG unreleased section",
+        "report": "The `## Unreleased` section in `/Users/malico/desgn/oga/CHANGELOG.md` contains the following lines:\n\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\n- Picking a task from the list now puts you straight in its reply box.\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes."
+      }
+    ]
   },
   {
     "id": 499723,
     "taskId": "subagent-fixture",
     "source": "claude",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Read CHANGELOG unreleased section",
     "presentation": {
       "type": "message",
@@ -1062,16 +1086,24 @@
     "createdAt": "2026-09-24T19:15:22.108Z",
     "actionId": "toolu_01PwwXMTx4H7CzSko8uroWvy",
     "sourceId": "toolu_01PwwXMTx4H7CzSko8uroWvy",
-    "complete": true
+    "complete": true,
+    "subagents": [
+      {
+        "id": "toolu_01PwwXMTx4H7CzSko8uroWvy",
+        "role": "launch",
+        "label": "Read CHANGELOG unreleased section",
+        "report": "The `## Unreleased` section in `/Users/malico/desgn/oga/CHANGELOG.md` contains the following lines:\n\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\n- Picking a task from the list now puts you straight in its reply box.\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes."
+      }
+    ]
   },
   {
     "id": 499725,
     "taskId": "subagent-fixture",
     "source": "claude",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Survey rust/crates directory",
     "presentation": {
       "type": "message",
@@ -1081,16 +1113,24 @@
     "createdAt": "2026-09-24T19:15:23.426Z",
     "actionId": "toolu_01XyJeX4KZMZaeugPJZHTpnz",
     "sourceId": "toolu_01XyJeX4KZMZaeugPJZHTpnz",
-    "complete": false
+    "complete": false,
+    "subagents": [
+      {
+        "id": "toolu_01XyJeX4KZMZaeugPJZHTpnz",
+        "role": "launch",
+        "label": "Survey rust/crates directory",
+        "report": "Here are the crates under `/Users/malico/desgn/oga/rust/crates/`:\n\n- `oga-acp` — ACP client protocol transport, policy, sessions, and outcomes.\n- `oga-advisor` — Optional advisor that picks a connected worker for a task from its brief, via an external LLM call.\n- `oga-client` — Typed broker access shared by the CLI, desktop shell, and web bridge.\n- `oga-config` — Profile discovery, YAML config layers, cwd settings, and prompts.\n- `oga-context` — Project code index (tree-sitter parsing) backing `oga query`/`oga relearn`.\n- `oga-domain` — Shared domain types and the JSON casing conventions used by every surface.\n- `oga-events` — Event bounds, normalization, presentation, and wire records.\n- `oga-http` — Axum HTTP routes for broker state, settings, and task actions.\n- `oga-mcp` — Stateless MCP server exposing the broker's task and discovery surface.\n- `oga-pricing` — Estimates provider spend from public model pricing when no amount is reported.\n- `oga-providers` — Provider argv construction, transcripts, sessions, and usage/event parsing.\n- `oga-routing` — Task classification, routing policy, model selection, and provider catalogs.\n- `oga-runner` — Provider process lifecycle: detached groups, bounded pipes, and cancellation/confinement.\n- `oga-service` — Task dispatch, lifecycle orchestration, and task actions (archive, cancel, handoff, etc.).\n- `oga-store` — SQLite persistence layer for the broker.\n- `oga-worktree` — Git worktree and branch lifecycle management."
+      }
+    ]
   },
   {
     "id": 499726,
     "taskId": "subagent-fixture",
     "source": "claude",
     "type": "agent.tool_call_update",
-    "kind": "reasoning",
+    "kind": "tool",
     "phase": "info",
-    "title": "Thinking",
+    "title": "Subagent",
     "detail": "Survey rust/crates directory",
     "presentation": {
       "type": "message",
@@ -1100,7 +1140,15 @@
     "createdAt": "2026-09-24T19:15:23.431Z",
     "actionId": "toolu_01XyJeX4KZMZaeugPJZHTpnz",
     "sourceId": "toolu_01XyJeX4KZMZaeugPJZHTpnz",
-    "complete": true
+    "complete": true,
+    "subagents": [
+      {
+        "id": "toolu_01XyJeX4KZMZaeugPJZHTpnz",
+        "role": "launch",
+        "label": "Survey rust/crates directory",
+        "report": "Here are the crates under `/Users/malico/desgn/oga/rust/crates/`:\n\n- `oga-acp` — ACP client protocol transport, policy, sessions, and outcomes.\n- `oga-advisor` — Optional advisor that picks a connected worker for a task from its brief, via an external LLM call.\n- `oga-client` — Typed broker access shared by the CLI, desktop shell, and web bridge.\n- `oga-config` — Profile discovery, YAML config layers, cwd settings, and prompts.\n- `oga-context` — Project code index (tree-sitter parsing) backing `oga query`/`oga relearn`.\n- `oga-domain` — Shared domain types and the JSON casing conventions used by every surface.\n- `oga-events` — Event bounds, normalization, presentation, and wire records.\n- `oga-http` — Axum HTTP routes for broker state, settings, and task actions.\n- `oga-mcp` — Stateless MCP server exposing the broker's task and discovery surface.\n- `oga-pricing` — Estimates provider spend from public model pricing when no amount is reported.\n- `oga-providers` — Provider argv construction, transcripts, sessions, and usage/event parsing.\n- `oga-routing` — Task classification, routing policy, model selection, and provider catalogs.\n- `oga-runner` — Provider process lifecycle: detached groups, bounded pipes, and cancellation/confinement.\n- `oga-service` — Task dispatch, lifecycle orchestration, and task actions (archive, cancel, handoff, etc.).\n- `oga-store` — SQLite persistence layer for the broker.\n- `oga-worktree` — Git worktree and branch lifecycle management."
+      }
+    ]
   },
   {
     "id": 499734,

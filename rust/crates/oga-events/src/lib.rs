@@ -652,6 +652,7 @@ pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventVie
     let mut calls = acp::AcpCalls::default();
     let mut ended = HashMap::<String, Option<i64>>::new();
     let mut claude_stream_subagents = HashMap::<String, String>::new();
+    let mut claude_acp_subagents = HashMap::<String, SubagentLink>::new();
     let mut turn = None;
     events
         .iter()
@@ -659,7 +660,13 @@ pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventVie
             turn = event.turn_id.or(turn);
             let patched = calls.patch(event);
             let mut view = event_view_base(&patched, provider);
-            annotate_subagents(&mut view, &patched, provider, &mut claude_stream_subagents);
+            annotate_subagents(
+                &mut view,
+                &patched,
+                provider,
+                &mut claude_stream_subagents,
+                &mut claude_acp_subagents,
+            );
             if matches!(patched, Cow::Owned(_)) {
                 view.raw_text = raw_payload_text(&event.payload);
             }
@@ -684,6 +691,7 @@ fn annotate_subagents(
     event: &TaskEvent,
     provider: Provider,
     claude_stream_subagents: &mut HashMap<String, String>,
+    claude_acp_subagents: &mut HashMap<String, SubagentLink>,
 ) {
     let payload = &event.payload;
     let is_acp = payload.contains_key("sessionUpdate");
@@ -691,49 +699,23 @@ fn annotate_subagents(
     let raw_input = payload.get("rawInput").and_then(Value::as_object);
 
     if provider == Provider::Claude && is_acp {
-        let claude = payload.get("_meta").and_then(|meta| meta.get("claudeCode"));
-        if claude
-            .and_then(|meta| meta.get("subagent"))
-            .and_then(Value::as_bool)
-            == Some(true)
-            && let Some(id) = tool_call_id.clone()
-        {
-            view.kind = EventKind::Tool;
-            view.title = "Subagent".into();
-            view.subagents.push(SubagentLink {
-                id,
-                role: SubagentRole::Launch,
-                label: subagent_label(raw_input),
-                report: completed(event, payload)
-                    .then(|| acp_content_text(payload))
-                    .flatten(),
-            });
-        }
-        if let Some(id) = claude
-            .and_then(Value::as_object)
-            .and_then(|meta| string_value(meta, &["parentToolUseId"]))
-        {
-            view.parent_action_id = Some(id.clone());
-            view.subagents.push(SubagentLink {
-                id,
-                role: SubagentRole::Member,
-                label: None,
-                report: None,
-            });
-        }
+        annotate_claude_acp_subagent(view, event, payload, claude_acp_subagents);
     }
 
     if is_acp && matches!(provider, Provider::OpenCode | Provider::OpenCode2) {
         let title = text_value(payload.get("title"));
+        let content = acp_content_text(payload);
+        let opencode_v1_report = (provider == Provider::OpenCode)
+            .then(|| opencode_report(content.as_deref()))
+            .flatten();
         let launch = match provider {
-            Provider::OpenCode => title == Some("task"),
+            Provider::OpenCode => title == Some("task") || opencode_v1_report.is_some(),
             Provider::OpenCode2 => title == Some("subagent"),
             _ => false,
         };
         if launch {
             view.kind = EventKind::Tool;
             view.title = "Subagent".into();
-            let content = acp_content_text(payload);
             let (id, report) = if provider == Provider::OpenCode2 {
                 opencode2_report(content.as_deref()).unwrap_or_else(|| {
                     (
@@ -742,16 +724,17 @@ fn annotate_subagents(
                     )
                 })
             } else {
-                (
-                    tool_call_id.clone().unwrap_or_default(),
-                    opencode_report(content.as_deref()),
-                )
+                (tool_call_id.clone().unwrap_or_default(), opencode_v1_report)
             };
             if !id.is_empty() {
                 view.subagents.push(SubagentLink {
                     id,
                     role: SubagentRole::Launch,
-                    label: subagent_label(raw_input),
+                    label: if provider == Provider::OpenCode && report.is_some() {
+                        title.and_then(|title| one_line(title.to_owned()))
+                    } else {
+                        subagent_label(raw_input)
+                    },
                     report,
                 });
             }
@@ -920,6 +903,79 @@ fn annotate_subagents(
             report: None,
         });
     }
+    if view
+        .subagents
+        .iter()
+        .any(|link| link.role == SubagentRole::Launch)
+    {
+        view.kind = EventKind::Tool;
+        view.title = "Subagent".into();
+    }
+}
+
+fn annotate_claude_acp_subagent(
+    view: &mut TaskEventView,
+    event: &TaskEvent,
+    payload: &BTreeMap<String, Value>,
+    claude_acp_subagents: &mut HashMap<String, SubagentLink>,
+) {
+    let claude = payload.get("_meta").and_then(|meta| meta.get("claudeCode"));
+    let is_subagent = claude
+        .and_then(|meta| meta.get("subagent"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    let tool_response = claude
+        .and_then(|meta| meta.get("toolResponse"))
+        .and_then(Value::as_object)
+        .filter(|response| {
+            text_value(response.get("status")) == Some("completed")
+                && string_value(response, &["agentId"]).is_some()
+                && string_value(response, &["agentType"]).is_some()
+        });
+    let id = tree_value(payload, &["toolCallId"]);
+    let existing = id.as_ref().and_then(|id| claude_acp_subagents.get(id));
+    if (is_subagent || tool_response.is_some() || existing.is_some())
+        && let Some(id) = id
+    {
+        view.kind = EventKind::Tool;
+        view.title = "Subagent".into();
+        let raw_input = payload.get("rawInput").and_then(Value::as_object);
+        let label = subagent_label(raw_input)
+            .or_else(|| existing.and_then(|link| link.label.clone()))
+            .or_else(|| {
+                tool_response
+                    .and_then(|response| string_value(response, &["agentType"]))
+                    .and_then(one_line)
+            });
+        let report = tool_response
+            .and_then(claude_tool_response_report)
+            .or_else(|| existing.and_then(|link| link.report.clone()))
+            .or_else(|| {
+                completed(event, payload)
+                    .then(|| acp_content_text(payload))
+                    .flatten()
+            });
+        let link = SubagentLink {
+            id: id.clone(),
+            role: SubagentRole::Launch,
+            label,
+            report,
+        };
+        claude_acp_subagents.insert(id, link.clone());
+        view.subagents.push(link);
+    }
+    if let Some(id) = claude
+        .and_then(Value::as_object)
+        .and_then(|meta| string_value(meta, &["parentToolUseId"]))
+    {
+        view.parent_action_id = Some(id.clone());
+        view.subagents.push(SubagentLink {
+            id,
+            role: SubagentRole::Member,
+            label: None,
+            report: None,
+        });
+    }
 }
 
 fn completed(event: &TaskEvent, payload: &BTreeMap<String, Value>) -> bool {
@@ -967,6 +1023,19 @@ fn acp_content_text(payload: &BTreeMap<String, Value>) -> Option<String> {
                 .and_then(|content| text_value(content.get("text")))
                 .map(str::to_owned)
         })
+}
+
+fn claude_tool_response_report(response: &Map<String, Value>) -> Option<String> {
+    let report = response
+        .get("content")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| text_value(entry.get("text")))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_owned();
+    (!report.is_empty()).then_some(report)
 }
 
 fn opencode2_report(text: Option<&str>) -> Option<(String, Option<String>)> {
@@ -1061,7 +1130,14 @@ fn ordinal(value: usize) -> String {
 pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
     let mut view = event_view_base(event, provider);
     let mut claude_stream_subagents = HashMap::new();
-    annotate_subagents(&mut view, event, provider, &mut claude_stream_subagents);
+    let mut claude_acp_subagents = HashMap::new();
+    annotate_subagents(
+        &mut view,
+        event,
+        provider,
+        &mut claude_stream_subagents,
+        &mut claude_acp_subagents,
+    );
     view
 }
 
@@ -5149,8 +5225,8 @@ mod tests {
             ),
             Provider::Claude,
         );
-        assert_eq!(started.title, SUBAGENT_STARTED_TITLE);
-        assert_eq!(started.kind, EventKind::Lifecycle);
+        assert_eq!(started.title, "Subagent");
+        assert_eq!(started.kind, EventKind::Tool);
         assert_eq!(started.phase, EventPhase::Started);
         assert_eq!(
             started.detail.as_deref(),
@@ -7597,7 +7673,8 @@ mod tests {
             ),
             Provider::Claude,
         );
-        assert_eq!(start.title, SUBAGENT_STARTED_TITLE);
+        assert_eq!(start.title, "Subagent");
+        assert_eq!(start.kind, EventKind::Tool);
         assert_eq!(start.detail.as_deref(), Some("general-purpose"));
         assert_ne!(start.minor, Some(true));
 
@@ -7694,7 +7771,8 @@ mod tests {
             )
         })
         .collect::<Vec<_>>();
-        assert_eq!(views[0].title, SUBAGENT_STARTED_TITLE);
+        assert_eq!(views[0].title, "Subagent");
+        assert_eq!(views[0].kind, EventKind::Tool);
         assert_eq!(views[3].title, SUBAGENT_FINISHED_TITLE);
         for view in &views {
             let raw = view.raw_text.as_deref().unwrap_or_default();

@@ -74,9 +74,18 @@ describe("subagent fixtures", () => {
     expect(subagents.every((subagent) => subagent.nodes.length === 0)).toBe(true);
   });
 
-  it.each(["codex", "fx"])("%s cards carry each subagent's report", async (driver) => {
+  it.each(["claude", "codex", "opencode", "opencode2", "fx"])("%s cards carry each subagent's report", async (driver) => {
     const finished = subagentsOf(await compose(driver)).filter((subagent) => subagent.status === "done");
     expect(finished.map((subagent) => subagent.report !== undefined)).toEqual([true, true, true]);
+  });
+
+  it("uses completed OpenCode task titles as card labels", async () => {
+    const subagents = subagentsOf(await compose("opencode"));
+    expect(subagents.map((subagent) => subagent.label)).toEqual([
+      "Survey Rust crates",
+      "Survey activity domain",
+      "Read unreleased notes",
+    ]);
   });
 
   it("fx keeps the launches that failed as failed cards", async () => {

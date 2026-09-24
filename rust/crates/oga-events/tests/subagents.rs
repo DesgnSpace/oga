@@ -67,6 +67,18 @@ fn subagent_fixtures_are_normalized_for_the_web() {
         "fx",
     ] {
         let views = oga_events::event_views(&events(driver), provider(driver));
+        for view in views.iter().filter(|view| {
+            view.subagents
+                .iter()
+                .any(|link| link.role == SubagentRole::Launch)
+        }) {
+            assert_eq!(
+                view.kind,
+                oga_domain::EventKind::Tool,
+                "{driver} launch kind"
+            );
+            assert_eq!(view.title, "Subagent", "{driver} launch title");
+        }
         let json = format!("{}\n", serde_json::to_string_pretty(&views).unwrap());
         let output = root().join(format!(
             "web/src/domain/activity/fixtures/subagents/{driver}.json"
@@ -104,6 +116,38 @@ fn subagent_fixtures_are_normalized_for_the_web() {
             _ => 3,
         };
         assert_eq!(launches.len(), expected, "{driver} launch count");
+
+        if matches!(driver, "claude" | "opencode" | "opencode2" | "codex" | "fx") {
+            let failed_launch_ids = views
+                .iter()
+                .filter(|view| view.phase == oga_domain::EventPhase::Failed)
+                .flat_map(|view| &view.subagents)
+                .filter(|link| link.role == SubagentRole::Launch)
+                .map(|link| link.id.as_str())
+                .collect::<HashSet<_>>();
+            let launch_ids = views
+                .iter()
+                .flat_map(|view| &view.subagents)
+                .filter(|link| link.role == SubagentRole::Launch)
+                .filter(|link| !link.id.starts_with("launch:"))
+                .filter(|link| !failed_launch_ids.contains(link.id.as_str()))
+                .map(|link| link.id.clone())
+                .collect::<HashSet<_>>();
+            assert_eq!(launch_ids.len(), 3, "{driver} reported launch count");
+            for id in launch_ids {
+                assert!(
+                    views.iter().flat_map(|view| &view.subagents).any(|link| {
+                        link.id == id
+                            && link
+                                .report
+                                .as_ref()
+                                .is_some_and(|report| !report.is_empty())
+                    }),
+                    "{driver} launch {id} has no report"
+                );
+            }
+        }
+
         if driver == "fx" {
             let failed = views
                 .iter()
@@ -138,4 +182,39 @@ fn subagent_fixtures_are_normalized_for_the_web() {
             }
         }
     }
+}
+
+#[test]
+fn claude_acp_tool_response_is_a_live_report_and_links_later_batch_rows() {
+    let events = events("claude");
+    let response = events.iter().find(|event| event.id == 499725).unwrap();
+    let live = oga_events::event_view(response, Provider::Claude);
+    let live_link = live
+        .subagents
+        .iter()
+        .find(|link| link.role == SubagentRole::Launch)
+        .unwrap();
+
+    assert_eq!(live.kind, oga_domain::EventKind::Tool);
+    assert_eq!(live.title, "Subagent");
+    assert_eq!(live_link.id, "toolu_01XyJeX4KZMZaeugPJZHTpnz");
+    assert!(
+        live_link
+            .report
+            .as_ref()
+            .is_some_and(|report| !report.is_empty())
+    );
+
+    let batch = oga_events::event_views(&events, Provider::Claude);
+    let later = batch.iter().find(|view| view.id == 499726).unwrap();
+    let later_link = later
+        .subagents
+        .iter()
+        .find(|link| link.role == SubagentRole::Launch)
+        .unwrap();
+
+    assert_eq!(later.kind, oga_domain::EventKind::Tool);
+    assert_eq!(later.title, "Subagent");
+    assert_eq!(later_link.id, live_link.id);
+    assert_eq!(later_link.report, live_link.report);
 }
