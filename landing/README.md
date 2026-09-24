@@ -1,6 +1,6 @@
 # Oga landing page
 
-Cloudflare Pages serves this directory as a static site. `docs/changelog.html` is generated from `CHANGELOG.md` at deploy time and is not committed — edit the markdown, never the HTML.
+Cloudflare Pages serves this directory as a static site. `docs/changelog.html` is generated from `CHANGELOG.md` at deploy time; edit the markdown, never the HTML.
 
 ## Deploy from the command line
 
@@ -12,7 +12,7 @@ make deploy-landing
 
 Authenticate once with `bunx wrangler login`. Wrangler keeps the session, so later deploys need nothing else.
 
-Before the first deployment, create the `oga` Pages project and set its production branch to `main` using the dashboard steps below. Configure `oga.desgn.space` there once. Later deployments only need `make deploy-landing`.
+Before the first deployment, create the `oga` Pages project with production branch `main`, then configure `oga.desgn.space` in the dashboard. Later deployments only need `make deploy-landing`.
 
 ## Project settings
 
@@ -39,7 +39,7 @@ Cloudflare will deploy updates from `main`. Preview deployments are created for 
 
 ## Publish the Homebrew tap
 
-The GitHub repository must be named exactly `DesgnSpace/homebrew-tap`. Homebrew maps `DesgnSpace/tap` to that repository. An empty repository is not a working tap: `Casks/oga.rb` must be committed and pushed before anyone can install Oga.
+The GitHub repository must be named exactly `DesgnSpace/homebrew-tap`; Homebrew maps `DesgnSpace/tap` to it. Commit and push `Casks/oga.rb` before publishing so the tap can install Oga.
 
 1. Create the `DesgnSpace/homebrew-tap` repository on GitHub.
 2. Clone that repository beside this one.
@@ -53,4 +53,4 @@ Users can then install Oga with:
 brew install --cask DesgnSpace/tap/oga
 ```
 
-Each Oga release regenerates `Casks/oga.rb` with the new version and ZIP checksum. After publishing a release, copy the regenerated file to `homebrew-tap/Casks/oga.rb`, then commit and push it from the tap repository. Homebrew will read the updated cask on the next install or upgrade.
+Each release regenerates `Casks/oga.rb`; copy the regenerated file to the tap repository after publishing.
