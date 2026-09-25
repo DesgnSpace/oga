@@ -62,6 +62,10 @@
 //! and asks about an extension's question with neither kind nor location.
 //! `next` is a release Oga was not verified against, `unmapped` an adapter that
 //! records no session file, and `ask` a turn that puts a question to a person.
+//!
+//! A mode whose turns are `outside` asks to run a command that reaches outside
+//! the task's folder, and finishes with the option it was given.
+//! `outside-steer` also waits for an instruction once it has its answer.
 
 use std::{
     env,
@@ -458,6 +462,97 @@ fn ask_permission(
     "no answer".into()
 }
 
+/// Asks to run a command that reaches outside the task's folder and waits for
+/// the answer, taking any instruction handed to the turn meanwhile.
+fn ask_outside(
+    session: &str,
+    lines: &mut impl Iterator<Item = String>,
+    log_path: &str,
+) -> (String, Option<String>) {
+    let id = 9004;
+    let command = "cp src/lib.rs /tmp/lib.rs.bak";
+    update(
+        session,
+        json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "run-9004",
+            "title": command,
+            "kind": "execute",
+            "locations": [{"path": "/tmp/lib.rs.bak"}],
+        }),
+    );
+    emit(&json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": session,
+            "toolCall": {
+                "toolCallId": "run-9004",
+                "title": command,
+                "kind": "execute",
+                "locations": [{"path": "/tmp/lib.rs.bak"}],
+            },
+            "options": [
+                {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
+                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
+            ],
+        },
+    }));
+    let mut told = None;
+    for line in lines.by_ref() {
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        log(log_path, &json!({"received": message}));
+        if let Some(text) = take_steering(&message) {
+            told = Some(text);
+            continue;
+        }
+        if message["id"] != json!(id) {
+            continue;
+        }
+        let answer = message["result"]["outcome"]["optionId"]
+            .as_str()
+            .or_else(|| message["result"]["outcome"]["outcome"].as_str())
+            .unwrap_or("no answer")
+            .to_owned();
+        return (answer, told);
+    }
+    ("no answer".into(), told)
+}
+
+/// Takes an instruction handed to the running turn, answering that it was.
+fn take_steering(message: &Value) -> Option<String> {
+    if message["method"] != "_session/steering" {
+        return None;
+    }
+    emit(&json!({"jsonrpc": "2.0", "id": message["id"], "result": {"outcome": "injected"}}));
+    Some(
+        message["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+    )
+}
+
+fn wait_for_steering(lines: &mut impl Iterator<Item = String>, log_path: &str) -> Option<String> {
+    for line in lines.by_ref() {
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        log(log_path, &json!({"received": message}));
+        if message["method"] == "session/cancel" {
+            return None;
+        }
+        if let Some(text) = take_steering(&message) {
+            return Some(text);
+        }
+    }
+    None
+}
+
 fn prompt(
     mode: &str,
     id: &Value,
@@ -593,6 +688,17 @@ fn prompt(
             chunk(
                 &session,
                 &format!("inside: {inside}, outside: {outside}\nOGA_RESULT: completed"),
+            );
+        }
+        turns if turns.starts_with("outside") => {
+            let (answer, mut told) = ask_outside(&session, lines, log_path);
+            if turns == "outside-steer" && told.is_none() {
+                told = wait_for_steering(lines, log_path);
+            }
+            let told = told.map_or_else(String::new, |text| format!(", told: {text}"));
+            chunk(
+                &session,
+                &format!("step: {answer}{told}\nOGA_RESULT: completed"),
             );
         }
         "refused-then-quiet" => {

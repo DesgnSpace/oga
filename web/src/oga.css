@@ -2174,6 +2174,13 @@ h1 {
     background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
+.pinned-question-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
 .pinned-question-label {
     margin: 0 0 var(--space-1);
     color: var(--color-accent);

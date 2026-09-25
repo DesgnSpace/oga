@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   archiveBranchSuccess,
+  awaitsPermission,
   canCancel,
   canComplete,
   canHandoff,
@@ -69,6 +70,21 @@ describe("canHandoff", () => {
       expect(canHandoff({ state })).toBe(true);
     }
     expect(canHandoff({ state: "completed" })).toBe(false);
+  });
+});
+
+describe("awaitsPermission", () => {
+  const events = (...types: string[]) => types.map((type) => ({ type }));
+
+  test("offers allow and refuse only while the worker waits on the step it asked about", () => {
+    expect(awaitsPermission({ state: "needs_input" }, events("agent.tool_call", "permission_asked"))).toBe(true);
+    expect(awaitsPermission({ state: "running" }, events("permission_asked", "permission_replied"))).toBe(false);
+  });
+
+  test("a question from a run that has since stopped is answered with words, not buttons", () => {
+    expect(awaitsPermission({ state: "needs_input" }, events("permission_asked", "permission_replied", "needs_input"))).toBe(false);
+    expect(awaitsPermission({ state: "needs_input" }, events("permission_asked", "run_interrupted"))).toBe(false);
+    expect(awaitsPermission({ state: "needs_input" }, events("needs_input"))).toBe(false);
   });
 });
 

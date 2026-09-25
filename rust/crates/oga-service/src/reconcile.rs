@@ -215,12 +215,90 @@ pub struct ReconcileReport {
     pub stopped: Vec<String>,
     pub blocked: Vec<String>,
     pub given_up: Vec<String>,
+    /// Runs that stopped while their worker waited on a person's answer.
+    pub asking: Vec<String>,
 }
 
 impl ReconcileReport {
     pub fn touched(&self) -> usize {
-        self.resumed.len() + self.stopped.len() + self.blocked.len() + self.given_up.len()
+        self.resumed.len()
+            + self.stopped.len()
+            + self.blocked.len()
+            + self.given_up.len()
+            + self.asking.len()
     }
+}
+
+/// Tasks whose worker was parked on a question for a person when its run was
+/// last driven: `needs_input` with a worker still recorded.
+fn open_questions(store: &Store) -> Result<Vec<InterruptedRun>, StoreError> {
+    let rows: Vec<(String, String)> = store.with_connection(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT id,worker_json FROM tasks WHERE state='needs_input' AND worker_json IS NOT NULL",
+        )?;
+        Ok(statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?)
+    })?;
+    Ok(rows
+        .into_iter()
+        .map(|(task_id, worker_json)| InterruptedRun {
+            task_id,
+            has_session: true,
+            worker: serde_json::from_str(&worker_json).ok(),
+            attempts: 0,
+        })
+        .collect())
+}
+
+/// The worker's permission request died with its run, so the task keeps
+/// waiting for a person, now on how the worker should go on, and a reply
+/// continues it in a new run.
+fn park_question(
+    store: &Store,
+    task_id: &str,
+    trigger: ReconcileTrigger,
+) -> Result<(), StoreError> {
+    let now = lifecycle::now_iso();
+    let question = format!(
+        "{} The worker was waiting for your answer about a step outside this task, and that step did not happen. How should it go on?",
+        trigger.stopped_reason()
+    );
+    let completion = TaskCompletion {
+        exit_code: None,
+        blocked: true,
+        code: CompletionCode::PermissionDenied,
+        reason: Some(question.clone()),
+        stop_reason: None,
+        suggested_scope: None,
+        resets_at: None,
+        asserted_completion: None,
+        dependency_blocked: None,
+    };
+    let completion_json = serde_json::to_string(&completion)
+        .map_err(|error| StoreError::Refusal(error.to_string()))?;
+    store.transaction(|tx| {
+        let changed = tx.execute(
+            "UPDATE tasks SET question=?,completion_json=?,worker_json=NULL,updated_at=? WHERE id=? AND state='needs_input' AND worker_json IS NOT NULL",
+            params![question, completion_json, now, task_id],
+        )?;
+        if changed != 1 {
+            return Ok(());
+        }
+        tx.execute(
+            "UPDATE task_turns SET status='needs_input',ended_at=? WHERE task_id=? AND status='running'",
+            params![now, task_id],
+        )?;
+        crate::append_event_tx(
+            tx,
+            task_id,
+            "run_interrupted",
+            TaskState::NeedsInput,
+            json!({"reason": trigger.stopped_reason(), "trigger": trigger.label(), "question": question}),
+            &now,
+        )?;
+        Ok(())
+    })
 }
 
 /// Every task the store still believes is in flight.
@@ -354,6 +432,20 @@ pub fn reconcile(
                 report.resumed.push(run.task_id);
             }
         }
+    }
+    for run in open_questions(store)? {
+        let verdict = verdict(&run, broker_pid, registry, probe);
+        match verdict {
+            WorkerVerdict::Supervised | WorkerVerdict::OwnedElsewhere => continue,
+            WorkerVerdict::Orphaned => {
+                if let Some(worker) = &run.worker {
+                    reap(worker);
+                }
+            }
+            WorkerVerdict::Gone | WorkerVerdict::Unconfirmed(_) => {}
+        }
+        park_question(store, &run.task_id, trigger)?;
+        report.asking.push(run.task_id);
     }
     Ok(report)
 }

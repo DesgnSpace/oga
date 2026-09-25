@@ -6,6 +6,7 @@ use rusqlite::Transaction;
 use serde::Serialize;
 use thiserror::Error;
 
+mod acp_question;
 mod acp_run;
 pub mod archive;
 pub mod authorization;

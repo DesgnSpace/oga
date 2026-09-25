@@ -38,9 +38,10 @@ use oga_runner::{ProviderRunner, RunRequest, Termination};
 use oga_store::{Store, StoreError};
 use rusqlite::params;
 use serde_json::{Value, json};
-use tokio::{sync::mpsc, time::Instant};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    acp_question::{Answer, Questions, TurnClock, permission_question},
     lifecycle::{
         ActiveRun, ActiveRuns, LifecycleError, MAX_ABORT_RETRIES, RunOutcome, Settlement,
         append_event_tx, broker_base_url, completion, encode, load_task, now_iso,
@@ -52,6 +53,10 @@ use crate::{
 
 /// The longest task timeout bounds a turn with no explicit timeout.
 const LONGEST_TURN: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The transport's own bound on a turn that may wait on a person, who has no
+/// deadline to answer by.
+const ANSWERED_TURN_BACKSTOP: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
 pub(crate) enum AcpEnd {
     Settled(Box<RunOutcome>),
@@ -89,12 +94,14 @@ pub(crate) struct AcpRun {
     steering: Option<AcpSteering>,
     /// Instructions handed over as their own prompt, still to be answered.
     joined: Mutex<Vec<SentPrompt>>,
+    questions: Arc<Questions>,
     cancelled: AtomicBool,
 }
 
 impl AcpRun {
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
+        self.questions.close();
         self.session.cancel();
         self.session.process().terminate(Termination::Cancelled);
     }
@@ -119,6 +126,11 @@ impl AcpRun {
             },
             None => Delivered::Missed("this worker only takes an instruction between runs".into()),
         }
+    }
+
+    /// The answer channel of the question the worker is parked on, if any.
+    pub(crate) fn take_question(&self) -> Option<oneshot::Sender<Answer>> {
+        self.questions.take()
     }
 
     async fn drain_joined(&self) {
@@ -220,6 +232,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     if adapter.oga_tools {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);
     }
+    let questions = Arc::new(Questions::default());
     let policy = Arc::new(TaskPolicy {
         store: Arc::clone(store),
         task_id: task.id.clone(),
@@ -229,13 +242,18 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         declines_questions: adapter.declines_questions,
         skills: skill_directories(turn.profile),
         refused: Refused::default(),
+        questions: Arc::clone(&questions),
     });
     let refused = Arc::clone(&policy.refused);
     let turn_bound = task.timeout_ms.map_or(LONGEST_TURN, Duration::from_millis);
     let config = AcpConfig {
         // The lifecycle enforces the task's own bound; the transport's is only
         // a backstop behind it.
-        prompt_timeout: turn_bound + Duration::from_secs(60),
+        prompt_timeout: if adapter.declines_questions {
+            turn_bound + Duration::from_secs(60)
+        } else {
+            ANSWERED_TURN_BACKSTOP
+        },
         ..AcpConfig::default()
     };
     let opening_bound = config.handshake_timeout;
@@ -290,6 +308,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         session,
         steering,
         joined: Mutex::new(Vec::new()),
+        questions,
         cancelled: AtomicBool::new(false),
     });
     let active = ActiveRun::Acp(Arc::clone(&run));
@@ -299,7 +318,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         refused,
         ..Transcript::default()
     };
-    let deadline = Instant::now() + turn_bound;
+    run.questions.clock.start(turn_bound);
     let mut ended = match load_task(store, &task.id) {
         Ok(current) => {
             if current.is_none_or(|current| current.state != TaskState::Running) {
@@ -311,7 +330,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
                 &mut updates,
                 &mut transcript,
                 turn.prompt,
-                deadline,
+                &run.questions.clock,
             )
             .await
         }
@@ -334,12 +353,19 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
                     &mut updates,
                     &mut transcript,
                     CONTINUE_AFTER_TURN_ERROR,
-                    deadline,
+                    &run.questions.clock,
                 )
                 .await
             }
             Err(error) => Err(error),
         };
+    }
+    run.questions.close();
+    if let Err(error) = withdraw_question(store, &task.id).await {
+        run.cancel();
+        run.session.shutdown().await;
+        turn.active.remove(&task.id, &active);
+        return Err(error.into());
     }
     let ended = match ended {
         Ok(ended) => ended,
@@ -426,13 +452,13 @@ async fn converse(
     updates: &mut mpsc::UnboundedReceiver<SessionNotification>,
     transcript: &mut Transcript,
     prompt: &str,
-    deadline: Instant,
+    clock: &TurnClock,
 ) -> Result<TurnEnd, LifecycleError> {
     let prompt = run
         .session
         .prompt(vec![ContentBlock::from(prompt.to_owned())]);
     tokio::pin!(prompt);
-    let deadline = tokio::time::sleep_until(deadline);
+    let deadline = clock.expired();
     tokio::pin!(deadline);
     let mut receiving = true;
     loop {
@@ -449,6 +475,22 @@ async fn converse(
             },
         }
     }
+}
+
+/// A turn that ended while a question was still open leaves the task running
+/// again, so it settles from how the turn ended.
+async fn withdraw_question(store: &Arc<Store>, task_id: &str) -> Result<(), StoreError> {
+    let task_id = task_id.to_owned();
+    let now = now_iso();
+    store
+        .write(move |tx| {
+            tx.execute(
+                "UPDATE tasks SET state='running',question=NULL,updated_at=? WHERE id=? AND state='needs_input'",
+                params![now, task_id],
+            )?;
+            Ok(())
+        })
+        .await
 }
 
 async fn wait_for_update(
@@ -1010,6 +1052,73 @@ struct TaskPolicy {
     /// Skill folders, which the agent reads whatever the scope.
     skills: Vec<PathBuf>,
     refused: Refused,
+    /// Where a step outside the scope waits for a person's answer.
+    questions: Arc<Questions>,
+}
+
+impl TaskPolicy {
+    /// Paths the request reaches that the scope does not cover.
+    fn outside_scope(
+        &self,
+        fields: &oga_acp::schema::ToolCallUpdateFields,
+        writes: bool,
+    ) -> Vec<String> {
+        let rules = if writes {
+            &self.scope.write
+        } else {
+            &self.scope.read
+        };
+        fields
+            .locations
+            .iter()
+            .flatten()
+            .map(|location| location.path.as_path())
+            .filter(|path| !scope_covers(&self.cwd, rules, path))
+            .filter(|path| {
+                writes
+                    || !self
+                        .skills
+                        .iter()
+                        .any(|skills| relative_inside(skills, path).is_some())
+            })
+            .map(|path| path.display().to_string())
+            .collect()
+    }
+
+    /// Parks the task on a question for a person and waits for the answer.
+    async fn ask(&self, mut payload: Value, question: String) -> Option<Answer> {
+        let store = Arc::clone(&self.store);
+        let (task_id, turn_id) = (self.task_id.clone(), self.turn_id);
+        let open = async move {
+            payload["question"] = json!(question);
+            let now = now_iso();
+            let opened = store
+                .write(move |tx| {
+                    let changed = tx.execute(
+                        "UPDATE tasks SET state='needs_input',question=?,updated_at=? WHERE id=? AND state='running'",
+                        params![question, now, task_id],
+                    )?;
+                    if changed == 1 {
+                        append_event_tx(
+                            tx,
+                            &task_id,
+                            "permission_asked",
+                            TaskState::NeedsInput,
+                            payload,
+                            &now,
+                            Some(turn_id),
+                        )?;
+                    }
+                    Ok(changed == 1)
+                })
+                .await;
+            opened.unwrap_or_else(|error| {
+                eprintln!("asking about a permission failed: {error}");
+                false
+            })
+        };
+        self.questions.ask(open).await
+    }
 }
 
 impl AcpPolicy for TaskPolicy {
@@ -1020,32 +1129,35 @@ impl AcpPolicy for TaskPolicy {
                 fields.kind,
                 Some(ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
             );
-            let rules = if writes {
-                &self.scope.write
+            let outside = self.outside_scope(fields, writes);
+            let mut payload = json!({
+                "toolCallId": request.tool_call.tool_call_id.0.as_ref(),
+                "title": fields.title,
+                "kind": fields.kind,
+                "access": if writes { "write" } else { "read" },
+                "outsideScope": outside,
+            });
+            // Only the scope stands in the way, so the person decides.
+            let answer = if !outside.is_empty() && !self.declines_questions {
+                let command = fields
+                    .title
+                    .as_deref()
+                    .filter(|_| fields.kind == Some(ToolKind::Execute));
+                let question = permission_question(command, writes, &outside);
+                match self.ask(payload.clone(), question).await {
+                    Some(answer) => Some(answer),
+                    None => return Decision::Cancel,
+                }
             } else {
-                &self.scope.read
+                None
             };
-            let paths: Vec<&Path> = fields
-                .locations
-                .iter()
-                .flatten()
-                .map(|location| location.path.as_path())
-                .collect();
-            let outside: Vec<String> = paths
-                .iter()
-                .filter(|path| !scope_covers(&self.cwd, rules, path))
-                .filter(|path| {
-                    writes
-                        || !self
-                            .skills
-                            .iter()
-                            .any(|skills| relative_inside(skills, path).is_some())
-                })
-                .map(|path| path.display().to_string())
-                .collect();
-            let allowed = outside.is_empty() && !self.declines_questions;
+            let allowed = match &answer {
+                Some(answer) => *answer == Answer::Allow,
+                None => outside.is_empty() && !self.declines_questions,
+            };
             let decision = choose(&request.options, allowed);
-            if !allowed {
+            // An instruction already says how the worker goes on.
+            if !allowed && !matches!(answer, Some(Answer::Instead(_))) {
                 self.refused
                     .lock()
                     .expect("refused tool call lock is not poisoned")
@@ -1054,14 +1166,10 @@ impl AcpPolicy for TaskPolicy {
                         outside.clone(),
                     );
             }
-            let mut payload = json!({
-                "toolCallId": request.tool_call.tool_call_id.0.as_ref(),
-                "title": fields.title,
-                "kind": fields.kind,
-                "access": if writes { "write" } else { "read" },
-                "allowed": allowed,
-                "outsideScope": outside,
-            });
+            payload["allowed"] = json!(allowed);
+            if answer.is_some() {
+                payload["answeredByPerson"] = json!(true);
+            }
             if self.declines_questions {
                 payload["unattended"] = json!(true);
             }
@@ -1225,12 +1333,9 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn a_write_outside_the_scope_is_rejected() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
-        let policy = TaskPolicy {
-            store: Arc::clone(&store),
+    fn policy(store: Arc<Store>, declines_questions: bool) -> TaskPolicy {
+        TaskPolicy {
+            store,
             task_id: "task".into(),
             turn_id: 1,
             cwd: PathBuf::from("/repo"),
@@ -1238,76 +1343,55 @@ mod tests {
                 read: rules(&["**"]),
                 write: rules(&["src/**"]),
             },
-            declines_questions: false,
+            declines_questions,
             skills: vec![PathBuf::from("/home/.agents/skills")],
             refused: Refused::default(),
-        };
-        let request = |path: &str| {
-            RequestPermissionRequest::new(
-                "session",
-                ToolCallUpdate::new(
-                    "tool",
-                    ToolCallUpdateFields::new()
-                        .kind(ToolKind::Edit)
-                        .locations(vec![ToolCallLocation::new(path)]),
-                ),
-                vec![
-                    option("yes", PermissionOptionKind::AllowOnce),
-                    option("no", PermissionOptionKind::RejectOnce),
-                ],
-            )
-        };
+            questions: Arc::default(),
+        }
+    }
 
-        let inside = policy.permission(request("/repo/src/main.rs")).await;
-        let outside = policy.permission(request("/repo/Cargo.toml")).await;
-        let skill = policy
-            .permission(request("/home/.agents/skills/ux/SKILL.md"))
-            .await;
-
-        assert_eq!(inside, Decision::Select(PermissionOptionId::new("yes")));
-        assert_eq!(outside, Decision::Select(PermissionOptionId::new("no")));
-        assert_eq!(skill, Decision::Select(PermissionOptionId::new("no")));
+    fn request(kind: ToolKind, path: &str) -> RequestPermissionRequest {
+        RequestPermissionRequest::new(
+            "session",
+            ToolCallUpdate::new(
+                "tool",
+                ToolCallUpdateFields::new()
+                    .kind(kind)
+                    .locations(vec![ToolCallLocation::new(path)]),
+            ),
+            vec![
+                option("yes", PermissionOptionKind::AllowOnce),
+                option("no", PermissionOptionKind::RejectOnce),
+            ],
+        )
     }
 
     #[tokio::test]
     async fn a_skill_folder_reads_whatever_the_scope() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
-        let policy = TaskPolicy {
-            store: Arc::clone(&store),
-            task_id: "task".into(),
-            turn_id: 1,
-            cwd: PathBuf::from("/repo"),
-            scope: TaskScope {
-                read: rules(&["**"]),
-                write: rules(&["src/**"]),
-            },
-            declines_questions: false,
-            skills: vec![PathBuf::from("/home/.agents/skills")],
-            refused: Refused::default(),
-        };
-        let read = |path: &str| {
-            RequestPermissionRequest::new(
-                "session",
-                ToolCallUpdate::new(
-                    "tool",
-                    ToolCallUpdateFields::new()
-                        .kind(ToolKind::Read)
-                        .locations(vec![ToolCallLocation::new(path)]),
-                ),
-                vec![
-                    option("yes", PermissionOptionKind::AllowOnce),
-                    option("no", PermissionOptionKind::RejectOnce),
-                ],
-            )
-        };
+        let policy = policy(store, false);
 
-        let skill = policy
-            .permission(read("/home/.agents/skills/ux/references/copy.md"))
+        let read = policy
+            .permission(request(
+                ToolKind::Read,
+                "/home/.agents/skills/ux/references/copy.md",
+            ))
             .await;
-        let elsewhere = policy.permission(read("/home/.cargo/registry/src")).await;
 
-        assert_eq!(skill, Decision::Select(PermissionOptionId::new("yes")));
-        assert_eq!(elsewhere, Decision::Select(PermissionOptionId::new("no")));
+        assert_eq!(read, Decision::Select(PermissionOptionId::new("yes")));
+    }
+
+    #[tokio::test]
+    async fn an_adapter_that_cannot_hold_a_question_is_refused_on_the_spot() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+        let policy = policy(store, true);
+
+        let outside = policy
+            .permission(request(ToolKind::Edit, "/repo/Cargo.toml"))
+            .await;
+
+        assert_eq!(outside, Decision::Select(PermissionOptionId::new("no")));
     }
 }

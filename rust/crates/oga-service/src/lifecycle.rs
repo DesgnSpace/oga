@@ -101,6 +101,16 @@ impl ActiveRun {
         }
     }
 
+    /// The answer channel of a permission question the worker is parked on.
+    pub(crate) fn take_question(
+        &self,
+    ) -> Option<tokio::sync::oneshot::Sender<crate::acp_question::Answer>> {
+        match self {
+            Self::Cli(_) => None,
+            Self::Acp(run) => run.take_question(),
+        }
+    }
+
     fn same_as(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Cli(left), Self::Cli(right)) => Arc::ptr_eq(left, right),

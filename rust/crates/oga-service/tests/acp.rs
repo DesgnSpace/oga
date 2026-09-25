@@ -16,8 +16,8 @@ use oga_domain::{
 };
 use oga_providers::{AcpAdapter, AcpAdapters};
 use oga_service::{
-    CancelRequest, DispatchRequest, Dispatcher, ResumeRequest, SteerRequest, cancel,
-    reconcile::ReconcileTrigger, resume, set_transport_preference, steer,
+    CancelRequest, DispatchRequest, Dispatcher, ReplyRequest, ResumeRequest, SteerRequest, cancel,
+    reconcile::ReconcileTrigger, reply, resume, set_transport_preference, steer,
 };
 use oga_store::Store;
 use serde_json::Value;
@@ -247,6 +247,30 @@ impl Harness {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         panic!("task did not settle: {id}");
+    }
+
+    /// Waits until the worker is parked on a question for a person.
+    async fn await_question(&self, id: &str) -> Task {
+        for _ in 0..2_000 {
+            let task = self.dispatcher.task(id).expect("task");
+            if task.state == TaskState::NeedsInput {
+                return task;
+            }
+            assert!(!task.state.settled(), "settled without asking: {task:?}");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the worker never asked: {id}");
+    }
+
+    /// Starts a task scoped to its own folder whose worker asks to reach
+    /// outside it, and waits for the question.
+    async fn asked(&self, mode_timeout: Option<Duration>) -> Task {
+        let mut request = DispatchRequest::new("work", "back up the library", &self.cwd);
+        if let Some(timeout) = mode_timeout {
+            request = request.timeout(timeout);
+        }
+        let dispatched = self.dispatcher.dispatch(request).await.expect("dispatched");
+        self.await_question(&dispatched.task.id).await
     }
 
     /// Every complete line the agent has logged. A line still being written
@@ -729,7 +753,19 @@ async fn permission_answers_follow_the_tasks_scope() {
         write: vec!["src/**".into()],
     });
 
-    let task = harness.run_with(request).await;
+    let dispatched = harness
+        .dispatcher
+        .dispatch(request)
+        .await
+        .expect("dispatched");
+    harness.await_question(&dispatched.task.id).await;
+    reply(
+        &harness.dispatcher,
+        ReplyRequest::new(&dispatched.task.id, "refuse"),
+    )
+    .await
+    .expect("replied");
+    let task = harness.settle(&dispatched.task.id).await;
 
     assert_eq!(task.state, TaskState::Completed, "{task:?}");
     assert!(
@@ -749,8 +785,20 @@ async fn permission_answers_follow_the_tasks_scope() {
 #[tokio::test]
 async fn a_worker_that_stops_on_a_refused_step_asks_how_to_go_on() {
     let harness = harness("refused-then-quiet");
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new("work", "edit things", &harness.cwd))
+        .await
+        .expect("dispatched");
+    harness.await_question(&dispatched.task.id).await;
+    reply(
+        &harness.dispatcher,
+        ReplyRequest::new(&dispatched.task.id, "refuse"),
+    )
+    .await
+    .expect("replied");
 
-    let task = harness.run("edit things").await;
+    let task = harness.settle(&dispatched.task.id).await;
 
     assert_eq!(task.state, TaskState::NeedsInput, "{task:?}");
     assert!(
@@ -768,6 +816,149 @@ async fn a_worker_that_stops_on_a_refused_step_asks_how_to_go_on() {
             .is_some_and(|reason| reason.contains("/tmp/scratch")),
         "{completion:?}"
     );
+}
+
+/// The option the agent was given for its permission request.
+fn chosen_option(harness: &Harness) -> Vec<String> {
+    harness
+        .agent_log()
+        .into_iter()
+        .filter(|entry| entry["received"]["id"] == 9004 && entry["received"]["method"].is_null())
+        .map(|entry| {
+            entry["received"]["result"]["outcome"]["optionId"]
+                .as_str()
+                .unwrap_or("none")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_step_outside_the_scope_waits_for_the_person_and_allowing_it_carries_the_turn_on() {
+    let harness = harness("outside");
+
+    let asked = harness.asked(None).await;
+
+    let question = asked.question.clone().expect("question");
+    assert!(
+        question.contains("cp src/lib.rs /tmp/lib.rs.bak"),
+        "{question}"
+    );
+    assert!(question.contains("/tmp/lib.rs.bak"), "{question}");
+    assert!(
+        chosen_option(&harness).is_empty(),
+        "nothing was answered yet"
+    );
+    reply(&harness.dispatcher, ReplyRequest::new(&asked.id, "Allow"))
+        .await
+        .expect("replied");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("step: allow"), "{}", task.output);
+    assert_eq!(
+        chosen_option(&harness),
+        ["allow"],
+        "allowed once, never always"
+    );
+    assert_eq!(
+        harness.received("session/prompt").len(),
+        1,
+        "the same turn carried on"
+    );
+    let kinds: Vec<String> = harness
+        .events(&task.id)
+        .into_iter()
+        .map(|event| event.kind)
+        .collect();
+    for kind in [
+        "permission_asked",
+        "permission_replied",
+        "permission_answered",
+    ] {
+        assert!(
+            kinds.iter().any(|recorded| recorded == kind),
+            "{kind}: {kinds:?}"
+        );
+    }
+    assert!(!kinds.iter().any(|kind| kind == "answered"), "{kinds:?}");
+}
+
+#[tokio::test]
+async fn refusing_a_step_outside_the_scope_gives_the_worker_its_reject_option() {
+    let harness = harness("outside");
+    let asked = harness.asked(None).await;
+
+    reply(&harness.dispatcher, ReplyRequest::new(&asked.id, "refuse"))
+        .await
+        .expect("replied");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("step: reject"), "{}", task.output);
+    assert_eq!(chosen_option(&harness), ["reject"]);
+    let answered = harness
+        .events(&task.id)
+        .into_iter()
+        .find(|event| event.kind == "permission_answered")
+        .expect("answer recorded");
+    assert_eq!(answered.payload["allowed"], false);
+}
+
+#[tokio::test]
+async fn a_written_reply_refuses_the_step_and_reaches_the_worker_as_an_instruction() {
+    let harness = harness("outside-steer");
+    let asked = harness.asked(None).await;
+
+    reply(
+        &harness.dispatcher,
+        ReplyRequest::new(&asked.id, "keep the backup inside the project instead"),
+    )
+    .await
+    .expect("replied");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(
+        task.output
+            .contains("step: reject, told: keep the backup inside the project instead"),
+        "{}",
+        task.output
+    );
+    assert_eq!(chosen_option(&harness), ["reject"]);
+    assert_eq!(harness.received("session/prompt").len(), 1);
+}
+
+#[tokio::test]
+async fn waiting_on_the_person_does_not_count_against_the_turns_timeout() {
+    let harness = harness("outside");
+    let asked = harness.asked(Some(Duration::from_millis(300))).await;
+
+    tokio::time::sleep(Duration::from_millis(900)).await;
+    assert_eq!(
+        harness.dispatcher.task(&asked.id).expect("task").state,
+        TaskState::NeedsInput
+    );
+    reply(&harness.dispatcher, ReplyRequest::new(&asked.id, "allow"))
+        .await
+        .expect("replied");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("step: allow"), "{}", task.output);
+}
+
+#[tokio::test]
+async fn cancelling_while_the_worker_waits_on_a_person_stops_the_run() {
+    let harness = harness("outside");
+    let asked = harness.asked(None).await;
+
+    cancel(&harness.dispatcher, CancelRequest::new(&asked.id))
+        .await
+        .expect("cancelled");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(task.state, TaskState::Cancelled, "{task:?}");
 }
 
 #[tokio::test]
@@ -1111,6 +1302,61 @@ async fn a_restart_picks_an_acp_conversation_back_up_instead_of_dropping_it() {
     assert_eq!(report.resumed, ["interrupted"]);
     assert!(report.stopped.is_empty());
     assert!(!Path::new(&harness.cwd.join("cli-ran")).exists());
+}
+
+#[tokio::test]
+async fn a_restart_while_the_worker_waits_on_a_person_leaves_the_task_waiting() {
+    let harness = harness("turn");
+    let task = Task {
+        id: "asking".into(),
+        profile_id: "work".into(),
+        model: "model-one".into(),
+        prompt: "back up the library".into(),
+        cwd: harness.cwd.display().to_string(),
+        state: TaskState::NeedsInput,
+        question: Some("The worker wants to run `cp a /tmp/b`. Allow it?".into()),
+        created_at: NOW.into(),
+        updated_at: NOW.into(),
+        ..Task::default()
+    };
+    harness
+        .store
+        .repositories()
+        .tasks()
+        .insert(&task)
+        .expect("task");
+    let gone = u32::MAX / 2;
+    harness
+        .store
+        .transaction(|connection| {
+            connection.execute(
+                "UPDATE tasks SET worker_json=? WHERE id='asking'",
+                [serde_json::json!({"pid": gone, "pgid": gone, "brokerPid": gone, "startedAt": NOW})
+                    .to_string()],
+            )?;
+            Ok(())
+        })
+        .expect("worker recorded");
+
+    let report = harness
+        .dispatcher
+        .reconcile(ReconcileTrigger::BrokerStart)
+        .expect("reconciled");
+
+    assert_eq!(report.asking, ["asking"]);
+    let task = harness.dispatcher.task("asking").expect("task");
+    assert_eq!(task.state, TaskState::NeedsInput, "{task:?}");
+    assert!(
+        task.question
+            .as_deref()
+            .is_some_and(|question| question.contains("How should it go on")),
+        "{task:?}"
+    );
+    let again = harness
+        .dispatcher
+        .reconcile(ReconcileTrigger::BrokerStart)
+        .expect("reconciled");
+    assert_eq!(again.touched(), 0, "a second pass finds nothing left");
 }
 
 #[tokio::test]

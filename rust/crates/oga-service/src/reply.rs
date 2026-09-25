@@ -4,8 +4,9 @@ use oga_domain::{Task, TaskScope, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, close_attempt, continuation_prompt, dispatch::Dispatcher,
-    encode_store, lifecycle::now_iso, require_existing_worktree, require_profile, require_task,
+    ContinuationError, SteerRequest, acp_question::Answer, append_event_tx, close_attempt,
+    continuation_prompt, dispatch::Dispatcher, encode_store, lifecycle::now_iso,
+    require_existing_worktree, require_profile, require_task,
 };
 
 #[derive(Debug, Clone)]
@@ -50,7 +51,6 @@ pub async fn reply(
         };
         return Err(ContinuationError::Refusal(message));
     }
-    require_existing_worktree(&old)?;
     let answer = request.answer.trim();
     if answer.is_empty() {
         return Err(ContinuationError::Refusal(format!(
@@ -58,6 +58,14 @@ pub async fn reply(
             old.id
         )));
     }
+    if let Some(waiting) = dispatcher
+        .active_runs()
+        .get(&old.id)
+        .and_then(|run| run.take_question())
+    {
+        return answer_live_question(dispatcher, &old, waiting, Answer::read(answer)).await;
+    }
+    require_existing_worktree(&old)?;
     let profile = require_profile(dispatcher.store(), &old.profile_id)?;
     if profile.command.is_some() {
         return Err(ContinuationError::Refusal(format!(
@@ -119,4 +127,59 @@ pub async fn reply(
         Some(session_id),
     );
     Ok(task)
+}
+
+/// Decides the permission request a live worker is parked on. The task runs
+/// again before the worker hears the answer, so its next question, if any,
+/// opens after this one has closed.
+async fn answer_live_question(
+    dispatcher: &Dispatcher,
+    old: &Task,
+    waiting: tokio::sync::oneshot::Sender<Answer>,
+    answer: Answer,
+) -> Result<Task, ContinuationError> {
+    let now = now_iso();
+    let mut payload = json!({"answer": answer.name()});
+    if let Answer::Instead(instruction) = &answer {
+        payload["instruction"] = json!(instruction);
+    }
+    dispatcher.store().transaction(|tx| {
+        let changed = tx.execute(
+            "UPDATE tasks SET state='running',question=NULL,updated_at=? WHERE id=? AND state='needs_input'",
+            rusqlite::params![now, old.id],
+        )?;
+        if changed != 1 {
+            return Err(oga_store::StoreError::Refusal(format!(
+                "task does not need input: {}",
+                old.id
+            )));
+        }
+        append_event_tx(
+            tx,
+            &old.id,
+            "permission_replied",
+            TaskState::Running,
+            payload,
+            &now,
+        )?;
+        Ok(())
+    })?;
+    let instruction = match &answer {
+        Answer::Instead(instruction) => Some(instruction.clone()),
+        Answer::Allow | Answer::Refuse => None,
+    };
+    if waiting.send(answer).is_err() {
+        return Err(ContinuationError::Refusal(format!(
+            "the worker stopped before your answer reached it: {}",
+            old.id
+        )));
+    }
+    if let Some(instruction) = instruction {
+        crate::steer::steer(
+            dispatcher,
+            SteerRequest::new(&old.id).instruction(instruction),
+        )
+        .await?;
+    }
+    require_task(dispatcher.store(), &old.id)
 }

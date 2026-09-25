@@ -1185,12 +1185,15 @@ fn event_view_base(event: &TaskEvent, provider: Provider) -> TaskEventView {
         });
     // A permission row carries the title of the call it answered, which names
     // what the worker wanted rather than what Oga decided.
-    let title = (event.kind != "permission_answered")
-        .then(|| text_value(event.payload.get("title")))
-        .flatten()
-        .map(str::to_owned)
-        .or_else(|| hook_tool.map(|tool| tool_title_with_input(tool, hook_input)))
-        .unwrap_or_else(|| event_title(&event.kind, &event.payload));
+    let title = (!matches!(
+        event.kind.as_str(),
+        "permission_answered" | "permission_asked" | "permission_replied"
+    ))
+    .then(|| text_value(event.payload.get("title")))
+    .flatten()
+    .map(str::to_owned)
+    .or_else(|| hook_tool.map(|tool| tool_title_with_input(tool, hook_input)))
+    .unwrap_or_else(|| event_title(&event.kind, &event.payload));
     let action_id =
         hook_action.and_then(|_| tree_value(&event.payload, &["tool_use_id", "toolUseId"]));
     let action_fields = hook_action.map(|(tool, phase)| {
@@ -4461,6 +4464,8 @@ struct PermissionAnswer<'a> {
     subject: Option<&'a str>,
     outside: Vec<&'a str>,
     unattended: bool,
+    /// A person decided it, rather than the task's scope.
+    by_person: bool,
 }
 
 fn permission_answer(payload: &BTreeMap<String, Value>) -> Option<PermissionAnswer<'_>> {
@@ -4482,6 +4487,10 @@ fn permission_answer(payload: &BTreeMap<String, Value>) -> Option<PermissionAnsw
             .get("unattended")
             .and_then(Value::as_bool)
             .unwrap_or_default(),
+        by_person: payload
+            .get("answeredByPerson")
+            .and_then(Value::as_bool)
+            .unwrap_or_default(),
     })
 }
 
@@ -4501,7 +4510,9 @@ fn permission_detail(answer: &PermissionAnswer<'_>) -> Option<String> {
     if answer.allowed {
         return subject;
     }
-    let reason = if !answer.outside.is_empty() {
+    let reason = if answer.by_person {
+        "you refused it".to_owned()
+    } else if !answer.outside.is_empty() {
         format!("outside this task's scope: {}", answer.outside.join(", "))
     } else if answer.unattended {
         "nobody was there to approve it".to_owned()
@@ -4519,6 +4530,8 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
         "permission_answered" => permission_answer(payload)
             .as_ref()
             .and_then(permission_detail),
+        "permission_asked" => tree_value(payload, &["question"]),
+        "permission_replied" => tree_value(payload, &["instruction"]),
         "transport_fallback" => tree_value(payload, &["detail"]),
         "worker_spawned" => {
             let provider = tree_value(payload, &["provider"]).map(|value| humanize(&value));
@@ -4943,6 +4956,7 @@ fn lifecycle_title(event_type: &str) -> String {
         "network_retry_exhausted" => "Network retries exhausted",
         "effort_mismatch" => "Effort mismatch",
         "steered" => "Instruction sent",
+        "permission_asked" => "Waiting for your go-ahead",
         "steer_accepted" => "Instruction accepted",
         "steer_rejected" => "Instruction rejected",
         "model_changed" => "Model changed",
@@ -5017,6 +5031,11 @@ fn event_title(event_type: &str, payload: &BTreeMap<String, Value>) -> String {
         "permission_answered" => permission_answer(payload)
             .as_ref()
             .map_or_else(|| lifecycle_title(event_type), permission_title),
+        "permission_replied" => match text_value(payload.get("answer")) {
+            Some("allow") => "You allowed it".into(),
+            Some("refuse") => "You refused it".into(),
+            _ => "You refused it and said what to do instead".into(),
+        },
         "agent.system" => match system_subtype(payload) {
             "init" => "Session started".into(),
             "task_started" => SUBAGENT_STARTED_TITLE.into(),
@@ -8139,6 +8158,71 @@ mod tests {
         assert_eq!(
             refused.detail.as_deref(),
             Some("Write /etc/hosts · outside this task's scope: /etc/hosts")
+        );
+    }
+
+    #[test]
+    fn a_question_put_to_the_person_reads_as_their_decision() {
+        let payload = |value: serde_json::Value| -> BTreeMap<String, Value> {
+            value
+                .as_object()
+                .expect("an object")
+                .clone()
+                .into_iter()
+                .collect()
+        };
+        let asked = event_view(
+            &lifecycle_event(
+                "permission_asked",
+                TaskState::NeedsInput,
+                payload(serde_json::json!({
+                    "title": "cp src/app.ts /tmp/app.ts.bak",
+                    "kind": "execute",
+                    "outsideScope": ["/tmp/app.ts.bak"],
+                    "question": "The worker wants to run `cp src/app.ts /tmp/app.ts.bak`. Allow it?",
+                })),
+            ),
+            Provider::OpenCode,
+        );
+        assert_eq!(asked.title, "Waiting for your go-ahead");
+        assert!(
+            asked
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("Allow it?")),
+            "{asked:?}"
+        );
+
+        let told = event_view(
+            &lifecycle_event(
+                "permission_replied",
+                TaskState::Running,
+                payload(
+                    serde_json::json!({"answer": "instead", "instruction": "keep it in the project"}),
+                ),
+            ),
+            Provider::OpenCode,
+        );
+        assert_eq!(told.title, "You refused it and said what to do instead");
+        assert_eq!(told.detail.as_deref(), Some("keep it in the project"));
+
+        let refused = event_view(
+            &lifecycle_event(
+                "permission_answered",
+                TaskState::Running,
+                payload(serde_json::json!({
+                    "title": "Edit /tmp/x",
+                    "access": "write",
+                    "allowed": false,
+                    "outsideScope": ["/tmp/x"],
+                    "answeredByPerson": true,
+                })),
+            ),
+            Provider::OpenCode,
+        );
+        assert_eq!(
+            refused.detail.as_deref(),
+            Some("Edit /tmp/x · you refused it")
         );
     }
 

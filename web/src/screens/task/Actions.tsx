@@ -298,6 +298,17 @@ function deniedPaths(current: TaskScope | undefined, suggested: TaskScope | unde
 }
 
 /** Explains why a task is blocked, in the copy the reference draws. */
+/** A worker parked on a step outside its task, waiting for the person to allow or refuse it. */
+export function awaitsPermission(task: Pick<Task, "state">, events: Pick<TaskEventView, "type">[]): boolean {
+  if (task.state !== "needs_input") return false;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const type = events[index].type;
+    if (type === "permission_asked") return true;
+    if (type === "permission_replied" || type === "needs_input" || type === "run_interrupted") return false;
+  }
+  return false;
+}
+
 export function explainBlocked(
   completion: TaskCompletion | undefined,
   currentScope: TaskScope | undefined,
@@ -974,6 +985,26 @@ export function TaskControls({
         <div className="pinned-question" ref={pinnedQuestionRef}>
           <p className="pinned-question-label">Waiting for your answer</p>
           <MarkdownContent source={pinnedQuestion} />
+          {awaitsPermission(task, events) && (
+            <div className="pinned-question-actions">
+              <button
+                className="task-action task-action-primary"
+                type="button"
+                disabled={busy}
+                onClick={() => void run(() => executeReply(task.id, "allow", task.scope), replyTitles(task))}
+              >
+                Allow
+              </button>
+              <button
+                className="task-action"
+                type="button"
+                disabled={busy}
+                onClick={() => void run(() => executeReply(task.id, "refuse", task.scope), replyTitles(task))}
+              >
+                Refuse
+              </button>
+            </div>
+          )}
         </div>
       )}
       {routing.type !== "none" && (
