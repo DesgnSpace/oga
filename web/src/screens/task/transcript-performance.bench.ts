@@ -29,7 +29,6 @@ const task: Task = {
   updatedAt: stamp(0),
   output: "",
   scope: { read: [], write: [] },
-  allowQuestions: true,
   canDelegate: false,
 };
 

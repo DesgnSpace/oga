@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- You can no longer set custom worker instructions. Workers receive your brief, project memories, and optional commit attribution; scope stays enforced by permissions, and your brief sets how they report back.
+
 ## 0.2.2 - 2026-09-25
 
 - When a worker splits its task across subagents, each subagent's work now shows as its own group in the task's activity, with its status and its answer, instead of mixing into one list.

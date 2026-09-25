@@ -323,7 +323,7 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
     -- Preferences a person sets, scoped to one directory. The global scope is
     -- the home directory's own row, so it is an ordinary row rather than a
     -- sentinel, and one key per concern keeps the table generic: 'models'
-    -- carries per-worker model enablement, 'prompts' the worker prompt text.
+    -- carries per-worker model enablement, and 'callerPrompts' holds brief rules.
     CREATE TABLE IF NOT EXISTS cwd_settings (
       cwd TEXT NOT NULL,
       key TEXT NOT NULL,

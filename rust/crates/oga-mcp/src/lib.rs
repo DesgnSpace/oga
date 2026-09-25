@@ -306,7 +306,6 @@ impl McpServer {
         let mut request = DispatchRequest::new(profile_id, prompt, PathBuf::from(&cwd));
         request.model = Some(model);
         request.scope = scope(args.get("scope"))?;
-        request.allow_questions = optional_bool(args, "allowQuestions").unwrap_or(true);
         request.can_delegate = optional_bool(args, "canDelegate").unwrap_or(false);
         request.timeout = optional_u64(args, "timeoutMs")?.map(Duration::from_millis);
         request.parent_task_id = optional_string(args, "parent");
@@ -585,7 +584,6 @@ impl McpServer {
                     let instruction = required_string(args, "instruction")?;
                     if args.get("timeoutMs").is_some()
                         || args.get("scope").is_some()
-                        || args.get("allowQuestions").is_some()
                         || args.get("model").is_some()
                         || args.get("effort").is_some()
                         || args.get("startAt").is_some()
@@ -637,9 +635,6 @@ impl McpServer {
         }
         if let Some(value) = args.get("scope") {
             request = request.scope(scope_value(value)?);
-        }
-        if let Some(value) = optional_bool(args, "allowQuestions") {
-            request = request.allow_questions(value);
         }
         if let Some(value) = optional_string(args, "model") {
             request = request.model(value);

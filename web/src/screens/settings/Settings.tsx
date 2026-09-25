@@ -14,7 +14,6 @@ import {
   CloseIcon,
   HistoryIcon,
   InfoIcon,
-  InstructionsIcon,
   KeyboardIcon,
   LinkIcon,
   ListIcon,
@@ -189,17 +188,6 @@ export default function SettingsPage({
     [],
   );
 
-  const loadPromptScope = useCallback(async (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => {
-    const cwd = scopeCwd(scope, projects);
-    setState((s) => ({ ...s, promptScope: scope, prompts: beginPromptLoad(s.prompts) }));
-    const result = await broker.prompt(cwd);
-    if (result.ok) {
-      setState((s) => ({ ...s, prompts: applyPromptConfig(s.prompts, result.value) }));
-    } else {
-      setState((s) => ({ ...s, prompts: applyPromptLoadError(s.prompts, result.error.message) }));
-    }
-  }, []);
-
   const loadCallerPromptScope = useCallback(
     async (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => {
       const cwd = scopeCwd(scope, projects);
@@ -242,9 +230,6 @@ export default function SettingsPage({
     if (state.overview !== "ready") return;
     if (!state.modelSettings.snapshot && !state.modelSettings.loading && !state.modelSettings.loadError) {
       void loadModelScope({ kind: "global" }, state.projects);
-    }
-    if (!state.prompts.loaded && !state.prompts.loadError && state.prompts.text === "" && state.prompts.inherited === "") {
-      void loadPromptScope({ kind: "global" }, state.projects);
     }
     if (
       !state.callerPrompts.loaded &&
@@ -386,22 +371,6 @@ export default function SettingsPage({
             <MemoriesPanel state={state} setState={setState} />
           </div>
           <div
-            id="settings-panel-prompts"
-            role="tabpanel"
-            tabIndex={0}
-            aria-labelledby="settings-tab-prompts"
-            hidden={activeTab !== "prompts"}
-            className={activeTab !== "prompts" ? "settings-tab-panel-hidden" : undefined}
-          >
-            <PromptsPanel
-              state={state}
-              setState={setState}
-              loadPromptScope={loadPromptScope}
-              offline={offline}
-              surface={WORKER_PROMPT_SURFACE}
-            />
-          </div>
-          <div
             id="settings-panel-callerPrompts"
             role="tabpanel"
             tabIndex={0}
@@ -469,8 +438,6 @@ function TabIcon({ tab }: { tab: SettingsTab }) {
       return <BellIcon />;
     case "memories":
       return <BookmarkIcon />;
-    case "prompts":
-      return <InstructionsIcon />;
     case "callerPrompts":
       return <ListIcon />;
     case "storage":
@@ -2058,21 +2025,6 @@ interface PromptSurface {
   apply: (state: SettingsState, model: PromptsModel) => SettingsState;
   save: (request: PromptWrite) => Promise<BridgeResult<PromptConfig>>;
 }
-
-const WORKER_PROMPT_SURFACE: PromptSurface = {
-  tab: "prompts",
-  label: "Worker instructions",
-  helper: (
-    <>
-      The whole message a worker receives, sent as written. Use {"{{brief}}"}, {"{{scope}}"}, {"{{memories}}"},{" "}
-      {"{{attribution}}"}, and {"{{reporting}}"} where each part should land; the task slot is added first when missing.
-    </>
-  ),
-  model: (state) => state.prompts,
-  scope: (state) => state.promptScope,
-  apply: (state, prompts) => ({ ...state, prompts }),
-  save: (request) => broker.putPrompt(request),
-};
 
 const CALLER_PROMPT_SURFACE: PromptSurface = {
   tab: "callerPrompts",

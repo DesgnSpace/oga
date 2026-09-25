@@ -436,15 +436,6 @@ export function BookmarkIcon({ size = 16, className }: IconProps) {
   );
 }
 
-export function InstructionsIcon({ size = 16, className }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <rect x={2.5} y={2.5} width={11} height={11} rx={2.5} />
-      <path d="M5.5 5.8h5M5.5 8h5M5.5 10.2h3" />
-    </Svg>
-  );
-}
-
 export function ListIcon({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>
@@ -520,7 +511,6 @@ export const iconRegistry: Array<{ name: string; Component: React.ComponentType<
   { name: "LinkIcon", Component: LinkIcon },
   { name: "BellIcon", Component: BellIcon },
   { name: "BookmarkIcon", Component: BookmarkIcon },
-  { name: "InstructionsIcon", Component: InstructionsIcon },
   { name: "ListIcon", Component: ListIcon },
   { name: "HistoryIcon", Component: HistoryIcon },
   { name: "KeyboardIcon", Component: KeyboardIcon },

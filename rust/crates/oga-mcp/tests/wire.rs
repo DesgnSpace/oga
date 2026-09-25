@@ -144,6 +144,10 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
         .as_str()
         .expect("prompt description");
     assert!(description.contains("It is sent as written"));
+    assert!(description.contains("directory's memories"));
+    assert!(description.contains("commit attribution"));
+    assert!(!description.contains("reporting protocol"));
+    assert!(!description.contains("the scope"));
     assert!(description.ends_with("Project rule: always name the entry file."));
 }
 
@@ -181,6 +185,14 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
     ] {
         assert!(names.contains(&name), "missing tool {name}");
     }
+    let delegate = tools
+        .iter()
+        .find(|tool| tool["name"] == "delegate")
+        .unwrap();
+    assert!(delegate["inputSchema"]["properties"]["scope"].is_object());
+    assert!(delegate["inputSchema"]["properties"]["allowQuestions"].is_null());
+    let resume = tools.iter().find(|tool| tool["name"] == "resume").unwrap();
+    assert!(resume["inputSchema"]["properties"]["allowQuestions"].is_null());
 }
 
 #[tokio::test]

@@ -385,7 +385,6 @@ mod tests {
             orchestrator_id: None,
             scope: TaskScope::default(),
             grant_id: None,
-            allow_questions: true,
             can_delegate: false,
             timeout_ms: None,
             effort: None,

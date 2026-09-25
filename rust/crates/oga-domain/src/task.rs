@@ -492,7 +492,6 @@ pub struct Task {
     /// Grant the scope came from; absent means none was stated or on file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grant_id: Option<String>,
-    pub allow_questions: bool,
     /// Whether this task may hand work onward. Off means the broker never
     /// serves it the delegate tool, so the work stays where it was sent.
     #[serde(default)]

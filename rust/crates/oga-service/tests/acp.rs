@@ -1555,7 +1555,7 @@ async fn opencode2_without_acp_runs_on_its_command_line_before_any_prompt() {
             "opencode/deep#high",
             "--auto",
             "--",
-            "Worker mode: you are executing an assigned Oga task.",
+            "do the work",
         ],
         "a private server, the effort after `#`, and no directory flag: it ran in the task's directory"
     );

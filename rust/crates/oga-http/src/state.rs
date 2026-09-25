@@ -688,7 +688,6 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         orchestrator_id: row.get(17)?,
         scope,
         grant_id: row.get(20)?,
-        allow_questions: row.get::<_, i64>(21)? != 0,
         can_delegate: row.get::<_, i64>(36)? != 0,
         timeout_ms: row.get(22)?,
         effort: row.get(23)?,

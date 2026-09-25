@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 use crate::{
     router::{HttpError, HttpState, latest_event_id, parse_json, parse_optional_json},
     routing::{self, RouteInput},
-    settings, state,
+    state,
 };
 
 #[derive(Debug, Deserialize, Default)]
@@ -32,7 +32,6 @@ pub(crate) struct DispatchBody {
     pub cwd: Option<String>,
     pub parent: Option<String>,
     pub scope: Option<TaskScope>,
-    pub allow_questions: Option<bool>,
     pub can_delegate: Option<bool>,
     pub effort: Option<String>,
     /// The kind of work, when the caller names it, in the same vocabulary
@@ -63,7 +62,6 @@ struct ResumeBody {
     instruction: Option<String>,
     timeout_ms: Option<u64>,
     scope: Option<TaskScope>,
-    allow_questions: Option<bool>,
     start_at: Option<String>,
     queue: Option<QueueAction>,
 }
@@ -197,7 +195,6 @@ pub(crate) async fn dispatch_body(
     )
     .await?;
     let workspace = cwd.display().to_string();
-    let worker_prompt = settings::worker_prompt(&state.store, &workspace)?;
     let (scope, grant_id, remember_scope) = match body.scope {
         Some(scope) => (scope, None, true),
         None => {
@@ -224,7 +221,6 @@ pub(crate) async fn dispatch_body(
     request.scope = scope;
     request.grant_id = grant_id;
     request.remember_scope = remember_scope;
-    request.allow_questions = body.allow_questions.unwrap_or(true);
     request.can_delegate = body.can_delegate.unwrap_or(false);
     request.timeout = body.timeout_ms.map(Duration::from_millis);
     request.parent_task_id = body.parent;
@@ -237,7 +233,6 @@ pub(crate) async fn dispatch_body(
     request.depends_on = body.depends_on.unwrap_or_default();
     request.on_blocker_failure = body.on_blocker_failure.unwrap_or(OnBlockerFailure::Hold);
     request.selection = Some(route.decision);
-    request.worker_prompt = Some(worker_prompt);
     request.start_at = body.start_at;
     request.attachments = body.attachments.unwrap_or_default();
     Ok(state.dispatcher.dispatch(request).await?.task)
@@ -361,11 +356,7 @@ pub async fn resume(
                     current.id
                 ))
             })?;
-        if body.timeout_ms.is_some()
-            || body.scope.is_some()
-            || body.allow_questions.is_some()
-            || body.start_at.is_some()
-        {
+        if body.timeout_ms.is_some() || body.scope.is_some() || body.start_at.is_some() {
             return Err(HttpError::bad_request(format!(
                 "a queued follow-up takes only an instruction: {}",
                 current.id
@@ -386,9 +377,6 @@ pub async fn resume(
     }
     if let Some(timeout_ms) = body.timeout_ms {
         request = request.timeout_ms(timeout_ms);
-    }
-    if let Some(allow_questions) = body.allow_questions {
-        request = request.allow_questions(allow_questions);
     }
     if let Some(start_at) = body.start_at {
         request = request.start_at(start_at);

@@ -29,16 +29,7 @@ const GROUPS: &[(&str, &[&str])] = &[
     ("label", &["title", "tldr"]),
     // The task's location is its project directory or worktree.
     ("location", &["cwd", "worktree"]),
-    (
-        "scope",
-        &[
-            "scope",
-            "grantId",
-            "allowQuestions",
-            "canDelegate",
-            "timeoutMs",
-        ],
-    ),
+    ("scope", &["scope", "grantId", "canDelegate", "timeoutMs"]),
     ("prompt", &["prompt"]),
     ("shippedPrompt", &["shippedPrompt"]),
     ("output", &["output"]),
@@ -150,9 +141,6 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
         && let Some(grant) = &task.grant_id
     {
         view.insert("grantId".into(), json!(grant));
-    }
-    if want.contains("allowQuestions") {
-        view.insert("allowQuestions".into(), json!(task.allow_questions));
     }
     if want.contains("canDelegate") {
         view.insert("canDelegate".into(), json!(task.can_delegate));

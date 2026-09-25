@@ -28,40 +28,9 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
      backend, database, docs, tests, review, research, refactor";
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
-pub const PROMPTS_KEY: &str = "prompts";
 pub const CALLER_PROMPTS_KEY: &str = "callerPrompts";
 /// The prompt guidance for callers writing a `delegate` brief.
 pub const DEFAULT_CALLER_PROMPT: &str = "A brief is the only account of the work the worker gets. It cannot see your conversation, and it is a smaller model with no judgment under ambiguity. Write down every fact you already hold and decide every choice it would otherwise guess. Do not go discover more: if writing the brief needs new reading, the task is too vague or too big. One deliverable per task; two deliverables is two tasks. A good brief carries: the deliverable in one sentence; why it matters; what you already know (entry points, symbols, conventions, dead ends); decisions made; what not to touch; checks it can run to know it is done; and the output shape. Length is fine, vagueness is not.";
-/// The default worker prompt, with task context filled in per run.
-pub const DEFAULT_WORKER_PROMPT: &str = concat!(
-    "Worker mode: you are executing an assigned Oga task.\n",
-    "Continue the assigned brief directly.\n",
-    "\n",
-    "{{brief}}\n",
-    "\n",
-    "{{scope}}\n",
-    "\n",
-    "## Worker rules\n",
-    "1. Blocked means stop. A command that will not run, a missing credential, an account or signup, a permission denial, a path outside your scope, a decision this brief does not answer — stop and report it, naming the blocker and the one decision you need.\n",
-    "2. Do not work around a blocker. No retry loops, no second tool for the same job, no creating accounts, no linking or authenticating anything, no faking or stubbing the result. Stop, finish what does not depend on it, then report the exact command or path and say whether you need the caller to decide or to run it and return the output.\n",
-    "3. Partial work is a valid result. Finish what is unblocked, then report what you stopped on.\n",
-    "4. Never report a result you did not observe. If you could not run a check, say so and say why, instead of describing an outcome you did not see.\n",
-    "5. Open your final report with `## TL;DR` — 1-3 plain-language sentences stating what was done or found and the outcome. Detail follows after; this applies to your final answer, not to intermediate messages.\n",
-    "6. Write that TL;DR as bullets — one idea per line, never a paragraph — and make it stand alone: no bullet may need the detail below it to make sense.\n",
-    "7. Keep it to roughly ten lines or fewer: the verdict; what the work did or decided, one meaningful line per decision; checks run and their results, quoting failures exactly; and what is left, broken, or uncertain, or \"nothing\".\n",
-    "8. Describe meaning, not a file list. Name a file only when the file itself is the point, such as a moved file, deleted feature, or new entry point. Keep the branch line for worktree tasks.\n",
-    "9. Clear local, reversible obstacles yourself — a stray generated file blocking a checkout, a stale lockfile, a missing directory, a tool needing a flag — decide, apply the fix, retry, and note it in the report. Stop only when the obstacle needs the caller: a credential, a scope or product decision, or an action that is irreversible or outside scope. A blocker is a decision you cannot make, not a step that failed once.\n",
-    "10. If a clearly separate continuation is needed, state why it is separate and emit a compact caller-facing pointer with the child task ID and title, so the caller can start `oga watch <childTaskId>` and inspect after settlement. Do not include prompt or output in the pointer.\n",
-    "11. Finding code starts with `oga query \"<what you need>\"`, every time, before any `find`, `rg`, `grep`, or glob. It is the project's own index: it takes a plain description, not just a name, and answers with the file, symbol, and line, kept in step with the working tree. Add `--code` when you want the source back with the answer, and read what came back instead of reopening the file it names; the bodies are excerpts, so open the file when the part you need was cut. Seven answers come back — `--limit N` changes that, and `--in PATH` holds the answer to one folder or file. Fall back to `rg` or `find` only when query returns no match, or when the task needs every occurrence rather than the right place; when that happens and the lookup had pointed elsewhere, `oga relearn \"<the words you asked>\" <path>#<symbol>` records the right place for next time, unless the brief says not to. A lookup that already answered correctly needs nothing.\n",
-    "12. Run the relevant checks before reporting completion, and say what you ran. Run JavaScript checks with `bun` or `bunx`; existing failures on the base branch do not block delivery.\n",
-    "13. Commit the work, push the branch, and open a pull request with `gh pr create --base main`.\n",
-    "\n",
-    "{{memories}}\n",
-    "\n",
-    "{{attribution}}\n",
-    "\n",
-    "{{reporting}}"
-);
 
 fn yaml_key(value: &serde_yaml::Value) -> Option<&str> {
     value.as_str()
@@ -1419,56 +1388,8 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
     Ok(Some(rules))
 }
 
-/// The worker prompt one `.oga.yaml` writes for its own scope: plain text
-/// that is sent as written, with `{{brief}}` marking where the task lands,
-/// alongside `{{scope}}`, `{{memories}}`,
-/// `{{attribution}}`, `{{reporting}}`, and the run itself as `{{task_id}}`,
-/// `{{provider}}`, `{{model}}`, `{{effort}}`. A value without `{{brief}}`
-/// keeps working: resolution gives it the slot first through
-/// [`ensure_brief_slot`], leaving its words and order untouched.
-/// `attribution` is the only other key: `false` turns off the supervision
-/// line workers stamp on commits and pull requests, `true` (or leaving it
-/// out) leaves it on. Any other key is a rule the writer expects Oga to
-/// honour and Oga would silently drop, so it fails the read instead.
-pub fn read_worker_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>, ConfigError> {
-    let Some(layer) = layer else {
-        return Ok(None);
-    };
-    let Some(worker) = layer.root.get("worker") else {
-        return Ok(None);
-    };
-    let table = worker
-        .as_mapping()
-        .ok_or_else(|| invalid(&layer.path, "worker", WORKER_SHAPE))?;
-    if let Some(key) = table.keys().find_map(|key| {
-        let key = yaml_key(key)?;
-        (key != "prompt" && key != "attribution").then_some(key)
-    }) {
-        return Err(invalid(
-            &layer.path,
-            &format!("worker.{key}"),
-            &format!("unknown key; {WORKER_SHAPE}"),
-        ));
-    }
-    table
-        .get("prompt")
-        .map(|prompt| {
-            prompt
-                .as_str()
-                .map(|prompt| prompt.trim().to_owned())
-                .ok_or_else(|| {
-                    invalid(
-                        &layer.path,
-                        "worker.prompt",
-                        "must be text; write it as a block with `prompt: |`",
-                    )
-                })
-        })
-        .transpose()
-}
-
 const WORKER_SHAPE: &str =
-    "worker takes prompt, holding the rules text, and an optional attribution flag";
+    "worker takes an optional attribution flag; prompt is accepted and ignored";
 
 /// The brief rules one `.oga.yaml` writes for its own scope: plain text read
 /// by the agent that calls `delegate`, with `{{default}}` standing for
@@ -1514,21 +1435,11 @@ pub fn read_caller_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
 
 const CALLER_SHAPE: &str = "caller takes prompt, holding the brief rules text";
 
-/// The single structural guarantee: the task slot. A template holding
-/// `{{brief}}` is sent as written, nothing added. Anything older — plain
-/// rules from before templates existed — gets the slot first, where the task
-/// always landed, so existing prompts keep working with their words and
-/// order untouched.
-pub fn ensure_brief_slot(raw: &str) -> String {
-    if raw.contains("{{brief}}") {
-        raw.to_owned()
-    } else {
-        format!("{{{{brief}}}}\n\n{raw}")
-    }
-}
-
 /// Whether this scope stamps worker output with the Done-with-Oga line.
 /// `None` means the file says nothing and the next scope up decides.
+/// `prompt` is accepted and ignored, so files written before worker prompts
+/// were dropped keep loading; any other key is a rule the writer expects Oga
+/// to honour and Oga would silently drop, so it fails the read instead.
 pub fn read_worker_attribution(layer: Option<&ConfigLayer>) -> Result<Option<bool>, ConfigError> {
     let Some(layer) = layer else {
         return Ok(None);
@@ -1539,6 +1450,16 @@ pub fn read_worker_attribution(layer: Option<&ConfigLayer>) -> Result<Option<boo
     let table = worker
         .as_mapping()
         .ok_or_else(|| invalid(&layer.path, "worker", WORKER_SHAPE))?;
+    if let Some(key) = table.keys().find_map(|key| {
+        let key = yaml_key(key)?;
+        (key != "prompt" && key != "attribution").then_some(key)
+    }) {
+        return Err(invalid(
+            &layer.path,
+            &format!("worker.{key}"),
+            &format!("unknown key; {WORKER_SHAPE}"),
+        ));
+    }
     table
         .get("attribution")
         .map(|value| {
@@ -2427,40 +2348,6 @@ mod tests {
     }
 
     #[test]
-    fn worker_prompt_reads_the_block_verbatim() {
-        let project = layer(
-            "/work/.oga.yaml",
-            "version: 1\nworker:\n  prompt: |\n    1. Blocked means stop.\n    2. Report what you ran.\n",
-        );
-
-        assert_eq!(
-            read_worker_prompt(Some(&project)).unwrap().as_deref(),
-            Some("1. Blocked means stop.\n2. Report what you ran.")
-        );
-    }
-
-    #[test]
-    fn worker_prompt_is_absent_without_a_table() {
-        assert!(read_worker_prompt(None).unwrap().is_none());
-        assert!(
-            read_worker_prompt(Some(&layer("/work/.oga.yaml", "version: 1\n")))
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn worker_prompt_rejects_every_other_key() {
-        let project = layer("/work/.oga.yaml", "worker:\n  tldr_sentences: 1-3\n");
-        let error = read_worker_prompt(Some(&project)).unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "invalid config /work/.oga.yaml at worker.tldr_sentences: unknown key; worker takes prompt, holding the rules text, and an optional attribution flag"
-        );
-    }
-
-    #[test]
     fn worker_attribution_defaults_on_and_resolves_project_first() {
         assert!(read_worker_attribution(None).unwrap().is_none());
         let on = layer("/work/.oga.yaml", "worker:\n  attribution: true\n");
@@ -2478,34 +2365,27 @@ mod tests {
     }
 
     #[test]
-    fn brief_slot_is_added_first_only_when_missing() {
-        assert_eq!(
-            ensure_brief_slot("{{brief}}\n\nBe terse."),
-            "{{brief}}\n\nBe terse."
+    fn the_stale_prompt_key_under_worker_is_ignored_while_attribution_still_reads() {
+        let project = layer(
+            "/work/.oga.yaml",
+            "worker:\n  prompt: old rules\n  attribution: false\n",
         );
-        assert_eq!(ensure_brief_slot("Be terse."), "{{brief}}\n\nBe terse.");
-        assert_eq!(ensure_brief_slot(""), "{{brief}}\n\n");
+
+        assert_eq!(
+            read_worker_attribution(Some(&project)).unwrap(),
+            Some(false)
+        );
     }
 
     #[test]
-    fn editable_default_is_a_template_carrying_the_house_style() {
-        assert!(DEFAULT_WORKER_PROMPT.contains("{{brief}}"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("{{scope}}"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("{{memories}}"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("{{attribution}}"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("{{reporting}}"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("Clear local, reversible obstacles yourself"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("oga query"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("Add `--code` when you want the source back"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("gh pr create"));
-        assert!(DEFAULT_WORKER_PROMPT.contains("Continue the assigned brief directly")); // default text, deletable
-    }
+    fn worker_rejects_every_other_key() {
+        let project = layer("/work/.oga.yaml", "worker:\n  tldr_sentences: 1-3\n");
+        let error = read_worker_attribution(Some(&project)).unwrap_err();
 
-    #[test]
-    fn worker_prompt_rejects_a_non_text_block() {
-        let project = layer("/work/.oga.yaml", "worker:\n  prompt:\n    - one\n");
-
-        assert!(read_worker_prompt(Some(&project)).is_err());
+        assert_eq!(
+            error.to_string(),
+            "invalid config /work/.oga.yaml at worker.tldr_sentences: unknown key; worker takes an optional attribution flag; prompt is accepted and ignored"
+        );
     }
 
     #[test]
@@ -2554,5 +2434,7 @@ mod tests {
         assert!(DEFAULT_CALLER_PROMPT.contains("It cannot see your conversation"));
         assert!(DEFAULT_CALLER_PROMPT.contains("One deliverable per task"));
         assert!(DEFAULT_CALLER_PROMPT.contains("Length is fine, vagueness is not."));
+        assert!(!DEFAULT_CALLER_PROMPT.contains("OGA_NEEDS_INPUT"));
+        assert!(!DEFAULT_CALLER_PROMPT.contains("Scope for this task"));
     }
 }

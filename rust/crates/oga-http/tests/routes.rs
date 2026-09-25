@@ -89,7 +89,6 @@ impl Fixture {
                     read: vec!["**".into()],
                     write: vec!["**".into()],
                 },
-                allow_questions: true,
                 can_delegate: false,
                 tldr: Some("fixture task".into()),
                 title: Some("Fixture task".into()),
@@ -427,7 +426,6 @@ async fn archive_returns_while_a_worktree_copy_is_preparing() {
             read: vec!["**".into()],
             write: vec!["**".into()],
         },
-        allow_questions: true,
         ..Task::default()
     });
 
@@ -1329,35 +1327,6 @@ async fn settings_routes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(memories["memories"].as_array().expect("memories").len(), 1);
 
-    let (status, prompt) = json_response(
-        request(
-            &fixture.router,
-            Method::GET,
-            &format!("/api/prompts?cwd={cwd}"),
-            Body::empty(),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(prompt["written"], false);
-    assert_eq!(prompt["scope"], "project");
-
-    let (status, prompt) = json_response(
-        request(
-            &fixture.router,
-            Method::PUT,
-            "/api/prompts",
-            Body::from(
-                json!({ "cwd": cwd, "written": true, "value": "Use the fixture." }).to_string(),
-            ),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(prompt["value"], "{{brief}}\n\nUse the fixture.");
-
     let (status, models) = json_response(
         request(
             &fixture.router,
@@ -1464,78 +1433,6 @@ async fn model_settings_reflect_yaml_enablement_overrides() {
     assert_eq!(
         settings["workers"][0]["models"][0]["hasEnabledOverride"],
         true
-    );
-}
-
-#[tokio::test]
-async fn a_project_file_owns_its_worker_rules() {
-    let fixture = Fixture::new();
-    let cwd = fixture.canonical_cwd();
-    fixture.write_source(
-        ".oga.yaml",
-        "version: 1\nworker:\n  prompt: |\n    1. Read first.\n",
-    );
-
-    fixture
-        .store
-        .repositories()
-        .settings()
-        .put(
-            &cwd,
-            "prompts",
-            &json!({ "written": true, "value": "Saved instructions." }).to_string(),
-            "2026-01-01T00:00:00Z",
-        )
-        .expect("saved instructions");
-
-    let (status, prompt) = json_response(
-        request(
-            &fixture.router,
-            Method::GET,
-            &format!("/api/prompts?cwd={cwd}"),
-            Body::empty(),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(prompt["value"], "{{brief}}\n\n1. Read first.");
-    assert_eq!(prompt["configPath"], format!("{cwd}/.oga.yaml"));
-
-    let (status, refused) = json_response(
-        request(
-            &fixture.router,
-            Method::PUT,
-            "/api/prompts",
-            Body::from(json!({ "cwd": cwd, "written": true, "value": "Elsewhere." }).to_string()),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        refused["error"],
-        format!("These instructions come from {cwd}/.oga.yaml. Edit them there.")
-    );
-
-    fixture.write_source(".oga.yaml", "version: 1\nworker:\n  tldr: true\n");
-    let (status, invalid) = json_response(
-        request(
-            &fixture.router,
-            Method::GET,
-            &format!("/api/prompts?cwd={cwd}"),
-            Body::empty(),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        invalid["error"]
-            .as_str()
-            .expect("error")
-            .contains("at worker.tldr:"),
-        "{invalid}"
     );
 }
 
