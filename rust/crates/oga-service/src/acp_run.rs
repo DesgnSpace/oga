@@ -128,7 +128,6 @@ impl AcpRun {
         }
     }
 
-    /// The answer channel of the question the worker is parked on, if any.
     pub(crate) fn take_question(&self) -> Option<oneshot::Sender<Answer>> {
         self.questions.take()
     }
@@ -361,12 +360,10 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         };
     }
     run.questions.close();
-    if let Err(error) = withdraw_question(store, &task.id).await {
-        run.cancel();
-        run.session.shutdown().await;
-        turn.active.remove(&task.id, &active);
-        return Err(error.into());
-    }
+    let ended = withdraw_question(store, &task.id)
+        .await
+        .map_err(LifecycleError::from)
+        .and(ended);
     let ended = match ended {
         Ok(ended) => ended,
         Err(error) => {
@@ -1052,12 +1049,10 @@ struct TaskPolicy {
     /// Skill folders, which the agent reads whatever the scope.
     skills: Vec<PathBuf>,
     refused: Refused,
-    /// Where a step outside the scope waits for a person's answer.
     questions: Arc<Questions>,
 }
 
 impl TaskPolicy {
-    /// Paths the request reaches that the scope does not cover.
     fn outside_scope(
         &self,
         fields: &oga_acp::schema::ToolCallUpdateFields,

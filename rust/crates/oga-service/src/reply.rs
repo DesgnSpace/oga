@@ -129,9 +129,8 @@ pub async fn reply(
     Ok(task)
 }
 
-/// Decides the permission request a live worker is parked on. The task runs
-/// again before the worker hears the answer, so its next question, if any,
-/// opens after this one has closed.
+/// The task runs again before the worker hears the answer, so the worker's
+/// next question opens only after this one has closed.
 async fn answer_live_question(
     dispatcher: &Dispatcher,
     old: &Task,
@@ -139,8 +138,12 @@ async fn answer_live_question(
     answer: Answer,
 ) -> Result<Task, ContinuationError> {
     let now = now_iso();
+    let instruction = match &answer {
+        Answer::Instead(instruction) => Some(instruction.clone()),
+        Answer::Allow | Answer::Refuse => None,
+    };
     let mut payload = json!({"answer": answer.name()});
-    if let Answer::Instead(instruction) = &answer {
+    if let Some(instruction) = &instruction {
         payload["instruction"] = json!(instruction);
     }
     dispatcher.store().transaction(|tx| {
@@ -164,10 +167,6 @@ async fn answer_live_question(
         )?;
         Ok(())
     })?;
-    let instruction = match &answer {
-        Answer::Instead(instruction) => Some(instruction.clone()),
-        Answer::Allow | Answer::Refuse => None,
-    };
     if waiting.send(answer).is_err() {
         return Err(ContinuationError::Refusal(format!(
             "the worker stopped before your answer reached it: {}",

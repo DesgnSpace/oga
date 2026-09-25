@@ -251,9 +251,8 @@ fn open_questions(store: &Store) -> Result<Vec<InterruptedRun>, StoreError> {
         .collect())
 }
 
-/// The worker's permission request died with its run, so the task keeps
-/// waiting for a person, now on how the worker should go on, and a reply
-/// continues it in a new run.
+/// The worker's permission request died with its run, so the question becomes
+/// how it should go on, and a reply continues it in a new run.
 fn park_question(
     store: &Store,
     task_id: &str,

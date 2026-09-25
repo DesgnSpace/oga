@@ -264,9 +264,9 @@ impl Harness {
 
     /// Starts a task scoped to its own folder whose worker asks to reach
     /// outside it, and waits for the question.
-    async fn asked(&self, mode_timeout: Option<Duration>) -> Task {
+    async fn asked(&self, timeout: Option<Duration>) -> Task {
         let mut request = DispatchRequest::new("work", "back up the library", &self.cwd);
-        if let Some(timeout) = mode_timeout {
+        if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
         let dispatched = self.dispatcher.dispatch(request).await.expect("dispatched");

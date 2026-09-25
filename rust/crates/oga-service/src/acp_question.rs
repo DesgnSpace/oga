@@ -1,9 +1,5 @@
-//! A step the task's scope does not cover, put to a person while the worker
-//! stays parked on its permission request.
-//!
-//! One question is open at a time; the rest wait in the order the worker
-//! asked them. The turn's clock stops while a question is open, so a person
-//! may take as long as they like to answer.
+//! Permission requests outside the task's scope, put to a person one at a time
+//! while the worker stays parked on them.
 
 use std::{future::Future, sync::Mutex, time::Duration};
 
@@ -12,7 +8,6 @@ use tokio::{
     time::Instant,
 };
 
-/// What the person decided about the step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Answer {
     Allow,
@@ -22,8 +17,7 @@ pub(crate) enum Answer {
 }
 
 impl Answer {
-    /// `allow` and `refuse` are the two buttons, and a plain yes or no reads
-    /// as one of them; anything else is an instruction.
+    /// Anything that isn't a yes or a no is an instruction.
     pub(crate) fn read(reply: &str) -> Self {
         let reply = reply.trim();
         match reply
@@ -54,16 +48,15 @@ struct Slot {
 
 #[derive(Default)]
 pub(crate) struct Questions {
-    /// Held by the question that is open; the rest queue on it in order.
+    /// Tokio's mutex is fair, so queued questions open oldest first.
     turn: tokio::sync::Mutex<()>,
     slot: Mutex<Slot>,
     pub(crate) clock: TurnClock,
 }
 
 impl Questions {
-    /// Waits for this question's turn, opens it with `open`, and waits for
-    /// the person's answer. `None` when the run stopped first or `open` could
-    /// not put the question to anyone.
+    /// `None` when the run stopped first or `open` could not put the question
+    /// to anyone.
     pub(crate) async fn ask<Open>(&self, open: Open) -> Option<Answer>
     where
         Open: Future<Output = bool>,
@@ -140,8 +133,6 @@ impl TurnClock {
         self.resumed.notify_waiters();
     }
 
-    /// Resolves once the turn has run for its whole bound, not counting the
-    /// time spent waiting on a person.
     pub(crate) async fn expired(&self) {
         loop {
             // Taken before the state is read, so a resume in between still wakes it.
@@ -166,8 +157,6 @@ impl TurnClock {
     }
 }
 
-/// The question in the person's words: the step, what it reaches, and how
-/// to answer.
 pub(crate) fn permission_question(
     command: Option<&str>,
     writes: bool,

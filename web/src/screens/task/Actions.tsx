@@ -940,6 +940,7 @@ export function TaskControls({
     return Promise.resolve(true);
   };
 
+  const answer = (reply: "allow" | "refuse") => void run(() => executeReply(task.id, reply, task.scope), replyTitles(task));
   const removeQueued = (index: number) => void run(() => executeRemoveFollowUp(task.id, index), removeFollowUpTitles(task));
   const explanation = task.state === "blocked" || task.state === "failed"
     ? explainBlocked(task.completion, task.scope)
@@ -987,20 +988,10 @@ export function TaskControls({
           <MarkdownContent source={pinnedQuestion} />
           {awaitsPermission(task, events) && (
             <div className="pinned-question-actions">
-              <button
-                className="task-action task-action-primary"
-                type="button"
-                disabled={busy}
-                onClick={() => void run(() => executeReply(task.id, "allow", task.scope), replyTitles(task))}
-              >
+              <button className="task-action task-action-primary" type="button" disabled={busy} onClick={() => answer("allow")}>
                 Allow
               </button>
-              <button
-                className="task-action"
-                type="button"
-                disabled={busy}
-                onClick={() => void run(() => executeReply(task.id, "refuse", task.scope), replyTitles(task))}
-              >
+              <button className="task-action" type="button" disabled={busy} onClick={() => answer("refuse")}>
                 Refuse
               </button>
             </div>

@@ -4464,7 +4464,6 @@ struct PermissionAnswer<'a> {
     subject: Option<&'a str>,
     outside: Vec<&'a str>,
     unattended: bool,
-    /// A person decided it, rather than the task's scope.
     by_person: bool,
 }
 
