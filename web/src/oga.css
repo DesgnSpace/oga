@@ -1670,11 +1670,15 @@ h1 {
 }
 
 .changed-files-header-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
     min-width: 0;
 }
 
 .changed-files-active-file {
-    margin: var(--space-1) 0 0;
+    min-width: 0;
+    margin: 0;
     overflow: hidden;
     color: var(--color-text-muted);
     font-family: var(--font-mono);
@@ -1684,7 +1688,8 @@ h1 {
 }
 
 .changed-files-summary {
-    margin: var(--space-1) 0 0;
+    min-width: 0;
+    margin: 0;
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
@@ -1702,12 +1707,9 @@ h1 {
     gap: var(--space-3);
 }
 
-.changed-files-header-title .changed-files-source-picker {
-    margin-left: calc(-1 * var(--space-4));
-}
-
 .changed-files-source-picker {
     position: relative;
+    flex: 0 0 auto;
 }
 
 .changed-files-source-trigger {
@@ -4596,21 +4598,18 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     background: var(--color-surface);
 }
 
-/* The filled/accent button keeps a smaller, bolder form than the secondary
-   shape above. */
+/* The primary button shares the secondary shape and stands out only by a
+   light accent tint and a heavier label. */
 .settings-button-primary {
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius);
-    font-weight: 600;
-    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
-    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
-    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 25%, var(--color-border));
+    background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg));
+    color: var(--color-text);
+    font-weight: 500;
 }
 
 .settings-button-primary:not(:disabled):hover,
 .settings-button-primary:focus-visible {
-    border-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
+    background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg));
 }
 
 .settings-button-danger {

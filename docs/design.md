@@ -33,9 +33,9 @@ and renumbering them would move every screen. Where a reference calls for
 | Token | Value | Use |
 | --- | --- | --- |
 | `--radius-sm` | 4px | Key caps |
-| `--radius` | 6px | Inputs, selects, the primary (filled/accent) button |
+| `--radius` | 6px | Inputs, selects |
 | `--radius-md` | 8px | Rail pills, the rail search field |
-| `--radius-lg` | 12px | Cards, messages, the settings dialog, the secondary button |
+| `--radius-lg` | 12px | Cards, messages, the settings dialog, buttons |
 
 ## Type
 
