@@ -325,6 +325,13 @@ fn tool_view(
         return view;
     }
 
+    if let Some(items) = todo_items(payload) {
+        let mut view = todo_view(event, provider, items, Some(complete), raw_text);
+        view.action_id = tool_call_id(payload);
+        view.source_id = Some(tool_call_id(payload));
+        return view;
+    }
+
     let category = category(kind);
     let presentation = tool_presentation(&category, payload, subject.clone());
     // Nothing but the agent's own title says what an uncategorised call did,
@@ -505,6 +512,34 @@ fn plan_view(
         .get("entries")
         .and_then(Value::as_array)
         .map_or(&[][..], Vec::as_slice);
+    let mut view = todo_view(event, provider, entries, None, raw_text);
+    view.source_id = Some(None);
+    view
+}
+
+/// The items of an agent's todo tool (opencode's `todowrite` over ACP), from
+/// its input or, once the call completes under a renamed title, its output.
+fn todo_items(payload: &BTreeMap<String, Value>) -> Option<&[Value]> {
+    let from_input = payload.get("rawInput").and_then(|input| input.get("todos"));
+    let from_output = payload
+        .get("rawOutput")
+        .and_then(|output| output.get("metadata"))
+        .and_then(|metadata| metadata.get("todos"));
+    from_output
+        .or(from_input)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+}
+
+/// A checklist row, shared by ACP plans and todo tool calls. `complete` is the
+/// call's own status when there is one; a plan is complete when every step is.
+fn todo_view(
+    event: &TaskEvent,
+    provider: Provider,
+    entries: &[Value],
+    complete: Option<bool>,
+    raw_text: Option<String>,
+) -> TaskEventView {
     let total = entries.len() as u64;
     let completed = entries
         .iter()
@@ -526,7 +561,7 @@ fn plan_view(
         .and_then(|entry| text_value(entry.get("content")))
         .map(|content| cap(content.trim(), SUBJECT_LIMIT).0)
         .or_else(|| (total > 0 && completed == total).then(|| "all done".to_owned()));
-    let done = total > 0 && completed == total;
+    let done = complete.unwrap_or(total > 0 && completed == total);
     let mut view = provider_view(
         event,
         provider,
@@ -548,7 +583,6 @@ fn plan_view(
     view.target = presentation.text.clone();
     view.result = presentation.outcome.clone();
     view.complete = Some(done);
-    view.source_id = Some(None);
     view
 }
 
@@ -774,6 +808,30 @@ mod tests {
         assert_eq!(presentation.total, Some(2));
         assert_eq!(presentation.completed, Some(1));
         assert_eq!(presentation.outcome.as_deref(), Some("Port the transport"));
+    }
+
+    #[test]
+    fn an_opencode_todo_call_reads_as_the_checklist_after_its_title_changes() {
+        let todos = json!([
+            {"content": "Audit the tests", "status": "completed", "priority": "high"},
+            {"content": "Run the suite", "status": "in_progress", "priority": "high"},
+            {"content": "Open the PR", "status": "pending", "priority": "high"},
+        ]);
+        let view = view(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call_todo",
+            "status": "completed",
+            "title": "3 todos",
+            "rawOutput": {"output": "[]", "metadata": {"todos": todos, "truncated": false}},
+        }));
+        assert_eq!(view.title, "Todo list");
+        assert_eq!(view.complete, Some(true));
+        assert_eq!(view.action_id.as_deref(), Some("call_todo"));
+        let presentation = view.presentation.expect("a todo call presents a checklist");
+        assert_eq!(presentation.kind, PresentationType::Todo);
+        assert_eq!(presentation.total, Some(3));
+        assert_eq!(presentation.completed, Some(1));
+        assert_eq!(presentation.outcome.as_deref(), Some("Run the suite"));
     }
 
     #[test]
