@@ -747,12 +747,18 @@ async fn permission_answers_follow_the_tasks_scope() {
 }
 
 #[tokio::test]
-async fn a_worker_that_stops_on_a_refused_step_is_not_completed() {
+async fn a_worker_that_stops_on_a_refused_step_asks_how_to_go_on() {
     let harness = harness("refused-then-quiet");
 
     let task = harness.run("edit things").await;
 
-    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    assert_eq!(task.state, TaskState::NeedsInput, "{task:?}");
+    assert!(
+        task.question
+            .as_deref()
+            .is_some_and(|question| question.contains("/tmp/scratch")),
+        "{task:?}"
+    );
     let completion = task.completion.expect("completion");
     assert_eq!(completion.code, CompletionCode::PermissionDenied);
     assert!(
@@ -2542,7 +2548,7 @@ async fn antigravity_runs_over_acp_by_default_with_its_model_and_gemini_home() {
         chosen_settings(&harness),
         [
             ("model".to_owned(), "gemini-3.6-flash-medium".to_owned()),
-            ("mode".to_owned(), "yolo".to_owned()),
+            ("mode".to_owned(), "auto_edit".to_owned()),
         ],
         "the model --model names, approving every tool as --dangerously-skip-permissions does"
     );
@@ -2750,10 +2756,10 @@ async fn an_antigravity_follow_up_resumes_its_session_and_a_lost_prompt_is_never
     assert_eq!(
         chosen_settings(&harness)
             .iter()
-            .filter(|(id, value)| id == "mode" && value == "yolo")
+            .filter(|(id, value)| id == "mode" && value == "auto_edit")
             .count(),
         2,
-        "a resumed session approves every tool again before its prompt"
+        "a resumed session sets its approval mode again before its prompt"
     );
     assert_eq!(second.session_id, None);
     assert!(harness.cli_runs().is_empty());

@@ -32,6 +32,7 @@ use oga_domain::{
 use oga_events::ModelRecovery;
 use oga_providers::{
     AcpAdapter, AcpLaunch, AcpVersions, NO_FINAL_MESSAGE, OPENCODE_ADAPTER, Usage,
+    skill_directories,
 };
 use oga_runner::{ProviderRunner, RunRequest, Termination};
 use oga_store::{Store, StoreError};
@@ -226,6 +227,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         cwd: PathBuf::from(&task.cwd),
         scope: task.scope.clone(),
         declines_questions: adapter.declines_questions,
+        skills: skill_directories(turn.profile),
         refused: Refused::default(),
     });
     let refused = Arc::clone(&policy.refused);
@@ -710,7 +712,7 @@ fn outcome(
             None => failed(CompletionCode::Timeout, "provider run timed out".into()),
             Some(Ok(response)) => match response.stop_reason {
             StopReason::EndTurn => match transcript.stopped_on_refusal() {
-                Some(paths) => failed(CompletionCode::PermissionDenied, stopped_on_refusal(&paths)),
+                Some(paths) => asks_after_refusal(&paths),
                 None => interpret_worker_outcome(Some(0), transcript.final_text(), stderr, None),
             },
             StopReason::Cancelled => cancelled(),
@@ -782,14 +784,23 @@ fn stopped_mid_turn(reason: &str) -> String {
     )
 }
 
-fn stopped_on_refusal(paths: &[String]) -> String {
-    if paths.is_empty() {
-        "The worker stopped after Oga refused a step it asked to take. Resume the task and tell it how to go on without that step.".into()
+/// A worker that gave up on a refused step waits for a person to say how it
+/// goes on, and the reply resumes it.
+fn asks_after_refusal(paths: &[String]) -> WorkerOutcome {
+    let question = if paths.is_empty() {
+        "The worker stopped after Oga refused a step it asked to take. How should it go on without that step?".to_owned()
     } else {
         format!(
-            "The worker stopped after Oga refused it access to {}, which this task can't reach. Resume the task and tell it how to go on without it.",
+            "The worker stopped after Oga refused it access to {}, which this task can't reach. How should it go on without it?",
             paths.join(", ")
         )
+    };
+    WorkerOutcome {
+        state: TaskState::NeedsInput,
+        output: String::new(),
+        question: Some(question.clone()),
+        error: None,
+        completion: completion(None, true, CompletionCode::PermissionDenied, Some(question)),
     }
 }
 
@@ -851,8 +862,6 @@ struct Transcript {
     /// Only the last one matters: an agent that paused and then got through
     /// reports that too.
     recovery: Option<ModelRecovery>,
-    /// The last tool call the agent started this turn.
-    last_tool_call: Option<String>,
     refused: Refused,
 }
 
@@ -888,9 +897,8 @@ impl Transcript {
             }
             return Ok(());
         }
-        if let SessionUpdate::ToolCall(call) = &notification.update {
+        if matches!(notification.update, SessionUpdate::ToolCall(_)) {
             self.final_message.clear();
-            self.last_tool_call = Some(call.tool_call_id.0.to_string());
         }
         if let SessionUpdate::UsageUpdate(usage) = &notification.update {
             self.session_cost = usage
@@ -952,18 +960,24 @@ impl Transcript {
         Some(worker)
     }
 
-    /// An agent whose last step was refused and that said nothing after it
-    /// gave up on the task rather than finished it.
+    /// An agent that had a step refused and ended without a word after its
+    /// last tool call gave up on the task rather than finished it. The paths
+    /// are every one it was refused this turn.
     fn stopped_on_refusal(&self) -> Option<Vec<String>> {
         if !self.final_message.trim().is_empty() {
             return None;
         }
-        let call = self.last_tool_call.as_ref()?;
-        self.refused
+        let refused = self
+            .refused
             .lock()
-            .expect("refused tool call lock is not poisoned")
-            .get(call)
-            .cloned()
+            .expect("refused tool call lock is not poisoned");
+        if refused.is_empty() {
+            return None;
+        }
+        let mut paths: Vec<String> = refused.values().flatten().cloned().collect();
+        paths.sort();
+        paths.dedup();
+        Some(paths)
     }
 
     fn final_text(&self) -> String {
@@ -993,6 +1007,8 @@ struct TaskPolicy {
     scope: TaskScope,
     /// Every request is a question for a person, and nobody is there to answer.
     declines_questions: bool,
+    /// Skill folders, which the agent reads whatever the scope.
+    skills: Vec<PathBuf>,
     refused: Refused,
 }
 
@@ -1018,6 +1034,13 @@ impl AcpPolicy for TaskPolicy {
             let outside: Vec<String> = paths
                 .iter()
                 .filter(|path| !scope_covers(&self.cwd, rules, path))
+                .filter(|path| {
+                    writes
+                        || !self
+                            .skills
+                            .iter()
+                            .any(|skills| relative_inside(skills, path).is_some())
+                })
                 .map(|path| path.display().to_string())
                 .collect();
             let allowed = outside.is_empty() && !self.declines_questions;
@@ -1216,6 +1239,7 @@ mod tests {
                 write: rules(&["src/**"]),
             },
             declines_questions: false,
+            skills: vec![PathBuf::from("/home/.agents/skills")],
             refused: Refused::default(),
         };
         let request = |path: &str| {
@@ -1236,8 +1260,54 @@ mod tests {
 
         let inside = policy.permission(request("/repo/src/main.rs")).await;
         let outside = policy.permission(request("/repo/Cargo.toml")).await;
+        let skill = policy
+            .permission(request("/home/.agents/skills/ux/SKILL.md"))
+            .await;
 
         assert_eq!(inside, Decision::Select(PermissionOptionId::new("yes")));
         assert_eq!(outside, Decision::Select(PermissionOptionId::new("no")));
+        assert_eq!(skill, Decision::Select(PermissionOptionId::new("no")));
+    }
+
+    #[tokio::test]
+    async fn a_skill_folder_reads_whatever_the_scope() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+        let policy = TaskPolicy {
+            store: Arc::clone(&store),
+            task_id: "task".into(),
+            turn_id: 1,
+            cwd: PathBuf::from("/repo"),
+            scope: TaskScope {
+                read: rules(&["**"]),
+                write: rules(&["src/**"]),
+            },
+            declines_questions: false,
+            skills: vec![PathBuf::from("/home/.agents/skills")],
+            refused: Refused::default(),
+        };
+        let read = |path: &str| {
+            RequestPermissionRequest::new(
+                "session",
+                ToolCallUpdate::new(
+                    "tool",
+                    ToolCallUpdateFields::new()
+                        .kind(ToolKind::Read)
+                        .locations(vec![ToolCallLocation::new(path)]),
+                ),
+                vec![
+                    option("yes", PermissionOptionKind::AllowOnce),
+                    option("no", PermissionOptionKind::RejectOnce),
+                ],
+            )
+        };
+
+        let skill = policy
+            .permission(read("/home/.agents/skills/ux/references/copy.md"))
+            .await;
+        let elsewhere = policy.permission(read("/home/.cargo/registry/src")).await;
+
+        assert_eq!(skill, Decision::Select(PermissionOptionId::new("yes")));
+        assert_eq!(elsewhere, Decision::Select(PermissionOptionId::new("no")));
     }
 }

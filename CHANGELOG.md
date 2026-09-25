@@ -3,7 +3,8 @@
 ## Unreleased
 
 - You can no longer set custom worker instructions. Workers receive your brief, project memories, and optional commit attribution; scope stays enforced by permissions, and your brief sets how they report back.
-- A task whose worker gives up after Oga blocks one of its steps, such as writing outside the task's folder, now shows as blocked and names what it couldn't reach, instead of showing as done.
+- A task whose worker gives up after Oga blocks one of its steps, such as writing outside the task's folder, now asks you how to go on and names what it couldn't reach, instead of showing as done.
+- Workers can read their skills' files wherever those skills are installed.
 
 ## 0.2.2 - 2026-09-25
 

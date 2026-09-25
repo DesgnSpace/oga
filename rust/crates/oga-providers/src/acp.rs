@@ -443,7 +443,7 @@ fn antigravity() -> AcpAdapter {
             value: value.into(),
             required: true,
         };
-        vec![setting("model", launch.model), setting("mode", "yolo")]
+        vec![setting("model", launch.model), setting("mode", "auto_edit")]
     })
 }
 
@@ -936,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_selects_the_model_and_approves_tools_as_the_command_line_does() {
+    fn antigravity_selects_the_model_and_approves_edits_only() {
         let adapters = AcpAdapters::builtin();
         let adapter = adapters
             .get(Provider::Antigravity)
@@ -958,7 +958,7 @@ mod tests {
                 }),
                 [
                     setting("model", "gemini-3.1-pro-low"),
-                    setting("mode", "yolo"),
+                    setting("mode", "auto_edit"),
                 ],
                 "the model id carries its thinking level, so no effort is chosen"
             );

@@ -898,6 +898,25 @@ pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
     }
     env
 }
+/// Folders a worker loads skills from, which it reads whatever the task's
+/// scope: the shared agent folder, and each provider's own.
+pub fn skill_directories(profile: &Profile) -> Vec<PathBuf> {
+    let home = PathBuf::from(
+        environment_for(profile)
+            .get("HOME")
+            .cloned()
+            .unwrap_or_else(home),
+    );
+    vec![
+        home.join(".agents/skills"),
+        home.join(".claude/skills"),
+        home.join(".config/opencode/skills"),
+        home.join(".config/opencode/skill"),
+        PathBuf::from(skills_dir(profile)),
+        PathBuf::from(codex_home(profile)).join("skills"),
+    ]
+}
+
 fn skills_dir(profile: &Profile) -> String {
     PathBuf::from(claude_config_dir(profile))
         .join("skills")
