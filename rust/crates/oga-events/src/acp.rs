@@ -370,7 +370,7 @@ fn tool_call_id(payload: &BTreeMap<String, Value>) -> Option<String> {
         .filter(|id| !id.is_empty())
 }
 
-const CALL_FIELDS: [&str; 5] = ["kind", "status", "title", "locations", "rawInput"];
+const CALL_FIELDS: [&str; 6] = ["kind", "status", "title", "name", "locations", "rawInput"];
 
 #[derive(Default)]
 pub(crate) struct AcpCalls {

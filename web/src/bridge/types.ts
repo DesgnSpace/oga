@@ -276,6 +276,15 @@ export interface TaskEventView {
   sourceId?: string | null;
   complete?: boolean;
   minor?: boolean;
+  subagents?: SubagentLink[];
+}
+
+/** A row `launch`es a subagent, is a call it ran as a `member`, or delivers its `report` without being the launch. */
+export interface SubagentLink {
+  id: string;
+  role: "launch" | "member" | "report";
+  label?: string;
+  report?: string;
 }
 
 /** Which two sides a task diff compared. */

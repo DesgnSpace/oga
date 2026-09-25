@@ -1,7 +1,7 @@
 // Ported from rust/crates/oga-ui/src/activity/mod.rs `#[cfg(test)] mod tests`.
 
 import { describe, expect, it } from "bun:test";
-import type { EventKind, TaskEventView } from "@/bridge/types";
+import type { EventKind, SubagentLink, TaskEventView } from "@/bridge/types";
 import {
   type ActivityCall,
   type ActivityComposition,
@@ -9,6 +9,7 @@ import {
   ActivityStory,
   ActivityStoryProjection,
   type ActivitySegment,
+  type ActivitySubagent,
   type ActivityTurn,
   compositionCalls,
   nodesCallCount,
@@ -18,19 +19,7 @@ import {
   turnDurationMs,
 } from "./index";
 
-/**
- * Field shapes below are taken from real `agent.hook` rows recorded for a
- * Claude Code subagent run in `~/.oga/oga.db` (task e2cc68b5, agent_id
- * a93973f285e94df1c): `SubagentStart`/`SubagentStop` carry a shared
- * `agent_id` and `agent_type`; `PreToolUse`/`PostToolUse` in between carry
- * only `agent_id`, no `parent_tool_use_id` back to the parent's `Agent` call.
- */
-function hookEvent(
-  id: number,
-  title: string,
-  detail: string | undefined,
-  payload: Record<string, unknown>,
-): TaskEventView {
+function hookEvent(id: number, title: string, detail: string | undefined, subagents: SubagentLink[]): TaskEventView {
   return {
     id,
     taskId: "task",
@@ -41,16 +30,18 @@ function hookEvent(
     title,
     detail,
     createdAt: `2026-07-30T15:00:${String(id % 60).padStart(2, "0")}Z`,
-    rawText: JSON.stringify(payload),
+    subagents,
   };
 }
 
-function subagentStart(id: number, agentId: string, agentType = "general-purpose"): TaskEventView {
-  return hookEvent(id, "SubagentStart", agentType, { agent_id: agentId, agent_type: agentType });
+/** A hook run: `SubagentStart` launches it, `SubagentStop` reports for it, and its own calls name it. */
+function subagentStart(id: number, agentId: string, agentType = "general-purpose", parent?: string): TaskEventView {
+  const member: SubagentLink[] = parent === undefined ? [] : [{ id: parent, role: "member" }];
+  return hookEvent(id, "Subagent started", agentType, [{ id: agentId, role: "launch", label: agentType }, ...member]);
 }
 
-function subagentStop(id: number, agentId: string): TaskEventView {
-  return hookEvent(id, "SubagentStop", undefined, { agent_id: agentId, hook_event_name: "SubagentStop" });
+function subagentStop(id: number, agentId: string, report?: string): TaskEventView {
+  return hookEvent(id, "Subagent finished", undefined, [{ id: agentId, role: "report", report }]);
 }
 
 function subagentToolUse(id: number, agentId: string, command: string): TaskEventView {
@@ -58,27 +49,17 @@ function subagentToolUse(id: number, agentId: string, command: string): TaskEven
     ...event(id, "tool", "Bash"),
     phase: "completed",
     detail: command,
-    rawText: JSON.stringify({ agent_id: agentId }),
+    subagents: [{ id: agentId, role: "member" }],
   };
 }
 
-/**
- * The second bracketing shape, taken from `agent.system` rows of task
- * 749deccd: `task_started`/`task_notification` share a `task_id`, and the
- * sub-agent's own calls point back at the `tool_use_id` that launched it.
- */
-function taskStarted(id: number, taskId: string, toolUseId: string, description: string): TaskEventView {
+/** A streamed run: a launch notice and a report notice share the subagent's id. */
+function taskStarted(id: number, taskId: string, description: string): TaskEventView {
   return {
     ...event(id, "lifecycle", "Subagent started"),
     phase: "started",
     detail: description,
-    rawText: JSON.stringify({
-      type: "system",
-      subtype: "task_started",
-      task_id: taskId,
-      tool_use_id: toolUseId,
-      description,
-    }),
+    subagents: [{ id: taskId, role: "launch", label: description }],
   };
 }
 
@@ -87,15 +68,15 @@ function taskNotification(id: number, taskId: string, status: string): TaskEvent
     ...event(id, "lifecycle", "Subagent finished"),
     phase: status === "completed" ? "completed" : "failed",
     detail: status === "completed" ? undefined : "Failed",
-    rawText: JSON.stringify({ type: "system", subtype: "task_notification", task_id: taskId, status }),
+    subagents: [{ id: taskId, role: "report" }],
   };
 }
 
-function subagentChildTool(id: number, parentToolUseId: string, command: string): TaskEventView {
+function subagentChildTool(id: number, taskId: string, command: string): TaskEventView {
   return {
     ...event(id, "command", "Bash"),
     detail: command,
-    parentActionId: parentToolUseId,
+    subagents: [{ id: taskId, role: "member" }],
   };
 }
 
@@ -164,7 +145,9 @@ function segmentsOf(composition: ActivityComposition): ActivitySegment[] {
 
 function nodesOf(composition: ActivityComposition): ActivityNode[] {
   const flatten = (nodes: ActivityNode[]): ActivityNode[] =>
-    nodes.flatMap((node) => (node.type === "subagent" ? [node, ...flatten(node.subagent.nodes)] : [node]));
+    nodes.flatMap((node) =>
+      node.type === "subagents" ? [node, ...flatten(node.subagents.flatMap((subagent) => subagent.nodes))] : [node],
+    );
   return flatten(segmentsOf(composition).flatMap((segment) => segment.nodes));
 }
 
@@ -172,8 +155,12 @@ function callsOf(composition: ActivityComposition): ActivityCall[] {
   return compositionCalls(composition.blocks);
 }
 
-function subagentsOf(composition: ActivityComposition) {
-  return nodesOf(composition).flatMap((node) => (node.type === "subagent" ? [node.subagent] : []));
+function subagentsOf(composition: ActivityComposition): ActivitySubagent[] {
+  return nodesOf(composition).flatMap((node) => (node.type === "subagents" ? node.subagents : []));
+}
+
+function noticeIds(subagent: ActivitySubagent | undefined): number[] {
+  return subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : [])) ?? [];
 }
 
 /** What a reader sees where a call has no id of its own to fold on. */
@@ -410,64 +397,34 @@ describe("ActivityStory.compose", () => {
     expect(calls.map((call) => call.status)).toEqual(["interrupted"]);
   });
 
-  it("nests a subagent's work under a collapsible group keyed by agent_id", () => {
+  it("nests a subagent's work under the launch that names it", () => {
     const events: TaskEventView[] = [
       event(1, "message", "Response"),
       subagentStart(2, "a93973f285e94df1c"),
       subagentToolUse(3, "a93973f285e94df1c", "wc -l README.md"),
       subagentToolUse(4, "a93973f285e94df1c", "grep -rn Worked web/src"),
-      subagentStop(5, "a93973f285e94df1c"),
+      subagentStop(5, "a93973f285e94df1c", "Counted the lines."),
       event(6, "message", "Response"),
     ];
 
     const composition = ActivityStory.compose(events);
     const [subagent] = subagentsOf(composition);
 
-    expect(subagent?.start.id).toBe(2);
-    expect(subagent?.label).toBe("Subagent · general-purpose");
-    // Every event between the pair, and the stop itself, stays reachable
-    // behind the group instead of being dropped.
-    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([3, 4, 5]);
-    // Nothing outside the pair is swallowed into it.
+    expect(subagent?.events.map((row) => row.id)).toEqual([2, 5]);
+    expect(subagent?.label).toBe("general-purpose");
+    expect(noticeIds(subagent)).toEqual([3, 4]);
+    expect(subagent?.report).toBe("Counted the lines.");
+    expect(subagent?.status).toBe("done");
+    // Nothing outside the run is swallowed into it.
     expect(segmentsOf(composition).flatMap((segment) => segment.lead ? [segment.lead.id] : [])).toEqual([1, 6]);
-  });
-
-  it("nests a hook subagent run under normalized started/finished titles keyed by agent_id", () => {
-    // Rust normalizes hook SubagentStart/SubagentStop to started/finished titles,
-    // keeping agent_id in the raw payload; trace groups on agent_id.
-    const agentId = "a26c5ad830544e025";
-    const started = hookEvent(2, "Subagent started", "general-purpose", {
-      hook_event_name: "SubagentStart",
-      agent_id: agentId,
-      agent_type: "general-purpose",
-    });
-    const finished = hookEvent(5, "Subagent finished", "general-purpose", {
-      hook_event_name: "SubagentStop",
-      agent_id: agentId,
-      agent_type: "general-purpose",
-    });
-    const events: TaskEventView[] = [
-      event(1, "message", "Response"),
-      started,
-      subagentToolUse(3, agentId, "Read pwa/src/lib/api.ts"),
-      subagentToolUse(4, agentId, "Read api/internal/httpx/ratelimit.go"),
-      finished,
-      event(6, "message", "Response"),
-    ];
-
-    const [subagent] = subagentsOf(ActivityStory.compose(events));
-
-    expect(subagent?.start.id).toBe(2);
-    expect(subagent?.label).toBe("Subagent · general-purpose");
-    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([3, 4, 5]);
   });
 
   it("nests a streamed sub-agent's work under its description", () => {
     const events: TaskEventView[] = [
       event(1, "message", "Response"),
-      taskStarted(2, "b5r75b4nr", "toolu_parent", "Audit the allocation path"),
-      subagentChildTool(3, "toolu_parent", "rg -n allocate rust/"),
-      subagentChildTool(4, "toolu_parent", "wc -l rust/src/alloc.rs"),
+      taskStarted(2, "b5r75b4nr", "Audit the allocation path"),
+      subagentChildTool(3, "b5r75b4nr", "rg -n allocate rust/"),
+      subagentChildTool(4, "b5r75b4nr", "wc -l rust/src/alloc.rs"),
       taskNotification(5, "b5r75b4nr", "completed"),
       event(6, "message", "Response"),
     ];
@@ -475,62 +432,76 @@ describe("ActivityStory.compose", () => {
     const composition = ActivityStory.compose(events);
     const [subagent] = subagentsOf(composition);
 
-    expect(subagent?.start.id).toBe(2);
-    expect(subagent?.label).toBe("Subagent · Audit the allocation path");
-    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([3, 4, 5]);
+    expect(subagent?.events.map((row) => row.id)).toEqual([2, 5]);
+    expect(subagent?.label).toBe("Audit the allocation path");
+    expect(noticeIds(subagent)).toEqual([3, 4]);
     expect(subagent?.status).toBe("done");
     expect(segmentsOf(composition).flatMap((segment) => segment.lead ? [segment.lead.id] : [])).toEqual([1, 6]);
   });
 
-  it("keeps two streamed sub-agents' interleaved tool calls correlated by their parent call", () => {
+  it("keeps two streamed sub-agents' interleaved tool calls with their own subagent", () => {
     const events: TaskEventView[] = [
-      taskStarted(1, "task-a", "toolu_a", "Port the parser"),
-      taskStarted(2, "task-b", "toolu_b", "Write the migration"),
-      subagentChildTool(3, "toolu_b", "bun run migrate"),
-      subagentChildTool(4, "toolu_a", "cargo test -p parser"),
+      taskStarted(1, "task-a", "Port the parser"),
+      taskStarted(2, "task-b", "Write the migration"),
+      subagentChildTool(3, "task-b", "bun run migrate"),
+      subagentChildTool(4, "task-a", "cargo test -p parser"),
       taskNotification(5, "task-a", "completed"),
       taskNotification(6, "task-b", "failed"),
     ];
 
     const subagents = subagentsOf(ActivityStory.compose(events));
-    const owned = (index: number) =>
-      subagents[index].nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []));
 
     expect(subagents).toHaveLength(2);
-    expect(owned(0)).toEqual([4, 5]);
-    expect(owned(1)).toEqual([3, 6]);
+    expect(noticeIds(subagents[0])).toEqual([4]);
+    expect(noticeIds(subagents[1])).toEqual([3]);
+    expect(subagents.map((subagent) => subagent.status)).toEqual(["done", "failed"]);
   });
 
   it("keeps a sub-agent start with no finish as a group still running", () => {
     const composition = ActivityStory.compose([
-      taskStarted(1, "task-a", "toolu_a", "Port the parser"),
-      subagentChildTool(2, "toolu_a", "cargo test -p parser"),
+      taskStarted(1, "task-a", "Port the parser"),
+      subagentChildTool(2, "task-a", "cargo test -p parser"),
     ]);
 
     const [subagent] = subagentsOf(composition);
     expect(subagent?.status).toBe("running");
-    expect(subagent?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([2]);
+    expect(noticeIds(subagent)).toEqual([2]);
   });
 
-  it("nests a sub-agent that starts while another is still open", () => {
+  it("nests a sub-agent launched by another sub-agent inside it", () => {
     const composition = ActivityStory.compose([
       subagentStart(1, "outer"),
       subagentToolUse(2, "outer", "rg -n allocate rust/"),
-      subagentStart(3, "inner"),
+      subagentStart(3, "inner", "general-purpose", "outer"),
       subagentToolUse(4, "inner", "wc -l rust/src/alloc.rs"),
       subagentStop(5, "inner"),
       subagentToolUse(6, "outer", "cargo test -p alloc"),
       subagentStop(7, "outer"),
     ]);
 
-    const top = nodesOf(composition).filter((node) => node.type === "subagent");
-    expect(top).toHaveLength(2);
-    const [outer] = subagentsOf(composition);
-    expect(outer?.start.id).toBe(1);
-    const inner = outer?.nodes.find((node) => node.type === "subagent");
-    expect(inner?.type === "subagent" ? inner.subagent.start.id : undefined).toBe(3);
-    expect(inner?.type === "subagent" ? inner.subagent.status : undefined).toBe("done");
-    expect(outer?.nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []))).toEqual([2, 6, 7]);
+    const top = segmentsOf(composition).flatMap((segment) => segment.nodes);
+    expect(top.map((node) => node.type)).toEqual(["subagents"]);
+    const [outer, inner] = subagentsOf(composition);
+    expect(outer?.events[0]?.id).toBe(1);
+    expect(outer?.nodes.map((node) => node.type)).toEqual(["notice", "subagents", "notice"]);
+    expect(inner?.events[0]?.id).toBe(3);
+    expect(inner?.status).toBe("done");
+    expect(noticeIds(outer)).toEqual([2, 6]);
+  });
+
+  it("puts launches that start back to back under one node", () => {
+    const composition = ActivityStory.compose([
+      taskStarted(1, "task-a", "Port the parser"),
+      taskStarted(2, "task-b", "Write the migration"),
+      event(3, "message", "Both are running."),
+      taskStarted(4, "task-c", "Check the docs"),
+    ]);
+
+    const batches = nodesOf(composition).flatMap((node) => (node.type === "subagents" ? [node] : []));
+    expect(batches.map((node) => node.subagents.map((subagent) => subagent.label))).toEqual([
+      ["Port the parser", "Write the migration"],
+      ["Check the docs"],
+    ]);
   });
 
   it("folds the thinking between two tool calls into one readable stretch", () => {
@@ -605,7 +576,7 @@ describe("ActivityStory.compose", () => {
     expect(looseEvents(composition)).toHaveLength(0);
   });
 
-  it("marks an unpaired SubagentStart interrupted once its turn has closed", () => {
+  it("marks an unfinished subagent interrupted once its turn has closed", () => {
     const events: TaskEventView[] = [
       subagentStart(1, "orphan-start"),
       subagentToolUse(2, "orphan-start", "wc -l README.md"),
@@ -615,19 +586,18 @@ describe("ActivityStory.compose", () => {
     expect(subagent?.status).toBe("interrupted");
   });
 
-  it("leaves an unpaired SubagentStop flat instead of guessing where it started", () => {
+  it("leaves a report with no launch flat instead of guessing where it started", () => {
     const events: TaskEventView[] = [
       subagentToolUse(1, "orphan-stop", "wc -l README.md"),
       subagentStop(2, "orphan-stop"),
     ];
 
-    expect(subagentsOf(ActivityStory.compose(events))).toHaveLength(0);
+    const composition = ActivityStory.compose(events);
+    expect(subagentsOf(composition)).toHaveLength(0);
+    expect(looseEvents(composition).map((row) => row.id)).toEqual([1, 2]);
   });
 
-  it("keeps two concurrent subagents' interleaved events correlated by their own agent_id", () => {
-    // Real runs interleave two subagents' hook rows event-by-event (task
-    // e2cc68b5 ran five at once); a naive nearest-stop match would cross-wire
-    // them.
+  it("keeps two concurrent subagents' interleaved events with their own subagent", () => {
     const events: TaskEventView[] = [
       subagentStart(1, "agent-a"),
       subagentStart(2, "agent-b"),
@@ -638,12 +608,11 @@ describe("ActivityStory.compose", () => {
     ];
 
     const subagents = subagentsOf(ActivityStory.compose(events));
-    const owned = (index: number) =>
-      subagents[index].nodes.flatMap((node) => (node.type === "notice" ? [node.event.id] : []));
 
     expect(subagents).toHaveLength(2);
-    expect(owned(0)).toEqual([3, 5]);
-    expect(owned(1)).toEqual([4, 6]);
+    expect(noticeIds(subagents[0])).toEqual([3]);
+    expect(noticeIds(subagents[1])).toEqual([4]);
+    expect(subagents.map((subagent) => subagent.events.at(-1)?.id)).toEqual([5, 6]);
   });
 
   it("keeps every one of ten thousand events now that nothing is windowed away", () => {

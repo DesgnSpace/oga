@@ -199,6 +199,7 @@ function ExpansionBody({
       return <MarkdownContent source={expansion.text} />;
     case "prose":
     case "thinking":
+    case "report":
       return <MarkdownContent source={expansion.text} />;
     case "detail":
       return <ReviewContent source={expansion.text} language="markdown" />;

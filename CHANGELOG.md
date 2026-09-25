@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- When a worker splits its task across subagents, each subagent's work now shows as its own group in the task's activity, with its status and its answer, instead of mixing into one list.
 - Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.
 - OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.
 - OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.

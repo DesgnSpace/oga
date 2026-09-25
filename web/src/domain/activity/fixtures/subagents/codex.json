@@ -1,0 +1,657 @@
+[
+  {
+    "id": 499658,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "created",
+    "kind": "lifecycle",
+    "phase": "info",
+    "title": "Task queued",
+    "createdAt": "2026-09-24T19:15:06.582Z"
+  },
+  {
+    "id": 499659,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "started",
+    "kind": "lifecycle",
+    "phase": "started",
+    "title": "Worker started",
+    "createdAt": "2026-09-24T19:15:06.584Z"
+  },
+  {
+    "id": 499660,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "transport_fallback",
+    "kind": "lifecycle",
+    "phase": "info",
+    "title": "Using the command line",
+    "detail": "spawn: could not spawn provider in /Users/malico/desgn/oga: No such file or directory (os error 2)",
+    "rawText": "{\n  \"detail\": \"spawn: could not spawn provider in /Users/malico/desgn/oga: No such file or directory (os error 2)\",\n  \"reason\": \"unavailable\",\n  \"transport\": \"cli\"\n}",
+    "createdAt": "2026-09-24T19:15:06.595Z"
+  },
+  {
+    "id": 499661,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "worker_spawned",
+    "kind": "lifecycle",
+    "phase": "started",
+    "title": "Worker started",
+    "detail": "Codex Gpt 5 6 luna",
+    "rawText": "{\n  \"model\": \"gpt-5.6-luna\",\n  \"pid\": 74273,\n  \"provider\": \"codex\"\n}",
+    "createdAt": "2026-09-24T19:15:06.603Z"
+  },
+  {
+    "id": 499664,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.thread.started",
+    "kind": "lifecycle",
+    "phase": "info",
+    "title": "Session started",
+    "detail": "01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c",
+    "rawText": "{\n  \"thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n  \"type\": \"thread.started\"\n}",
+    "createdAt": "2026-09-24T19:15:07.308Z",
+    "minor": true
+  },
+  {
+    "id": 499665,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "session_captured",
+    "kind": "lifecycle",
+    "phase": "started",
+    "title": "Session captured",
+    "detail": "Root provider session mapped",
+    "rawText": "{\n  \"provider\": \"codex\",\n  \"sessionId\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\"\n}",
+    "createdAt": "2026-09-24T19:15:07.308Z",
+    "minor": true
+  },
+  {
+    "id": 499666,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.turn.started",
+    "kind": "lifecycle",
+    "phase": "started",
+    "title": "Turn started",
+    "rawText": "{\n  \"type\": \"turn.started\"\n}",
+    "createdAt": "2026-09-24T19:15:07.427Z"
+  },
+  {
+    "id": 499675,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "error",
+    "phase": "failed",
+    "title": "Error",
+    "detail": "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.",
+    "verb": "Failed",
+    "target": "Skill descriptions were shortened to fit the skills context ",
+    "rawText": "{\n  \"item\": {\n    \"id\": \"item_0\",\n    \"message\": \"Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.\",\n    \"type\": \"error\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:10.558Z",
+    "actionId": "item_0",
+    "sourceId": "item_0",
+    "complete": true
+  },
+  {
+    "id": 499688,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "message",
+    "phase": "info",
+    "title": "Agent message",
+    "detail": "I’m starting the required three read-only subagents in parallel and will combine only their observed reports.",
+    "presentation": {
+      "type": "message",
+      "text": "I’m starting the required three read-only subagents in parallel and will combine only their observed reports."
+    },
+    "rawText": "{\n  \"item\": {\n    \"id\": \"item_1\",\n    \"text\": \"I’m starting the required three read-only subagents in parallel and will combine only their observed reports.\",\n    \"type\": \"agent_message\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:13.155Z",
+    "actionId": "item_1",
+    "sourceId": "item_1",
+    "complete": true
+  },
+  {
+    "id": 499715,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Subagent",
+    "detail": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that d",
+    "verb": "Using",
+    "target": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that d",
+    "presentation": {
+      "type": "tool",
+      "text": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that d"
+    },
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_2\",\n    \"prompt\": \"You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that directory and name the main exported functions/types of each. Use real tool calls (oga query first per repo instructions, then list/read/grep files as needed). Do not write, edit, commit, build, or test. Return a concise report covering every file and its main exports, plus the commands/paths you actually inspected.\",\n    \"receiver_thread_ids\": [],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"spawn_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:15:19.997Z",
+    "actionId": "item_2",
+    "sourceId": "item_2",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "launch:item_2",
+        "role": "launch",
+        "label": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/do"
+      }
+    ]
+  },
+  {
+    "id": 499716,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Subagent",
+    "detail": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that d",
+    "verb": "Used",
+    "target": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that d",
+    "presentation": {
+      "type": "tool",
+      "text": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that d"
+    },
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\": {\n        \"message\": null,\n        \"status\": \"pending_init\"\n      }\n    },\n    \"id\": \"item_2\",\n    \"prompt\": \"You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/domain/activity/: list the files in that directory and name the main exported functions/types of each. Use real tool calls (oga query first per repo instructions, then list/read/grep files as needed). Do not write, edit, commit, build, or test. Return a concise report covering every file and its main exports, plus the commands/paths you actually inspected.\",\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"spawn_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:20.125Z",
+    "actionId": "item_2",
+    "sourceId": "item_2",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "launch",
+        "label": "You are Subagent B. Work read-only in /Users/malico/desgn/oga. Survey web/src/do"
+      }
+    ]
+  },
+  {
+    "id": 499717,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Subagent",
+    "detail": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the ",
+    "verb": "Using",
+    "target": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the ",
+    "presentation": {
+      "type": "tool",
+      "text": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the "
+    },
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_3\",\n    \"prompt\": \"You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the ## Unreleased heading, or say it is empty. Use real tool calls (oga query first per repo instructions, then read/grep as needed). Do not write, edit, commit, build, or test. Return a concise report with the observed Unreleased lines and the commands/path you actually inspected.\",\n    \"receiver_thread_ids\": [],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"spawn_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:15:20.142Z",
+    "actionId": "item_3",
+    "sourceId": "item_3",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "launch:item_3",
+        "role": "launch",
+        "label": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md"
+      }
+    ]
+  },
+  {
+    "id": 499718,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Subagent",
+    "detail": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the ",
+    "verb": "Used",
+    "target": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the ",
+    "presentation": {
+      "type": "tool",
+      "text": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the "
+    },
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\": {\n        \"message\": null,\n        \"status\": \"pending_init\"\n      }\n    },\n    \"id\": \"item_3\",\n    \"prompt\": \"You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md and report exactly the lines under the ## Unreleased heading, or say it is empty. Use real tool calls (oga query first per repo instructions, then read/grep as needed). Do not write, edit, commit, build, or test. Return a concise report with the observed Unreleased lines and the commands/path you actually inspected.\",\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"spawn_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:20.342Z",
+    "actionId": "item_3",
+    "sourceId": "item_3",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473",
+        "role": "launch",
+        "label": "You are Subagent C. Work read-only in /Users/malico/desgn/oga. Read CHANGELOG.md"
+      }
+    ]
+  },
+  {
+    "id": 499719,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Subagent",
+    "detail": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under ",
+    "verb": "Using",
+    "target": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under ",
+    "presentation": {
+      "type": "tool",
+      "text": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under "
+    },
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_4\",\n    \"prompt\": \"You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under rust/crates/ and give one line explaining what each crate does. Use real tool calls (oga query first per repo instructions, then list/read files as needed). Inspect each crate's Cargo.toml or top of lib.rs/main.rs. Do not write, edit, commit, build, or test. Return a concise report with every crate directory and one-line purpose, plus the commands/paths you actually inspected.\",\n    \"receiver_thread_ids\": [],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"spawn_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:15:20.365Z",
+    "actionId": "item_4",
+    "sourceId": "item_4",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "launch:item_4",
+        "role": "launch",
+        "label": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crate"
+      }
+    ]
+  },
+  {
+    "id": 499720,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Subagent",
+    "detail": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under ",
+    "verb": "Used",
+    "target": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under ",
+    "presentation": {
+      "type": "tool",
+      "text": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under "
+    },
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\": {\n        \"message\": null,\n        \"status\": \"pending_init\"\n      }\n    },\n    \"id\": \"item_4\",\n    \"prompt\": \"You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crates/: list the directories directly under rust/crates/ and give one line explaining what each crate does. Use real tool calls (oga query first per repo instructions, then list/read files as needed). Inspect each crate's Cargo.toml or top of lib.rs/main.rs. Do not write, edit, commit, build, or test. Return a concise report with every crate directory and one-line purpose, plus the commands/paths you actually inspected.\",\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"spawn_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:20.526Z",
+    "actionId": "item_4",
+    "sourceId": "item_4",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fe9b-7f51-abf5-a780dc21243f",
+        "role": "launch",
+        "label": "You are Subagent A. Work read-only in /Users/malico/desgn/oga. Survey rust/crate"
+      }
+    ]
+  },
+  {
+    "id": 499724,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "message",
+    "phase": "info",
+    "title": "Agent message",
+    "detail": "All three subagents are running in parallel: A is surveying Rust crates, B is surveying the activity domain, and C is reading the changelog.",
+    "presentation": {
+      "type": "message",
+      "text": "All three subagents are running in parallel: A is surveying Rust crates, B is surveying the activity domain, and C is reading the changelog."
+    },
+    "rawText": "{\n  \"item\": {\n    \"id\": \"item_5\",\n    \"text\": \"All three subagents are running in parallel: A is surveying Rust crates, B is surveying the activity domain, and C is reading the changelog.\",\n    \"type\": \"agent_message\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:22.935Z",
+    "actionId": "item_5",
+    "sourceId": "item_5",
+    "complete": true
+  },
+  {
+    "id": 499733,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Waiting for subagents",
+    "verb": "Using",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_6\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\",\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\",\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"wait\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:15:24.326Z",
+    "actionId": "item_6",
+    "sourceId": "item_6",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fe9b-7f51-abf5-a780dc21243f",
+        "role": "report"
+      },
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "report"
+      },
+      {
+        "id": "01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473",
+        "role": "report"
+      }
+    ]
+  },
+  {
+    "id": 499870,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Waiting for subagents",
+    "verb": "Used",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\": {\n        \"message\": \"Observed under `## Unreleased` in `CHANGELOG.md`:\\n\\n```text\\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\\n- Picking a task from the list now puts you straight in its reply box.\\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes.\\n```\\n\\nInspected `/Users/malico/desgn/oga/CHANGELOG.md` using `oga query \\\"CHANGELOG.md Unreleased heading\\\"` and `rg -n '^## ' CHANGELOG.md && sed -n '/^## Unreleased$/,/^## /p' CHANGELOG.md`. No files changed.\",\n        \"status\": \"completed\"\n      }\n    },\n    \"id\": \"item_6\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"wait\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:15:41.565Z",
+    "actionId": "item_6",
+    "sourceId": "item_6",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473",
+        "role": "report",
+        "report": "Observed under `## Unreleased` in `CHANGELOG.md`:\n\n```text\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\n- Picking a task from the list now puts you straight in its reply box.\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes.\n```\n\nInspected `/Users/malico/desgn/oga/CHANGELOG.md` using `oga query \"CHANGELOG.md Unreleased heading\"` and `rg -n '^## ' CHANGELOG.md && sed -n '/^## Unreleased$/,/^## /p' CHANGELOG.md`. No files changed."
+      }
+    ]
+  },
+  {
+    "id": 499910,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Waiting for subagents",
+    "verb": "Using",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_7\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\",\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"wait\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:15:44.552Z",
+    "actionId": "item_7",
+    "sourceId": "item_7",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fe9b-7f51-abf5-a780dc21243f",
+        "role": "report"
+      },
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "report"
+      }
+    ]
+  },
+  {
+    "id": 500334,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Waiting for subagents",
+    "verb": "Used",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\": {\n        \"message\": \"Surveyed all 16 directories under `rust/crates/`.\\n\\n`oga-acp` — ACP client protocol transport, policy, sessions, and outcomes.\\n\\n`oga-advisor` — Chooses a connected worker and effort level for a task.\\n\\n`oga-client` — Typed broker client shared by CLI, desktop, and web surfaces.\\n\\n`oga-config` — Handles profiles, YAML configuration layers, settings, and prompts.\\n\\n`oga-context` — Builds and queries the project code index.\\n\\n`oga-domain` — Defines shared domain types and JSON formats.\\n\\n`oga-events` — Normalizes, presents, stores, and streams task events.\\n\\n`oga-http` — Provides Axum HTTP routes for broker state and task actions.\\n\\n`oga-mcp` — Runs the stateless MCP server for task and discovery operations.\\n\\n`oga-pricing` — Estimates provider spend from public model pricing data.\\n\\n`oga-providers` — Builds provider commands and parses transcripts, usage, and events.\\n\\n`oga-routing` — Classifies tasks and selects models using routing policy and catalogs.\\n\\n`oga-runner` — Manages provider processes, pipes, cancellation, and confinement.\\n\\n`oga-service` — Orchestrates task dispatch, lifecycle, and task actions.\\n\\n`oga-store` — Provides SQLite persistence for the broker.\\n\\n`oga-worktree` — Manages Git worktrees and branch lifecycle.\\n\\nInspected with the project-index query for `rust/crates`, then:\\n\\n- `find rust/crates -mindepth 1 -maxdepth 1 -type d -print | sort`\\n- `rust/crates/*/Cargo.toml`\\n- `rust/crates/*/src/lib.rs`\\n- `sed -n '1,80p'` for each manifest\\n- `sed -n '1,60p'` for each library entry point\\n\\nNo files were written, and no build or tests were run.\",\n        \"status\": \"completed\"\n      }\n    },\n    \"id\": \"item_7\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"wait\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:00.095Z",
+    "actionId": "item_7",
+    "sourceId": "item_7",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fe9b-7f51-abf5-a780dc21243f",
+        "role": "report",
+        "report": "Surveyed all 16 directories under `rust/crates/`.\n\n`oga-acp` — ACP client protocol transport, policy, sessions, and outcomes.\n\n`oga-advisor` — Chooses a connected worker and effort level for a task.\n\n`oga-client` — Typed broker client shared by CLI, desktop, and web surfaces.\n\n`oga-config` — Handles profiles, YAML configuration layers, settings, and prompts.\n\n`oga-context` — Builds and queries the project code index.\n\n`oga-domain` — Defines shared domain types and JSON formats.\n\n`oga-events` — Normalizes, presents, stores, and streams task events.\n\n`oga-http` — Provides Axum HTTP routes for broker state and task actions.\n\n`oga-mcp` — Runs the stateless MCP server for task and discovery operations.\n\n`oga-pricing` — Estimates provider spend from public model pricing data.\n\n`oga-providers` — Builds provider commands and parses transcripts, usage, and events.\n\n`oga-routing` — Classifies tasks and selects models using routing policy and catalogs.\n\n`oga-runner` — Manages provider processes, pipes, cancellation, and confinement.\n\n`oga-service` — Orchestrates task dispatch, lifecycle, and task actions.\n\n`oga-store` — Provides SQLite persistence for the broker.\n\n`oga-worktree` — Manages Git worktrees and branch lifecycle.\n\nInspected with the project-index query for `rust/crates`, then:\n\n- `find rust/crates -mindepth 1 -maxdepth 1 -type d -print | sort`\n- `rust/crates/*/Cargo.toml`\n- `rust/crates/*/src/lib.rs`\n- `sed -n '1,80p'` for each manifest\n- `sed -n '1,60p'` for each library entry point\n\nNo files were written, and no build or tests were run."
+      }
+    ]
+  },
+  {
+    "id": 500336,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Waiting for subagents",
+    "verb": "Using",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_8\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"wait\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:16:02.430Z",
+    "actionId": "item_8",
+    "sourceId": "item_8",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "report"
+      }
+    ]
+  },
+  {
+    "id": 500434,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Waiting for subagents",
+    "verb": "Used",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\": {\n        \"message\": \"Survey complete. No files were changed; `git status` is clean.\\n\\n`web/src/domain/activity/index.ts`\\n\\n- Types/interfaces: `ActivityComposition`, `ActivityEnding`, `ReasoningPulse`, `ActivityStatus`, `ActivityBlock`, `ActivityTurn`, `ActivitySegment`, `ActivityNode`, `ActivityCall`, `ActivitySubagent`.\\n- Handoff types: `HandoffBriefTier`, `HandoffBoundary`, `HandoffRun`, `Hop`.\\n- Functions: `compositionCalls`, `nodesCallCount`, `nodesDurationMs`, `turnDurationMs`, `callDurationMs`, `compositionHasThinking`, `withoutDuplicateHookCalls`, `normalizeAntigravityEvents`, `deriveTurnIds`.\\n- Main object/class: `ActivityStory` with `compose`, `composeWithState`, `responseEvent`, and `isTechnical`; `ActivityStoryProjection` with `update`, `incrementalCount`, and `fallbackCount`.\\n- Constants: `SUBAGENT_STARTED_TITLE`, `SUBAGENT_FINISHED_TITLE`, `ACTIVITY_SKIPPED_TITLE`, `REASONING_TITLE`.\\n\\n`web/src/domain/activity/index.test.ts`\\n\\n- No exports.\\n- Tests cover activity composition, calls, subagents, reasoning, receipts, projection reuse/fallbacks, and provider-specific pairing.\\n\\n`web/src/domain/activity/acp.test.ts`\\n\\n- No exports.\\n- Tests cover ACP worker narration, duplicate hook removal, Antigravity normalization, streamed responses, and provider call updates.\\n\\n`web/src/domain/activity/fixtures/`\\n\\n- `antigravity-acp-probe.json`: 15-row JSON array fixture.\\n- `antigravity-run.jsonl`: 20-line Antigravity protocol fixture.\\n- `claude-acp-resumed.json`: 521-row JSON array fixture.\\n- `probe-rows.json`: object with `opencodeAcpRead`, `antigravityAcpRead`, `antigravityCliResponse`, and `claudeCliHooksThenTranscript`; no exports.\\n\\nInspected paths and commands:\\n\\n- `oga query \\\"the files and exported functions and types in web/src/domain/activity\\\"` with `in=web/src/domain/activity`.\\n- `rg --files web/src/domain/activity | sort`\\n- `rg -n '^export ' web/src/domain/activity/index.ts ...`\\n- Relevant `sed` ranges from `index.ts` and test files.\\n- `wc -l`, `jq` fixture counts/keys, and `git status --short -- web/src/domain/activity`.\",\n        \"status\": \"completed\"\n      }\n    },\n    \"id\": \"item_8\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"wait\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:26.658Z",
+    "actionId": "item_8",
+    "sourceId": "item_8",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "report",
+        "report": "Survey complete. No files were changed; `git status` is clean.\n\n`web/src/domain/activity/index.ts`\n\n- Types/interfaces: `ActivityComposition`, `ActivityEnding`, `ReasoningPulse`, `ActivityStatus`, `ActivityBlock`, `ActivityTurn`, `ActivitySegment`, `ActivityNode`, `ActivityCall`, `ActivitySubagent`.\n- Handoff types: `HandoffBriefTier`, `HandoffBoundary`, `HandoffRun`, `Hop`.\n- Functions: `compositionCalls`, `nodesCallCount`, `nodesDurationMs`, `turnDurationMs`, `callDurationMs`, `compositionHasThinking`, `withoutDuplicateHookCalls`, `normalizeAntigravityEvents`, `deriveTurnIds`.\n- Main object/class: `ActivityStory` with `compose`, `composeWithState`, `responseEvent`, and `isTechnical`; `ActivityStoryProjection` with `update`, `incrementalCount`, and `fallbackCount`.\n- Constants: `SUBAGENT_STARTED_TITLE`, `SUBAGENT_FINISHED_TITLE`, `ACTIVITY_SKIPPED_TITLE`, `REASONING_TITLE`.\n\n`web/src/domain/activity/index.test.ts`\n\n- No exports.\n- Tests cover activity composition, calls, subagents, reasoning, receipts, projection reuse/fallbacks, and provider-specific pairing.\n\n`web/src/domain/activity/acp.test.ts`\n\n- No exports.\n- Tests cover ACP worker narration, duplicate hook removal, Antigravity normalization, streamed responses, and provider call updates.\n\n`web/src/domain/activity/fixtures/`\n\n- `antigravity-acp-probe.json`: 15-row JSON array fixture.\n- `antigravity-run.jsonl`: 20-line Antigravity protocol fixture.\n- `claude-acp-resumed.json`: 521-row JSON array fixture.\n- `probe-rows.json`: object with `opencodeAcpRead`, `antigravityAcpRead`, `antigravityCliResponse`, and `claudeCliHooksThenTranscript`; no exports.\n\nInspected paths and commands:\n\n- `oga query \"the files and exported functions and types in web/src/domain/activity\"` with `in=web/src/domain/activity`.\n- `rg --files web/src/domain/activity | sort`\n- `rg -n '^export ' web/src/domain/activity/index.ts ...`\n- Relevant `sed` ranges from `index.ts` and test files.\n- `wc -l`, `jq` fixture counts/keys, and `git status --short -- web/src/domain/activity`."
+      }
+    ]
+  },
+  {
+    "id": 500438,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "message",
+    "phase": "info",
+    "title": "Agent message",
+    "detail": "All three have finished and reported. I’m closing the completed subagent sessions, then I’ll return their combined read-only survey without adding local checks or edits.",
+    "presentation": {
+      "type": "message",
+      "text": "All three have finished and reported. I’m closing the completed subagent sessions, then I’ll return their combined read-only survey without adding local checks or edits."
+    },
+    "rawText": "{\n  \"item\": {\n    \"id\": \"item_9\",\n    \"text\": \"All three have finished and reported. I’m closing the completed subagent sessions, then I’ll return their combined read-only survey without adding local checks or edits.\",\n    \"type\": \"agent_message\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:30.888Z",
+    "actionId": "item_9",
+    "sourceId": "item_9",
+    "complete": true
+  },
+  {
+    "id": 500439,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Closed subagent",
+    "verb": "Using",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_10\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"close_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:16:32.229Z",
+    "actionId": "item_10",
+    "sourceId": "item_10",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fe9b-7f51-abf5-a780dc21243f",
+        "role": "report"
+      }
+    ]
+  },
+  {
+    "id": 500440,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Closed subagent",
+    "verb": "Used",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\": {\n        \"message\": \"Surveyed all 16 directories under `rust/crates/`.\\n\\n`oga-acp` — ACP client protocol transport, policy, sessions, and outcomes.\\n\\n`oga-advisor` — Chooses a connected worker and effort level for a task.\\n\\n`oga-client` — Typed broker client shared by CLI, desktop, and web surfaces.\\n\\n`oga-config` — Handles profiles, YAML configuration layers, settings, and prompts.\\n\\n`oga-context` — Builds and queries the project code index.\\n\\n`oga-domain` — Defines shared domain types and JSON formats.\\n\\n`oga-events` — Normalizes, presents, stores, and streams task events.\\n\\n`oga-http` — Provides Axum HTTP routes for broker state and task actions.\\n\\n`oga-mcp` — Runs the stateless MCP server for task and discovery operations.\\n\\n`oga-pricing` — Estimates provider spend from public model pricing data.\\n\\n`oga-providers` — Builds provider commands and parses transcripts, usage, and events.\\n\\n`oga-routing` — Classifies tasks and selects models using routing policy and catalogs.\\n\\n`oga-runner` — Manages provider processes, pipes, cancellation, and confinement.\\n\\n`oga-service` — Orchestrates task dispatch, lifecycle, and task actions.\\n\\n`oga-store` — Provides SQLite persistence for the broker.\\n\\n`oga-worktree` — Manages Git worktrees and branch lifecycle.\\n\\nInspected with the project-index query for `rust/crates`, then:\\n\\n- `find rust/crates -mindepth 1 -maxdepth 1 -type d -print | sort`\\n- `rust/crates/*/Cargo.toml`\\n- `rust/crates/*/src/lib.rs`\\n- `sed -n '1,80p'` for each manifest\\n- `sed -n '1,60p'` for each library entry point\\n\\nNo files were written, and no build or tests were run.\",\n        \"status\": \"completed\"\n      }\n    },\n    \"id\": \"item_10\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fe9b-7f51-abf5-a780dc21243f\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"close_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:32.234Z",
+    "actionId": "item_10",
+    "sourceId": "item_10",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fe9b-7f51-abf5-a780dc21243f",
+        "role": "report",
+        "report": "Surveyed all 16 directories under `rust/crates/`.\n\n`oga-acp` — ACP client protocol transport, policy, sessions, and outcomes.\n\n`oga-advisor` — Chooses a connected worker and effort level for a task.\n\n`oga-client` — Typed broker client shared by CLI, desktop, and web surfaces.\n\n`oga-config` — Handles profiles, YAML configuration layers, settings, and prompts.\n\n`oga-context` — Builds and queries the project code index.\n\n`oga-domain` — Defines shared domain types and JSON formats.\n\n`oga-events` — Normalizes, presents, stores, and streams task events.\n\n`oga-http` — Provides Axum HTTP routes for broker state and task actions.\n\n`oga-mcp` — Runs the stateless MCP server for task and discovery operations.\n\n`oga-pricing` — Estimates provider spend from public model pricing data.\n\n`oga-providers` — Builds provider commands and parses transcripts, usage, and events.\n\n`oga-routing` — Classifies tasks and selects models using routing policy and catalogs.\n\n`oga-runner` — Manages provider processes, pipes, cancellation, and confinement.\n\n`oga-service` — Orchestrates task dispatch, lifecycle, and task actions.\n\n`oga-store` — Provides SQLite persistence for the broker.\n\n`oga-worktree` — Manages Git worktrees and branch lifecycle.\n\nInspected with the project-index query for `rust/crates`, then:\n\n- `find rust/crates -mindepth 1 -maxdepth 1 -type d -print | sort`\n- `rust/crates/*/Cargo.toml`\n- `rust/crates/*/src/lib.rs`\n- `sed -n '1,80p'` for each manifest\n- `sed -n '1,60p'` for each library entry point\n\nNo files were written, and no build or tests were run."
+      }
+    ]
+  },
+  {
+    "id": 500441,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Closed subagent",
+    "verb": "Using",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_11\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"close_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:16:32.235Z",
+    "actionId": "item_11",
+    "sourceId": "item_11",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "report"
+      }
+    ]
+  },
+  {
+    "id": 500442,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Closed subagent",
+    "verb": "Used",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\": {\n        \"message\": \"Survey complete. No files were changed; `git status` is clean.\\n\\n`web/src/domain/activity/index.ts`\\n\\n- Types/interfaces: `ActivityComposition`, `ActivityEnding`, `ReasoningPulse`, `ActivityStatus`, `ActivityBlock`, `ActivityTurn`, `ActivitySegment`, `ActivityNode`, `ActivityCall`, `ActivitySubagent`.\\n- Handoff types: `HandoffBriefTier`, `HandoffBoundary`, `HandoffRun`, `Hop`.\\n- Functions: `compositionCalls`, `nodesCallCount`, `nodesDurationMs`, `turnDurationMs`, `callDurationMs`, `compositionHasThinking`, `withoutDuplicateHookCalls`, `normalizeAntigravityEvents`, `deriveTurnIds`.\\n- Main object/class: `ActivityStory` with `compose`, `composeWithState`, `responseEvent`, and `isTechnical`; `ActivityStoryProjection` with `update`, `incrementalCount`, and `fallbackCount`.\\n- Constants: `SUBAGENT_STARTED_TITLE`, `SUBAGENT_FINISHED_TITLE`, `ACTIVITY_SKIPPED_TITLE`, `REASONING_TITLE`.\\n\\n`web/src/domain/activity/index.test.ts`\\n\\n- No exports.\\n- Tests cover activity composition, calls, subagents, reasoning, receipts, projection reuse/fallbacks, and provider-specific pairing.\\n\\n`web/src/domain/activity/acp.test.ts`\\n\\n- No exports.\\n- Tests cover ACP worker narration, duplicate hook removal, Antigravity normalization, streamed responses, and provider call updates.\\n\\n`web/src/domain/activity/fixtures/`\\n\\n- `antigravity-acp-probe.json`: 15-row JSON array fixture.\\n- `antigravity-run.jsonl`: 20-line Antigravity protocol fixture.\\n- `claude-acp-resumed.json`: 521-row JSON array fixture.\\n- `probe-rows.json`: object with `opencodeAcpRead`, `antigravityAcpRead`, `antigravityCliResponse`, and `claudeCliHooksThenTranscript`; no exports.\\n\\nInspected paths and commands:\\n\\n- `oga query \\\"the files and exported functions and types in web/src/domain/activity\\\"` with `in=web/src/domain/activity`.\\n- `rg --files web/src/domain/activity | sort`\\n- `rg -n '^export ' web/src/domain/activity/index.ts ...`\\n- Relevant `sed` ranges from `index.ts` and test files.\\n- `wc -l`, `jq` fixture counts/keys, and `git status --short -- web/src/domain/activity`.\",\n        \"status\": \"completed\"\n      }\n    },\n    \"id\": \"item_11\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"close_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:32.237Z",
+    "actionId": "item_11",
+    "sourceId": "item_11",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fd37-70e0-a8ab-f2bb1c2bf114",
+        "role": "report",
+        "report": "Survey complete. No files were changed; `git status` is clean.\n\n`web/src/domain/activity/index.ts`\n\n- Types/interfaces: `ActivityComposition`, `ActivityEnding`, `ReasoningPulse`, `ActivityStatus`, `ActivityBlock`, `ActivityTurn`, `ActivitySegment`, `ActivityNode`, `ActivityCall`, `ActivitySubagent`.\n- Handoff types: `HandoffBriefTier`, `HandoffBoundary`, `HandoffRun`, `Hop`.\n- Functions: `compositionCalls`, `nodesCallCount`, `nodesDurationMs`, `turnDurationMs`, `callDurationMs`, `compositionHasThinking`, `withoutDuplicateHookCalls`, `normalizeAntigravityEvents`, `deriveTurnIds`.\n- Main object/class: `ActivityStory` with `compose`, `composeWithState`, `responseEvent`, and `isTechnical`; `ActivityStoryProjection` with `update`, `incrementalCount`, and `fallbackCount`.\n- Constants: `SUBAGENT_STARTED_TITLE`, `SUBAGENT_FINISHED_TITLE`, `ACTIVITY_SKIPPED_TITLE`, `REASONING_TITLE`.\n\n`web/src/domain/activity/index.test.ts`\n\n- No exports.\n- Tests cover activity composition, calls, subagents, reasoning, receipts, projection reuse/fallbacks, and provider-specific pairing.\n\n`web/src/domain/activity/acp.test.ts`\n\n- No exports.\n- Tests cover ACP worker narration, duplicate hook removal, Antigravity normalization, streamed responses, and provider call updates.\n\n`web/src/domain/activity/fixtures/`\n\n- `antigravity-acp-probe.json`: 15-row JSON array fixture.\n- `antigravity-run.jsonl`: 20-line Antigravity protocol fixture.\n- `claude-acp-resumed.json`: 521-row JSON array fixture.\n- `probe-rows.json`: object with `opencodeAcpRead`, `antigravityAcpRead`, `antigravityCliResponse`, and `claudeCliHooksThenTranscript`; no exports.\n\nInspected paths and commands:\n\n- `oga query \"the files and exported functions and types in web/src/domain/activity\"` with `in=web/src/domain/activity`.\n- `rg --files web/src/domain/activity | sort`\n- `rg -n '^export ' web/src/domain/activity/index.ts ...`\n- Relevant `sed` ranges from `index.ts` and test files.\n- `wc -l`, `jq` fixture counts/keys, and `git status --short -- web/src/domain/activity`."
+      }
+    ]
+  },
+  {
+    "id": 500443,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.started",
+    "kind": "tool",
+    "phase": "started",
+    "title": "Closed subagent",
+    "verb": "Using",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {},\n    \"id\": \"item_12\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"in_progress\",\n    \"tool\": \"close_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.started\"\n}",
+    "createdAt": "2026-09-24T19:16:32.238Z",
+    "actionId": "item_12",
+    "sourceId": "item_12",
+    "complete": false,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473",
+        "role": "report"
+      }
+    ]
+  },
+  {
+    "id": 500444,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "tool",
+    "phase": "completed",
+    "title": "Closed subagent",
+    "verb": "Used",
+    "rawText": "{\n  \"item\": {\n    \"agents_states\": {\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\": {\n        \"message\": \"Observed under `## Unreleased` in `CHANGELOG.md`:\\n\\n```text\\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\\n- Picking a task from the list now puts you straight in its reply box.\\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes.\\n```\\n\\nInspected `/Users/malico/desgn/oga/CHANGELOG.md` using `oga query \\\"CHANGELOG.md Unreleased heading\\\"` and `rg -n '^## ' CHANGELOG.md && sed -n '/^## Unreleased$/,/^## /p' CHANGELOG.md`. No files changed.\",\n        \"status\": \"completed\"\n      }\n    },\n    \"id\": \"item_12\",\n    \"prompt\": null,\n    \"receiver_thread_ids\": [\n      \"01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473\"\n    ],\n    \"sender_thread_id\": \"01a0d4d7-ca8a-7d93-8e70-2a50b591fd0c\",\n    \"status\": \"completed\",\n    \"tool\": \"close_agent\",\n    \"type\": \"collab_tool_call\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:32.247Z",
+    "actionId": "item_12",
+    "sourceId": "item_12",
+    "complete": true,
+    "subagents": [
+      {
+        "id": "01a0d4d7-fdc7-7f51-b2ba-8fd24cd63473",
+        "role": "report",
+        "report": "Observed under `## Unreleased` in `CHANGELOG.md`:\n\n```text\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode workers keep working when OpenCode 2 has taken over the `opencode` command: they find your OpenCode 1 install, and if there isn't one, the task stops straight away and says what to do instead of failing with an unrecognized flag. A worker can also point at a specific OpenCode 1 install.\n- OpenCode 2 workers work again with OpenCode 2.0 and later, even when that install has also taken over the `opencode` command. Tasks, follow-ups, the model list with its effort levels, and continuing a task in a terminal all work, and a worker can point at a specific OpenCode 2 install.\n- Picking a task from the list now puts you straight in its reply box.\n- ⌘B (Ctrl+B on Windows and Linux) now shows or hides the task list, and puts you right in it so the arrow keys move between tasks.\n- The reply box is simpler: task details and options now live behind the + button, so typing your next message is the only thing in the way.\n- Settings can now pick the worker for you: turn on Choosing a worker, paste your TypeSafe key, and work you hand over without naming a worker lands on the one whose strengths fit what you asked for. Your own rules still catch anything it can't answer, and the task shows which worker was suggested and whether the work went there.\n- Claude workers can now run newer models, like Opus 5.5, by using the Claude Code already installed on your machine instead of the older copy Oga shipped with.\n- A task no longer fails with a confusing error when it starts just as Oga itself is starting up.\n- The reply box no longer jumps when the note about continuing a paused task appears, and that note now lines up with the options under the box.\n- Text in a task's activity log — command output, labels, and the response — now reads at one consistent size instead of jumping between sizes.\n```\n\nInspected `/Users/malico/desgn/oga/CHANGELOG.md` using `oga query \"CHANGELOG.md Unreleased heading\"` and `rg -n '^## ' CHANGELOG.md && sed -n '/^## Unreleased$/,/^## /p' CHANGELOG.md`. No files changed."
+      }
+    ]
+  },
+  {
+    "id": 500451,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.item.completed",
+    "kind": "message",
+    "phase": "info",
+    "title": "Agent message",
+    "detail": "## TL;DR\n\n- Three read-only subagents completed the requested repo survey.\n- All three ran in parallel using `multi_agent_v1__spawn_agent` and `multi_agent_v1__wait_agent`.\n- No files changed; no builds or tests were run.\n\n## A\n\n`rust/crates/` contains 16 crates:\n\n- `oga-acp` — ACP transport and sessions.\n- `oga-advisor` — Selects workers and effort levels.\n- `oga-client` — Shared typed broker client.\n- `oga-config` — Profiles and YAML settings.\n- `oga-context` — Project code index.\n- `oga-domain` — Shared domain types and JSON.\n- `oga-events` — Task event normalization and storage.\n- `oga-http` — Axum HTTP routes.\n- `oga-mcp` — Stateless MCP server.\n- `oga-pricing` — Provider spend estimates.\n- `oga-providers` — Provider commands and transcript parsing.\n- `oga-routing` — Task classification and model selection.\n- `oga-runner` — Provider processes and cancellation.\n- `oga-service` — Task orchestration and lifecycle.\n- `oga-store` — SQLite persistence.\n- `oga-worktree` — Git worktree lifecycle.\n\n## B\n\n- `index.ts` — Exports activity types, handoff types, activity composition/duration helpers, normalization functions, constants, `ActivityStory`, and `ActivityStoryProjection`.\n- `index.test.ts` — No exports; activity composition and projection tests.\n- `acp.test.ts` — No exports; ACP narration and provider-event tests.\n- `fixtures/antigravity-acp-probe.json` — 15-row fixture.\n- `fixtures/antigravity-run.jsonl` — 20-line fixture.\n- `fixtures/claude-acp-resumed.json` — 521-row fixture.\n- `fixtures/probe-rows.json` — Provider probe fixture object.\n\n## C\n\nUnder `## Unreleased`:\n\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode 1 and OpenCode 2 workers now work with their respective installations, including explicit install selection and clearer failures.\n- Picking a task now focuses its reply box.\n- `⌘B`/`Ctrl+B` toggles the task list and focuses it for keyboard navigation.\n- The reply box is simpler, with details and options behind `+`.\n- Settings can automatically choose a worker using a TypeSafe key.\n- Claude workers support newer models through the installed Claude Code.\n- Tasks no longer fail confusingly during Oga startup.\n- The paused-task continuation note no longer shifts the reply box.\n- Activity-log text now uses a consistent size.",
+    "presentation": {
+      "type": "message",
+      "text": "## TL;DR\n\n- Three read-only subagents completed the requested repo survey.\n- All three ran in parallel using `multi_agent_v1__spawn_agent` and `multi_agent_v1__wait_agent`.\n- No files changed; no builds or tests were run.\n\n## A\n\n`rust/crates/` contains 16 crates:\n\n- `oga-acp` — ACP transport and sessions.\n- `oga-advisor` — Selects workers and effort levels.\n- `oga-client` — Shared typed broker client.\n- `oga-config` — Profiles and YAML settings.\n- `oga-context` — Project code index.\n- `oga-domain` — Shared domain types and JSON.\n- `oga-events` — Task event normalization and storage.\n- `oga-http` — Axum HTTP routes.\n- `oga-mcp` — Stateless MCP server.\n- `oga-pricing` — Provider spend estimates.\n- `oga-providers` — Provider commands and transcript parsing.\n- `oga-routing` — Task classification and model selection.\n- `oga-runner` — Provider processes and cancellation.\n- `oga-service` — Task orchestration and lifecycle.\n- `oga-store` — SQLite persistence.\n- `oga-worktree` — Git worktree lifecycle.\n\n## B\n\n- `index.ts` — Exports activity types, handoff types, activity composition/duration helpers, normalization functions, constants, `ActivityStory`, and `ActivityStoryProjection`.\n- `index.test.ts` — No exports; activity composition and projection tests.\n- `acp.test.ts` — No exports; ACP narration and provider-event tests.\n- `fixtures/antigravity-acp-probe.json` — 15-row fixture.\n- `fixtures/antigravity-run.jsonl` — 20-line fixture.\n- `fixtures/claude-acp-resumed.json` — 521-row fixture.\n- `fixtures/probe-rows.json` — Provider probe fixture object.\n\n## C\n\nUnder `## Unreleased`:\n\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\n- OpenCode 1 and OpenCode 2 workers now work with their respective installations, including explicit install selection and clearer failures.\n- Picking a task now focuses its reply box.\n- `⌘B`/`Ctrl+B` toggles the task list and focuses it for keyboard navigation.\n- The reply box is simpler, with details and options behind `+`.\n- Settings can automatically choose a worker using a TypeSafe key.\n- Claude workers support newer models through the installed Claude Code.\n- Tasks no longer fail confusingly during Oga startup.\n- The paused-task continuation note no longer shifts the reply box.\n- Activity-log text now uses a consistent size."
+    },
+    "rawText": "{\n  \"item\": {\n    \"id\": \"item_13\",\n    \"text\": \"## TL;DR\\n\\n- Three read-only subagents completed the requested repo survey.\\n- All three ran in parallel using `multi_agent_v1__spawn_agent` and `multi_agent_v1__wait_agent`.\\n- No files changed; no builds or tests were run.\\n\\n## A\\n\\n`rust/crates/` contains 16 crates:\\n\\n- `oga-acp` — ACP transport and sessions.\\n- `oga-advisor` — Selects workers and effort levels.\\n- `oga-client` — Shared typed broker client.\\n- `oga-config` — Profiles and YAML settings.\\n- `oga-context` — Project code index.\\n- `oga-domain` — Shared domain types and JSON.\\n- `oga-events` — Task event normalization and storage.\\n- `oga-http` — Axum HTTP routes.\\n- `oga-mcp` — Stateless MCP server.\\n- `oga-pricing` — Provider spend estimates.\\n- `oga-providers` — Provider commands and transcript parsing.\\n- `oga-routing` — Task classification and model selection.\\n- `oga-runner` — Provider processes and cancellation.\\n- `oga-service` — Task orchestration and lifecycle.\\n- `oga-store` — SQLite persistence.\\n- `oga-worktree` — Git worktree lifecycle.\\n\\n## B\\n\\n- `index.ts` — Exports activity types, handoff types, activity composition/duration helpers, normalization functions, constants, `ActivityStory`, and `ActivityStoryProjection`.\\n- `index.test.ts` — No exports; activity composition and projection tests.\\n- `acp.test.ts` — No exports; ACP narration and provider-event tests.\\n- `fixtures/antigravity-acp-probe.json` — 15-row fixture.\\n- `fixtures/antigravity-run.jsonl` — 20-line fixture.\\n- `fixtures/claude-acp-resumed.json` — 521-row fixture.\\n- `fixtures/probe-rows.json` — Provider probe fixture object.\\n\\n## C\\n\\nUnder `## Unreleased`:\\n\\n- Settings is roomier and easier to scan: sections are grouped with icons in the sidebar, each page has a clear title, and every setting sits on its own row with its switch or button on the right.\\n- OpenCode 1 and OpenCode 2 workers now work with their respective installations, including explicit install selection and clearer failures.\\n- Picking a task now focuses its reply box.\\n- `⌘B`/`Ctrl+B` toggles the task list and focuses it for keyboard navigation.\\n- The reply box is simpler, with details and options behind `+`.\\n- Settings can automatically choose a worker using a TypeSafe key.\\n- Claude workers support newer models through the installed Claude Code.\\n- Tasks no longer fail confusingly during Oga startup.\\n- The paused-task continuation note no longer shifts the reply box.\\n- Activity-log text now uses a consistent size.\",\n    \"type\": \"agent_message\"\n  },\n  \"type\": \"item.completed\"\n}",
+    "createdAt": "2026-09-24T19:16:42.569Z",
+    "actionId": "item_13",
+    "sourceId": "item_13",
+    "complete": true
+  },
+  {
+    "id": 500452,
+    "taskId": "subagent-fixture",
+    "source": "codex",
+    "type": "agent.turn.completed",
+    "kind": "usage",
+    "phase": "completed",
+    "title": "Turn completed",
+    "detail": "2113 tokens out · 194816 cached",
+    "presentation": {
+      "type": "usage",
+      "tokensIn": 29461,
+      "tokensOut": 2113,
+      "tokensCached": 194816,
+      "tokensThinking": 630
+    },
+    "rawText": "{\n  \"type\": \"turn.completed\",\n  \"usage\": {\n    \"cache_write_input_tokens\": 0,\n    \"cached_input_tokens\": 194816,\n    \"input_tokens\": 224277,\n    \"output_tokens\": 2113,\n    \"reasoning_output_tokens\": 630\n  }\n}",
+    "createdAt": "2026-09-24T19:16:42.632Z"
+  },
+  {
+    "id": 500453,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "worker_stderr",
+    "kind": "lifecycle",
+    "phase": "info",
+    "title": "Worker log",
+    "detail": "Reading additional input from stdin...",
+    "rawText": "Reading additional input from stdin...\n",
+    "createdAt": "2026-09-24T19:16:44.569Z",
+    "minor": true
+  },
+  {
+    "id": 500454,
+    "taskId": "subagent-fixture",
+    "source": "broker",
+    "type": "completed",
+    "kind": "lifecycle",
+    "phase": "completed",
+    "title": "Task completed",
+    "rawText": "{\n  \"completion\": {\n    \"blocked\": false,\n    \"code\": \"completed\",\n    \"exitCode\": 0\n  },\n  \"learnRoutes\": {\n    \"attempt\": 1,\n    \"status\": \"missing\"\n  }\n}",
+    "createdAt": "2026-09-24T19:16:44.569Z"
+  }
+]
