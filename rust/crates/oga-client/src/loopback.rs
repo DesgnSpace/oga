@@ -593,30 +593,6 @@ impl LoopbackClient {
         .await
     }
 
-    pub async fn prompt(&self, cwd: Option<&str>) -> Result<PromptConfig, ClientError> {
-        let mut url = self.endpoint(&["api", "prompts"]);
-        if let Some(cwd) = cwd {
-            url.query_pairs_mut().append_pair("cwd", cwd);
-        }
-        self.get_json(url).await
-    }
-
-    pub async fn put_prompt(&self, request: &PromptWrite) -> Result<PromptConfig, ClientError> {
-        self.put_json(
-            self.endpoint(&["api", "prompts"]),
-            serde_json::to_value(request).map_err(ClientError::Encode)?,
-        )
-        .await
-    }
-
-    pub async fn delete_prompt(&self, cwd: Option<&str>) -> Result<PromptConfig, ClientError> {
-        let mut url = self.endpoint(&["api", "prompts"]);
-        if let Some(cwd) = cwd {
-            url.query_pairs_mut().append_pair("cwd", cwd);
-        }
-        self.send_json(Method::DELETE, url, None, None).await
-    }
-
     pub async fn caller_prompt(&self, cwd: Option<&str>) -> Result<PromptConfig, ClientError> {
         let mut url = self.endpoint(&["api", "caller-prompts"]);
         if let Some(cwd) = cwd {
@@ -1340,11 +1316,9 @@ mod tests {
             ),
             ("GET", "/api/memories") => json_response(StatusCode::OK, json!({ "memories": [] })),
             ("PUT", "/api/memories") => json_response(StatusCode::OK, memory_json()),
-            ("GET", "/api/prompts")
-            | ("PUT", "/api/prompts")
-            | ("DELETE", "/api/prompts")
-            | ("GET", "/api/caller-prompts")
-            | ("PUT", "/api/caller-prompts") => json_response(StatusCode::OK, prompt_json()),
+            ("GET", "/api/caller-prompts") | ("PUT", "/api/caller-prompts") => {
+                json_response(StatusCode::OK, prompt_json())
+            }
             ("GET", "/api/projects") => json_response(
                 StatusCode::OK,
                 json!({ "global": "/home/test", "projects": [] }),
@@ -1426,7 +1400,7 @@ mod tests {
         json!({ "id": "task", "kind": "delegated", "profileId": "profile", "model": "model",
             "prompt": "inspect", "cwd": "/home/test", "state": "completed",
             "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z",
-            "output": "done", "scope": { "read": [], "write": [] }, "allowQuestions": true })
+            "output": "done", "scope": { "read": [], "write": [] } })
     }
 
     fn task_summary_json() -> Value {
@@ -1686,15 +1660,6 @@ mod tests {
             })
             .await
             .expect("put memory");
-        client.prompt(Some("/home/test")).await.expect("prompt");
-        client
-            .put_prompt(&PromptWrite {
-                cwd: "/home/test".into(),
-                written: true,
-                value: "prompt".into(),
-            })
-            .await
-            .expect("put prompt");
         client
             .caller_prompt(Some("/home/test"))
             .await
@@ -1707,10 +1672,6 @@ mod tests {
             })
             .await
             .expect("put caller prompt");
-        client
-            .delete_prompt(Some("/home/test"))
-            .await
-            .expect("delete prompt");
         client.projects().await.expect("projects");
         client.models(&ModelQuery::default()).await.expect("models");
         client.usage(&ModelQuery::default()).await.expect("usage");

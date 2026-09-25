@@ -13,14 +13,12 @@ import { clearCachedSettingsState } from "./state";
 import { SettingsPage } from "./index";
 
 const inheritedPrompt: PromptConfig = { cwd: "/tmp/project", scope: "global", written: false, value: "", inherited: "" };
-let prompt = inheritedPrompt;
 let callerPrompt = inheritedPrompt;
 let savedCallerPrompt: { cwd: string; written: boolean; value: string } | undefined;
 
 afterEach(() => {
   cleanup();
   clearCachedSettingsState();
-  prompt = inheritedPrompt;
   callerPrompt = inheritedPrompt;
   savedCallerPrompt = undefined;
 });
@@ -179,8 +177,6 @@ function makeTransport(
               ? onUpdateProfile({ profileId: call.profileId, enabled: call.patch?.enabled })
               : profiles[0]
           ) as T;
-        case "prompt":
-          return prompt as T;
         case "callerPrompt":
           return callerPrompt as T;
         case "putCallerPrompt":
@@ -494,29 +490,6 @@ describe("model access", () => {
     const allowed = await screen.findByRole("switch", { name: /Opus/ });
     expect(allowed.hasAttribute("disabled")).toBe(false);
     expect((allowed as HTMLInputElement).checked).toBe(false);
-  });
-});
-
-describe("worker instructions", () => {
-  it("shows instructions a project file owns as read-only, and says where to edit them", async () => {
-    prompt = {
-      cwd: "/tmp/project",
-      scope: "project",
-      written: false,
-      value: "1. Blocked means stop.",
-      inherited: "",
-      configPath: "/tmp/project/.oga.yaml",
-    };
-    setTransport(makeTransport());
-    render(<SettingsPage />);
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Worker instructions" }));
-
-    const editor = await screen.findByRole("textbox", { name: "Worker instructions" });
-    expect(editor.hasAttribute("readonly")).toBe(true);
-    expect(screen.getByDisplayValue("1. Blocked means stop.")).toBeTruthy();
-    expect(screen.getByText("Set by the project file. Edit that file to change them.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 });
 

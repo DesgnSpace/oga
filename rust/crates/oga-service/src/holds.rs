@@ -758,7 +758,6 @@ pub(crate) mod tests {
                 write: vec!["**".into()],
             },
             grant_id: None,
-            allow_questions: true,
             can_delegate: false,
             timeout_ms: None,
             effort: None,

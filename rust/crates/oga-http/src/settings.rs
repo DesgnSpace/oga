@@ -13,10 +13,9 @@ use axum::{
     response::IntoResponse,
 };
 use oga_config::{
-    ConfigLayer, ConfigLayers, DEFAULT_CALLER_PROMPT, DEFAULT_WORKER_PROMPT, LoveRules,
-    MASKED_SECRET, ModelOverrides, ResolvedModelSettings, config_revision, global_cwd,
-    load_config_layers, model_enabled, model_override_for, read_model_overrides,
-    read_model_settings,
+    ConfigLayer, ConfigLayers, DEFAULT_CALLER_PROMPT, LoveRules, MASKED_SECRET, ModelOverrides,
+    ResolvedModelSettings, config_revision, global_cwd, load_config_layers, model_enabled,
+    model_override_for, read_model_overrides, read_model_settings,
 };
 use oga_domain::{
     AdvisorSettings, CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
@@ -44,7 +43,6 @@ use tokio::time::timeout;
 use crate::router::{HttpError, HttpState};
 
 const MODEL_SETTINGS_KEY: &str = "models";
-const PROMPTS_KEY: &str = "prompts";
 const CALLER_PROMPTS_KEY: &str = "callerPrompts";
 const CLEANUP_KEY: &str = "cleanup";
 const ADVISOR_KEY: &str = "advisor";
@@ -215,104 +213,70 @@ pub async fn put_memory(
     Ok(Json(serde_json::to_value(saved).unwrap()))
 }
 
-pub async fn get_prompt(
-    State(state): State<HttpState>,
-    Query(query): Query<CwdQuery>,
-) -> Result<impl IntoResponse, HttpError> {
-    read_prompt(&state, query, PromptKind::Worker)
-}
-
-pub async fn put_prompt(
-    State(state): State<HttpState>,
-    body: Bytes,
-) -> Result<impl IntoResponse, HttpError> {
-    write_prompt(&state, &body, PromptKind::Worker)
-}
-
-pub async fn delete_prompt(
-    State(state): State<HttpState>,
-    Query(query): Query<CwdQuery>,
-) -> Result<impl IntoResponse, HttpError> {
-    clear_prompt(&state, query, PromptKind::Worker)
-}
-
 pub async fn get_caller_prompt(
     State(state): State<HttpState>,
     Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    read_prompt(&state, query, PromptKind::Caller)
+    read_prompt(&state, query)
 }
 
 pub async fn put_caller_prompt(
     State(state): State<HttpState>,
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
-    write_prompt(&state, &body, PromptKind::Caller)
+    write_prompt(&state, &body)
 }
 
 pub async fn delete_caller_prompt(
     State(state): State<HttpState>,
     Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    clear_prompt(&state, query, PromptKind::Caller)
+    clear_prompt(&state, query)
 }
 
-fn read_prompt(
-    state: &HttpState,
-    query: CwdQuery,
-    kind: PromptKind,
-) -> Result<Json<Value>, HttpError> {
+fn read_prompt(state: &HttpState, query: CwdQuery) -> Result<Json<Value>, HttpError> {
     let cwd = requested_cwd(query.cwd.as_deref());
     Ok(Json(
-        serde_json::to_value(prompt_config(&state.store, &cwd, kind)?).unwrap(),
+        serde_json::to_value(prompt_config(&state.store, &cwd)?).unwrap(),
     ))
 }
 
-fn write_prompt(
-    state: &HttpState,
-    body: &Bytes,
-    kind: PromptKind,
-) -> Result<Json<Value>, HttpError> {
+fn write_prompt(state: &HttpState, body: &Bytes) -> Result<Json<Value>, HttpError> {
     let body: PromptWrite = parse_json(body)?;
     let cwd = canonical_cwd(&body.cwd);
-    if let Some(path) = prompt_config(&state.store, &cwd, kind)?.config_path {
+    if let Some(path) = prompt_config(&state.store, &cwd)?.config_path {
         return Err(HttpError::bad_request(format!(
             "These instructions come from {path}. Edit them there."
         )));
     }
     let value = body.value.trim().to_owned();
     if value.chars().count() > 8_000 {
-        return Err(HttpError::bad_request(format!(
-            "invalid prompt config at {}: must be at most 8000 characters",
-            kind.field()
-        )));
+        return Err(HttpError::bad_request(
+            "invalid prompt config at caller_prompt: must be at most 8000 characters".to_owned(),
+        ));
     }
     let stored = json!({ "written": body.written, "value": value });
     state.store.repositories().settings().put(
         &cwd,
-        kind.settings_key(),
+        CALLER_PROMPTS_KEY,
         &stored.to_string(),
         &now_iso(),
     )?;
     Ok(Json(
-        serde_json::to_value(prompt_config(&state.store, &cwd, kind)?).unwrap(),
+        serde_json::to_value(prompt_config(&state.store, &cwd)?).unwrap(),
     ))
 }
 
-fn clear_prompt(
-    state: &HttpState,
-    query: CwdQuery,
-    kind: PromptKind,
-) -> Result<Json<Value>, HttpError> {
+fn clear_prompt(state: &HttpState, query: CwdQuery) -> Result<Json<Value>, HttpError> {
     let cwd = requested_cwd(query.cwd.as_deref());
     state.store.repositories().settings().put(
         &cwd,
-        kind.settings_key(),
+        CALLER_PROMPTS_KEY,
         &json!({ "written": false, "value": "" }).to_string(),
         &now_iso(),
     )?;
     Ok(Json(
-        serde_json::to_value(prompt_config(&state.store, &cwd, kind)?).unwrap(),
+        serde_json::to_value(prompt_config(&state.store, &cwd)?).unwrap(),
     ))
 }
 
@@ -837,59 +801,23 @@ fn validate_memory_key(key: &str) -> Result<String, HttpError> {
     Ok(key.to_owned())
 }
 
-/// Which side of a delegation a scope's rules text is written for: the rules
-/// the worker runs under, or the rules the agent calling `delegate` reads
-/// when it writes a brief. Both resolve through the same layers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptKind {
-    Worker,
-    Caller,
-}
-
-impl PromptKind {
-    fn settings_key(self) -> &'static str {
-        match self {
-            Self::Worker => PROMPTS_KEY,
-            Self::Caller => CALLER_PROMPTS_KEY,
-        }
-    }
-
-    fn field(self) -> &'static str {
-        match self {
-            Self::Worker => "worker_prompt",
-            Self::Caller => "caller_prompt",
-        }
-    }
-
-    fn default_text(self) -> &'static str {
-        match self {
-            Self::Worker => DEFAULT_WORKER_PROMPT,
-            Self::Caller => DEFAULT_CALLER_PROMPT,
-        }
-    }
-
-    fn read_file(self, layer: Option<&ConfigLayer>) -> Result<Option<String>, HttpError> {
-        match self {
-            Self::Worker => oga_config::read_worker_prompt(layer),
-            Self::Caller => oga_config::read_caller_prompt(layer),
-        }
-        .map_err(|error| HttpError::bad_request(error.to_string()))
-    }
-}
-
-/// One scope's rules text, resolved highest first: the `.oga.yaml` sitting in
-/// that directory, then what Settings saved for it, then what it inherits. The
-/// file is read here rather than copied into the store, so editing it changes
-/// the next dispatch.
-fn prompt_config(store: &Store, cwd: &str, kind: PromptKind) -> Result<PromptConfig, HttpError> {
+/// The brief rules one scope's text resolves through, highest first: the
+/// `.oga.yaml` sitting in that directory, then what Settings saved for it,
+/// then what it inherits. The file is read here rather than copied into the
+/// store, so editing it changes the next dispatch.
+fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
     let global = canonical_cwd(&global_cwd().display().to_string());
     let layers = load_config_layers(Some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let default_text = DEFAULT_CALLER_PROMPT.to_owned();
     let own_layer = layers.project.as_ref();
-    let from_file = kind
-        .read_file(own_layer)?
-        .zip(own_layer.map(|layer| layer.path.display().to_string()));
-    let own = read_json_setting(store, cwd, kind.settings_key())?;
+    let read_file = |layer: Option<&ConfigLayer>| {
+        oga_config::read_caller_prompt(layer)
+            .map_err(|error| HttpError::bad_request(error.to_string()))
+    };
+    let from_file =
+        read_file(own_layer)?.zip(own_layer.map(|layer| layer.path.display().to_string()));
+    let own = read_json_setting(store, cwd, CALLER_PROMPTS_KEY)?;
     let own_value = own
         .as_ref()
         .and_then(|value| value.get("value"))
@@ -902,10 +830,10 @@ fn prompt_config(store: &Store, cwd: &str, kind: PromptKind) -> Result<PromptCon
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let inherited = if cwd == global {
-        kind.default_text().to_owned()
+        default_text.clone()
     } else {
-        kind.read_file(layers.user.as_ref())?
-            .or(read_json_setting(store, &global, kind.settings_key())?
+        read_file(layers.user.as_ref())?
+            .or(read_json_setting(store, &global, CALLER_PROMPTS_KEY)?
                 .filter(|value| value.get("written").and_then(Value::as_bool) == Some(true))
                 .and_then(|value| {
                     value
@@ -913,7 +841,7 @@ fn prompt_config(store: &Store, cwd: &str, kind: PromptKind) -> Result<PromptCon
                         .and_then(Value::as_str)
                         .map(str::to_owned)
                 }))
-            .unwrap_or_else(|| kind.default_text().to_owned())
+            .unwrap_or(default_text)
     };
     let saved = if written {
         own_value
@@ -923,12 +851,6 @@ fn prompt_config(store: &Store, cwd: &str, kind: PromptKind) -> Result<PromptCon
     let (value, config_path) = match from_file {
         Some((prompt, path)) => (prompt, Some(path)),
         None => (saved, None),
-    };
-    // The task slot is the one structural guarantee: prompts customized
-    // before templates existed get it first, words and order untouched.
-    let value = match kind {
-        PromptKind::Worker => oga_config::ensure_brief_slot(&value),
-        PromptKind::Caller => value,
     };
     Ok(PromptConfig {
         cwd: cwd.to_owned(),
@@ -940,16 +862,14 @@ fn prompt_config(store: &Store, cwd: &str, kind: PromptKind) -> Result<PromptCon
     })
 }
 
-pub(crate) fn worker_prompt(store: &Store, cwd: &str) -> Result<String, HttpError> {
-    Ok(prompt_config(store, &canonical_cwd(cwd), PromptKind::Worker)?.value)
-}
-
 /// The brief rules as the calling agent reads them: the scope's text with
 /// `{{default}}` and `{{project}}` filled in. Every other `{{name}}` stays
-/// visible, so a typo reads as a typo rather than vanishing.
+/// visible, so a typo reads as a typo rather than vanishing. `{{default}}`
+/// drops the attribution sentence when the scope's `worker.attribution` is
+/// off.
 pub fn caller_prompt(store: &Store, cwd: &str) -> Result<String, HttpError> {
     let cwd = canonical_cwd(cwd);
-    let value = prompt_config(store, &cwd, PromptKind::Caller)?.value;
+    let value = prompt_config(store, &cwd)?.value;
     Ok(oga_service::render_template(
         &value,
         &[

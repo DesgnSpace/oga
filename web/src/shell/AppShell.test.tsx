@@ -12,7 +12,7 @@ function summaryTask(id: string, preview: string) {
 function fullTask(id: string, prompt: string) {
   return { id, profileId: "worker", model: "sonnet", prompt, cwd: "/repo", state: id === "three" ? "preparing_checkout" : "running",
     createdAt: "2026-08-31T10:00:00Z", updatedAt: "2026-08-31T10:00:00Z", output: "",
-    scope: { read: [], write: [] }, allowQuestions: true };
+    scope: { read: [], write: [] } };
 }
 
 const transport: Transport = {

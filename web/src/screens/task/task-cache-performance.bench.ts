@@ -66,7 +66,6 @@ function task(id: string, state: Task["state"] = "running"): Task {
     updatedAt: stamp(1),
     output: "",
     scope: { read: [], write: [] },
-    allowQuestions: true,
     canDelegate: false,
   };
 }

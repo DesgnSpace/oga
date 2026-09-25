@@ -7,7 +7,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use oga_config::DEFAULT_WORKER_PROMPT;
 use oga_domain::{
     CompletionCode, HoldArgs, HoldVerb, MemoryEntry, OnBlockerFailure, ScopeGrant,
     SelectionDecision, Task, TaskCompletion, TaskKind, TaskScope, TaskState, TaskWorktree,
@@ -80,7 +79,6 @@ pub struct DispatchRequest {
     pub scope: TaskScope,
     pub grant_id: Option<String>,
     pub remember_scope: bool,
-    pub allow_questions: bool,
     /// Whether the worker may hand work onward to tasks of its own.
     pub can_delegate: bool,
     pub timeout: Option<Duration>,
@@ -94,7 +92,6 @@ pub struct DispatchRequest {
     pub depends_on: Vec<String>,
     pub on_blocker_failure: OnBlockerFailure,
     pub selection: Option<SelectionDecision>,
-    pub worker_prompt: Option<String>,
     pub memories: Vec<MemoryEntry>,
     pub caller_id: Option<String>,
     /// The caller's own start time, unparsed. Absent means start now.
@@ -120,7 +117,6 @@ impl DispatchRequest {
             },
             grant_id: None,
             remember_scope: false,
-            allow_questions: true,
             can_delegate: false,
             timeout: None,
             parent_task_id: None,
@@ -133,7 +129,6 @@ impl DispatchRequest {
             depends_on: Vec::new(),
             on_blocker_failure: OnBlockerFailure::Hold,
             selection: None,
-            worker_prompt: None,
             memories: Vec::new(),
             caller_id: None,
             start_at: None,
@@ -438,7 +433,6 @@ impl Dispatcher {
             orchestrator_id: request.orchestrator_id.clone(),
             scope: request.scope.clone(),
             grant_id,
-            allow_questions: request.allow_questions,
             can_delegate: request.can_delegate,
             timeout_ms: request.timeout.map(|value| value.as_millis() as u64),
             effort: request.effort.clone(),
@@ -458,19 +452,8 @@ impl Dispatcher {
             hold: None,
             attachments: request.attachments.clone(),
         };
-        let attribution = prompt::attribution_for(
-            &workspace,
-            profile.provider.as_str(),
-            &task.model,
-            request.effort.as_deref(),
-        );
         let prompt = WorkerPromptInput {
             task: request.prompt,
-            allow_questions: request.allow_questions,
-            scope: Some(request.scope),
-            worker_prompt: request
-                .worker_prompt
-                .unwrap_or_else(|| DEFAULT_WORKER_PROMPT.to_owned()),
             memories: if request.memories.is_empty() {
                 self.store
                     .repositories()
@@ -479,10 +462,9 @@ impl Dispatcher {
             } else {
                 request.memories
             },
-            attribution,
-            identity: prompt::PromptIdentity::new(
-                &task.id,
-                profile.provider,
+            attribution: prompt::attribution_for(
+                &workspace,
+                profile.provider.as_str(),
                 &task.model,
                 request.effort.as_deref(),
             ),
@@ -1019,22 +1001,11 @@ impl Dispatcher {
                                     .unwrap_or(CONTINUE_INSTRUCTION),
                                 true,
                             ),
-                            allow_questions: task.allow_questions,
-                            scope: Some(task.scope.clone()),
                             ..WorkerPromptInput::default()
                         },
                         None => WorkerPromptInput {
                             task: task.prompt.clone(),
-                            allow_questions: task.allow_questions,
-                            scope: Some(task.scope.clone()),
-                            worker_prompt: DEFAULT_WORKER_PROMPT.to_owned(),
                             attribution: prompt::attribution_for_task(&task, profile.provider),
-                            identity: prompt::PromptIdentity::new(
-                                &task.id,
-                                profile.provider,
-                                &task.model,
-                                task.effort.as_deref(),
-                            ),
                             ..WorkerPromptInput::default()
                         },
                     };
@@ -1101,16 +1072,7 @@ impl Dispatcher {
                 Ok(Some(profile)) => {
                     let prompt = WorkerPromptInput {
                         task: queued.prompt.clone(),
-                        allow_questions: queued.allow_questions,
-                        scope: Some(queued.scope.clone()),
-                        worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
                         attribution: prompt::attribution_for_task(&queued, profile.provider),
-                        identity: prompt::PromptIdentity::new(
-                            &queued.id,
-                            profile.provider,
-                            &queued.model,
-                            queued.effort.as_deref(),
-                        ),
                         ..WorkerPromptInput::default()
                     };
                     self.launch_task(queued, profile, prompt, None);
@@ -1500,7 +1462,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 plan.caller_id.as_deref(),
                 scope,
                 task.grant_id,
-                i64::from(task.allow_questions),
+                1_i64,
                 i64::from(task.can_delegate),
                 task.timeout_ms,
                 task.effort,

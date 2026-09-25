@@ -60,7 +60,6 @@ function task(overrides: Partial<Task> = {}): Task {
     updatedAt: "2026-07-30T15:05:00Z",
     output: "",
     scope: { read: [], write: [] },
-    allowQuestions: true,
   canDelegate: false,
     ...overrides,
   };

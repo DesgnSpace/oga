@@ -149,7 +149,6 @@ export interface Task {
   orchestratorId?: string;
   scope: TaskScope;
   grantId?: string;
-  allowQuestions: boolean;
   canDelegate: boolean;
   timeoutMs?: number;
   effort?: string;
@@ -447,7 +446,6 @@ export interface ResumeRequest {
   instruction?: string;
   timeoutMs?: number;
   scope?: TaskScope;
-  allowQuestions?: boolean;
   queue?: QueueAction;
 }
 
@@ -751,7 +749,6 @@ export type BrokerCall =
   | { call: "taskBranches"; taskId: string }
   | { call: "projects" }
   | { call: "memories"; cwd: string }
-  | { call: "prompt"; cwd?: string }
   | { call: "callerPrompt"; cwd?: string }
   | { call: "modelSettings"; cwd?: string; refresh?: boolean }
   | { call: "cleanup" }
@@ -769,7 +766,6 @@ export type BrokerCall =
   | { call: "handoffTask"; taskId: string; request: HandoffRequest }
   | { call: "completeTask"; taskId: string; request: CompletionRequest }
   | { call: "removeFollowUp"; taskId: string; index: number }
-  | { call: "putPrompt"; request: PromptWrite }
   | { call: "putCallerPrompt"; request: PromptWrite }
   | { call: "putModelSettings"; request: ModelSettingsUpdate }
   | { call: "resetModelSettings"; cwd?: string; revision?: string }
@@ -789,7 +785,6 @@ export interface BrokerCallResult {
   taskBranches: TaskBranches;
   projects: ProjectList;
   memories: MemoryEntry[];
-  prompt: PromptConfig;
   callerPrompt: PromptConfig;
   modelSettings: ModelSettingsSnapshot;
   cleanup: CleanupSnapshot;
@@ -807,7 +802,6 @@ export interface BrokerCallResult {
   handoffTask: void;
   completeTask: void;
   removeFollowUp: void;
-  putPrompt: PromptConfig;
   putCallerPrompt: PromptConfig;
   putModelSettings: ModelSettingsSnapshot;
   resetModelSettings: ModelSettingsSnapshot;

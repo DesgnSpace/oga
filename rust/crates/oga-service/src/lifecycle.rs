@@ -12,7 +12,7 @@ use crate::acp_run::{self, AcpEnd, AcpRun, AcpTurn, Delivered};
 use crate::authorization;
 use crate::dependencies;
 use crate::prompt::{
-    WorkerOutcome, WorkerPromptInput, assemble_worker_prompt, interpret_worker_outcome,
+    WorkerOutcome, WorkerPromptInput, assemble_worker_message, interpret_worker_outcome,
 };
 use crate::transport::{self, TransportPlan};
 use oga_domain::{
@@ -284,7 +284,6 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         orchestrator_id: row.get(17)?,
         scope,
         grant_id: row.get(20)?,
-        allow_questions: row.get::<_, i64>(21)? != 0,
         can_delegate: row.get::<_, i64>(37)? != 0,
         timeout_ms: row.get(22)?,
         effort: row.get(23)?,
@@ -328,16 +327,7 @@ pub async fn run_task(
 ) -> Result<RunOutcome, LifecycleError> {
     let prompt = WorkerPromptInput {
         task: task.prompt.clone(),
-        allow_questions: task.allow_questions,
-        scope: Some(task.scope.clone()),
-        worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
         attribution: crate::prompt::attribution_for_task(&task, profile.provider),
-        identity: crate::prompt::PromptIdentity::new(
-            &task.id,
-            profile.provider,
-            &task.model,
-            task.effort.as_deref(),
-        ),
         ..WorkerPromptInput::default()
     };
     run_task_and_release(store, runner, task, profile, prompt).await
@@ -393,23 +383,13 @@ pub(crate) async fn run_task_and_release_with_active(
                 block_queued_task(&store, &queued.id, "unknown profile for dependent task")?;
                 continue;
             };
-            let attribution = crate::prompt::attribution_for_task(&queued, profile.provider);
-            let identity = crate::prompt::PromptIdentity::new(
-                &queued.id,
-                profile.provider,
-                &queued.model,
-                queued.effort.as_deref(),
-            );
+            let provider = profile.provider;
             pending.push((
                 queued.clone(),
                 profile,
                 WorkerPromptInput {
                     task: queued.prompt.clone(),
-                    allow_questions: queued.allow_questions,
-                    scope: Some(queued.scope.clone()),
-                    worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
-                    attribution,
-                    identity,
+                    attribution: crate::prompt::attribution_for_task(&queued, provider),
                     ..WorkerPromptInput::default()
                 },
             ));
@@ -449,7 +429,7 @@ pub(crate) async fn run_task_with_session_and_active(
     let shipped_prompt = if options.session_id.is_some() {
         prompt.task.clone()
     } else {
-        assemble_worker_prompt(&prompt)
+        assemble_worker_message(&prompt)
     };
     if let Some(reason) = oga_providers::cannot_start(&profile) {
         return refuse_run(&store, task, &shipped_prompt, reason);

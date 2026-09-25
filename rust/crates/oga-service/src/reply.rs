@@ -114,8 +114,6 @@ pub async fn reply(
                     old.question.as_deref().unwrap_or("What input is required?")
                 ),
             ),
-            allow_questions: task.allow_questions,
-            scope: Some(task.scope.clone()),
             ..crate::prompt::WorkerPromptInput::default()
         },
         Some(session_id),
