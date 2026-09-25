@@ -297,7 +297,6 @@ function deniedPaths(current: TaskScope | undefined, suggested: TaskScope | unde
   return suggested.read.filter((path) => !currentRead.includes(path));
 }
 
-/** Explains why a task is blocked, in the copy the reference draws. */
 /** A worker parked on a step outside its task, waiting for the person to allow or refuse it. */
 export function awaitsPermission(task: Pick<Task, "state">, events: Pick<TaskEventView, "type">[]): boolean {
   if (task.state !== "needs_input") return false;
@@ -309,6 +308,7 @@ export function awaitsPermission(task: Pick<Task, "state">, events: Pick<TaskEve
   return false;
 }
 
+/** Explains why a task is blocked, in the copy the reference draws. */
 export function explainBlocked(
   completion: TaskCompletion | undefined,
   currentScope: TaskScope | undefined,

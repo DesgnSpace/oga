@@ -22,8 +22,8 @@ pub(crate) enum Answer {
 }
 
 impl Answer {
-    /// `allow` and `refuse` are the two buttons; anything else is an
-    /// instruction.
+    /// `allow` and `refuse` are the two buttons, and a plain yes or no reads
+    /// as one of them; anything else is an instruction.
     pub(crate) fn read(reply: &str) -> Self {
         let reply = reply.trim();
         match reply
@@ -31,8 +31,8 @@ impl Answer {
             .to_ascii_lowercase()
             .as_str()
         {
-            "allow" | "allow it" => Self::Allow,
-            "refuse" | "refuse it" => Self::Refuse,
+            "allow" | "allow it" | "yes" | "y" | "ok" | "okay" | "go ahead" => Self::Allow,
+            "refuse" | "refuse it" | "no" | "n" | "don't" | "deny" => Self::Refuse,
             _ => Self::Instead(reply.to_owned()),
         }
     }
@@ -184,4 +184,20 @@ pub(crate) fn permission_question(
     format!(
         "The worker wants to {step}. Allow it? Reply allow or refuse, or say what it should do instead."
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_yes_or_no_answers_the_question_rather_than_instructing() {
+        assert_eq!(Answer::read("Yes"), Answer::Allow);
+        assert_eq!(Answer::read("allow."), Answer::Allow);
+        assert_eq!(Answer::read("no"), Answer::Refuse);
+        assert_eq!(
+            Answer::read("keep the backup inside the repo"),
+            Answer::Instead("keep the backup inside the repo".into())
+        );
+    }
 }
