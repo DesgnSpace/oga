@@ -6,17 +6,18 @@ use std::{
 };
 
 use chrono::{Datelike, SecondsFormat, TimeZone, Utc};
-use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskScope, TaskState};
+use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Where a worker's stamp points back to.
-pub const ATTRIBUTION_EMAIL: &str = "oga@desgn.space";
+/// Inputs for the full prompt sent to a fresh provider session.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkerPromptInput {
+    pub task: String,
+    pub memories: Vec<MemoryEntry>,
+    pub attribution: Option<WorkerAttribution>,
+}
 
-/// The run this prompt was built for. Rendered verbatim into the attribution
-/// instruction below, so the stamp always names the worker that ran.
-/// `provider` is the provider type (`claude`, `codex`, …), never the user's
-/// own profile name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkerAttribution {
     pub provider: String,
@@ -25,141 +26,12 @@ pub struct WorkerAttribution {
 }
 
 impl WorkerAttribution {
-    /// `claude/opus, high`, or `claude/opus` when no effort ran.
-    pub fn summary(&self) -> String {
-        match self
-            .effort
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
+    fn trailer(&self) -> String {
+        let run = match self.effort.as_deref().filter(|effort| !effort.is_empty()) {
             Some(effort) => format!("{}/{}, {effort}", self.provider, self.model),
             None => format!("{}/{}", self.provider, self.model),
-        }
-    }
-
-    /// The git trailer stamped on commits the worker creates. Shaped so git
-    /// reads it as a co-author.
-    pub fn trailer(&self) -> String {
-        format!(
-            "Co-Authored-By: Oga ({}) <{ATTRIBUTION_EMAIL}>",
-            self.summary()
-        )
-    }
-}
-
-/// Stamp this run unless the project turned attribution off. A config that
-/// cannot be read fails open: attribution stays on, the default.
-pub fn attribution_for(
-    cwd: &std::path::Path,
-    provider: &str,
-    model: &str,
-    effort: Option<&str>,
-) -> Option<WorkerAttribution> {
-    let attribution = WorkerAttribution {
-        provider: provider.to_owned(),
-        model: model.to_owned(),
-        effort: effort.map(str::to_owned),
-    };
-    let layers = match oga_config::load_config_layers(Some(cwd)) {
-        Ok(layers) => layers,
-        Err(_) => return Some(attribution),
-    };
-    let project = oga_config::read_worker_attribution(layers.project.as_ref())
-        .ok()
-        .flatten();
-    let user = oga_config::read_worker_attribution(layers.user.as_ref())
-        .ok()
-        .flatten();
-    oga_config::resolve_worker_attribution(project, user).then_some(attribution)
-}
-
-/// Same as [`attribution_for`], but read from the project the task was
-/// delegated against: a worktree task runs in a checkout whose own directory
-/// holds no `.oga.yaml`, so the origin directory decides.
-pub fn attribution_for_task(
-    task: &oga_domain::Task,
-    provider: oga_domain::Provider,
-) -> Option<WorkerAttribution> {
-    let cwd = task
-        .worktree
-        .as_ref()
-        .map(|worktree| worktree.origin_cwd.as_str())
-        .unwrap_or(task.cwd.as_str());
-    attribution_for(
-        std::path::Path::new(cwd),
-        provider.as_str(),
-        &task.model,
-        task.effort.as_deref(),
-    )
-}
-
-/// The attribution block appended to the worker prompt. Kept as one function
-/// so commits and pull requests always stamp the same words.
-fn attribution_lines(attribution: &WorkerAttribution) -> Vec<String> {
-    vec![
-        "Stamp what you ship so the tool stays visible. This is on by default; skip it only when the project's own worker rules forbid tool attribution, or when the commit already carries an Oga trailer.".into(),
-        format!(
-            "- Commits you create: end each message with the trailer `{}` on its own line.",
-            attribution.trailer()
-        ),
-        "- Use these words exactly as written here. Never stamp the same commit twice, and never add attribution to anything the user wrote themselves.".into(),
-    ]
-}
-
-/// Who is running, for `{{task_id}}`, `{{provider}}`, `{{model}}`, and
-/// `{{effort}}` substitution. Always known on fresh launches.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PromptIdentity {
-    pub task_id: String,
-    pub provider: String,
-    pub model: String,
-    pub effort: Option<String>,
-}
-
-impl PromptIdentity {
-    pub fn new(
-        task_id: &str,
-        provider: oga_domain::Provider,
-        model: &str,
-        effort: Option<&str>,
-    ) -> Self {
-        Self {
-            task_id: task_id.to_owned(),
-            provider: provider.as_str().to_owned(),
-            model: model.to_owned(),
-            effort: effort.map(str::to_owned),
-        }
-    }
-}
-
-/// Inputs for the full prompt sent to a fresh provider session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkerPromptInput {
-    pub task: String,
-    pub allow_questions: bool,
-    pub scope: Option<TaskScope>,
-    /// The template, resolved upstream with the brief slot ensured.
-    pub worker_prompt: String,
-    pub memories: Vec<MemoryEntry>,
-    /// `None` silences the stamp: the project turned attribution off.
-    pub attribution: Option<WorkerAttribution>,
-    pub identity: PromptIdentity,
-}
-
-impl Default for WorkerPromptInput {
-    /// A bare input still renders the default template: continuations that
-    /// rebuild without a session have no resolved prompt of their own.
-    fn default() -> Self {
-        Self {
-            task: String::new(),
-            allow_questions: false,
-            scope: None,
-            worker_prompt: oga_config::DEFAULT_WORKER_PROMPT.to_owned(),
-            memories: Vec::new(),
-            attribution: None,
-            identity: PromptIdentity::default(),
-        }
+        };
+        format!("Co-Authored-By: Oga ({run}) <oga@desgn.space>")
     }
 }
 
@@ -175,14 +47,59 @@ pub struct WorkerOutcome {
     pub completion: TaskCompletion,
 }
 
-/// Assemble the worker document sent to a new provider session. The prompt is
-/// the user's plain text, top to bottom: code substitutes the values it
-/// knows and sends what they wrote — no imposed sections, no mandatory
-/// headings, no reordering, nothing appended. The one guarantee is the task
-/// slot itself, ensured upstream: without `{{brief}}` there is no delegation
-/// to perform.
-pub fn assemble_worker_prompt(input: &WorkerPromptInput) -> String {
-    render_template(&input.worker_prompt, &template_values(input))
+/// Assemble the brief with its project memories and optional attribution.
+pub fn assemble_worker_message(input: &WorkerPromptInput) -> String {
+    let mut sections = vec![input.task.clone()];
+    if !input.memories.is_empty() {
+        sections.push(memories_section(&input.memories));
+    }
+    if let Some(attribution) = &input.attribution {
+        sections.push(format!(
+            "## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `{}` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves.",
+            attribution.trailer()
+        ));
+    }
+    sections.join("\n\n")
+}
+
+pub fn attribution_for(
+    cwd: &std::path::Path,
+    provider: &str,
+    model: &str,
+    effort: Option<&str>,
+) -> Option<WorkerAttribution> {
+    let attribution = WorkerAttribution {
+        provider: provider.to_owned(),
+        model: model.to_owned(),
+        effort: effort.map(str::to_owned),
+    };
+    let Ok(layers) = oga_config::load_config_layers(Some(cwd)) else {
+        return Some(attribution);
+    };
+    let project = oga_config::read_worker_attribution(layers.project.as_ref())
+        .ok()
+        .flatten();
+    let user = oga_config::read_worker_attribution(layers.user.as_ref())
+        .ok()
+        .flatten();
+    oga_config::resolve_worker_attribution(project, user).then_some(attribution)
+}
+
+pub fn attribution_for_task(
+    task: &oga_domain::Task,
+    provider: oga_domain::Provider,
+) -> Option<WorkerAttribution> {
+    let cwd = task
+        .worktree
+        .as_ref()
+        .map(|worktree| worktree.origin_cwd.as_str())
+        .unwrap_or(task.cwd.as_str());
+    attribution_for(
+        std::path::Path::new(cwd),
+        provider.as_str(),
+        &task.model,
+        task.effort.as_deref(),
+    )
 }
 
 /// One substitution pass over the template. Known `{{names}}` become the
@@ -213,46 +130,6 @@ pub fn render_template(template: &str, values: &[(&str, String)]) -> String {
     out
 }
 
-/// Every value a template may name. `{{memories}}` and `{{attribution}}`
-/// expand to a whole section or nothing: a placeholder language with no
-/// conditionals cannot skip a heading, so the section goes down with the
-/// placeholder.
-///
-/// `{{context_map}}` is retired and expands to nothing. Unknown names survive
-/// as visible text so a typo is caught, which is the wrong answer for a name
-/// Oga itself withdrew: a prompt saved while it existed would print the token.
-fn template_values(input: &WorkerPromptInput) -> Vec<(&str, String)> {
-    let scope = input.scope.as_ref().map(scope_line).unwrap_or_default();
-    let memories = if input.memories.is_empty() {
-        String::new()
-    } else {
-        memories_section(&input.memories)
-    };
-    let attribution = input
-        .attribution
-        .as_ref()
-        .map(|attribution| {
-            let mut lines = vec!["## Attribution".to_owned()];
-            lines.extend(attribution_lines(attribution));
-            lines.join("\n")
-        })
-        .unwrap_or_default();
-    let mut reporting = vec!["## Reporting".to_owned()];
-    reporting.extend(reporting_lines(input.allow_questions));
-    vec![
-        ("brief", input.task.clone()),
-        ("scope", scope),
-        ("task_id", input.identity.task_id.clone()),
-        ("provider", input.identity.provider.clone()),
-        ("model", input.identity.model.clone()),
-        ("effort", input.identity.effort.clone().unwrap_or_default()),
-        ("context_map", String::new()),
-        ("memories", memories),
-        ("attribution", attribution),
-        ("reporting", reporting.join("\n")),
-    ]
-}
-
 fn memories_section(memories: &[MemoryEntry]) -> String {
     let facts = memories
         .iter()
@@ -265,42 +142,6 @@ fn memories_section(memories: &[MemoryEntry]) -> String {
         facts,
     ]
     .join("\n")
-}
-
-fn reporting_lines(allow_questions: bool) -> Vec<String> {
-    vec![if allow_questions {
-        "If a product choice, secret, destructive action, or new authority is required, stop and end with: OGA_NEEDS_INPUT: <one clear question>".into()
-    } else {
-        "Do not ask questions. Decide with what you have, and say in the report what you could not settle.".into()
-    }]
-}
-
-/// Render the scope sentence shared by fresh prompts and continuation prompts.
-pub fn scope_line(scope: &TaskScope) -> String {
-    let mut all = scope.read.clone();
-    all.extend(scope.write.iter().cloned());
-    all.sort();
-    all.dedup();
-    format!(
-        "Scope for this task — read: {}; write: {}. That is what the caller approved, not a reading list; what to open is your call.",
-        describe_rules(&all),
-        describe_rules(&scope.write),
-    )
-}
-
-fn describe_rules(rules: &[String]) -> String {
-    if rules.is_empty() {
-        return "nothing".into();
-    }
-    if rules.iter().any(|rule| rule == "**") {
-        return "the whole working directory".into();
-    }
-    let shown = rules.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
-    if rules.len() > 8 {
-        format!("{shown} and {} more", rules.len() - 8)
-    } else {
-        shown
-    }
 }
 
 /// Classify provider text using the same broad failure classes as the broker.
@@ -800,43 +641,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prompt_substitutes_values_through_placeholders() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+    fn assembled_message_is_the_brief_then_memories_and_attribution() {
+        let prompt = assemble_worker_message(&WorkerPromptInput {
             task: "do the thing".into(),
-            allow_questions: true,
-            scope: Some(TaskScope {
-                read: vec!["src/**".into()],
-                write: vec!["src/**".into()],
+            attribution: Some(WorkerAttribution {
+                provider: "claude".into(),
+                model: "opus".into(),
+                effort: None,
             }),
-            worker_prompt: "{{brief}}\n\n{{scope}}\n\n{{reporting}}".into(),
-            ..WorkerPromptInput::default()
-        });
-        assert!(prompt.contains("do the thing"));
-        assert!(prompt.contains("src/**"));
-        assert!(prompt.contains("OGA_NEEDS_INPUT"));
-    }
-
-    #[test]
-    fn one_sentence_in_one_sentence_out() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            worker_prompt: "Be terse.".into(),
-            ..WorkerPromptInput::default()
-        });
-        assert_eq!(prompt, "Be terse.");
-    }
-
-    #[test]
-    fn template_substitutes_values_and_keeps_user_order() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            allow_questions: true,
-            scope: Some(TaskScope {
-                read: vec!["src/**".into()],
-                write: vec!["src/**".into()],
-            }),
-            worker_prompt:
-                "{{reporting}}\n\n{{brief}}\n\n{{scope}}\n\n{{memories}}\n\n{{attribution}}".into(),
             memories: vec![MemoryEntry {
                 cwd: "/work".into(),
                 key: "a".into(),
@@ -845,101 +657,20 @@ mod tests {
                 created_at: "now".into(),
                 updated_at: "now".into(),
             }],
-            attribution: Some(WorkerAttribution {
-                provider: "claude".into(),
-                model: "opus".into(),
-                effort: None,
-            }),
-            identity: PromptIdentity {
-                task_id: "t-1".into(),
-                provider: "claude".into(),
-                model: "opus".into(),
-                effort: None,
-            },
         });
-        let reporting_at = prompt.find("## Reporting").expect("reporting");
-        let brief_at = prompt.find("do the thing").expect("brief");
-        let scope_at = prompt.find("src/**").expect("scope");
-        let memories_at = prompt.find("## Memories").expect("memories");
-        let attribution_at = prompt.find("## Attribution").expect("attribution");
-        assert!(reporting_at < brief_at && brief_at < scope_at);
-        assert!(scope_at < memories_at && memories_at < attribution_at);
-        assert!(prompt.contains("- a: b"));
-        assert!(!prompt.contains("{{"));
         assert_eq!(
-            prompt.matches("## Reporting").count(),
-            1,
-            "reporting is placed, not appended twice"
+            prompt,
+            "do the thing\n\n## Memories\nTreat these project facts as shared context. If one conflicts with the task or current files, report the conflict.\n- a: b\n\n## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `Co-Authored-By: Oga (claude/opus) <oga@desgn.space>` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves."
         );
     }
 
     #[test]
-    fn dropped_sections_stay_dropped() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
+    fn a_bare_brief_is_sent_verbatim() {
+        let prompt = assemble_worker_message(&WorkerPromptInput {
             task: "do the thing".into(),
-            worker_prompt: "{{brief}}".into(),
-            attribution: Some(WorkerAttribution {
-                provider: "claude".into(),
-                model: "opus".into(),
-                effort: Some("high".into()),
-            }),
             ..WorkerPromptInput::default()
         });
         assert_eq!(prompt, "do the thing");
-    }
-
-    #[test]
-    fn template_leaves_unknown_placeholders_verbatim() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            worker_prompt: "{{brief}}\n\n{{typo}}".into(),
-            ..WorkerPromptInput::default()
-        });
-        assert!(prompt.contains("{{typo}}"));
-    }
-
-    #[test]
-    fn prompt_stamps_the_real_destination_and_nothing_else() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            worker_prompt: "{{brief}}\n\n{{attribution}}".into(),
-            attribution: Some(WorkerAttribution {
-                provider: "claude".into(),
-                model: "opus".into(),
-                effort: Some("high".into()),
-            }),
-            ..WorkerPromptInput::default()
-        });
-        assert!(prompt.contains("## Attribution"));
-        assert!(prompt.contains("Co-Authored-By: Oga (claude/opus, high) <oga@desgn.space>"));
-        assert!(!prompt.contains("Supervised by Oga"));
-        assert!(prompt.contains(ATTRIBUTION_EMAIL));
-        assert!(prompt.contains("Never stamp the same commit twice"));
-        assert!(!prompt.contains("without an AI attribution trailer"));
-    }
-
-    #[test]
-    fn prompt_leaves_effort_off_and_stays_silent_when_opted_out() {
-        let prompt = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            worker_prompt: "{{brief}}\n\n{{attribution}}".into(),
-            attribution: Some(WorkerAttribution {
-                provider: "claude".into(),
-                model: "opus".into(),
-                effort: None,
-            }),
-            ..WorkerPromptInput::default()
-        });
-        assert!(prompt.contains("Co-Authored-By: Oga (claude/opus) <oga@desgn.space>"));
-        assert!(!prompt.contains("claude/opus,"));
-
-        let silent = assemble_worker_prompt(&WorkerPromptInput {
-            task: "do the thing".into(),
-            worker_prompt: "{{brief}}\n\n{{attribution}}".into(),
-            ..WorkerPromptInput::default()
-        });
-        assert!(!silent.contains("## Attribution"));
-        assert!(!silent.contains("upervised by Oga"));
     }
 
     #[test]

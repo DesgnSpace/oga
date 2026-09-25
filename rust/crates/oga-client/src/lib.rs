@@ -442,8 +442,6 @@ pub struct DispatchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<TaskScope>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_questions: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub can_delegate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
@@ -489,8 +487,6 @@ pub struct ResumeRequest {
     pub timeout_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<TaskScope>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_questions: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

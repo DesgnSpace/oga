@@ -26,7 +26,6 @@ pub struct ResumeRequest {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub timeout_ms: Option<u64>,
-    pub allow_questions: Option<bool>,
     pub start_at: Option<String>,
 }
 
@@ -60,11 +59,6 @@ impl ResumeRequest {
 
     pub fn timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = Some(timeout_ms);
-        self
-    }
-
-    pub fn allow_questions(mut self, allow_questions: bool) -> Self {
-        self.allow_questions = Some(allow_questions);
         self
     }
 
@@ -154,10 +148,6 @@ pub async fn resume(
             request.effort.is_some().then_some("effort"),
             request.timeout_ms.is_some().then_some("timeoutMs"),
             request.scope.is_some().then_some("scope"),
-            request
-                .allow_questions
-                .is_some()
-                .then_some("allowQuestions"),
         ]
         .into_iter()
         .flatten()
@@ -177,19 +167,17 @@ pub async fn resume(
     let scope_updated = request.scope.is_some();
     let scope = request.scope.unwrap_or_else(|| old.scope.clone());
     let scope_json = encode_store(&scope)?;
-    let allow_questions = request.allow_questions.unwrap_or(old.allow_questions);
     let was_archived = old.archived_at.is_some();
     let launch_instruction = instruction
         .clone()
         .unwrap_or_else(|| crate::dispatch::CONTINUE_INSTRUCTION.to_owned());
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,timeout_ms=COALESCE(?,timeout_ms),scope_json=?,allow_questions=?,model=?,effort=?,archived_at=NULL,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','completed','pending')",
+            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,timeout_ms=COALESCE(?,timeout_ms),scope_json=?,model=?,effort=?,archived_at=NULL,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','completed','pending')",
             rusqlite::params![
                 attempts_json,
                 request.timeout_ms,
                 scope_json,
-                i64::from(allow_questions),
                 model,
                 effort,
                 now,
@@ -242,9 +230,6 @@ pub async fn resume(
         });
         if scope_updated {
             resumed_payload["scopeUpdated"] = json!(true);
-        }
-        if let Some(allow_questions) = request.allow_questions {
-            resumed_payload["allowQuestions"] = json!(allow_questions);
         }
         if let Some(model) = &request.model {
             resumed_payload["model"] = json!(model);
@@ -329,8 +314,6 @@ pub async fn resume(
         profile,
         crate::prompt::WorkerPromptInput {
             task: prompt,
-            allow_questions: task.allow_questions,
-            scope: Some(task.scope.clone()),
             ..crate::prompt::WorkerPromptInput::default()
         },
         session,

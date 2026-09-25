@@ -56,7 +56,6 @@ impl Fixture {
                     read: vec!["**".into()],
                     write: vec!["**".into()],
                 },
-                allow_questions: true,
                 ..Task::default()
             })
             .expect("task");

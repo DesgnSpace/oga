@@ -134,7 +134,7 @@ const DELETE_WORKTREE_DESCRIPTION: &str = concat!(
 const PROMPT_DESCRIPTION: &str = concat!(
     "The brief the worker runs, as markdown, 1 to 64000 characters. It is the only account of the work the worker gets, since it cannot see this conversation, so anything it needs to know has to be in it. ",
     "It is sent as written: a one-line brief arrives as one line, a pasted bug report arrives as that report. Headings and numbered steps earn their length on work with several parts, and get in the way on work with one. ",
-    "Oga wraps it with the directory's memories, the scope, and its own reporting protocol before sending it; inspect `fields: [\"shippedPrompt\"]` returns the result."
+    "Oga sends it with the directory's memories and, when enabled, its commit attribution; inspect `fields: [\"shippedPrompt\"]` returns the result."
 );
 
 /// The `prompt` field's description with this scope's brief rules as its
@@ -162,10 +162,6 @@ const EFFORT_DESCRIPTION: &str = concat!(
     "Omitted, a routing rule's own configured effort applies if it has one, else the model's default. ",
     "Passed through by claude, codex, opencode, opencode-2 and pi; antigravity and cursor ignore it, since their model ids carry the level. models reports the levels each model accepts in `efforts`."
 );
-const ALLOW_QUESTIONS_DESCRIPTION: &str = concat!(
-    "Whether the worker may stop and ask. True, the default, lets it park in needs_input with a question and wait there until reply answers. ",
-    "False tells it to decide for itself instead of asking, so the task settles without a turn from the caller."
-);
 const CAN_DELEGATE_DESCRIPTION: &str = concat!(
     "Whether this worker may create tasks of its own. Off by default: the delegate tool is not served to it at all, so no prompt can talk it into fanning work out. ",
     "Turn it on for a task whose job is to split work up."
@@ -192,7 +188,7 @@ const RESUME_START_AT_DESCRIPTION: &str = concat!(
     "Hold the resume instead of running it now. ",
     "\"rate_limit\" waits for the account's own limit to clear: the reset time the failed run reported is the hint, the account's live usage is what releases it, and a run that named no reset time is checked again after ten minutes. ",
     "Otherwise an ISO instant in UTC, or a duration counted from now — \"30m\", \"4h\", \"2d\". ",
-    "The held task carries only its instruction, so model, effort, timeoutMs, scope and allowQuestions are refused alongside it. Resume again without startAt to start now, or cancel to drop it."
+    "The held task carries only its instruction, so model, effort, timeoutMs, and scope are refused alongside it. Resume again without startAt to start now, or cancel to drop it."
 );
 const ISO_DATETIME_PATTERN: &str = r"^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$";
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -434,13 +430,6 @@ fn delegate_tool(caller_prompt: &str) -> Value {
             ),
         ),
         ("scope".into(), scope_schema()),
-        (
-            "allowQuestions".into(),
-            described(
-                json!({ "type": "boolean", "default": true }),
-                ALLOW_QUESTIONS_DESCRIPTION,
-            ),
-        ),
         (
             "canDelegate".into(),
             described(
@@ -827,13 +816,6 @@ fn shared_tools() -> Vec<Value> {
         ),
         ("scope".into(), scope_schema()),
         (
-            "allowQuestions".into(),
-            described(
-                json!({ "type": "boolean" }),
-                "Whether the continued run may park in needs_input to ask. Omitted, the task keeps what it was dispatched with.",
-            ),
-        ),
-        (
             "model".into(),
             described(
                 json!({ "type": "string", "minLength": 1, "maxLength": 200 }),
@@ -858,7 +840,7 @@ fn shared_tools() -> Vec<Value> {
             "queue".into(),
             described(
                 json!({ "type": "string", "enum": ["add", "clear"] }),
-                "Work on the task's queue of waiting instructions instead of continuing it now. \"add\" puts the instruction behind the current run, to be taken up once that run finishes clean; instruction is then required and timeoutMs, scope, allowQuestions, model, effort and startAt are refused. \"clear\" drops everything waiting. Queued instructions run oldest first; a run that fails, asks a question, or ends blocked leaves them waiting, and cancelling the task discards them.",
+                "Work on the task's queue of waiting instructions instead of continuing it now. \"add\" puts the instruction behind the current run, to be taken up once that run finishes clean; instruction is then required and timeoutMs, scope, model, effort and startAt are refused. \"clear\" drops everything waiting. Queued instructions run oldest first; a run that fails, asks a question, or ends blocked leaves them waiting, and cancelling the task discards them.",
             ),
         ),
     ]);

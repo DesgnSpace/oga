@@ -212,8 +212,8 @@ pub use lifecycle::{
     ActiveRuns, LifecycleError, RunOutcome, run_task, run_task_and_release, run_task_with_prompt,
 };
 pub use prompt::{
-    WorkerOutcome, WorkerPromptInput, assemble_worker_prompt, classify_failure,
-    interpret_worker_outcome, render_template, scope_line,
+    WorkerOutcome, WorkerPromptInput, assemble_worker_message, classify_failure,
+    interpret_worker_outcome, render_template,
 };
 pub use reply::{ReplyRequest, reply};
 pub use resume::{ResumeRequest, resume};

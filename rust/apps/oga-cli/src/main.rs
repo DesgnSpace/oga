@@ -13,9 +13,9 @@ use oga_client::{
     LoopbackClient, QueryInitRequest, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
-    CALLER_PROMPTS_KEY, DEFAULT_CALLER_PROMPT, DEFAULT_WORKER_PROMPT, LoveDestination, PROMPTS_KEY,
-    ResolvedProfiles, canonical_cwd, global_cwd, load_config_layers, load_profiles,
-    mask_secret_env, read_caller_prompt, read_config_file, read_worker_prompt, update_config_file,
+    CALLER_PROMPTS_KEY, LoveDestination, ResolvedProfiles, canonical_cwd, global_cwd,
+    load_config_layers, load_profiles, mask_secret_env, read_caller_prompt, read_config_file,
+    update_config_file,
 };
 use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
@@ -2827,8 +2827,11 @@ async fn run_config(args: &[String]) -> CliResult<i32> {
     );
     output.insert("models".into(), merged_model_overrides(&layers)?);
     output.insert(
-        "worker".into(),
-        worker_config_json(&layers, &stored_worker_prompts(&cwd))?,
+        "callerPrompt".into(),
+        json!(caller_prompt_for_config(
+            &layers,
+            &stored_caller_prompt(&cwd)
+        )?),
     );
     let love = love_rules_from_layers(&layers, &cwd)?;
     if !love.is_empty() {
@@ -3110,46 +3113,27 @@ fn config_routes_json(policy: Option<&RoutingPolicy>, layers: &oga_config::Confi
     Value::Object(routes)
 }
 
-fn worker_config_json(
+fn caller_prompt_for_config(
     layers: &oga_config::ConfigLayers,
-    saved: &SavedWorkerPrompts,
-) -> CliResult<Value> {
+    saved: &SavedCallerPrompt,
+) -> CliResult<String> {
     let own = layers.project.as_ref();
-    let from_file = read_worker_prompt(own)?;
-    let worker_prompt = from_file
-        .clone()
-        .or_else(|| saved.worker_here.clone())
-        .or(read_worker_prompt(layers.user.as_ref())?)
-        .or_else(|| saved.worker_everywhere.clone())
-        .unwrap_or_else(|| DEFAULT_WORKER_PROMPT.to_owned());
-    let caller_prompt = read_caller_prompt(own)?
-        .or_else(|| saved.caller_here.clone())
+    Ok(read_caller_prompt(own)?
+        .or_else(|| saved.here.clone())
         .or(read_caller_prompt(layers.user.as_ref())?)
-        .or_else(|| saved.caller_everywhere.clone())
-        .unwrap_or_else(|| DEFAULT_CALLER_PROMPT.to_owned());
-    let mut worker = Map::new();
-    worker.insert(
-        "workerPrompt".into(),
-        json!(oga_config::ensure_brief_slot(&worker_prompt)),
-    );
-    worker.insert("callerPrompt".into(), json!(caller_prompt));
-    if let Some(layer) = own.filter(|_| from_file.is_some()) {
-        worker.insert("source".into(), json!(layer.path));
-    }
-    Ok(Value::Object(worker))
+        .or_else(|| saved.everywhere.clone())
+        .unwrap_or_else(|| oga_config::DEFAULT_CALLER_PROMPT.to_owned()))
 }
 
 #[derive(Debug, Default)]
-struct SavedWorkerPrompts {
-    worker_here: Option<String>,
-    worker_everywhere: Option<String>,
-    caller_here: Option<String>,
-    caller_everywhere: Option<String>,
+struct SavedCallerPrompt {
+    here: Option<String>,
+    everywhere: Option<String>,
 }
 
-fn stored_worker_prompts(cwd: &Path) -> SavedWorkerPrompts {
+fn stored_caller_prompt(cwd: &Path) -> SavedCallerPrompt {
     let Ok(store) = Store::open_observe(database_path()) else {
-        return SavedWorkerPrompts::default();
+        return SavedCallerPrompt::default();
     };
     let global = canonical_cwd(global_cwd());
     let read = |path: &Path, key: &str| {
@@ -3169,11 +3153,9 @@ fn stored_worker_prompts(cwd: &Path) -> SavedWorkerPrompts {
             })
     };
     let here = canonical_cwd(cwd) != global;
-    let saved = SavedWorkerPrompts {
-        worker_here: here.then(|| read(cwd, PROMPTS_KEY)).flatten(),
-        worker_everywhere: read(&global, PROMPTS_KEY),
-        caller_here: here.then(|| read(cwd, CALLER_PROMPTS_KEY)).flatten(),
-        caller_everywhere: read(&global, CALLER_PROMPTS_KEY),
+    let saved = SavedCallerPrompt {
+        here: here.then(|| read(cwd, CALLER_PROMPTS_KEY)).flatten(),
+        everywhere: read(&global, CALLER_PROMPTS_KEY),
     };
     let _ = store.close();
     saved
@@ -4442,63 +4424,6 @@ mod tests {
         );
     }
 
-    fn saved(here: &str) -> SavedWorkerPrompts {
-        SavedWorkerPrompts {
-            worker_here: Some(here.into()),
-            ..SavedWorkerPrompts::default()
-        }
-    }
-
-    #[test]
-    fn worker_config_prefers_the_project_file_over_saved_instructions() {
-        let layers = oga_config::ConfigLayers {
-            user: Some(oga_config::ConfigLayer {
-                path: "/home/user/.oga.yaml".into(),
-                root: serde_yaml::from_str("worker:\n  prompt: user rules\n").unwrap(),
-            }),
-            project: Some(oga_config::ConfigLayer {
-                path: "/work/.oga.yaml".into(),
-                root: serde_yaml::from_str("worker:\n  prompt: project rules\n").unwrap(),
-            }),
-        };
-        let worker = worker_config_json(&layers, &saved("saved rules")).unwrap();
-
-        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nproject rules");
-        assert_eq!(worker["source"], "/work/.oga.yaml");
-    }
-
-    #[test]
-    fn worker_config_falls_back_to_saved_instructions_without_a_project_table() {
-        let layers = oga_config::ConfigLayers {
-            user: Some(oga_config::ConfigLayer {
-                path: "/home/user/.oga.yaml".into(),
-                root: serde_yaml::from_str("worker:\n  prompt: user rules\n").unwrap(),
-            }),
-            project: Some(oga_config::ConfigLayer {
-                path: "/work/.oga.yaml".into(),
-                root: serde_yaml::from_str("profiles:\n  alpha:\n    model: sonnet\n").unwrap(),
-            }),
-        };
-        let worker = worker_config_json(&layers, &saved("saved rules")).unwrap();
-
-        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nsaved rules");
-        assert!(worker.get("source").is_none());
-    }
-
-    #[test]
-    fn worker_config_falls_back_to_the_all_projects_file() {
-        let layers = oga_config::ConfigLayers {
-            user: Some(oga_config::ConfigLayer {
-                path: "/home/user/.oga.yaml".into(),
-                root: serde_yaml::from_str("worker:\n  prompt: user rules\n").unwrap(),
-            }),
-            project: None,
-        };
-        let worker = worker_config_json(&layers, &SavedWorkerPrompts::default()).unwrap();
-
-        assert_eq!(worker["workerPrompt"], "{{brief}}\n\nuser rules");
-    }
-
     #[test]
     fn caller_config_prefers_the_project_file_over_saved_instructions() {
         let layers = oga_config::ConfigLayers {
@@ -4511,13 +4436,13 @@ mod tests {
                 root: serde_yaml::from_str("caller:\n  prompt: project briefs\n").unwrap(),
             }),
         };
-        let saved = SavedWorkerPrompts {
-            caller_here: Some("saved briefs".into()),
-            ..SavedWorkerPrompts::default()
+        let saved = SavedCallerPrompt {
+            here: Some("saved briefs".into()),
+            ..SavedCallerPrompt::default()
         };
-        let worker = worker_config_json(&layers, &saved).unwrap();
+        let prompt = caller_prompt_for_config(&layers, &saved).unwrap();
 
-        assert_eq!(worker["callerPrompt"], "project briefs");
+        assert_eq!(prompt, "project briefs");
     }
 
     #[test]
@@ -4532,30 +4457,30 @@ mod tests {
                 root: serde_yaml::from_str("profiles:\n  alpha:\n    model: sonnet\n").unwrap(),
             }),
         };
-        let saved = SavedWorkerPrompts {
-            caller_here: Some("saved briefs".into()),
-            ..SavedWorkerPrompts::default()
+        let saved = SavedCallerPrompt {
+            here: Some("saved briefs".into()),
+            ..SavedCallerPrompt::default()
         };
 
         assert_eq!(
-            worker_config_json(&layers, &saved).unwrap()["callerPrompt"],
+            caller_prompt_for_config(&layers, &saved).unwrap(),
             "saved briefs"
         );
         assert_eq!(
-            worker_config_json(&layers, &SavedWorkerPrompts::default()).unwrap()["callerPrompt"],
+            caller_prompt_for_config(&layers, &SavedCallerPrompt::default()).unwrap(),
             "user briefs"
         );
     }
 
     #[test]
     fn caller_config_falls_back_to_the_shipped_default() {
-        let worker = worker_config_json(
+        let prompt = caller_prompt_for_config(
             &oga_config::ConfigLayers::default(),
-            &SavedWorkerPrompts::default(),
+            &SavedCallerPrompt::default(),
         )
         .unwrap();
 
-        assert_eq!(worker["callerPrompt"], DEFAULT_CALLER_PROMPT);
+        assert_eq!(prompt, oga_config::DEFAULT_CALLER_PROMPT);
     }
 
     #[test]

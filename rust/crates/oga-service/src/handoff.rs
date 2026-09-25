@@ -338,8 +338,6 @@ pub async fn handoff(
         profile,
         crate::prompt::WorkerPromptInput {
             task: prompt,
-            allow_questions: task.allow_questions,
-            scope: Some(task.scope.clone()),
             ..crate::prompt::WorkerPromptInput::default()
         },
         continuing,

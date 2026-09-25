@@ -15,7 +15,6 @@ function task(overrides: Partial<Task> = {}): Task {
     updatedAt: "2026-01-01T00:00:00Z",
     output: "",
     scope: { read: [], write: [] },
-    allowQuestions: false,
     canDelegate: false,
     sessionId: "session-1",
     ...overrides,

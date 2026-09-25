@@ -296,7 +296,7 @@ impl Tasks<'_> {
         let completion = task.completion.as_ref().map(encode).transpose()?;
         let attempts = encode(&task.attempts)?;
         let transport = task.transport.as_ref().map(encode).transpose()?;
-        self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,bool_value(task.allow_questions),task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at,bool_value(task.can_delegate),transport])?; Ok(()) })
+        self.store.transaction(|tx| { tx.execute("INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", params![task.id,kind_string(kind),task.profile_id,task.model,task.prompt,task.cwd,task.branch,task.state.as_str(),task.output,task.error,task.question,task.parent_task_id,task.orchestrator_id,scope,task.grant_id,true,task.timeout_ms,task.session_id,task.shipped_prompt,completion,attempts,task.cost_usd,bool_value(task.cost_usd_estimated),task.turns,task.archived_at,task.created_at,task.updated_at,bool_value(task.can_delegate),transport])?; Ok(()) })
     }
     pub fn get(&self, id: &str) -> Result<Option<Task>, StoreError> {
         self.store.with_connection(|c| {
@@ -459,7 +459,6 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
         orchestrator_id: r.get(12)?,
         scope,
         grant_id: r.get(14)?,
-        allow_questions: r.get::<_, i64>(15)? != 0,
         can_delegate: r.get::<_, i64>(27)? != 0,
         timeout_ms: r.get(16)?,
         effort: None,

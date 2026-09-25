@@ -61,9 +61,6 @@ pub enum BrokerCall {
     Memories {
         cwd: String,
     },
-    Prompt {
-        cwd: Option<String>,
-    },
     CallerPrompt {
         cwd: Option<String>,
     },
@@ -116,9 +113,6 @@ pub enum BrokerCall {
     RemoveFollowUp {
         task_id: String,
         index: usize,
-    },
-    PutPrompt {
-        request: PromptWrite,
     },
     PutCallerPrompt {
         request: PromptWrite,
@@ -297,7 +291,6 @@ mod native {
                 ),
                 BrokerCall::Projects => encode(self.projects().await),
                 BrokerCall::Memories { cwd } => encode(self.memories(&cwd).await),
-                BrokerCall::Prompt { cwd } => encode(self.prompt(cwd.as_deref()).await),
                 BrokerCall::CallerPrompt { cwd } => {
                     encode(self.caller_prompt(cwd.as_deref()).await)
                 }
@@ -341,7 +334,6 @@ mod native {
                 BrokerCall::RemoveFollowUp { task_id, index } => {
                     encode(self.remove_follow_up(&task_id, index).await)
                 }
-                BrokerCall::PutPrompt { request } => encode(self.put_prompt(&request).await),
                 BrokerCall::PutCallerPrompt { request } => {
                     encode(self.put_caller_prompt(&request).await)
                 }

@@ -78,10 +78,6 @@ export const broker = {
 
   memories: (cwd: string) => call({ call: "memories", cwd }),
 
-  prompt: (cwd?: string) => call({ call: "prompt", cwd }),
-
-  putPrompt: (request: PromptWrite) => call({ call: "putPrompt", request }),
-
   callerPrompt: (cwd?: string) => call({ call: "callerPrompt", cwd }),
 
   putCallerPrompt: (request: PromptWrite) => call({ call: "putCallerPrompt", request }),

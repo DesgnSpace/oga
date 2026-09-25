@@ -25,7 +25,6 @@ export type SettingsTab =
   | "connections"
   | "notifications"
   | "memories"
-  | "prompts"
   | "callerPrompts"
   | "storage"
   | "shortcuts"
@@ -36,7 +35,6 @@ export const SETTINGS_TABS: SettingsTab[] = [
   "connections",
   "notifications",
   "memories",
-  "prompts",
   "callerPrompts",
   "storage",
   "shortcuts",
@@ -46,7 +44,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
 /** Tabs stay in `SETTINGS_TABS` order: the arrow keys move through that list. */
 export const SETTINGS_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
   { label: "General", tabs: ["workers", "connections", "notifications"] },
-  { label: "Instructions", tabs: ["memories", "prompts", "callerPrompts"] },
+  { label: "Instructions", tabs: ["memories", "callerPrompts"] },
   { label: "App", tabs: ["storage", "shortcuts", "about"] },
 ];
 
@@ -60,8 +58,6 @@ export function tabLabel(tab: SettingsTab): string {
       return "Notifications";
     case "memories":
       return "Memories";
-    case "prompts":
-      return "Worker instructions";
     case "callerPrompts":
       return "Brief rules";
     case "storage":
@@ -404,8 +400,6 @@ export interface SettingsState {
   projects: ProjectList | undefined;
   modelScope: ProjectSettingsScope;
   modelSettings: ModelSettingsStore;
-  promptScope: ProjectSettingsScope;
-  prompts: PromptsModel;
   callerPromptScope: ProjectSettingsScope;
   callerPrompts: PromptsModel;
   memories: MemoryState;
@@ -422,8 +416,6 @@ export function defaultSettingsState(): SettingsState {
     projects: undefined,
     modelScope: { kind: "global" },
     modelSettings: defaultModelSettingsStore(),
-    promptScope: { kind: "global" },
-    prompts: defaultPromptsModel(),
     callerPromptScope: { kind: "global" },
     callerPrompts: defaultPromptsModel(),
     memories: defaultMemoryState(),

@@ -185,12 +185,6 @@ pub fn router(state: HttpState) -> Router {
             get(settings::get_memories).put(settings::put_memory),
         )
         .route(
-            "/api/prompts",
-            get(settings::get_prompt)
-                .put(settings::put_prompt)
-                .delete(settings::delete_prompt),
-        )
-        .route(
             "/api/caller-prompts",
             get(settings::get_caller_prompt)
                 .put(settings::put_caller_prompt)
