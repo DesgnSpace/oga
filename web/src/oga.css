@@ -26,7 +26,7 @@
     --color-info: #2563eb;
     --color-success: #087f5b;
     --color-warning: #a15c05;
-    --color-scrim: rgba(0, 0, 0, 0.4);
+    --color-scrim: rgba(0, 0, 0, 0.22);
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
@@ -84,7 +84,7 @@
         --color-info: #60a5fa;
         --color-success: #6ee7b7;
         --color-warning: #f5c27a;
-        --color-scrim: rgba(0, 0, 0, 0.55);
+        --color-scrim: rgba(0, 0, 0, 0.38);
     }
 }
 
@@ -3635,8 +3635,8 @@ select {
     justify-content: center;
     padding: var(--space-5);
     background: var(--color-scrim);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
     animation: modal-overlay-fade-in 150ms var(--ease-out);
     contain: layout paint;
     isolation: isolate;
@@ -3729,8 +3729,8 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 }
 
 .modal-dialog-settings {
-    width: min(100%, 90rem);
-    height: 100%;
+    width: min(100%, 68rem);
+    height: min(100%, 48rem);
     border-radius: var(--radius-lg);
 }
 

@@ -317,7 +317,8 @@ export default function Sidebar({ sidebarController, onSelectTask, onOpenSetting
   useLayoutEffect(() => {
     const shell = listShellRef.current;
     if (shell) setViewportHeight((height) => (shell.clientHeight > 0 ? shell.clientHeight : height));
-    const row = taskRowRefs.current.values().next().value;
+    // The row wrapper, not the link, so the link's margins count too.
+    const row = taskRowRefs.current.values().next().value?.parentElement;
     if (!row) return;
     const measure = () => {
       const height = row.offsetHeight;
