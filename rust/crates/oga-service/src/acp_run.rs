@@ -7,6 +7,7 @@
 //! run again, because the turn may already have happened.
 
 use std::{
+    collections::HashMap,
     path::{Component, Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -225,7 +226,9 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         cwd: PathBuf::from(&task.cwd),
         scope: task.scope.clone(),
         declines_questions: adapter.declines_questions,
+        refused: Refused::default(),
     });
+    let refused = Arc::clone(&policy.refused);
     let turn_bound = task.timeout_ms.map_or(LONGEST_TURN, Duration::from_millis);
     let config = AcpConfig {
         // The lifecycle enforces the task's own bound; the transport's is only
@@ -290,7 +293,10 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     let active = ActiveRun::Acp(Arc::clone(&run));
     turn.active.insert(&task.id, active.clone());
 
-    let mut transcript = Transcript::default();
+    let mut transcript = Transcript {
+        refused,
+        ..Transcript::default()
+    };
     let deadline = Instant::now() + turn_bound;
     let mut ended = match load_task(store, &task.id) {
         Ok(current) => {
@@ -703,9 +709,10 @@ fn outcome(
         match answer {
             None => failed(CompletionCode::Timeout, "provider run timed out".into()),
             Some(Ok(response)) => match response.stop_reason {
-            StopReason::EndTurn => {
-                interpret_worker_outcome(Some(0), transcript.final_text(), stderr, None)
-            }
+            StopReason::EndTurn => match transcript.stopped_on_refusal() {
+                Some(paths) => failed(CompletionCode::PermissionDenied, stopped_on_refusal(&paths)),
+                None => interpret_worker_outcome(Some(0), transcript.final_text(), stderr, None),
+            },
             StopReason::Cancelled => cancelled(),
             StopReason::MaxTokens => failed(
                 CompletionCode::WorkerError,
@@ -775,6 +782,17 @@ fn stopped_mid_turn(reason: &str) -> String {
     )
 }
 
+fn stopped_on_refusal(paths: &[String]) -> String {
+    if paths.is_empty() {
+        "The worker stopped after Oga refused a step it asked to take. Resume the task and tell it how to go on without that step.".into()
+    } else {
+        format!(
+            "The worker stopped after Oga refused it access to {}, which this task can't reach. Resume the task and tell it how to go on without it.",
+            paths.join(", ")
+        )
+    }
+}
+
 fn failed(code: CompletionCode, reason: String) -> WorkerOutcome {
     WorkerOutcome {
         state: TaskState::Failed,
@@ -833,7 +851,13 @@ struct Transcript {
     /// Only the last one matters: an agent that paused and then got through
     /// reports that too.
     recovery: Option<ModelRecovery>,
+    /// The last tool call the agent started this turn.
+    last_tool_call: Option<String>,
+    refused: Refused,
 }
+
+/// Tool calls the task's policy refused, by id, with the paths outside its scope.
+type Refused = Arc<Mutex<HashMap<String, Vec<String>>>>;
 
 impl Transcript {
     async fn push(
@@ -864,8 +888,9 @@ impl Transcript {
             }
             return Ok(());
         }
-        if matches!(notification.update, SessionUpdate::ToolCall(_)) {
+        if let SessionUpdate::ToolCall(call) = &notification.update {
             self.final_message.clear();
+            self.last_tool_call = Some(call.tool_call_id.0.to_string());
         }
         if let SessionUpdate::UsageUpdate(usage) = &notification.update {
             self.session_cost = usage
@@ -927,6 +952,20 @@ impl Transcript {
         Some(worker)
     }
 
+    /// An agent whose last step was refused and that said nothing after it
+    /// gave up on the task rather than finished it.
+    fn stopped_on_refusal(&self) -> Option<Vec<String>> {
+        if !self.final_message.trim().is_empty() {
+            return None;
+        }
+        let call = self.last_tool_call.as_ref()?;
+        self.refused
+            .lock()
+            .expect("refused tool call lock is not poisoned")
+            .get(call)
+            .cloned()
+    }
+
     fn final_text(&self) -> String {
         if self.final_message.trim().is_empty() {
             NO_FINAL_MESSAGE.to_owned()
@@ -954,6 +993,7 @@ struct TaskPolicy {
     scope: TaskScope,
     /// Every request is a question for a person, and nobody is there to answer.
     declines_questions: bool,
+    refused: Refused,
 }
 
 impl AcpPolicy for TaskPolicy {
@@ -982,6 +1022,15 @@ impl AcpPolicy for TaskPolicy {
                 .collect();
             let allowed = outside.is_empty() && !self.declines_questions;
             let decision = choose(&request.options, allowed);
+            if !allowed {
+                self.refused
+                    .lock()
+                    .expect("refused tool call lock is not poisoned")
+                    .insert(
+                        request.tool_call.tool_call_id.0.to_string(),
+                        outside.clone(),
+                    );
+            }
             let mut payload = json!({
                 "toolCallId": request.tool_call.tool_call_id.0.as_ref(),
                 "title": fields.title,
@@ -1167,6 +1216,7 @@ mod tests {
                 write: rules(&["src/**"]),
             },
             declines_questions: false,
+            refused: Refused::default(),
         };
         let request = |path: &str| {
             RequestPermissionRequest::new(

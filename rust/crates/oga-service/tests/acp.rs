@@ -747,6 +747,24 @@ async fn permission_answers_follow_the_tasks_scope() {
 }
 
 #[tokio::test]
+async fn a_worker_that_stops_on_a_refused_step_is_not_completed() {
+    let harness = harness("refused-then-quiet");
+
+    let task = harness.run("edit things").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    let completion = task.completion.expect("completion");
+    assert_eq!(completion.code, CompletionCode::PermissionDenied);
+    assert!(
+        completion
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("/tmp/scratch")),
+        "{completion:?}"
+    );
+}
+
+#[tokio::test]
 async fn cancelling_stops_the_agent_and_settles_the_task() {
     let harness = harness("hang");
     let dispatched = harness

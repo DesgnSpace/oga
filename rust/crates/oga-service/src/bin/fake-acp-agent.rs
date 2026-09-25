@@ -595,6 +595,19 @@ fn prompt(
                 &format!("inside: {inside}, outside: {outside}\nOGA_RESULT: completed"),
             );
         }
+        "refused-then-quiet" => {
+            update(
+                &session,
+                json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "edit-9003",
+                    "title": "Edit /tmp/scratch",
+                    "kind": "edit",
+                    "locations": [{"path": "/tmp/scratch"}],
+                }),
+            );
+            ask_permission(&session, 9003, "/tmp/scratch", lines, log_path);
+        }
         "usage" => {
             let turn = prompts_logged(log_path);
             update(
