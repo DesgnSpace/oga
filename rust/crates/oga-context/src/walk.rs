@@ -289,10 +289,8 @@ fn mtime_ms(metadata: &Metadata) -> i64 {
         .unwrap_or_default()
 }
 
-/// When the file's inode last changed. A restore can hand a file back the size
-/// and modification time it had; nothing in userland can hand back this. Zero
-/// where the platform does not report one, which leaves the size and
-/// modification time to decide on their own.
+/// On Unix, inode change time catches same-size, same-mtime restores.
+/// If unavailable, leave size and modification time to decide.
 #[cfg(unix)]
 fn ctime_ms(metadata: &Metadata) -> i64 {
     use std::os::unix::fs::MetadataExt;

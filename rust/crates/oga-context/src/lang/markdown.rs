@@ -25,7 +25,6 @@ impl LanguageAdapter for Markdown {
         Separator::Arrow
     }
 
-    /// Prose has no private half.
     fn exported(&self, _node: Node<'_>, _source: &str) -> bool {
         true
     }

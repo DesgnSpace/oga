@@ -1,10 +1,7 @@
 //! Turning a plain-language question into one anchor.
 //!
-//! Signals are tried in the order a reader would trust them: a place the
-//! question spelled out, then a hint someone taught the project, then a symbol
-//! whose name is what was asked, then a symbol whose name shares the
-//! question's words, then the search index over doc comments and signatures,
-//! then the path.
+//! Trust explicit places, taught routes, exact names, shared name words, then
+//! search and path signals.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -91,11 +88,8 @@ pub struct Ranking {
 }
 
 impl Ranking {
-    /// A taught hint outranks anything the parser found, but only a route
-    /// taught the phrase that was asked settles the answer by itself. One
-    /// shared word among several routes — "adapter" taught for three
-    /// unrelated files — must compete like everything else, not each claim
-    /// sole confidence and get picked by an arbitrary tiebreak.
+    /// A taught route outranks parser hits, but only an exact taught phrase is decisive.
+    /// Partial overlaps compete together, so unrelated shared words cannot win by tiebreak.
     pub fn add_route(
         &mut self,
         route: &LearnedRoute,
@@ -250,15 +244,8 @@ impl Ranking {
     }
 }
 
-/// Whether the top answer is worth returning on its own. Judge the candidates
-/// the caller can actually read, after scope and disk have had their say: a
-/// sure answer that was filtered out cannot lend its certainty to whatever is
-/// left.
-///
-/// A named place, a taught phrase, or an exact name settles it, unless a
-/// second candidate claims the same thing — two symbols of that name is two
-/// answers. Otherwise the question has to have landed whole, and the
-/// runner-up has to be well behind.
+/// Judge confidence after scope and disk filtering; a filtered sure answer cannot lend certainty.
+/// A decisive hit is sure unless tied; otherwise all terms match and the runner-up must trail.
 pub fn is_confident(ranked: &[Scored], terms: &[String]) -> bool {
     let Some(top) = ranked.first() else {
         return false;

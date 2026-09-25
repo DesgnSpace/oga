@@ -1,6 +1,4 @@
-// The conversation transcript: request/follow-up bubbles, collapsible work
-// blocks, and the worker's replies.
-// Ported from rust/crates/oga-ui/src/task_detail/mod.rs's view layer.
+// The conversation transcript: request bubbles, work blocks, and replies.
 
 import * as React from "react";
 import { InlineMarkdown, MarkdownContent } from "@/domain/markdown";

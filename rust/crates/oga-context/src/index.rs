@@ -84,11 +84,8 @@ pub struct ReconcileResult {
     pub route_moves: Vec<RouteMove>,
 }
 
-/// Where a lookup runs and what it may read. Every checkout carries its own
-/// symbol index, so the answer is whatever that branch has on disk. Learned
-/// routes stay with the origin a checkout was cut from, because the words
-/// people use for a place are knowledge about the project rather than about
-/// one branch.
+/// Lookups read the checkout's own symbol index because each branch may differ.
+/// Learned routes stay with the origin because project vocabulary is not branch-specific.
 #[derive(Debug, Clone, Default)]
 pub struct ContextTarget {
     pub cwd: PathBuf,
@@ -389,10 +386,8 @@ impl<'a> ContextIndex<'a> {
         })
     }
 
-    /// The best candidates this task may read that are still on disk, with a
-    /// count of what each rule left out. One past the limit is kept, so
-    /// whether the answer is sure is judged against the runner-up rather than
-    /// against however many the caller asked to see.
+    /// Keep candidates this task may read that remain on disk, plus one runner-up.
+    /// Count scope and existence exclusions so confidence reflects only reachable hits.
     fn reachable(
         &self,
         target: &ContextTarget,
@@ -564,12 +559,8 @@ impl<'a> ContextIndex<'a> {
         Ok(ranking.ranked(limit, &weights))
     }
 
-    /// Where a route points now, as a symbol row. A route saved against a
-    /// whole file answers with the file itself.
-    ///
-    /// Routes are shared across the checkouts of one project, so a route can
-    /// name code this branch does not carry. Such a route answers with
-    /// nothing rather than with the other branch's location.
+    /// Resolve a route to a symbol row, or to the file when it names a whole file.
+    /// A branch without the target returns nothing, never the other branch's location.
     fn route_target(
         &self,
         target: &ContextTarget,
@@ -616,9 +607,8 @@ impl<'a> ContextIndex<'a> {
         })
     }
 
-    /// The answer to a question that named a place instead of describing one.
-    /// It is the whole answer: a path someone typed is not a starting point
-    /// for a search.
+    /// Answer a question that named a place with only that place; do not turn
+    /// an explicit path into a search seed.
     fn direct(
         &self,
         target: &ContextTarget,
@@ -651,13 +641,8 @@ impl<'a> ContextIndex<'a> {
         Ok(answers)
     }
 
-    /// Confirm a candidate still exists where the index says, re-reading the
-    /// file when it has changed since the walk this answer ran.
-    ///
-    /// The index is reconciled before an answer is ranked, but nothing stops
-    /// the tree changing while the answer is being put together. A candidate
-    /// whose file no longer hashes to what the index recorded is re-parsed
-    /// here, so the line quoted is the line the file has now.
+    /// Confirm a candidate still exists at its indexed place, re-reading changed files.
+    /// Re-parse stale files so concurrent tree changes cannot quote obsolete lines.
     fn locate(
         &self,
         target: &ContextTarget,
@@ -946,10 +931,8 @@ struct Reachable {
     gone: usize,
 }
 
-/// One bare anchor when the ranking landed on a single sure answer, otherwise
-/// every candidate the caller may read, ranked, each with the words it
-/// matched so the reader can judge them instead of trusting one arbitrary
-/// pick.
+/// Return one bare anchor for a single sure answer; otherwise rank all reachable
+/// candidates with their matched words so the reader can reject an arbitrary pick.
 fn answer_lines(
     candidates: &[QuestionCandidate],
     kept: &[Scored],

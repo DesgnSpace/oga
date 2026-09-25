@@ -1,7 +1,5 @@
-//! One adapter per language. An adapter names the extensions it owns, hands
-//! over a grammar and a capture query, and answers the few questions the
-//! engine cannot answer for itself: what counts as public, what a doc comment
-//! looks like, and which files are not worth indexing.
+//! Language adapters own extensions, grammars, capture queries, and language-specific
+//! visibility, documentation, and noise rules.
 
 mod c;
 mod c_sharp;
@@ -99,8 +97,7 @@ pub trait LanguageAdapter: Send + Sync {
     }
 }
 
-/// Every adapter, in registration order. Adding a language means adding one
-/// module beside this one and one line here.
+/// Every adapter, in registration order.
 pub fn adapters() -> &'static [&'static dyn LanguageAdapter] {
     static ADAPTERS: OnceLock<Vec<&'static dyn LanguageAdapter>> = OnceLock::new();
     ADAPTERS

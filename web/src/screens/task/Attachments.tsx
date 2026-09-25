@@ -1,7 +1,4 @@
-// Chips for the files or images handed to a worker alongside a request,
-// shown beside the request bubble. Images preview in place, reusing the
-// same disk-read and modal pattern as the trace's file preview; other
-// files open in the OS's own app for that file type.
+// File and image attachments beside a request.
 
 import * as React from "react";
 import { openAttachment, readImagePreview } from "@/bridge";

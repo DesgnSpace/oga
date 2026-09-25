@@ -1,7 +1,4 @@
-// Turns the flat activity stream into a conversation transcript: the original
-// request, follow-ups and answers as bubbles, and everything the worker did
-// between them as a collapsible block ahead of its reply.
-// Ported from rust/crates/oga-ui/src/task_detail/transcript.rs — keep behavior identical.
+// Turns the flat activity stream into a conversation transcript.
 
 import type { Task, TaskAttempt, TaskCompletion, TaskEventView, TaskState } from "@/bridge/types";
 import {

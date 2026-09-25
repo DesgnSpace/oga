@@ -1,7 +1,4 @@
 //! Newline-delimited JSON-RPC over a child's pipes.
-//!
-//! Framing only: this layer knows requests, responses, and notifications, and
-//! nothing about what ACP means by any of them.
 
 use std::{
     collections::HashMap,
@@ -32,10 +29,8 @@ pub const DEFAULT_MAX_STDERR_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, ThisError)]
 pub(crate) enum RpcError {
-    /// The connection was already gone, so the frame never left the client.
     #[error("the agent was no longer connected when {method} was queued")]
     NotSent { method: String },
-    /// The connection went away with the frame already handed over.
     #[error("the agent closed the connection")]
     Closed,
     #[error("the agent did not answer {method} within {}ms", timeout.as_millis())]
@@ -55,8 +50,6 @@ pub(crate) enum RpcError {
     },
 }
 
-/// Frames and bytes the connection had to throw away, plus whatever the agent
-/// wrote to stderr. Read this when a turn fails and the protocol went quiet.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Diagnostics {
     pub malformed_frames: usize,
@@ -66,7 +59,6 @@ pub struct Diagnostics {
     pub stderr_truncated: bool,
 }
 
-/// Answers the calls the agent makes back to the client.
 pub(crate) trait Handler: Send + Sync + 'static {
     fn request(
         self: Arc<Self>,
@@ -79,7 +71,6 @@ pub(crate) trait Handler: Send + Sync + 'static {
 
 type Pending = Mutex<HashMap<i64, oneshot::Sender<Result<Value, Error>>>>;
 
-/// Everything both ends of the connection read and write.
 #[derive(Debug, Default)]
 struct Shared {
     pending: Pending,
@@ -130,7 +121,6 @@ impl StderrTail {
     }
 }
 
-/// A live JSON-RPC session with a child process.
 pub(crate) struct Connection {
     outbound: mpsc::UnboundedSender<Vec<u8>>,
     shared: Arc<Shared>,
@@ -205,8 +195,6 @@ impl Connection {
         }
     }
 
-    /// Sends a request and waits for its answer. The wait is the request's
-    /// own, so one slow call cannot hold the connection open forever.
     pub(crate) async fn request<P, R>(
         &self,
         method: &str,
@@ -220,8 +208,6 @@ impl Connection {
         self.start_request(method, params)?.answer(lifetime).await
     }
 
-    /// Writes a request and hands back the answer still to come, so the caller
-    /// decides when to wait for it. Failing here means the frame never left.
     pub(crate) fn start_request<P, R>(&self, method: &str, params: &P) -> Result<Sent<R>, RpcError>
     where
         P: Serialize,
@@ -280,7 +266,6 @@ impl Drop for Connection {
     }
 }
 
-/// A request the agent has been given and has not answered yet.
 pub(crate) struct Sent<R> {
     id: i64,
     method: String,
@@ -290,7 +275,6 @@ pub(crate) struct Sent<R> {
 }
 
 impl<R: DeserializeOwned> Sent<R> {
-    /// Waits for the answer, for as long as `lifetime` allows.
     pub(crate) async fn answer(self, lifetime: Duration) -> Result<R, RpcError> {
         let answer = match timeout(lifetime, self.waiting).await {
             Ok(Ok(answer)) => answer,
@@ -355,8 +339,7 @@ async fn read_frames<O, H>(
             Ok(None) | Err(_) => break,
         }
     }
-    // Dropping every sender is what tells each waiting request the agent is
-    // gone, instead of leaving it to time out.
+    // Dropping senders tells pending requests the agent is gone instead of making them time out.
     shared.closed.store(true, Ordering::Release);
     shared
         .pending
@@ -413,8 +396,7 @@ fn answer_agent<H: Handler>(
     let params = message.get("params").cloned().unwrap_or(Value::Null);
     let handler = Arc::clone(handler);
     let outbound = outbound.clone();
-    // A policy can take as long as a person does, so answering runs off the
-    // read loop rather than holding up the rest of the turn.
+    // Policy answers may wait for a person, so they run outside the read loop.
     tokio::spawn(async move {
         let reply = match handler.request(method, params).await {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
@@ -442,8 +424,6 @@ enum Frame {
     Oversized(usize),
 }
 
-/// Splits a stream on newlines without letting one unterminated frame grow
-/// without limit.
 struct FrameReader<R> {
     reader: R,
     buffer: Vec<u8>,

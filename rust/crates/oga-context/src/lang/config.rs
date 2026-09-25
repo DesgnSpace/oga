@@ -1,7 +1,5 @@
-//! What JSON, TOML and YAML share. A config file has no declarations, so the
-//! index treats every key as a symbol and its dotted path as the qualified
-//! name. A key that holds a container is a `module`, a key that holds a scalar
-//! is a `field`, and a container inside a sequence is known by its position.
+//! Treat config keys as symbols with dotted qualified names: containers are
+//! modules, scalars are fields, and sequence children are positional.
 
 use tree_sitter::Node;
 
