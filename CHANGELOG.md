@@ -3,6 +3,7 @@
 ## Unreleased
 
 - A task's status dot now looks the same everywhere it shows — the task list, its header, and its reply box — so a running, waiting, or blocked task reads the same no matter where you're looking. A task blocked on another task now shows as blocked instead of looking like it's merely waiting.
+- A task's subagents now carry that same status dot, so you can tell at a glance which are still running, done, or hit a problem, without opening each one. A collapsed group of subagents shows how many are still running, and reads as done once none are.
 - You can choose the font Oga's interface uses in Settings → Appearance.
 - You can replace Oga's default handoff instructions with your own.
 

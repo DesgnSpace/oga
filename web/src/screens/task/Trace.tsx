@@ -9,6 +9,8 @@ import { parseBlocks, parseInline } from "@/domain/markdown/parse";
 import {
   expansionLabel,
   stripTransportMarkup,
+  subagentIndicatorLabel,
+  subagentIndicatorState,
   traceRowOffersExpansion,
   turnMarkerLabel,
   type EventExpansion,
@@ -20,6 +22,7 @@ import {
 import { readStorage, writeStorage } from "@/state/storage";
 import { Modal } from "@/components/primitives/Modal";
 import { EmptyState } from "@/components/atoms/ListState";
+import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import {
   DisclosureIcon,
   FollowUpIcon,
@@ -450,12 +453,21 @@ const TraceRowView = React.memo(function TraceRowView({
   const rowClass = `trace-row trace-row-${row.style} trace-state-${row.state}${
     row.isStepStart ? " trace-row-step-start" : ""
   }${row.marker !== undefined ? " trace-row-turn-boundary" : ""}`;
+  // Matches both a lone card's `subagent:` id and a batch's `subagents:` id.
+  const isSubagentRow = row.nodeId?.startsWith("subagent") ?? false;
 
   const main = row.marker === "handoff" && row.handoff !== undefined ? (
     <TraceHandoffMarker handoff={row.handoff} />
   ) : (
     <>
       {row.marker !== undefined && <TraceTurnMarker kind={row.marker} />}
+      {isSubagentRow && (
+        <TaskStatusDot
+          state={subagentIndicatorState(row.state)}
+          label={subagentIndicatorLabel(row.state)}
+          decorative
+        />
+      )}
       {row.verb !== undefined && <span className="trace-verb">{row.verb}</span>}
       <TraceTarget row={row} />
       {row.preview !== undefined && <span className="trace-preview">{row.preview}</span>}

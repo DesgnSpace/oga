@@ -2,7 +2,7 @@
 // in `@/domain/review`; this module only composes the rows and their
 // expansions.
 
-import type { TaskEventView } from "@/bridge/types";
+import type { TaskState, TaskEventView } from "@/bridge/types";
 import { fileChangeFromRaw, type FileChange } from "@/domain/changes";
 import {
   ActivityBlock,
@@ -26,6 +26,36 @@ import { ogaResultText } from "@/domain/oga";
 
 export type TraceStyle = "work" | "message" | "notice";
 export type TraceState = "running" | "needs-input" | "failed" | "interrupted" | "done";
+
+/**
+ * The shared task status indicator only knows `TaskState`, so a subagent row
+ * borrows the task state whose look already matches what it means here: an
+ * interrupted subagent never finished cleanly, so it reads the same as one
+ * that failed outright.
+ */
+const INDICATOR_STATE_BY_TRACE_STATE = {
+  running: "running",
+  "needs-input": "needs_input",
+  failed: "failed",
+  interrupted: "failed",
+  done: "completed",
+} satisfies Record<TraceState, TaskState>;
+
+export function subagentIndicatorState(state: TraceState): TaskState {
+  return INDICATOR_STATE_BY_TRACE_STATE[state];
+}
+
+const INDICATOR_LABEL_BY_TRACE_STATE = {
+  running: "Running",
+  "needs-input": "Needs input",
+  failed: "Failed",
+  interrupted: "Interrupted",
+  done: "Done",
+} satisfies Record<TraceState, string>;
+
+export function subagentIndicatorLabel(state: TraceState): string {
+  return INDICATOR_LABEL_BY_TRACE_STATE[state];
+}
 
 export interface HandoffPresentation {
   fromId: string;
@@ -562,10 +592,11 @@ function subagentsRow(node: Extract<ActivityNode, { type: "subagents" }>, cwd: s
   const rows = node.subagents.map((subagent) => subagentRow(subagent, cwd, live));
   const [only] = rows;
   if (only !== undefined && rows.length === 1) return only;
+  const runningCount = rows.filter((row) => row.state === "running").length;
   return {
     ...blankRow(rows[0]?.id ?? 0),
     nodeId: node.id,
-    target: `${rows.length} subagents`,
+    target: runningCount > 0 ? `${runningCount} of ${rows.length} subagents running` : `${rows.length} subagents`,
     result: formatDuration(nodesDurationMs([node])),
     state: rowsState(rows, live),
     children: rows,

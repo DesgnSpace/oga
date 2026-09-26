@@ -830,7 +830,13 @@ function finishSubagent(draft: SubagentDraft): ActivitySubagent {
   };
 }
 
-/** Done once its report arrives; a report row still waiting keeps it running, and without one the launch decides. */
+/**
+ * Done once its report arrives; a report row still waiting keeps it running.
+ * A launching call reaching its own terminal phase is not that report — a
+ * fire-and-forget launch reports itself accepted long before the subagent it
+ * started has anything to say, so only a failure there, or an actual report,
+ * moves a subagent off "running".
+ */
 function subagentStatus(launch: ActivityNode, reports: SubagentReport[], report: string | undefined): ActivityStatus {
   const row = launch.type === "call" ? launch.call.event : launch.type === "notice" ? launch.event : undefined;
   if (row?.phase === "failed") return "failed";
@@ -841,9 +847,7 @@ function subagentStatus(launch: ActivityNode, reports: SubagentReport[], report:
     return last.row.phase === "started" ? "running" : "done";
   }
   if (report !== undefined) return "done";
-  // A notice only announces a launch; a call is what reports finishing it.
-  const settled = launch.type === "call" && (row?.phase === "completed" || row?.complete === true);
-  return settled ? "done" : "running";
+  return "running";
 }
 
 // ---------------------------------------------------------------------------

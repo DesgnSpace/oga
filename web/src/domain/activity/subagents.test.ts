@@ -131,6 +131,57 @@ describe("subagent fixtures", () => {
   );
 });
 
+describe("subagent status while the task is still running", () => {
+  function beforeFirstReport(events: TaskEventView[]): TaskEventView[] {
+    const index = events.findIndex((event) => event.subagents?.some((link) => link.role === "report"));
+    return index === -1 ? events : events.slice(0, index);
+  }
+
+  it("codex keeps a launched subagent running until its report arrives, not once its launch call completes", async () => {
+    const events = beforeFirstReport(await fixture("codex"));
+    const launches = events.filter((event) => event.subagents?.some((link) => link.role === "launch"));
+    const latestByAction = new Map<string, TaskEventView>();
+    for (const event of launches) if (event.actionId) latestByAction.set(event.actionId, event);
+    // Every launch call has already completed at this point in the transcript,
+    // well before any of the three subagents has actually reported back.
+    expect(latestByAction.size).toBe(3);
+    expect([...latestByAction.values()].every((event) => event.phase === "completed")).toBe(true);
+
+    const composition = ActivityStory.composeWithState(events, false, undefined, false);
+    const subagents = subagentsOf(composition);
+    expect(subagents).toHaveLength(3);
+    expect(subagents.every((subagent) => subagent.status === "running")).toBe(true);
+  });
+});
+
+describe("subagent group row while some subagents are still running", () => {
+  function findBatch(rows: ReturnType<typeof TraceRowBuilder.rows>): (typeof rows)[number] | undefined {
+    for (const row of rows) {
+      if (row.nodeId?.startsWith("subagents:")) return row;
+      const found = findBatch(row.children);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  it("counts how many of the batch are still running, and drops that once none are", async () => {
+    const events = await fixture("codex");
+    const oneReported = events.filter((event) => event.id <= 499870);
+    const allReported = events.filter((event) => event.id <= 500434);
+
+    const midComposition = ActivityStory.composeWithState(oneReported, false, undefined, false);
+    const midBatch = findBatch(TraceRowBuilder.rows(midComposition.blocks, "/", true));
+    expect(midBatch?.target).toBe("2 of 3 subagents running");
+    expect(midBatch?.state).toBe("running");
+    expect(midBatch?.children.map((row) => row.state).sort()).toEqual(["done", "running", "running"]);
+
+    const doneComposition = ActivityStory.composeWithState(allReported, false, undefined, false);
+    const doneBatch = findBatch(TraceRowBuilder.rows(doneComposition.blocks, "/", true));
+    expect(doneBatch?.target).toBe("3 subagents");
+    expect(doneBatch?.state).toBe("done");
+  });
+});
+
 describe("subagent trace rows", () => {
   it("labels a batch by its count and each subagent by its label", async () => {
     const composition = await compose("claude");

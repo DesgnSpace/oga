@@ -486,4 +486,43 @@ describe("TraceRows", () => {
       setTransport(tauriTransport);
     }
   });
+
+  it("shows the shared status indicator on a subagent card, and settles it live with no reload", () => {
+    const subagent = row({ id: 1, nodeId: "subagent:one", target: "Subagent · Survey crates", state: "running" });
+    const { container, rerender } = render(<TraceRows rows={[subagent]} live />);
+
+    expect(container.querySelector(".task-dot-look-running")).not.toBeNull();
+
+    rerender(<TraceRows rows={[{ ...subagent, state: "done" }]} live />);
+    expect(container.querySelector(".task-dot-look-running")).toBeNull();
+    expect(container.querySelector(".task-dot-look-settled")).not.toBeNull();
+  });
+
+  it("shows how many of a group's subagents are still running, and drops the count once none are", () => {
+    const group = row({
+      id: 1,
+      nodeId: "subagents:batch",
+      target: "1 of 2 subagents running",
+      state: "running",
+      children: [
+        row({ id: 1, nodeId: "subagent:one", target: "Subagent · A", state: "running" }),
+        row({ id: 2, nodeId: "subagent:two", target: "Subagent · B", state: "done" }),
+      ],
+    });
+    const { container, rerender } = render(<TraceRows rows={[group]} live />);
+
+    expect(screen.getByText("1 of 2 subagents running")).toBeDefined();
+    expect(container.querySelector(".task-dot-look-running")).not.toBeNull();
+
+    const settled = {
+      ...group,
+      target: "2 subagents",
+      state: "done" as const,
+      children: group.children.map((child) => ({ ...child, state: "done" as const })),
+    };
+    rerender(<TraceRows rows={[settled]} live />);
+
+    expect(screen.getByText("2 subagents")).toBeDefined();
+    expect(container.querySelector(".task-dot-look-running")).toBeNull();
+  });
 });
