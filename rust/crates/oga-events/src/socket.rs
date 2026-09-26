@@ -239,6 +239,7 @@ async fn serve_connection(
         Ok(cursor) => cursor,
         Err(_) => return,
     };
+    let requested_cursor = requested_cursor.unwrap_or(initial_cursor);
     let stale = requested_cursor > 0 && stream_floor > 0 && requested_cursor < stream_floor;
     let mut cursor = if stale {
         stream_floor - 1
@@ -381,7 +382,9 @@ async fn wait_for_tasks(
     }
 }
 
-fn parse_subscribe(frame: &Value) -> Result<(Vec<String>, i64), String> {
+/// `afterCursor: "latest"` subscribes from the newest event, answered as
+/// `None`, so a watcher that only wants what happens next skips the replay.
+fn parse_subscribe(frame: &Value) -> Result<(Vec<String>, Option<i64>), String> {
     let Some(watch) = frame.get("watch").and_then(Value::as_array) else {
         return Err("subscribe frame must contain a non-empty watch array".into());
     };
@@ -397,11 +400,15 @@ fn parse_subscribe(frame: &Value) -> Result<(Vec<String>, i64), String> {
             task_ids.push(id.to_owned());
         }
     }
-    let after = frame
-        .get("afterCursor")
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite())
-        .map_or(0, |value| value.floor().clamp(0.0, i64::MAX as f64) as i64);
+    let after = match frame.get("afterCursor") {
+        Some(Value::String(from)) if from == "latest" => None,
+        after => Some(
+            after
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite())
+                .map_or(0, |value| value.floor().clamp(0.0, i64::MAX as f64) as i64),
+        ),
+    };
     Ok((task_ids, after))
 }
 

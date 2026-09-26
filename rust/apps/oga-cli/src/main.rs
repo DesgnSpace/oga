@@ -1637,7 +1637,7 @@ async fn run_socket_watch(
     let subscribe = json!({
         "v": 1,
         "watch": args.task_ids,
-        "afterCursor": 0,
+        "afterCursor": "latest",
     });
     writer
         .write_all(format!("{}\n", subscribe).as_bytes())

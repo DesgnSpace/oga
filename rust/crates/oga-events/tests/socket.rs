@@ -135,7 +135,7 @@ where
 async fn subscribe(
     path: &std::path::Path,
     task_ids: &[&str],
-    after_cursor: i64,
+    after_cursor: impl Into<Value>,
 ) -> (
     BufReader<tokio::net::unix::OwnedReadHalf>,
     tokio::net::unix::OwnedWriteHalf,
@@ -149,7 +149,7 @@ async fn subscribe(
                 json!({
                     "v": 1,
                     "watch": task_ids,
-                    "afterCursor": after_cursor,
+                    "afterCursor": after_cursor.into(),
                 })
             )
             .as_bytes(),
@@ -201,6 +201,36 @@ async fn socket_replays_events_and_delivers_new_batches() {
             .map(|event| event.id)
             .collect::<Vec<_>>(),
         [later_id]
+    );
+    handle.stop();
+}
+
+#[tokio::test]
+async fn a_subscription_from_the_latest_event_skips_the_history() {
+    let fixture = Fixture::new(TaskState::Running);
+    let history_id = fixture.append("worker_spawned", TaskState::Running, json!({}));
+    let path = fixture.path("latest.sock");
+    let handle = start_event_socket(
+        fixture.store.clone(),
+        options(path.clone(), Duration::from_secs(5)),
+    )
+    .expect("socket start");
+
+    let (mut reader, _writer) = subscribe(&path, &["task"], "latest").await;
+    let hello: oga_domain::HelloFrame =
+        serde_json::from_value(next_json(&mut reader).await).expect("hello");
+    let next_id = fixture.append("completed", TaskState::Completed, json!({}));
+    let batch: oga_domain::BatchFrame =
+        serde_json::from_value(next_json(&mut reader).await).expect("first batch");
+
+    assert_eq!(hello.hello.initial_cursor, Some(history_id));
+    assert_eq!(
+        batch
+            .events
+            .iter()
+            .map(|event| event.id)
+            .collect::<Vec<_>>(),
+        [next_id]
     );
     handle.stop();
 }
