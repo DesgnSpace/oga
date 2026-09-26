@@ -6,7 +6,7 @@ use std::fs::{self, DirEntry, Metadata};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rayon::prelude::*;
 
@@ -145,20 +145,29 @@ fn excludes_file(cwd: &Path) -> Option<PathBuf> {
 }
 
 fn git_info_exclude_path(cwd: &Path) -> Option<PathBuf> {
+    Some(git_dir(cwd)?.join("info/exclude"))
+}
+
+/// When git last rewrote this checkout's index. A switch, reset, commit, or
+/// stash each rewrites it, so an unchanged stamp means git moved nothing.
+pub fn checkout_stamp(cwd: &Path) -> Option<SystemTime> {
+    fs::metadata(git_dir(cwd)?.join("index"))
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+fn git_dir(cwd: &Path) -> Option<PathBuf> {
     let git_path = cwd.join(".git");
-    let git_dir = if git_path.is_dir() {
-        git_path
+    if git_path.is_dir() {
+        return Some(git_path);
+    }
+    let gitfile = fs::read_to_string(git_path).ok()?;
+    let path = PathBuf::from(gitfile.strip_prefix("gitdir: ")?.trim());
+    Some(if path.is_absolute() {
+        path
     } else {
-        let gitfile = fs::read_to_string(git_path).ok()?;
-        let path = gitfile.strip_prefix("gitdir: ")?.trim();
-        let path = PathBuf::from(path);
-        if path.is_absolute() {
-            path
-        } else {
-            cwd.join(path)
-        }
-    };
-    Some(git_dir.join("info/exclude"))
+        cwd.join(path)
+    })
 }
 
 /// True when some adapter would parse this path.

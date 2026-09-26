@@ -24,3 +24,4 @@ pub use lang::{LanguageAdapter, adapters};
 pub use query::{DEFAULT_CODE, DEFAULT_LIMIT};
 pub use routes::RouteMove;
 pub use symbols::{ExtractedFile, ExtractedSymbol, extract_symbols};
+pub use walk::checkout_stamp;

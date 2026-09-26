@@ -1933,8 +1933,8 @@ async fn a_question_sees_an_edit_made_since_the_last_one() {
         "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
     );
 
-    // Back-to-back questions are the branch-switch case: the second one walks
-    // the tree again rather than answering from where the symbol used to be.
+    // A question right after an edit reads the edited file again rather than
+    // answering from where the symbol used to be.
     let (status, body) = json_response(
         request(
             &fixture.router,
@@ -1982,6 +1982,61 @@ async fn a_question_sees_an_edit_made_since_the_last_one() {
             .as_str()
             .expect("markdown")
             .contains("src/auth.ts:5#checkAuth")
+    );
+}
+
+#[tokio::test]
+async fn a_question_right_after_a_branch_switch_answers_from_the_new_branch() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    let cwd = fixture.canonical_cwd();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&cwd)
+            .args(["-c", "user.name=Oga", "-c", "user.email=oga@example.com"])
+            .args(args)
+            .output()
+            .expect("git is installed");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "main"]);
+    git(&["switch", "--quiet", "--create", "refunds"]);
+    fixture.write_source(
+        "src/billing.ts",
+        "export function refundCard(): boolean { return true; }\n",
+    );
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "refunds"]);
+    git(&["switch", "--quiet", "main"]);
+
+    let ask = || async {
+        let (status, body) = json_response(
+            request(
+                &fixture.router,
+                Method::GET,
+                &format!("/api/query?cwd={cwd}&q=refundCard"),
+                Body::empty(),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        body["markdown"].as_str().expect("markdown").to_owned()
+    };
+    let on_main = ask().await;
+    assert!(!on_main.contains("src/billing.ts"), "{on_main}");
+
+    git(&["switch", "--quiet", "refunds"]);
+    let on_branch = ask().await;
+    assert!(
+        on_branch.contains("src/billing.ts:1#refundCard"),
+        "a question asked straight after the switch answered from the old branch: {on_branch}"
     );
 }
 

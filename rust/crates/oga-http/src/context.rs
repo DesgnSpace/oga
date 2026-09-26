@@ -5,7 +5,7 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex, RwLock},
-    time::Instant,
+    time::{Duration, Instant, SystemTime},
 };
 
 use axum::{
@@ -110,6 +110,7 @@ pub async fn init_index(
         }
         let index = ContextIndex::new(&store);
         let started = Instant::now();
+        let checkout = oga_context::checkout_stamp(Path::new(&cwd));
         let project = gate.project(&cwd);
         let mut walked = project.write().expect("reconcile gate poisoned");
         let (file_count, symbol_count, partial, changed) = if force {
@@ -124,7 +125,10 @@ pub async fn init_index(
                 reconciled.changed,
             )
         };
-        *walked = Some(started);
+        *walked = Some(Walked {
+            began: started,
+            checkout,
+        });
         drop(walked);
         if file_count == 0 {
             return Err(HttpError::bad_request(format!(
@@ -165,6 +169,11 @@ pub fn target_for(store: &Store, cwd: &str) -> Result<ContextTarget, StoreError>
     })
 }
 
+/// A question this soon after a walk answers from that walk, unless git has
+/// rewritten the checkout since. An edit to a file the answer names is still
+/// read from disk.
+const RECENT_WALK: Duration = Duration::from_secs(2);
+
 /// One entry per project, holding when that project's tree was last walked.
 ///
 /// A reconcile takes the entry's write lock, so only one walks a project at a
@@ -175,7 +184,14 @@ pub struct ReconcileDebounce(Arc<Mutex<HashMap<String, Project>>>);
 
 /// When one project's tree was last walked, and the lock that says who may
 /// walk it or read from it.
-type Project = Arc<RwLock<Option<Instant>>>;
+type Project = Arc<RwLock<Option<Walked>>>;
+
+#[derive(Clone, Copy)]
+struct Walked {
+    began: Instant,
+    /// The checkout's git stamp, read before the walk began.
+    checkout: Option<SystemTime>,
+}
 
 impl ReconcileDebounce {
     fn project(&self, cwd: &str) -> Project {
@@ -191,11 +207,10 @@ impl ReconcileDebounce {
 /// Bring a checkout's index up to date and answer one question from it, or
 /// `None` when nothing there is indexed.
 ///
-/// The walk is skipped only when another question's walk *began* after this
-/// one was asked, which is the only case where it cannot have missed anything
-/// this asker could have done. The answer is then assembled under the read
-/// lock, so it reads one committed index state rather than straddling a
-/// reconcile.
+/// The walk is skipped when another question's walk *began* after this one
+/// was asked, or began within [`RECENT_WALK`] with git having moved nothing
+/// since. The answer is then assembled under the read lock, so it reads one
+/// committed index state rather than straddling a reconcile.
 pub fn answer(
     gate: &ReconcileDebounce,
     store: &Store,
@@ -208,13 +223,18 @@ pub fn answer(
     let index = ContextIndex::new(store);
     let project = gate.project(&cwd);
     {
+        let checkout = oga_context::checkout_stamp(&target.cwd);
         let mut walked = project.write().expect("reconcile gate poisoned");
-        if !walked.is_some_and(|began| began >= asked) {
+        let current = walked.is_some_and(|walked| {
+            walked.began >= asked
+                || (walked.began.elapsed() < RECENT_WALK && walked.checkout == checkout)
+        });
+        if !current {
             let began = Instant::now();
             if index.reconcile(&cwd, BuildOptions::default())?.file_count == 0 {
                 return Ok(None);
             }
-            *walked = Some(began);
+            *walked = Some(Walked { began, checkout });
         }
     }
     let _reading = project.read().expect("reconcile gate poisoned");
