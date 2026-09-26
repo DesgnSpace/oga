@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { broker, streamStatus } from "@/bridge/client";
+import { streamStatus } from "@/bridge/client";
 import { onBrokerStatus, onEventBatch } from "@/bridge/events";
 import type { BridgeError, EventBatch } from "@/bridge/types";
 import type { TaskSummary } from "@/bridge/types";
@@ -247,18 +247,8 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
   );
 
   // Nothing started yet could mean "no workers configured", which the plain
-  // message doesn't explain, so this checks once and points at the fix.
-  const [hasNoWorkers, setHasNoWorkers] = useState(false);
-  useEffect(() => {
-    if (emptyMessage !== NO_TASKS_MESSAGE) return;
-    let cancelled = false;
-    void broker.modelSettings().then((result) => {
-      if (!cancelled && result.ok) setHasNoWorkers(result.value.workers.length === 0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [emptyMessage]);
+  // message doesn't explain, so the footer points at the fix.
+  const hasNoWorkers = sidebar.loadState === "ready" && sidebar.profiles.length === 0;
 
   const virtual = useMemo(
     () =>

@@ -256,6 +256,24 @@ describe("the sidebar", () => {
     expect(link!.querySelector(".task-dot")!.className).toContain("task-dot-look-settled");
   });
 
+  it("points a new user at worker settings without reading the model catalogue", async () => {
+    const calls: string[] = [];
+    setTransport({
+      ...transport({ tasks: [] }),
+      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+        const call = (args?.call as { call: string } | undefined)?.call ?? command;
+        calls.push(call);
+        if (call === "modelSettings") return { workers: [] } as T;
+        return transport({ tasks: [] }).invoke(command, args);
+      },
+    });
+
+    render(<Sidebar sidebarController={new SidebarController()} onOpenSettings={mock()} />);
+
+    await screen.findByText("No workers yet");
+    expect(calls).not.toContain("modelSettings");
+  });
+
   it("lists each new task as it starts, including two started back to back", async () => {
     const tasks = [task("one", "first task")];
     let batchListener: ((batch: EventBatch) => void) | undefined;
