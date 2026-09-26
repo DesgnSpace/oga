@@ -622,9 +622,8 @@ pub(crate) async fn run_task_with_session_and_active(
     }
 }
 
-/// Why this profile can't start a task, if it can't. Finding an OpenCode
-/// executable runs each candidate's `--version`, which can take seconds, so it
-/// runs off the async threads and leaves its answer cached for the start.
+/// Finding an OpenCode executable runs each candidate's `--version`, which can
+/// take seconds, so this runs off the async threads and warms the cache the start reads.
 async fn start_refusal(profile: &Profile) -> Option<String> {
     let profile = profile.clone();
     tokio::task::spawn_blocking(move || {

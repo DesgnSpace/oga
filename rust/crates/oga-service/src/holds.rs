@@ -1076,7 +1076,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// Counts how often the sweep asks whether the network is back.
     #[derive(Default)]
     struct CountingProbe {
         network_checks: Mutex<usize>,
