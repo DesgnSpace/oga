@@ -1,3 +1,25 @@
+/* Every row puts the label on the left and the value flush right, so values
+   line up whether or not the row can be copied. The copy icon sits just
+   before the value rather than after it, so it never pushes the value in. */
+.composer-menu-details .task-metadata-label {
+    flex: 0 0 auto;
+}
+
+.composer-menu-details .task-metadata-value {
+    order: 2;
+    flex: 0 1 auto;
+    text-align: right;
+}
+
+.composer-menu-details .task-metadata-static .task-metadata-value {
+    margin-left: auto;
+}
+
+.composer-menu-details .task-metadata-copy {
+    order: 1;
+    margin-left: auto;
+}
+
 :root {
     color-scheme: light dark;
     --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;

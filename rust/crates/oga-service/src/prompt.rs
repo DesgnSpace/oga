@@ -47,12 +47,18 @@ pub struct WorkerOutcome {
     pub completion: TaskCompletion,
 }
 
+/// Asks the worker to teach `oga query` the places it worked in, so the
+/// next lookup lands there. Settlement records whether it did.
+const RELEARN_SECTION: &str = r#"## Before you finish
+When the work is done and before your final answer, run `oga relearn` once with every file you found or changed that a later search should land on: `oga relearn '[{"hints":["<words someone would search>"],"path":"<file>","symbol":"<optional symbol>"}]'`."#;
+
 /// Assemble the brief with its project memories and optional attribution.
 pub fn assemble_worker_message(input: &WorkerPromptInput) -> String {
     let mut sections = vec![input.task.clone()];
     if !input.memories.is_empty() {
         sections.push(memories_section(&input.memories));
     }
+    sections.push(RELEARN_SECTION.to_owned());
     if let Some(attribution) = &input.attribution {
         sections.push(format!(
             "## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `{}` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves.",
@@ -660,17 +666,19 @@ mod tests {
         });
         assert_eq!(
             prompt,
-            "do the thing\n\n## Memories\nTreat these project facts as shared context. If one conflicts with the task or current files, report the conflict.\n- a: b\n\n## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `Co-Authored-By: Oga (claude/opus) <oga@desgn.space>` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves."
+            format!(
+                "do the thing\n\n## Memories\nTreat these project facts as shared context. If one conflicts with the task or current files, report the conflict.\n- a: b\n\n{RELEARN_SECTION}\n\n## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `Co-Authored-By: Oga (claude/opus) <oga@desgn.space>` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves."
+            )
         );
     }
 
     #[test]
-    fn a_bare_brief_is_sent_verbatim() {
+    fn a_bare_brief_gains_only_the_relearn_step() {
         let prompt = assemble_worker_message(&WorkerPromptInput {
             task: "do the thing".into(),
             ..WorkerPromptInput::default()
         });
-        assert_eq!(prompt, "do the thing");
+        assert_eq!(prompt, format!("do the thing\n\n{RELEARN_SECTION}"));
     }
 
     #[test]
