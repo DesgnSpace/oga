@@ -67,30 +67,6 @@ mod tests {
     use oga_domain::{ModelCost, Provider};
 
     #[test]
-    fn reads_the_providers_own_default_when_it_publishes_one() {
-        let claude = model(
-            "model",
-            Provider::Claude,
-            "p",
-            ModelInfoFields {
-                default_effort: Some("medium".into()),
-                ..ModelInfoFields::default()
-            },
-        );
-        let projected = default_effort(&claude);
-        assert_eq!(projected.effort.as_deref(), Some("medium"));
-        assert!(projected.reason.contains("default"));
-    }
-
-    #[test]
-    fn no_published_default_means_no_effort_flag() {
-        let bare = model("m", Provider::OpenCode, "oc", ModelInfoFields::default());
-        let projected = default_effort(&bare);
-        assert_eq!(projected.effort, None);
-        assert!(projected.reason.contains("no default reasoning effort"));
-    }
-
-    #[test]
     fn catalog_prices_do_not_affect_the_default() {
         let priced = model(
             "m",

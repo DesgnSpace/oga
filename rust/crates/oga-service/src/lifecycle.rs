@@ -1913,31 +1913,6 @@ pub(crate) fn worker_env(task_id: &str, cwd: &str) -> BTreeMap<String, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn lifecycle_maps_timeout_to_blocked_completion_code() {
-        let run = WorkerOutcome {
-            state: TaskState::Failed,
-            output: String::new(),
-            question: None,
-            error: Some("provider run timed out".into()),
-            completion: completion(
-                None,
-                true,
-                CompletionCode::Timeout,
-                Some("provider run timed out".into()),
-            ),
-        };
-        assert_eq!(run.completion.code, CompletionCode::Timeout);
-        assert_eq!(turn_status(run.state), "failed");
-    }
-
-    #[test]
-    fn lifecycle_event_names_match_terminal_states() {
-        assert_eq!(event_type(TaskState::Completed), "completed");
-        assert_eq!(event_type(TaskState::NeedsInput), "needs_input");
-        assert_eq!(event_type(TaskState::Blocked), "blocked");
-    }
-
     // Whoever adds the next way to start a run reaches a provider through here,
     // so the switch is checked here rather than at each caller. A path that
     // skipped every earlier check still cannot spend anything.

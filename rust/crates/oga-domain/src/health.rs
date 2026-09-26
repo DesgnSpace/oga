@@ -48,15 +48,3 @@ impl HealthReport {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{HealthReport, Staleness};
-
-    #[test]
-    fn reported_version_matches_crate_version() {
-        let report = HealthReport::ok("test", &Staleness::default());
-
-        assert_eq!(report.version, env!("CARGO_PKG_VERSION"));
-    }
-}

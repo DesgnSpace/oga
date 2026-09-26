@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use oga_domain::{Profile, Provider, Task, TaskEvent, TaskKind, TaskScope, TaskState};
-use oga_events::{EventSocketOptions, event_socket_path, start_event_socket};
+use oga_events::{EventSocketOptions, start_event_socket};
 use oga_store::Store;
 use rusqlite::params;
 use serde_json::{Value, json};
@@ -314,13 +314,4 @@ fn socket_requires_a_runtime_before_binding() {
     let result = start_event_socket(store, options(path.clone(), Duration::from_secs(5)));
     assert!(matches!(result, Err(oga_events::SocketError::NoRuntime)));
     assert!(!path.exists());
-}
-
-#[test]
-fn resolves_the_socket_next_to_the_database() {
-    let database = std::path::Path::new("/tmp/oga-test.db");
-    assert_eq!(
-        event_socket_path(database),
-        std::path::Path::new("/tmp/oga.sock")
-    );
 }

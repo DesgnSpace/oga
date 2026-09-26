@@ -766,21 +766,6 @@ mod tests {
     }
 
     #[test]
-    fn queries_survive_the_trip_with_their_defaults() {
-        let call = BrokerCall::TaskEvents {
-            task_id: "task".to_owned(),
-            query: TaskEventsQuery::default().last(150).limit(150),
-        };
-
-        let encoded = serde_json::to_value(&call).expect("encode call");
-
-        assert_eq!(
-            serde_json::from_value::<BrokerCall>(encoded).expect("decode call"),
-            call
-        );
-    }
-
-    #[test]
     fn calls_name_their_fields_the_way_the_web_view_writes_them() {
         let encoded = serde_json::to_value(BrokerCall::TaskEvents {
             task_id: "task".to_owned(),

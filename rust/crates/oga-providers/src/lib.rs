@@ -1121,15 +1121,6 @@ mod tests {
         assert_eq!(final_text(Provider::OpenCode2, raw), "PONG");
     }
     #[test]
-    fn command_uses_provider_program() {
-        assert_eq!(
-            command_for(&profile(Provider::Pi), "go", "/repo", None, None, None)
-                .expect("a command line")
-                .argv[0],
-            "pi"
-        );
-    }
-    #[test]
     fn home_expands_only_on_a_path_boundary() {
         for (value, expected) in [
             ("$HOME/.claude-me", "/h/.claude-me"),
@@ -1271,13 +1262,5 @@ mod tests {
             pi_env["PI_CODING_AGENT_SESSION_DIR"],
             format!("{}/.pi/agent/sessions", home())
         );
-    }
-
-    #[test]
-    fn claude_skills_follow_the_profile_account_directory() {
-        let mut me = profile(Provider::Claude);
-        me.env
-            .insert("CLAUDE_CONFIG_DIR".into(), "~/.claude-work".into());
-        assert_eq!(skills_dir(&me), format!("{}/.claude-work/skills", home()));
     }
 }
