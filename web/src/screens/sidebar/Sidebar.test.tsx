@@ -52,6 +52,36 @@ function transport(
   };
 }
 
+/** jsdom lays nothing out, so the list reads the row and viewport sizes a browser would give it. */
+function stubRowLayout({ rowHeight, viewportHeight }: { rowHeight: number; viewportHeight: number }): () => void {
+  const prototype = window.HTMLElement.prototype;
+  const offsetHeight = Object.getOwnPropertyDescriptor(prototype, "offsetHeight")!;
+  const getBoundingClientRect = prototype.getBoundingClientRect;
+  const isRow = (element: Element) => element.classList.contains("sidebar-task-row");
+  Object.defineProperty(prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return isRow(this) ? Math.round(rowHeight) : 0;
+    },
+  });
+  Object.defineProperty(prototype, "clientHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.id === "task-list" ? viewportHeight : 0;
+    },
+  });
+  prototype.getBoundingClientRect = function (this: HTMLElement) {
+    const height = isRow(this) ? rowHeight : 0;
+    return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect;
+  };
+  return () => {
+    Object.defineProperty(prototype, "offsetHeight", offsetHeight);
+    // Only shadows Element's own clientHeight, so removing it restores that.
+    Reflect.deleteProperty(prototype, "clientHeight");
+    prototype.getBoundingClientRect = getBoundingClientRect;
+  };
+}
+
 describe("the sidebar", () => {
   beforeEach(() => {
     projectionFromState.mockClear();
@@ -305,6 +335,36 @@ describe("the sidebar", () => {
     await screen.findByText("second task");
     start("three", "third task", 2);
     await screen.findByText("third task");
+  });
+
+  it("places each task once, at its own row, when rows are not a whole pixel tall", async () => {
+    // A row lays out 52.39px tall; offsetHeight rounds that to 52.
+    const rowHeight = 52.39;
+    const restore = stubRowLayout({ rowHeight, viewportHeight: 480 });
+    try {
+      const tasks = Array.from({ length: 40 }, (_, index) => task(`t${index}`, `task ${index}`));
+      setTransport(transport({ tasks }));
+      render(<Sidebar sidebarController={new SidebarController()} onSelectTask={mock()} />);
+      await screen.findByText("task 0");
+
+      const list = document.getElementById("task-list")!;
+      act(() => {
+        list.scrollTop = 1_000;
+        list.dispatchEvent(new window.Event("scroll"));
+      });
+
+      const spacer = list.querySelector<HTMLElement>(".sidebar-list-spacer")!;
+      expect(parseFloat(spacer.style.height)).toBeCloseTo(tasks.length * rowHeight, 3);
+
+      const rendered = screen.getAllByRole("option").map((option) => option.getAttribute("href"));
+      expect(new Set(rendered).size).toBe(rendered.length);
+      const firstIndex = Number(rendered[0]!.replace("/tasks/t", ""));
+      const listWindow = list.querySelector<HTMLElement>(".sidebar-list-window")!;
+      const offset = parseFloat(listWindow.style.transform.replace("translateY(", ""));
+      expect(offset).toBeCloseTo(firstIndex * rowHeight, 3);
+    } finally {
+      restore();
+    }
   });
 
   it("keeps a newer stream status when the startup read returns late", async () => {

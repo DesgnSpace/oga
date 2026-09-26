@@ -319,11 +319,12 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
 
   const measuredTaskId = visibleRows.find((row) => row.type === "task")?.task.id;
   useLayoutEffect(() => {
-    // The row wrapper, not the link, so the link's margins count too.
+    // The row wrapper, not the link, so the link's margins count too. Unrounded,
+    // because rows stack at their fractional height and the window offset must match.
     const row = measuredTaskId === undefined ? undefined : taskRowRefs.current.get(measuredTaskId)?.parentElement;
     if (!row) return;
     const measure = () => {
-      const height = row.offsetHeight;
+      const height = row.getBoundingClientRect().height;
       if (height > 0) setItemHeight(height);
     };
     measure();
