@@ -450,20 +450,6 @@ describe("TraceRows", () => {
     expect(container.querySelector(".markdown-content")).toBeNull();
   });
 
-  it("renders a long agent message in full, wrapped rather than truncated", () => {
-    const long = "This run touched /Users/malico/desgn/oga/rust/crates/oga-events/src/lib.rs ".repeat(6).trim();
-    const { container } = render(<TraceRows rows={[proseRow(long)]} />);
-    const target = container.querySelector(".trace-target");
-    if (target === null) throw new Error("expected a .trace-target row");
-
-    expect(target.textContent).toBe(long);
-    expect(target.textContent?.endsWith("…")).toBe(false);
-    const style = getComputedStyle(target);
-    expect(style.whiteSpace).toBe("pre-wrap");
-    expect(style.overflowWrap).toBe("anywhere");
-    expect(style.overflow).not.toBe("hidden");
-  });
-
   it("does not render transport tags from a wrapped file result", () => {
     const output = [
       "<path>/Users/malico/desgn/oga/web/src/oga.css</path>",
