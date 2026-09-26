@@ -231,6 +231,9 @@ pub fn answer(
         });
         if !current {
             let began = Instant::now();
+            if let Some(origin) = &target.source_cwd {
+                index.seed(&target.cwd, origin)?;
+            }
             if index.reconcile(&cwd, BuildOptions::default())?.file_count == 0 {
                 return Ok(None);
             }

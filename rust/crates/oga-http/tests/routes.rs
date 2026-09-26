@@ -2113,6 +2113,101 @@ async fn plain_language_lookup_inside_a_worktree_answers_from_the_checkout() {
     }
 }
 
+/// A checkout's first lookup starts from its origin's index, and still
+/// answers with what the checkout itself holds.
+#[tokio::test]
+async fn a_first_lookup_in_a_worktree_answers_from_the_checkout_after_its_origin_is_indexed() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    fixture.write_source(
+        "src/billing.ts",
+        "export function chargeCard(): boolean { return true; }\n",
+    );
+    let origin = fixture.canonical_cwd();
+    let ask = |cwd: String, question: &'static str| {
+        let router = fixture.router.clone();
+        async move {
+            let (status, body) = json_response(
+                request(
+                    &router,
+                    Method::GET,
+                    &format!("/api/query?cwd={cwd}&q={question}"),
+                    Body::empty(),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["markdown"].as_str().expect("markdown").to_owned()
+        }
+    };
+    assert!(
+        ask(origin.clone(), "chargeCard")
+            .await
+            .contains("src/billing.ts:1#chargeCard")
+    );
+
+    let checkout = tempfile::tempdir().expect("worktree directory");
+    std::fs::create_dir_all(checkout.path().join("src")).expect("checkout source directory");
+    std::fs::write(
+        checkout.path().join("src/auth.ts"),
+        "import { log } from './log';\n\nlog('auth');\n\nexport function checkAuth(token: string): boolean { return !!token; }\n",
+    )
+    .expect("checkout source writes");
+    std::fs::write(
+        checkout.path().join("src/refund.ts"),
+        "export function refundCard(): boolean { return true; }\n",
+    )
+    .expect("checkout source writes");
+    let checkout_cwd = std::fs::canonicalize(checkout.path())
+        .expect("canonicalize worktree")
+        .display()
+        .to_string();
+    fixture
+        .store
+        .repositories()
+        .tasks()
+        .insert(&Task {
+            id: "worktree-task".into(),
+            kind: Some(TaskKind::Delegated),
+            profile_id: "profile".into(),
+            model: "fake".into(),
+            prompt: "work in a checkout".into(),
+            cwd: checkout_cwd.clone(),
+            state: TaskState::Running,
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            updated_at: "2026-01-01T00:00:00.000Z".into(),
+            ..Task::default()
+        })
+        .expect("worktree task insert");
+    fixture
+        .store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET origin_cwd=?,worktree_path=?,worktree_branch=? WHERE id=?",
+                rusqlite::params![&origin, &checkout_cwd, "task/checkout", "worktree-task"],
+            )?;
+            Ok(())
+        })
+        .expect("worktree columns");
+
+    assert!(
+        ask(checkout_cwd.clone(), "checkAuth")
+            .await
+            .contains("src/auth.ts:5#checkAuth")
+    );
+    assert!(
+        ask(checkout_cwd.clone(), "refundCard")
+            .await
+            .contains("src/refund.ts:1#refundCard")
+    );
+    let deleted = ask(checkout_cwd, "chargeCard").await;
+    assert!(!deleted.contains("src/billing.ts"), "{deleted}");
+}
+
 #[tokio::test]
 async fn plain_language_lookup_in_an_unindexed_directory_says_so() {
     let fixture = Fixture::new();

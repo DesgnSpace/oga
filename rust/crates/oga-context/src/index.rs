@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use oga_domain::Task;
 use oga_store::{Store, StoreError};
+use rayon::iter::Either;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -197,7 +198,7 @@ impl<'a> ContextIndex<'a> {
     ) -> Result<BuildResult, ContextError> {
         let cwd = cwd.as_ref();
         let walk = walk::walk_files(cwd, options.max_files);
-        let mut updates = parse_all(cwd, &walk.files);
+        let mut updates = parse_all(cwd, &walk.files, &HashMap::new()).0;
         let partial = walk.partial || truncate_to_budget(&mut updates, options.max_symbols);
         let now = timestamp_now();
         index_store::replace_files(self.store, cwd, &updates, &now)?;
@@ -223,10 +224,34 @@ impl<'a> ContextIndex<'a> {
         Ok(())
     }
 
-    /// True when nothing is stored for `cwd`, or what is stored was written to
-    /// a layout this binary no longer reads.
+    /// True when nothing is stored for `cwd`, what is stored was written to a
+    /// layout this binary no longer reads, or its build never finished.
     fn unreadable(&self, cwd: &Path) -> Result<bool, ContextError> {
-        Ok(index_store::index_row(self.store, cwd)?.is_none_or(|row| row.scheme != INDEX_SCHEME))
+        Ok(index_store::index_row(self.store, cwd)?
+            .is_none_or(|row| row.scheme != INDEX_SCHEME || row.state == "building"))
+    }
+
+    /// Start a checkout's first index from the index of the checkout it was
+    /// cut from, so its first reconcile parses only the files that differ.
+    /// Does nothing when `cwd` already has an index or `origin` has none.
+    pub fn seed(
+        &self,
+        cwd: impl AsRef<Path>,
+        origin: impl AsRef<Path>,
+    ) -> Result<(), ContextError> {
+        let (cwd, origin) = (cwd.as_ref(), origin.as_ref());
+        if !self.unreadable(cwd)? || self.unreadable(origin)? {
+            return Ok(());
+        }
+        let partial =
+            index_store::index_row(self.store, origin)?.is_some_and(|row| row.state == "partial");
+        let now = timestamp_now();
+        index_store::mark_building(self.store, cwd, &now)?;
+        index_store::clear(self.store, cwd)?;
+        index_store::seed(self.store, cwd, origin, &now)?;
+        let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
+        index_store::save_index(self.store, cwd, partial, file_count, symbol_count, &now)?;
+        Ok(())
     }
 
     /// Re-read only what changed on disk, and follow every saved route to
@@ -268,21 +293,7 @@ impl<'a> ContextIndex<'a> {
                 candidates.push(file.clone());
             }
         }
-        let mut updates = parse_all(cwd, &candidates);
-        let mut touched = Vec::new();
-        updates.retain(|update| {
-            let same = known
-                .get(&update.path)
-                .is_some_and(|known| known.digest == update.digest);
-            if same {
-                touched.push(index_store::TouchedFile {
-                    path: update.path.clone(),
-                    mtime_ms: update.mtime_ms,
-                    ctime_ms: update.ctime_ms,
-                });
-            }
-            !same
-        });
+        let (updates, touched) = parse_all(cwd, &candidates, &known);
         let vanished = known
             .keys()
             .filter(|path| !seen.contains(*path))
@@ -748,55 +759,70 @@ struct PreparedRoute {
     digest: String,
 }
 
-/// Read and parse every file, on as many threads as the machine has.
-fn parse_all(cwd: &Path, files: &[WalkFile]) -> Vec<FileUpdate> {
+/// Read every file and parse the ones whose contents differ from `known`, on
+/// as many threads as the machine has. A file with the same contents comes
+/// back as touched, carrying the stamps it now wears.
+fn parse_all(
+    cwd: &Path,
+    files: &[WalkFile],
+    known: &HashMap<String, index_store::FileRow>,
+) -> (Vec<FileUpdate>, Vec<index_store::TouchedFile>) {
     files
         .par_iter()
         .filter(|file| file.size <= MAX_FILE_BYTES)
         .filter_map(|file| {
             let bytes = fs::read(walk::absolute_path(cwd, &file.path)).ok()?;
+            let digest = digest_of(&bytes);
+            if known
+                .get(&file.path)
+                .is_some_and(|known| known.digest == digest)
+            {
+                return Some(Either::Right(index_store::TouchedFile {
+                    path: file.path.clone(),
+                    mtime_ms: file.mtime_ms,
+                    ctime_ms: file.ctime_ms,
+                }));
+            }
             let source = String::from_utf8(bytes).ok()?;
-            let extracted = extract_symbols(&file.path, &source)?;
-            Some(FileUpdate {
-                path: file.path.clone(),
-                lang: extracted.lang.to_owned(),
-                digest: digest_of(source.as_bytes()),
-                size: file.size,
-                mtime_ms: file.mtime_ms,
-                ctime_ms: file.ctime_ms,
-                lines: line_count(source.as_bytes()) as u64,
-                symbols: extracted
-                    .symbols
-                    .into_iter()
-                    .map(|symbol| {
-                        let name_key = name_key(&symbol.name);
-                        let tokens =
-                            identifier_tokens(&[&symbol.name, &symbol.qualified, &file.path]);
-                        SymbolRow {
-                            digest: symbol_digest(
-                                &source,
-                                &symbol.name,
-                                symbol.line,
-                                symbol.end_line,
-                            ),
-                            path: file.path.clone(),
-                            kind: symbol.kind,
-                            name: symbol.name,
-                            qualified: symbol.qualified,
-                            parent: symbol.parent,
-                            line: symbol.line,
-                            end_line: symbol.end_line,
-                            signature: symbol.signature,
-                            doc: symbol.doc,
-                            exported: symbol.exported,
-                            name_key,
-                            tokens,
-                        }
-                    })
-                    .collect(),
-            })
+            parse_file(file, &source, digest).map(Either::Left)
         })
-        .collect()
+        .partition_map(|read| read)
+}
+
+fn parse_file(file: &WalkFile, source: &str, digest: String) -> Option<FileUpdate> {
+    let extracted = extract_symbols(&file.path, source)?;
+    Some(FileUpdate {
+        path: file.path.clone(),
+        lang: extracted.lang.to_owned(),
+        digest,
+        size: file.size,
+        mtime_ms: file.mtime_ms,
+        ctime_ms: file.ctime_ms,
+        lines: line_count(source.as_bytes()) as u64,
+        symbols: extracted
+            .symbols
+            .into_iter()
+            .map(|symbol| {
+                let name_key = name_key(&symbol.name);
+                let tokens = identifier_tokens(&[&symbol.name, &symbol.qualified, &file.path]);
+                SymbolRow {
+                    digest: symbol_digest(source, &symbol.name, symbol.line, symbol.end_line),
+                    path: file.path.clone(),
+                    kind: symbol.kind,
+                    name: symbol.name,
+                    qualified: symbol.qualified,
+                    parent: symbol.parent,
+                    line: symbol.line,
+                    end_line: symbol.end_line,
+                    signature: symbol.signature,
+                    doc: symbol.doc,
+                    exported: symbol.exported,
+                    name_key,
+                    tokens,
+                }
+            })
+            .collect(),
+    })
 }
 
 /// Stop before the project's symbol budget, keeping whole files.

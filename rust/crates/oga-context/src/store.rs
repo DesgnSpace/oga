@@ -1,5 +1,6 @@
-//! Every read and write the index makes against SQLite. One transaction per
-//! rebuild, one prepared statement per shape of write.
+//! Every read and write the index makes against SQLite. Writes go in batches
+//! of about [`BATCH_SYMBOLS`] symbols, one transaction each, so a large build
+//! never holds the broker's one writer for long.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -14,10 +15,16 @@ use crate::text::fts_query;
 /// rebuilt rather than read.
 pub(crate) const INDEX_SCHEME: u32 = 11;
 
+/// Symbols one write transaction carries at most, give or take one file.
+const BATCH_SYMBOLS: usize = 1_000;
+/// Files one transaction removes or copies.
+const BATCH_FILES: usize = 100;
+
 /// What the index knows about its own last build for one project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexRow {
     pub scheme: u32,
+    pub state: String,
     pub symbol_count: usize,
 }
 
@@ -383,13 +390,16 @@ pub fn file_exists(store: &Store, cwd: &Path, path: &str) -> Result<bool, StoreE
 }
 
 /// Write the whole project, dropping whatever the index held for it before.
+/// The project reads as `building` until [`save_index`] marks it done.
 pub fn replace_files(
     store: &Store,
     cwd: &Path,
     updates: &[FileUpdate],
     now: &str,
 ) -> Result<(), StoreError> {
-    write(store, cwd, updates, &[], true, now)
+    mark_building(store, cwd, now)?;
+    clear(store, cwd)?;
+    merge_files(store, cwd, updates, &[], now)
 }
 
 /// Write the files that changed and drop the ones that went, leaving the rest
@@ -401,26 +411,90 @@ pub fn merge_files(
     removed: &[String],
     now: &str,
 ) -> Result<(), StoreError> {
-    write(store, cwd, updates, removed, false, now)
+    let cwd = cwd.display().to_string();
+    for chunk in removed.chunks(BATCH_FILES) {
+        store.transaction(|transaction| {
+            for path in chunk {
+                delete_file(transaction, &cwd, path)?;
+            }
+            Ok(())
+        })?;
+    }
+    let mut start = 0;
+    while start < updates.len() {
+        let mut end = start;
+        let mut symbols = 0;
+        while end < updates.len() && (end == start || symbols < BATCH_SYMBOLS) {
+            symbols += updates[end].symbols.len();
+            end += 1;
+        }
+        write(store, &cwd, &updates[start..end], now)?;
+        start = end;
+    }
+    Ok(())
 }
 
-fn write(
-    store: &Store,
-    cwd: &Path,
-    updates: &[FileUpdate],
-    removed: &[String],
-    wipe: bool,
-    now: &str,
-) -> Result<(), StoreError> {
+/// Drop every row the index holds for `cwd`.
+pub fn clear(store: &Store, cwd: &Path) -> Result<(), StoreError> {
     let cwd = cwd.display().to_string();
+    loop {
+        let deleted = store.transaction(|transaction| {
+            Ok(transaction.execute(
+                "DELETE FROM context_symbols WHERE id IN \
+                 (SELECT id FROM context_symbols WHERE cwd=? LIMIT ?)",
+                params![cwd, BATCH_SYMBOLS],
+            )?)
+        })?;
+        if deleted < BATCH_SYMBOLS {
+            break;
+        }
+    }
     store.transaction(|transaction| {
-        if wipe {
-            transaction.execute("DELETE FROM context_files WHERE cwd=?", [&cwd])?;
-            transaction.execute("DELETE FROM context_symbols WHERE cwd=?", [&cwd])?;
-        }
-        for path in removed {
-            delete_file(transaction, &cwd, path)?;
-        }
+        transaction.execute("DELETE FROM context_files WHERE cwd=?", [&cwd])?;
+        Ok(())
+    })
+}
+
+/// Start `cwd`'s index as a copy of `origin`'s, a batch of files at a time.
+/// Stamps are copied too, so the next reconcile re-reads every file but
+/// parses only those whose contents differ.
+pub fn seed(store: &Store, cwd: &Path, origin: &Path, now: &str) -> Result<(), StoreError> {
+    let cwd = cwd.display().to_string();
+    let origin = origin.display().to_string();
+    let paths = store.with_connection(|connection| {
+        let mut statement =
+            connection.prepare("SELECT path FROM context_files WHERE cwd=? ORDER BY path")?;
+        Ok(statement
+            .query_map([&origin], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?)
+    })?;
+    for chunk in paths.chunks(BATCH_FILES) {
+        let (first, last) = (&chunk[0], &chunk[chunk.len() - 1]);
+        store.transaction(|transaction| {
+            transaction.execute(
+                "INSERT INTO context_files(cwd,path,lang,digest,size,mtime_ms,ctime_ms,lines,updated_at) \
+                 SELECT ?1,path,lang,digest,size,mtime_ms,ctime_ms,lines,?3 FROM context_files \
+                 WHERE cwd=?2 AND path BETWEEN ?4 AND ?5",
+                params![cwd, origin, now, first, last],
+            )?;
+            transaction.execute(
+                "INSERT INTO context_symbols(file_id,cwd,path,kind,name,name_key,qualified,parent,\
+                 line,end_line,signature,doc,exported,digest,tokens) \
+                 SELECT f.id,?1,s.path,s.kind,s.name,s.name_key,s.qualified,s.parent,\
+                 s.line,s.end_line,s.signature,s.doc,s.exported,s.digest,s.tokens \
+                 FROM context_symbols s JOIN context_files f ON f.cwd=?1 AND f.path=s.path \
+                 WHERE s.cwd=?2 AND s.path BETWEEN ?3 AND ?4 ORDER BY s.id",
+                params![cwd, origin, first, last],
+            )?;
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
+/// One batch of changed files, each replacing whatever the index held for it.
+fn write(store: &Store, cwd: &str, updates: &[FileUpdate], now: &str) -> Result<(), StoreError> {
+    store.transaction(|transaction| {
         let mut upsert_file = transaction.prepare(
             "INSERT INTO context_files(cwd,path,lang,digest,size,mtime_ms,ctime_ms,lines,updated_at) \
              VALUES(?,?,?,?,?,?,?,?,?) \
@@ -452,9 +526,7 @@ fn write(
                 ],
                 |row| row.get(0),
             )?;
-            if !wipe {
-                clear_symbols.execute([file_id])?;
-            }
+            clear_symbols.execute([file_id])?;
             for symbol in &update.symbols {
                 insert_symbol.execute(params![
                     file_id,
@@ -565,12 +637,13 @@ pub fn index_row(store: &Store, cwd: &Path) -> Result<Option<IndexRow>, StoreErr
     store.with_connection(|connection| {
         Ok(connection
             .query_row(
-                "SELECT scheme, symbol_count FROM context_index WHERE cwd=?",
+                "SELECT scheme, state, symbol_count FROM context_index WHERE cwd=?",
                 [cwd.display().to_string()],
                 |row| {
                     Ok(IndexRow {
                         scheme: row.get::<_, i64>(0)?.max(0) as u32,
-                        symbol_count: row.get::<_, i64>(1)?.max(0) as usize,
+                        state: row.get(1)?,
+                        symbol_count: row.get::<_, i64>(2)?.max(0) as usize,
                     })
                 },
             )
@@ -610,6 +683,23 @@ pub fn save_index(
     now: &str,
 ) -> Result<(), StoreError> {
     let state = if partial { "partial" } else { "ready" };
+    upsert_index(store, cwd, state, file_count, symbol_count, now)
+}
+
+/// Mark `cwd`'s index as being written, so an interrupted build is rebuilt
+/// rather than read.
+pub fn mark_building(store: &Store, cwd: &Path, now: &str) -> Result<(), StoreError> {
+    upsert_index(store, cwd, "building", 0, 0, now)
+}
+
+fn upsert_index(
+    store: &Store,
+    cwd: &Path,
+    state: &str,
+    file_count: usize,
+    symbol_count: usize,
+    now: &str,
+) -> Result<(), StoreError> {
     store.transaction(|transaction| {
         transaction.execute(
             "INSERT INTO context_index(cwd,scheme,state,built_at,file_count,symbol_count,updated_at) \
