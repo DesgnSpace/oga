@@ -281,7 +281,13 @@ async fn poll_changes(store: Arc<Store>, state: Arc<FeedState>, poll_interval: D
             .database_queries
             .fetch_add(1, Ordering::Relaxed);
         state.metrics.poll_queries.fetch_add(1, Ordering::Relaxed);
-        match list_event_keys(&store, after, MAX_TRACKED_EVENTS + 1) {
+        let reader = Arc::clone(&store);
+        let keys = tokio::task::spawn_blocking(move || {
+            list_event_keys(&reader, after, MAX_TRACKED_EVENTS + 1)
+        })
+        .await
+        .unwrap_or_else(|error| Err(StoreError::Refusal(format!("event poll stopped: {error}"))));
+        match keys {
             Ok(events) => {
                 if let Some(last) = events.last() {
                     state

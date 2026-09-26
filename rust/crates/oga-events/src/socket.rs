@@ -10,7 +10,8 @@ use std::{
 };
 
 use oga_domain::{
-    BatchFrame, BatchTask, HelloFrame, HelloPayload, Provider, Task, TaskEvent, WaitedTaskEvent,
+    BatchFrame, BatchTask, HelloFrame, HelloPayload, Provider, Task, TaskEvent, TaskState,
+    WaitedTaskEvent,
 };
 use oga_store::{Store, StoreError};
 use rusqlite::{Row, ToSql, params_from_iter};
@@ -216,28 +217,34 @@ async fn serve_connection(
             return;
         }
     };
-    for task_id in &task_ids {
-        match store.repositories().tasks().get(task_id) {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                let _ = write_json(
-                    &mut writer,
-                    &json!({ "error": unknown_task_message(task_id) }),
-                )
-                .await;
-                return;
-            }
-            Err(_) => return,
+    let ids = task_ids.clone();
+    let Some(opened) = read_store(&store, move |store| {
+        let found = store.repositories().tasks().get_many(&ids)?;
+        if let Some(unknown) = ids
+            .iter()
+            .find(|id| !found.iter().any(|task| &task.id == *id))
+        {
+            return Ok(Err(unknown.clone()));
         }
-    }
-
-    let initial_cursor = match latest_event_id(&store, &task_ids, true) {
-        Ok(cursor) => cursor,
-        Err(_) => return,
+        Ok(Ok((
+            latest_event_id(store, &ids, true)?,
+            oldest_event_id(store, &ids)?,
+        )))
+    })
+    .await
+    else {
+        return;
     };
-    let stream_floor = match oldest_event_id(&store, &task_ids) {
-        Ok(cursor) => cursor,
-        Err(_) => return,
+    let (initial_cursor, stream_floor) = match opened {
+        Ok(cursors) => cursors,
+        Err(unknown) => {
+            let _ = write_json(
+                &mut writer,
+                &json!({ "error": unknown_task_message(&unknown) }),
+            )
+            .await;
+            return;
+        }
     };
     let requested_cursor = requested_cursor.unwrap_or(initial_cursor);
     let stale = requested_cursor > 0 && stream_floor > 0 && requested_cursor < stream_floor;
@@ -275,22 +282,32 @@ async fn serve_connection(
         else {
             return;
         };
-        let contexts = match load_task_contexts(&store, &waited.events, &watched) {
-            Ok(contexts) => contexts,
-            Err(_) => return,
+        let has_more = waited.has_more;
+        cursor = waited
+            .events
+            .iter()
+            .map(|event| event.id)
+            .fold(cursor.max(waited.cursor), i64::max);
+        let ids = watched.clone();
+        let Some((events, contexts)) = read_store(&store, move |store| {
+            let contexts = load_task_contexts(store, &waited.events, &ids)?;
+            let events = waited
+                .events
+                .iter()
+                .filter_map(|event| {
+                    let context = contexts.get(&event.task_id)?;
+                    Some(crate::event_to_batch(
+                        &waited_event(event, context.provider),
+                        Some(&context.task),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            Ok((events, contexts))
+        })
+        .await
+        else {
+            return;
         };
-        let mut events = Vec::with_capacity(waited.events.len());
-        for event in &waited.events {
-            cursor = cursor.max(event.id);
-            let Some(context) = contexts.get(&event.task_id) else {
-                continue;
-            };
-            events.push(crate::event_to_batch(
-                &waited_event(event, context.provider),
-                Some(&context.task),
-            ));
-        }
-        cursor = cursor.max(waited.cursor);
         let tasks = watched
             .iter()
             .filter_map(|id| {
@@ -303,12 +320,12 @@ async fn serve_connection(
             events,
             tasks,
             cursor,
-            has_more: waited.has_more,
+            has_more,
         };
         if !write_json(&mut writer, &batch).await {
             return;
         }
-        if waited.has_more {
+        if has_more {
             continue;
         }
         watched.retain(|id| {
@@ -330,7 +347,7 @@ struct WaitedBatch {
 }
 
 async fn wait_for_tasks(
-    store: &Store,
+    store: &Arc<Store>,
     feed: &EventFeed,
     task_ids: &[String],
     cursor: i64,
@@ -340,9 +357,14 @@ async fn wait_for_tasks(
     let deadline = Instant::now() + wait;
     let mut signal_cursor = cursor;
     loop {
-        let events = list_events(store, cursor, MAX_BATCH_EVENTS + 1, task_ids, true).ok()?;
-        let tasks = load_tasks(store, task_ids).ok()?;
-        let settled = tasks.iter().any(|task| task.state.settled());
+        let ids = task_ids.to_vec();
+        let (events, settled) = read_store(store, move |store| {
+            Ok((
+                list_events(store, cursor, MAX_BATCH_EVENTS + 1, &ids, true)?,
+                any_settled(store, &ids)?,
+            ))
+        })
+        .await?;
         if !events.is_empty() || settled {
             let has_more = events.len() > MAX_BATCH_EVENTS;
             let events = events
@@ -358,7 +380,8 @@ async fn wait_for_tasks(
         }
         let now = Instant::now();
         if now >= deadline {
-            let latest = latest_event_id(store, task_ids, true).ok()?;
+            let ids = task_ids.to_vec();
+            let latest = read_store(store, move |store| latest_event_id(store, &ids, true)).await?;
             return Some(WaitedBatch {
                 events: Vec::new(),
                 cursor: cursor.max(latest),
@@ -372,7 +395,10 @@ async fn wait_for_tasks(
             changed = feed.wait_for_change(signal_cursor, task_ids, deadline - now) => {
                 match changed {
                     Ok(true) => {
-                        signal_cursor = feed.latest_event_id(task_ids).ok()?;
+                        let ids = task_ids.to_vec();
+                        signal_cursor =
+                            read_store(store, move |store| latest_event_id(store, &ids, false))
+                                .await?;
                     }
                     Ok(false) => {}
                     Err(_) => return None,
@@ -422,17 +448,42 @@ struct TaskContext {
     provider: Provider,
 }
 
-fn load_tasks(store: &Store, task_ids: &[String]) -> Result<Vec<Task>, StoreError> {
-    task_ids
+/// Store work for a watcher runs on the blocking pool, so replaying a long
+/// history never holds an executor thread. `None` ends the connection.
+async fn read_store<T, F>(store: &Arc<Store>, work: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&Store) -> Result<T, StoreError> + Send + 'static,
+{
+    let store = Arc::clone(store);
+    tokio::task::spawn_blocking(move || work(&store))
+        .await
+        .ok()?
+        .ok()
+}
+
+/// Whether any watched task has settled. A watched task that no longer
+/// exists is an error.
+fn any_settled(store: &Store, task_ids: &[String]) -> Result<bool, StoreError> {
+    let states = store.with_connection(|connection| {
+        let sql = format!(
+            "SELECT state FROM tasks WHERE 1=1{}",
+            task_clause(task_ids, "id")
+        );
+        let mut statement = connection.prepare(&sql)?;
+        Ok(statement
+            .query_map(params_from_iter(task_ids), |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?)
+    })?;
+    if states.len() < task_ids.len() {
+        return Err(StoreError::Refusal(
+            "a watched task no longer exists".into(),
+        ));
+    }
+    Ok(states
         .iter()
-        .map(|id| {
-            store
-                .repositories()
-                .tasks()
-                .get(id)?
-                .ok_or_else(|| StoreError::Refusal(format!("unknown task: {id}")))
-        })
-        .collect()
+        .filter_map(|state| serde_json::from_value::<TaskState>(Value::String(state.clone())).ok())
+        .any(TaskState::settled))
 }
 
 fn load_task_contexts(
@@ -444,31 +495,43 @@ fn load_task_contexts(
     ids.extend(events.iter().map(|event| event.task_id.clone()));
     ids.sort();
     ids.dedup();
-    let mut contexts = HashMap::new();
-    for id in ids {
-        let Some(mut task) = store.repositories().tasks().get(&id)? else {
-            continue;
-        };
-        let (title, tldr) = store.with_connection(|connection| {
-            Ok(
-                connection.query_row("SELECT title,tldr FROM tasks WHERE id=?", [&id], |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                    ))
-                })?,
-            )
+    let tasks = store.repositories().tasks().get_many(&ids)?;
+    let mut profile_ids = tasks
+        .iter()
+        .map(|task| task.profile_id.clone())
+        .collect::<Vec<_>>();
+    profile_ids.sort();
+    profile_ids.dedup();
+    let providers = store.with_connection(|connection| {
+        let sql = format!(
+            "SELECT id,provider FROM profiles WHERE deleted_at IS NULL{}",
+            task_clause(&profile_ids, "id")
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(&profile_ids), |row| {
+            let provider = row.get::<_, String>(1)?;
+            let provider =
+                serde_json::from_value::<Provider>(Value::String(provider)).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
+            Ok((row.get::<_, String>(0)?, provider))
         })?;
-        task.title = title;
-        task.tldr = tldr;
-        let provider = store
-            .repositories()
-            .profiles()
-            .get(&task.profile_id)?
-            .map_or(Provider::Claude, |profile| profile.provider);
-        contexts.insert(id, TaskContext { task, provider });
-    }
-    Ok(contexts)
+        Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
+    })?;
+    Ok(tasks
+        .into_iter()
+        .map(|task| {
+            let provider = providers
+                .get(&task.profile_id)
+                .copied()
+                .unwrap_or(Provider::Claude);
+            (task.id.clone(), TaskContext { task, provider })
+        })
+        .collect())
 }
 
 fn waited_event(event: &TaskEvent, provider: Provider) -> WaitedTaskEvent {

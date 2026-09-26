@@ -2595,3 +2595,45 @@ async fn transport_preference_routes_report_what_a_new_session_would_use() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_save_waiting_on_the_database_leaves_other_requests_answered() {
+    let fixture = Fixture::new();
+    let store = fixture.store.clone();
+    let (locked, holding) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let writer = std::thread::spawn(move || {
+        store
+            .transaction(|_| {
+                locked.send(()).expect("lock held");
+                let _ = released.recv_timeout(Duration::from_secs(20));
+                Ok(())
+            })
+            .expect("held write");
+    });
+    holding.recv().expect("writer holds the lock");
+
+    let (saved, save_status) = std::sync::mpsc::channel();
+    let router = fixture.router.clone();
+    tokio::spawn(async move {
+        let body = Body::from(json!({ "font": "system" }).to_string());
+        let response = request(&router, Method::PUT, "/api/appearance", body).await;
+        let _ = saved.send(response.status());
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let (answered, health_status) = std::sync::mpsc::channel();
+    let router = fixture.router.clone();
+    tokio::spawn(async move {
+        let response = request(&router, Method::GET, "/health", Body::empty()).await;
+        let _ = answered.send(response.status());
+    });
+    let health = health_status.recv_timeout(Duration::from_secs(2));
+    release.send(()).expect("release the lock");
+    writer.join().expect("writer thread");
+
+    assert_eq!(health, Ok(StatusCode::OK));
+    assert_eq!(
+        save_status.recv_timeout(Duration::from_secs(10)),
+        Ok(StatusCode::OK)
+    );
+}

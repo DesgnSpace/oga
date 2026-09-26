@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::router::{HttpError, HttpState, parse_json};
+use crate::router::{HttpError, HttpState, parse_json, run_blocking};
 
 pub async fn list_not_found() -> Response {
     Response::builder()
@@ -61,12 +61,16 @@ pub async fn create(
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let body: ProfileCreate = parse_json(&body)?;
-    let profile = normalize_create(body, &state)?;
-    state
-        .store
-        .repositories()
-        .profiles()
-        .insert(&profile, &now_iso())?;
+    let profile = run_blocking(move || {
+        let profile = normalize_create(body, &state)?;
+        state
+            .store
+            .repositories()
+            .profiles()
+            .insert(&profile, &now_iso())?;
+        Ok(profile)
+    })
+    .await?;
     Ok((StatusCode::CREATED, Json(public_profile(&profile))))
 }
 
@@ -76,25 +80,24 @@ pub async fn update(
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let body: ProfilePatch = parse_json(&body)?;
-    let mut profile = state
-        .store
-        .repositories()
-        .profiles()
-        .get(&id)?
-        .ok_or_else(|| HttpError::not_found("unknown profile"))?;
-    let expected = profile.clone();
+    let profile = run_blocking(move || {
+        let mut profile = existing_profile(&state, &id)?;
+        let expected = profile.clone();
 
-    apply_patch(&mut profile, body)?;
-    if !state.store.repositories().profiles().update_if_unchanged(
-        &id,
-        &expected,
-        &profile,
-        &now_iso(),
-    )? {
-        return Err(HttpError::conflict(
-            "profile changed outside Oga. Reload it before saving",
-        ));
-    }
+        apply_patch(&mut profile, body)?;
+        if !state.store.repositories().profiles().update_if_unchanged(
+            &id,
+            &expected,
+            &profile,
+            &now_iso(),
+        )? {
+            return Err(HttpError::conflict(
+                "profile changed outside Oga. Reload it before saving",
+            ));
+        }
+        Ok(profile)
+    })
+    .await?;
     Ok(Json(public_profile(&profile)))
 }
 
@@ -126,8 +129,11 @@ pub async fn get_transport(
     State(state): State<HttpState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let profile = existing_profile(&state, &id)?;
-    Ok(Json(transport_view(&state, &profile)?))
+    run_blocking(move || {
+        let profile = existing_profile(&state, &id)?;
+        Ok(Json(transport_view(&state, &profile)?))
+    })
+    .await
 }
 
 /// Sets which transport new sessions on this profile use. Tasks that already
@@ -138,21 +144,27 @@ pub async fn put_transport(
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let body: TransportUpdate = parse_json(&body)?;
-    let profile = existing_profile(&state, &id)?;
-    set_transport_preference(&state.store, &profile.id, body.preference, &now_iso())?;
-    Ok(Json(transport_view(&state, &profile)?))
+    run_blocking(move || {
+        let profile = existing_profile(&state, &id)?;
+        set_transport_preference(&state.store, &profile.id, body.preference, &now_iso())?;
+        Ok(Json(transport_view(&state, &profile)?))
+    })
+    .await
 }
 
 pub async fn remove(
     State(state): State<HttpState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    if !state
-        .store
-        .repositories()
-        .profiles()
-        .remove(&id, &now_iso())?
-    {
+    let removed = run_blocking(move || {
+        Ok(state
+            .store
+            .repositories()
+            .profiles()
+            .remove(&id, &now_iso())?)
+    })
+    .await?;
+    if !removed {
         return Err(HttpError::not_found("unknown profile"));
     }
     Ok(StatusCode::NO_CONTENT)

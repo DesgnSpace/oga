@@ -18,7 +18,9 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    router::{HttpError, HttpState, latest_event_id, parse_json, parse_optional_json},
+    router::{
+        HttpError, HttpState, latest_event_id, parse_json, parse_optional_json, run_blocking,
+    },
     routing::{self, RouteInput},
     state,
 };
@@ -198,21 +200,27 @@ pub(crate) async fn dispatch_body(
     let (scope, grant_id, remember_scope) = match body.scope {
         Some(scope) => (scope, None, true),
         None => {
-            let grant = state
-                .store
-                .repositories()
-                .grants()
-                .for_cwd(&workspace)?
-                .into_iter()
-                .find(|grant| grant.profile_id == route.profile_id);
-            if let Some(grant) = grant {
-                state.store.repositories().grants().touch(
-                    &grant.id,
-                    &oga_routing::format_rfc3339_ms(oga_routing::now_ms()),
-                )?;
-                (grant.scope, Some(grant.id), false)
-            } else {
-                (default_scope(), None, false)
+            let store = state.store.clone();
+            let profile_id = route.profile_id.clone();
+            let grant = run_blocking(move || {
+                let grant = store
+                    .repositories()
+                    .grants()
+                    .for_cwd(&workspace)?
+                    .into_iter()
+                    .find(|grant| grant.profile_id == profile_id);
+                if let Some(grant) = &grant {
+                    store.repositories().grants().touch(
+                        &grant.id,
+                        &oga_routing::format_rfc3339_ms(oga_routing::now_ms()),
+                    )?;
+                }
+                Ok(grant)
+            })
+            .await?;
+            match grant {
+                Some(grant) => (grant.scope, Some(grant.id), false),
+                None => (default_scope(), None, false),
             }
         }
     };
@@ -309,7 +317,10 @@ pub async fn cancel(
     Path(id): Path<String>,
     Query(query): Query<CancelQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    if state::load_task(&state.store, &id)?
+    let store = state.store.clone();
+    let task_id = id.clone();
+    if run_blocking(move || state::load_task(&store, &task_id))
+        .await?
         .is_some_and(|task| task.kind == Some(TaskKind::Orchestrator))
     {
         return Err(HttpError::bad_request(format!("unknown task: {id}")));
@@ -330,11 +341,16 @@ pub async fn resume(
     let body: ResumeBody = parse_optional_json(&body)?;
     let current = state.dispatcher.task(&id)?;
     if matches!(body.queue, Some(QueueAction::Clear)) {
-        FollowUpQueue::new(state.store.clone()).clear(&id, current.state, "removed on request")?;
-        return Ok((
-            StatusCode::ACCEPTED,
-            Json(started_task(&state, &state.dispatcher.task(&id)?, false)?),
-        ));
+        let view = run_blocking(move || {
+            FollowUpQueue::new(state.store.clone()).clear(
+                &id,
+                current.state,
+                "removed on request",
+            )?;
+            started_task(&state, &state.dispatcher.task(&id)?, false)
+        })
+        .await?;
+        return Ok((StatusCode::ACCEPTED, Json(view)));
     }
     if matches!(body.queue, Some(QueueAction::Add))
         && matches!(
@@ -362,11 +378,13 @@ pub async fn resume(
                 current.id
             )));
         }
-        FollowUpQueue::new(state.store.clone()).queue(&id, current.state, instruction)?;
-        return Ok((
-            StatusCode::ACCEPTED,
-            Json(started_task(&state, &state.dispatcher.task(&id)?, false)?),
-        ));
+        let instruction = instruction.to_owned();
+        let view = run_blocking(move || {
+            FollowUpQueue::new(state.store.clone()).queue(&id, current.state, &instruction)?;
+            started_task(&state, &state.dispatcher.task(&id)?, false)
+        })
+        .await?;
+        return Ok((StatusCode::ACCEPTED, Json(view)));
     }
     let mut request = ResumeRequest::new(id);
     if let Some(instruction) = body.instruction {
@@ -416,9 +434,12 @@ pub async fn remove_follow_up(
     let index = index
         .parse::<usize>()
         .map_err(|_| HttpError::bad_request("invalid follow-up index"))?;
-    let task =
-        state::load_task(&state.store, &id)?.ok_or_else(|| HttpError::not_found("unknown task"))?;
-    let removed = FollowUpQueue::new(state.store.clone()).remove_at(&id, task.state, index)?;
+    let removed = run_blocking(move || {
+        let task = state::load_task(&state.store, &id)?
+            .ok_or_else(|| HttpError::not_found("unknown task"))?;
+        Ok(FollowUpQueue::new(state.store.clone()).remove_at(&id, task.state, index)?)
+    })
+    .await?;
     if !removed {
         return Err(HttpError::not_found("follow-up not found"));
     }
@@ -518,8 +539,12 @@ pub async fn complete(
         body.reason
             .unwrap_or_else(|| "marked completed from the sidebar".to_owned()),
     );
-    let task = state.dispatcher.force_complete(assertion)?;
-    Ok(Json(response_view(&state, &task, false)?))
+    let view = run_blocking(move || {
+        let task = state.dispatcher.force_complete(assertion)?;
+        response_view(&state, &task, false)
+    })
+    .await?;
+    Ok(Json(view))
 }
 
 pub(crate) fn response_view(

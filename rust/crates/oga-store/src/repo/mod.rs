@@ -14,6 +14,12 @@ use serde_json::json;
 
 use crate::{Store, StoreError};
 
+const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json";
+/// Aggregates over a task's `task_turns` rows: finished work time, and when
+/// the running turn began.
+const TURN_DURATION_MS: &str = "COALESCE(SUM(CASE WHEN ended_at IS NULL THEN 0 ELSE CAST(MAX(0, ROUND((julianday(ended_at)-julianday(started_at))*86400000.0)) AS INTEGER) END),0)";
+const RUNNING_SINCE: &str = "MAX(CASE WHEN status='running' THEN started_at END)";
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskTiming {
     pub duration_ms: u64,
@@ -26,12 +32,14 @@ pub fn task_timing(
     task_id: &str,
 ) -> rusqlite::Result<TaskTiming> {
     connection.query_row(
-        "SELECT COALESCE(SUM(CASE WHEN ended_at IS NULL THEN 0 ELSE CAST(MAX(0, ROUND((julianday(ended_at)-julianday(started_at))*86400000.0)) AS INTEGER) END),0), MAX(CASE WHEN status='running' THEN started_at END) FROM task_turns WHERE task_id=?",
+        &format!("SELECT {TURN_DURATION_MS}, {RUNNING_SINCE} FROM task_turns WHERE task_id=?"),
         [task_id],
-        |row| Ok(TaskTiming {
-            duration_ms: row.get::<_, i64>(0)?.max(0) as u64,
-            running_since: row.get(1)?,
-        }),
+        |row| {
+            Ok(TaskTiming {
+                duration_ms: row.get::<_, i64>(0)?.max(0) as u64,
+                running_since: row.get(1)?,
+            })
+        },
     )
 }
 
@@ -300,11 +308,40 @@ impl Tasks<'_> {
     }
     pub fn get(&self, id: &str) -> Result<Option<Task>, StoreError> {
         self.store.with_connection(|c| {
-            let mut task = c.query_row("SELECT id,kind,profile_id,model,prompt,cwd,branch,state,output,error,question,parent_task_id,orchestrator_id,scope_json,grant_id,allow_questions,timeout_ms,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json FROM tasks WHERE id=?", [id], task_from_row).optional()?;
+            let mut task = c
+                .query_row(
+                    &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id=?"),
+                    [id],
+                    task_from_row,
+                )
+                .optional()?;
             if let Some(task) = &mut task {
                 attach_task_timing(c, task)?;
             }
             Ok(task)
+        })
+    }
+    /// The named tasks with their title, tldr, and timing, in one read. An id
+    /// that names no task is left out.
+    pub fn get_many(&self, ids: &[String]) -> Result<Vec<Task>, StoreError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; ids.len()].join(",");
+        self.store.with_connection(|c| {
+            let mut statement = c.prepare(&format!(
+                "SELECT {TASK_COLUMNS},title,tldr,(SELECT {TURN_DURATION_MS} FROM task_turns WHERE task_id=tasks.id),(SELECT {RUNNING_SINCE} FROM task_turns WHERE task_id=tasks.id) FROM tasks WHERE id IN ({placeholders})"
+            ))?;
+            Ok(statement
+                .query_map(params_from_iter(ids), |row| {
+                    let mut task = task_from_row(row)?;
+                    task.title = row.get(29)?;
+                    task.tldr = row.get(30)?;
+                    task.duration_ms = row.get::<_, i64>(31)?.max(0) as u64;
+                    task.running_since = row.get(32)?;
+                    Ok(task)
+                })?
+                .collect::<Result<Vec<_>, _>>()?)
         })
     }
     pub fn search(&self, query: &TaskListQuery) -> Result<Vec<TaskSearchResult>, StoreError> {

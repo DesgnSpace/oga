@@ -120,11 +120,23 @@ pub async fn get_task_turns(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let task = load_task(&state.store, &id)?
-        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
-        .ok_or_else(|| HttpError::not_found("unknown task"))?;
-    let turns = state.store.repositories().turns().list(&task.id)?;
+    let turns = run_read(move || {
+        let task = load_delegated_task(&state.store, &id)?;
+        Ok(state.store.repositories().turns().list(&task.id)?)
+    })
+    .await?;
     Ok(Json(json!({ "turns": turns })))
+}
+
+async fn read_delegated_task(state: &HttpState, id: String) -> Result<Task, HttpError> {
+    let store = state.store.clone();
+    run_read(move || load_delegated_task(&store, &id)).await
+}
+
+fn load_delegated_task(store: &Store, id: &str) -> Result<Task, HttpError> {
+    load_task(store, id)?
+        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
+        .ok_or_else(|| HttpError::not_found("unknown task"))
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -140,9 +152,7 @@ pub async fn get_task_diff(
     AxumPath(id): AxumPath<String>,
     Query(query): Query<DiffQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let task = load_task(&state.store, &id)?
-        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
-        .ok_or_else(|| HttpError::not_found("unknown task"))?;
+    let task = read_delegated_task(&state, id).await?;
     let diff = oga_worktree::task_diff(&task, query.against.as_deref())
         .await
         .map_err(|error| HttpError::conflict(error.to_string()))?;
@@ -154,9 +164,7 @@ pub async fn get_task_branches(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let task = load_task(&state.store, &id)?
-        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
-        .ok_or_else(|| HttpError::not_found("unknown task"))?;
+    let task = read_delegated_task(&state, id).await?;
     let choices = oga_worktree::branch_choices(Path::new(&task.cwd))
         .await
         .map_err(|error| HttpError::conflict(error.to_string()))?;
@@ -170,9 +178,7 @@ pub async fn get_task_branch(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let task = load_task(&state.store, &id)?
-        .filter(|task| task.kind != Some(TaskKind::Orchestrator))
-        .ok_or_else(|| HttpError::not_found("unknown task"))?;
+    let task = read_delegated_task(&state, id).await?;
     let recorded = || {
         task.worktree
             .as_ref()
@@ -208,7 +214,12 @@ pub async fn mark_task_viewed(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    if load_task(&state.store, &id)?.is_none() {
+    let store = state.store.clone();
+    let task_id = id.clone();
+    if run_read(move || load_task(&store, &task_id))
+        .await?
+        .is_none()
+    {
         return Err(HttpError::not_found("unknown task"));
     }
     state.store.set_viewed_task(id);
@@ -227,8 +238,11 @@ pub async fn get_agent_turns(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let task = load_orchestrator(&state.store, &id)?;
-    let turns = state.store.repositories().turns().list(&task.id)?;
+    let turns = run_read(move || {
+        let task = load_orchestrator(&state.store, &id)?;
+        Ok(state.store.repositories().turns().list(&task.id)?)
+    })
+    .await?;
     Ok(Json(json!({ "turns": turns })))
 }
 
@@ -445,28 +459,31 @@ async fn event_response(
 /// The tray and dock badge need two numbers, and loading the task list to
 /// count them costs megabytes of JSON per poll. Count the states instead.
 pub async fn get_activity(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
-    let counts = state.store.with_connection(|connection| {
-        let mut statement = connection.prepare(
-            "SELECT state, COUNT(*) FROM tasks WHERE archived_at IS NULL GROUP BY state",
-        )?;
-        let mut counts = ActivityCounts::default();
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?.max(0) as usize,
-            ))
-        })?;
-        for row in rows {
-            let (state, count) = row?;
-            let Ok(state) = serde_json::from_value::<TaskState>(Value::String(state)) else {
-                continue;
-            };
-            if state.is_active() {
-                counts.running += count;
+    let counts = run_read(move || {
+        Ok(state.store.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT state, COUNT(*) FROM tasks WHERE archived_at IS NULL GROUP BY state",
+            )?;
+            let mut counts = ActivityCounts::default();
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?.max(0) as usize,
+                ))
+            })?;
+            for row in rows {
+                let (state, count) = row?;
+                let Ok(state) = serde_json::from_value::<TaskState>(Value::String(state)) else {
+                    continue;
+                };
+                if state.is_active() {
+                    counts.running += count;
+                }
             }
-        }
-        Ok(counts)
-    })?;
+            Ok(counts)
+        })?)
+    })
+    .await?;
     Ok(Json(counts))
 }
 

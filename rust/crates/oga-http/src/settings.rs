@@ -40,7 +40,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{ChildStdin, ChildStdout, Command};
 use tokio::time::timeout;
 
-use crate::router::{HttpError, HttpState};
+use crate::router::{HttpError, HttpState, run_blocking};
 
 const MODEL_SETTINGS_KEY: &str = "models";
 const CALLER_PROMPTS_KEY: &str = "callerPrompts";
@@ -148,7 +148,8 @@ pub async fn get_memories(
     Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let cwd = require_cwd(query.cwd.as_deref())?;
-    let memories = state.store.repositories().memories().list(&cwd)?;
+    let memories =
+        run_blocking(move || Ok(state.store.repositories().memories().list(&cwd)?)).await?;
     Ok(Json(json!({ "memories": memories })))
 }
 
@@ -168,50 +169,53 @@ pub async fn put_memory(
             "memory value exceeds 16000 characters",
         ));
     }
-    let existing = state
-        .store
-        .repositories()
-        .memories()
-        .list(&cwd)?
-        .into_iter()
-        .find(|memory| memory.key == key);
-    let entries = state.store.repositories().memories().list(&cwd)?;
-    if existing.is_none() && entries.len() as u64 >= MAX_MEMORY_ENTRIES {
-        return Err(HttpError::bad_request(
-            "project memory limit is 100 entries",
-        ));
-    }
-    let total = entries
-        .iter()
-        .map(|memory| memory.value.chars().count() as u64)
-        .sum::<u64>()
-        .saturating_sub(
-            existing
+    let saved = run_blocking(move || {
+        let existing = state
+            .store
+            .repositories()
+            .memories()
+            .list(&cwd)?
+            .into_iter()
+            .find(|memory| memory.key == key);
+        let entries = state.store.repositories().memories().list(&cwd)?;
+        if existing.is_none() && entries.len() as u64 >= MAX_MEMORY_ENTRIES {
+            return Err(HttpError::bad_request(
+                "project memory limit is 100 entries",
+            ));
+        }
+        let total = entries
+            .iter()
+            .map(|memory| memory.value.chars().count() as u64)
+            .sum::<u64>()
+            .saturating_sub(
+                existing
+                    .as_ref()
+                    .map_or(0, |memory| memory.value.chars().count() as u64),
+            )
+            + value.chars().count() as u64;
+        if total > MAX_MEMORY_CHARS {
+            return Err(HttpError::bad_request(
+                "project memory exceeds 64000 characters",
+            ));
+        }
+        let now = now_iso();
+        let entry = MemoryEntry {
+            cwd,
+            key,
+            value,
+            version: existing.as_ref().map_or(1, |memory| memory.version),
+            created_at: existing
                 .as_ref()
-                .map_or(0, |memory| memory.value.chars().count() as u64),
-        )
-        + value.chars().count() as u64;
-    if total > MAX_MEMORY_CHARS {
-        return Err(HttpError::bad_request(
-            "project memory exceeds 64000 characters",
-        ));
-    }
-    let now = now_iso();
-    let entry = MemoryEntry {
-        cwd,
-        key,
-        value,
-        version: existing.as_ref().map_or(1, |memory| memory.version),
-        created_at: existing
-            .as_ref()
-            .map_or_else(|| now.clone(), |memory| memory.created_at.clone()),
-        updated_at: now,
-    };
-    let saved = state
-        .store
-        .repositories()
-        .memories()
-        .upsert(&entry, body.expected_version)?;
+                .map_or_else(|| now.clone(), |memory| memory.created_at.clone()),
+            updated_at: now,
+        };
+        Ok(state
+            .store
+            .repositories()
+            .memories()
+            .upsert(&entry, body.expected_version)?)
+    })
+    .await?;
     Ok(Json(serde_json::to_value(saved).unwrap()))
 }
 
@@ -219,21 +223,21 @@ pub async fn get_caller_prompt(
     State(state): State<HttpState>,
     Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    read_prompt(&state, query)
+    run_blocking(move || read_prompt(&state, query)).await
 }
 
 pub async fn put_caller_prompt(
     State(state): State<HttpState>,
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
-    write_prompt(&state, &body)
+    run_blocking(move || write_prompt(&state, &body)).await
 }
 
 pub async fn delete_caller_prompt(
     State(state): State<HttpState>,
     Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    clear_prompt(&state, query)
+    run_blocking(move || clear_prompt(&state, query)).await
 }
 
 fn read_prompt(state: &HttpState, query: CwdQuery) -> Result<Json<Value>, HttpError> {
@@ -291,16 +295,18 @@ fn requested_cwd(cwd: Option<&str>) -> String {
 
 pub async fn get_projects(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
     let global = global_cwd().display().to_string();
-    let projects = state
-        .store
-        .with_connection(|connection| {
+    let seen = run_blocking(move || {
+        Ok(state.store.with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT cwd FROM (SELECT COALESCE(origin_cwd,cwd) AS cwd,MAX(updated_at) AS seen FROM tasks GROUP BY COALESCE(origin_cwd,cwd) UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM memories GROUP BY cwd UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM context_index GROUP BY cwd) GROUP BY cwd ORDER BY MAX(seen) DESC,cwd",
             )?;
             Ok(statement
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?)
-        })?
+        })?)
+    })
+    .await?;
+    let projects = seen
         .into_iter()
         .filter(|cwd| cwd != &global)
         .collect::<Vec<_>>();
@@ -308,7 +314,8 @@ pub async fn get_projects(State(state): State<HttpState>) -> Result<impl IntoRes
 }
 
 pub async fn get_cleanup(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
-    cleanup_snapshot(&state.store).map(|snapshot| Json(serde_json::to_value(snapshot).unwrap()))
+    let snapshot = run_blocking(move || cleanup_snapshot(&state.store)).await?;
+    Ok(Json(serde_json::to_value(snapshot).unwrap()))
 }
 
 pub async fn put_cleanup(
@@ -323,19 +330,23 @@ pub async fn put_cleanup(
         archived_only: body.archived_only,
     };
     let cwd = global_cwd().display().to_string();
-    state.store.repositories().settings().put(
-        &cwd,
-        CLEANUP_KEY,
-        &serde_json::to_string(&settings).unwrap(),
-        &now_iso(),
-    )?;
-    get_cleanup(State(state)).await
+    let snapshot = run_blocking(move || {
+        state.store.repositories().settings().put(
+            &cwd,
+            CLEANUP_KEY,
+            &serde_json::to_string(&settings).unwrap(),
+            &now_iso(),
+        )?;
+        cleanup_snapshot(&state.store)
+    })
+    .await?;
+    Ok(Json(serde_json::to_value(snapshot).unwrap()))
 }
 
 pub async fn get_waiting(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
-    Ok(Json(
-        serde_json::to_value(oga_service::waiting::wait_settings(&state.store)).unwrap(),
-    ))
+    let settings =
+        run_blocking(move || Ok(oga_service::waiting::wait_settings(&state.store))).await?;
+    Ok(Json(serde_json::to_value(settings).unwrap()))
 }
 
 pub async fn put_waiting(
@@ -365,12 +376,16 @@ pub async fn put_waiting(
             "networkMaxAttempts must be a whole number from 1 to {MAX_WAIT_ATTEMPTS}"
         )));
     }
-    state.store.repositories().settings().put(
-        &global_cwd().display().to_string(),
-        oga_service::waiting::WAIT_SETTINGS_KEY,
-        &serde_json::to_string(&settings).unwrap(),
-        &now_iso(),
-    )?;
+    let store = state.store.clone();
+    run_blocking(move || {
+        Ok(store.repositories().settings().put(
+            &global_cwd().display().to_string(),
+            oga_service::waiting::WAIT_SETTINGS_KEY,
+            &serde_json::to_string(&settings).unwrap(),
+            &now_iso(),
+        )?)
+    })
+    .await?;
     get_waiting(State(state)).await
 }
 
@@ -378,7 +393,7 @@ pub async fn put_waiting(
 /// reads a project's settings; this one is global, because the key signs in
 /// to one account whichever project a task starts from.
 pub async fn get_advisor(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
-    let settings = advisor_settings(&state.store)?;
+    let settings = run_blocking(move || advisor_settings(&state.store)).await?;
     Ok(Json(json!({
         "enabled": settings.enabled,
         "apiKey": if settings.api_key.is_empty() { "" } else { MASKED_SECRET },
@@ -390,27 +405,31 @@ pub async fn put_advisor(
     body: Bytes,
 ) -> Result<Json<Value>, HttpError> {
     let body: AdvisorSettings = parse_json(&body)?;
-    let stored = advisor_settings(&state.store)?;
-    let api_key = if body.api_key == MASKED_SECRET {
-        stored.api_key
-    } else {
-        body.api_key.trim().to_owned()
-    };
-    if body.enabled && api_key.is_empty() {
-        return Err(HttpError::bad_request(
-            "Paste your TypeSafe key before turning this on.",
-        ));
-    }
-    state.store.repositories().settings().put(
-        &global_cwd().display().to_string(),
-        ADVISOR_KEY,
-        &serde_json::to_string(&AdvisorSettings {
-            enabled: body.enabled,
-            api_key,
-        })
-        .unwrap(),
-        &now_iso(),
-    )?;
+    let store = state.store.clone();
+    run_blocking(move || {
+        let stored = advisor_settings(&store)?;
+        let api_key = if body.api_key == MASKED_SECRET {
+            stored.api_key
+        } else {
+            body.api_key.trim().to_owned()
+        };
+        if body.enabled && api_key.is_empty() {
+            return Err(HttpError::bad_request(
+                "Paste your TypeSafe key before turning this on.",
+            ));
+        }
+        Ok(store.repositories().settings().put(
+            &global_cwd().display().to_string(),
+            ADVISOR_KEY,
+            &serde_json::to_string(&AdvisorSettings {
+                enabled: body.enabled,
+                api_key,
+            })
+            .unwrap(),
+            &now_iso(),
+        )?)
+    })
+    .await?;
     get_advisor(State(state)).await
 }
 
@@ -428,7 +447,7 @@ pub fn advisor_settings(store: &Store) -> Result<AdvisorSettings, HttpError> {
 
 /// Global: the look belongs to the app, not to a project.
 pub async fn get_appearance(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
-    let settings = appearance_settings(&state.store)?;
+    let settings = run_blocking(move || appearance_settings(&state.store)).await?;
     Ok(Json(json!({ "font": settings.font })))
 }
 
@@ -451,12 +470,16 @@ pub async fn put_appearance(
             )));
         }
     }
-    state.store.repositories().settings().put(
-        &global_cwd().display().to_string(),
-        APPEARANCE_KEY,
-        &serde_json::to_string(&body).unwrap(),
-        &now_iso(),
-    )?;
+    let store = state.store.clone();
+    run_blocking(move || {
+        Ok(store.repositories().settings().put(
+            &global_cwd().display().to_string(),
+            APPEARANCE_KEY,
+            &serde_json::to_string(&body).unwrap(),
+            &now_iso(),
+        )?)
+    })
+    .await?;
     get_appearance(State(state)).await
 }
 
@@ -478,15 +501,19 @@ pub async fn preview_cleanup(
 }
 
 pub async fn run_cleanup(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
-    let settings = cleanup_settings(&state.store)?;
-    let cutoff =
-        format_rfc3339_ms(now_ms().saturating_sub((settings.older_than_days * 86_400_000) as i64));
     let finished_at = now_iso();
-    let store = state.store.clone();
     let result = tokio::time::timeout(
         Duration::from_secs(15 * 60),
         tokio::task::spawn_blocking(move || {
-            store.cleanup(&cutoff, settings.archived_only, &finished_at)
+            let settings = cleanup_settings(&state.store)?;
+            let cutoff = format_rfc3339_ms(
+                now_ms().saturating_sub((settings.older_than_days * 86_400_000) as i64),
+            );
+            Ok::<_, HttpError>(state.store.cleanup(
+                &cutoff,
+                settings.archived_only,
+                &finished_at,
+            )?)
         }),
     )
     .await
@@ -693,9 +720,12 @@ pub async fn delete_grant(
     State(state): State<HttpState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let changed = state.store.transaction(|tx| {
-        Ok(tx.execute("DELETE FROM scope_grants WHERE id=?", [id.as_str()])? != 0)
-    })?;
+    let changed = run_blocking(move || {
+        Ok(state.store.transaction(|tx| {
+            Ok(tx.execute("DELETE FROM scope_grants WHERE id=?", [id.as_str()])? != 0)
+        })?)
+    })
+    .await?;
     if !changed {
         return Err(HttpError::not_found("unknown grant"));
     }
@@ -723,9 +753,16 @@ pub async fn put_model_settings(
 ) -> Result<impl IntoResponse, HttpError> {
     let body: ModelSettingsWrite = parse_json(&body)?;
     let cwd = canonical_cwd(&body.cwd);
-    let current = model_settings_raw(&state.store, &cwd)?;
+    let store = state.store.clone();
+    let written = cwd.clone();
+    run_blocking(move || save_model_setting(&store, &written, body)).await?;
+    Ok(Json(model_settings_view(&state.store, &cwd, false).await?))
+}
+
+fn save_model_setting(store: &Store, cwd: &str, body: ModelSettingsWrite) -> Result<(), HttpError> {
+    let current = model_settings_raw(store, cwd)?;
     check_revision(body.expected_revision.as_deref(), &current)?;
-    let profiles = state.store.repositories().profiles().list()?;
+    let profiles = store.repositories().profiles().list()?;
     if !profiles.iter().any(|profile| profile.id == body.profile_id) {
         return Err(HttpError::bad_request(format!(
             "unknown worker: {}",
@@ -790,13 +827,11 @@ pub async fn put_model_settings(
             .expect("model settings object")
             .remove(model_id);
     }
-    state.store.repositories().settings().put(
-        &cwd,
-        MODEL_SETTINGS_KEY,
-        &root.to_string(),
-        &now_iso(),
-    )?;
-    Ok(Json(model_settings_view(&state.store, &cwd, false).await?))
+    store
+        .repositories()
+        .settings()
+        .put(cwd, MODEL_SETTINGS_KEY, &root.to_string(), &now_iso())?;
+    Ok(())
 }
 
 pub async fn delete_model_settings(
@@ -809,13 +844,17 @@ pub async fn delete_model_settings(
             .as_deref()
             .unwrap_or(&global_cwd().display().to_string()),
     );
-    let current = model_settings_raw(&state.store, &cwd)?;
-    check_revision(query.revision.as_deref(), &current)?;
-    state
-        .store
-        .repositories()
-        .settings()
-        .remove(&cwd, MODEL_SETTINGS_KEY)?;
+    let store = state.store.clone();
+    let removed = cwd.clone();
+    run_blocking(move || {
+        let current = model_settings_raw(&store, &removed)?;
+        check_revision(query.revision.as_deref(), &current)?;
+        Ok(store
+            .repositories()
+            .settings()
+            .remove(&removed, MODEL_SETTINGS_KEY)?)
+    })
+    .await?;
     Ok(Json(model_settings_view(&state.store, &cwd, false).await?))
 }
 
