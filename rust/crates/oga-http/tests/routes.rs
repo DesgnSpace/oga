@@ -1481,6 +1481,74 @@ async fn stale_usage_is_served_at_once_and_replaced_behind_the_caller() {
     assert_eq!(refreshed, Some(70.0), "the background read replaces it");
 }
 
+#[tokio::test]
+async fn model_settings_leave_a_fresh_catalog_alone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let bin = tempfile::tempdir().expect("fake provider directory");
+    let calls = bin.path().join("calls");
+    let program = bin.path().join("fx");
+    fs::write(
+        &program,
+        format!("#!/bin/sh\necho listed >> '{}'\n", calls.display()),
+    )
+    .expect("fake fx");
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("executable");
+    fixture
+        .store
+        .repositories()
+        .profiles()
+        .insert(
+            &Profile {
+                id: "catalog-refresh-fx".into(),
+                label: "Fx".into(),
+                provider: Provider::Fx,
+                default_model: "fx-model".into(),
+                enabled: true,
+                env: BTreeMap::from([(String::from("PATH"), bin.path().display().to_string())]),
+                capabilities: Vec::new(),
+                command: None,
+            },
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("profile insert");
+    let listings = || {
+        fs::read_to_string(&calls)
+            .map(|text| text.lines().count())
+            .unwrap_or(0)
+    };
+    let open_settings = || async {
+        let (status, _) = json_response(
+            request(
+                &fixture.router,
+                Method::GET,
+                "/api/model-settings",
+                Body::empty(),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    };
+
+    open_settings().await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while listings() == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the first open never read the catalog"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    open_settings().await;
+    open_settings().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert_eq!(listings(), 1);
+}
+
 async fn appearance(fixture: &Fixture, method: Method, body: Value) -> (StatusCode, Value) {
     let body = if method == Method::GET {
         Body::empty()

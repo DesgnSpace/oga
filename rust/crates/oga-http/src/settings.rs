@@ -962,13 +962,23 @@ fn catalog_cache() -> &'static Mutex<CatalogCache> {
     CATALOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Re-reads, off the caller's path, only the catalogs that are missing or
+/// older than `CATALOG_CACHE_TTL`.
 fn refresh_catalog_in_background(profiles: &[Profile]) {
     let pending = CATALOG_REFRESHES.get_or_init(|| Mutex::new(HashSet::new()));
-    let profiles = profiles
-        .iter()
-        .filter(|profile| profile.provider != Provider::Claude)
-        .cloned()
-        .collect::<Vec<_>>();
+    let profiles = {
+        let cache = catalog_cache().lock().expect("catalog cache poisoned");
+        profiles
+            .iter()
+            .filter(|profile| profile.provider != Provider::Claude)
+            .filter(|profile| {
+                cache
+                    .get(&profile.id)
+                    .is_none_or(|(at, _)| at.elapsed() >= CATALOG_CACHE_TTL)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     let mut pending_profiles = pending.lock().expect("catalog refresh lock poisoned");
     let profiles = profiles
         .into_iter()
@@ -979,7 +989,7 @@ fn refresh_catalog_in_background(profiles: &[Profile]) {
         return;
     }
     tokio::spawn(async move {
-        let _ = discover_catalog(&profiles, true).await;
+        let _ = discover_catalog(&profiles, false).await;
         let mut pending = CATALOG_REFRESHES
             .get_or_init(|| Mutex::new(HashSet::new()))
             .lock()
