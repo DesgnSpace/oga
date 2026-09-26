@@ -1513,6 +1513,20 @@ async fn saved_brief_rules_are_returned_and_capped() {
     let fixture = Fixture::new();
     let cwd = fixture.canonical_cwd();
 
+    let (status, fresh) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/caller-prompts?cwd={cwd}"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fresh["value"], "");
+    assert_eq!(fresh["inherited"], "");
+
     let (status, saved) = json_response(
         request(
             &fixture.router,

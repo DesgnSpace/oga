@@ -90,7 +90,6 @@ impl McpServer {
         self
     }
 
-    /// An unreadable project config falls back to shipped brief guidance.
     fn caller_prompt(&self) -> String {
         let cwd = self
             .project
@@ -98,8 +97,7 @@ impl McpServer {
             .unwrap_or_else(global_cwd)
             .display()
             .to_string();
-        oga_http::settings::caller_prompt(&self.state.store, &cwd)
-            .unwrap_or_else(|_| oga_config::DEFAULT_CALLER_PROMPT.to_owned())
+        oga_http::settings::caller_prompt(&self.state.store, &cwd).unwrap_or_default()
     }
 
     pub fn state(&self) -> &HttpState {

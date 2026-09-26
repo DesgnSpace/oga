@@ -13,9 +13,9 @@ use axum::{
     response::IntoResponse,
 };
 use oga_config::{
-    ConfigLayer, ConfigLayers, DEFAULT_CALLER_PROMPT, LoveRules, MASKED_SECRET, ModelOverrides,
-    ResolvedModelSettings, config_revision, global_cwd, load_config_layers, model_enabled,
-    model_override_for, read_model_overrides, read_model_settings,
+    ConfigLayer, ConfigLayers, LoveRules, MASKED_SECRET, ModelOverrides, ResolvedModelSettings,
+    config_revision, global_cwd, load_config_layers, model_enabled, model_override_for,
+    read_model_overrides, read_model_settings,
 };
 use oga_domain::{
     AdvisorSettings, CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
@@ -809,7 +809,7 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
     let global = canonical_cwd(&global_cwd().display().to_string());
     let layers = load_config_layers(Some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let default_text = DEFAULT_CALLER_PROMPT.to_owned();
+    let default_text = String::new();
     let own_layer = layers.project.as_ref();
     let read_file = |layer: Option<&ConfigLayer>| {
         oga_config::read_caller_prompt(layer)
@@ -862,20 +862,13 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
     })
 }
 
-/// The brief rules as the calling agent reads them: the scope's text with
-/// `{{default}}` and `{{project}}` filled in. Every other `{{name}}` stays
-/// visible, so a typo reads as a typo rather than vanishing. `{{default}}`
-/// drops the attribution sentence when the scope's `worker.attribution` is
-/// off.
+/// The scope's prompt text with `{{default}}` and `{{project}}` filled in.
 pub fn caller_prompt(store: &Store, cwd: &str) -> Result<String, HttpError> {
     let cwd = canonical_cwd(cwd);
     let value = prompt_config(store, &cwd)?.value;
     Ok(oga_service::render_template(
         &value,
-        &[
-            ("default", DEFAULT_CALLER_PROMPT.to_owned()),
-            ("project", cwd),
-        ],
+        &[("default", String::new()), ("project", cwd)],
     ))
 }
 

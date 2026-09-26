@@ -107,7 +107,7 @@ async fn initialize_advertises_protocol_and_instructions() {
     assert!(instructions.contains("oga watch <taskId>"));
     assert!(instructions.contains("`query` locates code in a project"));
     assert!(instructions.contains("Every task response carries `next`"));
-    assert!(instructions.contains("A brief is the only account of the work the worker gets."));
+    assert!(!instructions.contains("A brief is the only account of the work the worker gets."));
 }
 
 #[tokio::test]
@@ -115,7 +115,7 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
     let (directory, server) = test_server();
     std::fs::write(
         directory.path().join(".oga.yaml"),
-        "version: 1\ncaller:\n  prompt: |\n    {{default}}\n    Project rule: always name the entry file.\n",
+        "version: 1\ncaller:\n  prompt: |\n    {{default}}\n    Project root: {{project}}. Always name the entry file.\n",
     )
     .expect("project config");
     let server = server.with_project(directory.path());
@@ -127,8 +127,12 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
     let instructions = initialize["result"]["instructions"]
         .as_str()
         .expect("instructions");
-    assert!(instructions.contains("A brief is the only account of the work the worker gets."));
-    assert!(instructions.ends_with("Project rule: always name the entry file."));
+    assert!(!instructions.contains("A brief is the only account of the work the worker gets."));
+    let project = std::fs::canonicalize(directory.path()).expect("canonical project path");
+    assert!(instructions.ends_with(&format!(
+        "Project root: {}. Always name the entry file.",
+        project.display()
+    )));
 
     let tools = server
         .handle_value(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
@@ -144,11 +148,15 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
         .as_str()
         .expect("prompt description");
     assert!(description.contains("It is sent as written"));
+    assert!(description.contains("Always name the entry file."));
     assert!(description.contains("directory's memories"));
     assert!(description.contains("commit attribution"));
     assert!(!description.contains("reporting protocol"));
     assert!(!description.contains("the scope"));
-    assert!(description.ends_with("Project rule: always name the entry file."));
+    assert!(description.contains(&format!(
+        "Project root: {}. Always name the entry file.",
+        project.display()
+    )));
 }
 
 #[tokio::test]

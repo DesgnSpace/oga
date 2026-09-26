@@ -29,9 +29,8 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const CALLER_PROMPTS_KEY: &str = "callerPrompts";
+pub const DEFAULT_CALLER_PROMPT: &str = "";
 /// The prompt guidance for callers writing a `delegate` brief.
-pub const DEFAULT_CALLER_PROMPT: &str = "A brief is the only account of the work the worker gets. It cannot see your conversation, and it is a smaller model with no judgment under ambiguity. Write down every fact you already hold and decide every choice it would otherwise guess. Do not go discover more: if writing the brief needs new reading, the task is too vague or too big. One deliverable per task; two deliverables is two tasks. A good brief carries: the deliverable in one sentence; why it matters; what you already know (entry points, symbols, conventions, dead ends); decisions made; what not to touch; checks it can run to know it is done; and the output shape. Length is fine, vagueness is not.";
-
 fn yaml_key(value: &serde_yaml::Value) -> Option<&str> {
     value.as_str()
 }
@@ -1391,11 +1390,7 @@ fn read_love_list(layer: &ConfigLayer, scope: &str) -> Result<Option<Vec<LoveRul
 const WORKER_SHAPE: &str =
     "worker takes an optional attribution flag; prompt is accepted and ignored";
 
-/// The brief rules one `.oga.yaml` writes for its own scope: plain text read
-/// by the agent that calls `delegate`, with `{{default}}` standing for
-/// [`DEFAULT_CALLER_PROMPT`] and `{{project}}` for the directory it came
-/// from. `prompt` is the only key, so a rule the writer expects Oga to honour
-/// and Oga would silently drop fails the read instead.
+/// The optional prompt text one `.oga.yaml` writes for its own scope.
 pub fn read_caller_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>, ConfigError> {
     let Some(layer) = layer else {
         return Ok(None);
@@ -2389,7 +2384,7 @@ mod tests {
     }
 
     #[test]
-    fn caller_prompt_reads_the_block_verbatim() {
+    fn caller_prompt_reads_custom_text_verbatim() {
         let project = layer(
             "/work/.oga.yaml",
             "version: 1\ncaller:\n  prompt: |\n    {{default}}\n    Project rule: always name the entry file.\n",
@@ -2427,14 +2422,5 @@ mod tests {
         let project = layer("/work/.oga.yaml", "caller:\n  prompt:\n    - one\n");
 
         assert!(read_caller_prompt(Some(&project)).is_err());
-    }
-
-    #[test]
-    fn caller_default_says_what_a_brief_carries() {
-        assert!(DEFAULT_CALLER_PROMPT.contains("It cannot see your conversation"));
-        assert!(DEFAULT_CALLER_PROMPT.contains("One deliverable per task"));
-        assert!(DEFAULT_CALLER_PROMPT.contains("Length is fine, vagueness is not."));
-        assert!(!DEFAULT_CALLER_PROMPT.contains("OGA_NEEDS_INPUT"));
-        assert!(!DEFAULT_CALLER_PROMPT.contains("Scope for this task"));
     }
 }
