@@ -19,7 +19,7 @@ const defaultBriefRules = "The brief is all the worker gets: it can't see this c
 const inheritedPrompt: PromptConfig = { cwd: "/tmp/project", scope: "global", written: false, value: defaultBriefRules, inherited: defaultBriefRules };
 let callerPrompt = inheritedPrompt;
 let savedCallerPrompt: { cwd: string; written: boolean; value: string } | undefined;
-let appearance: AppearanceSettings = { font: null };
+let appearance: AppearanceSettings = { font: null, showTechnicalDetails: false };
 let savedAppearance: AppearanceSettings | undefined;
 
 afterEach(() => {
@@ -27,9 +27,10 @@ afterEach(() => {
   clearCachedSettingsState();
   callerPrompt = inheritedPrompt;
   savedCallerPrompt = undefined;
-  appearance = { font: null };
+  appearance = { font: null, showTechnicalDetails: false };
   savedAppearance = undefined;
   document.documentElement.removeAttribute("style");
+  localStorage.clear();
 });
 
 const longModelId =
@@ -406,12 +407,27 @@ describe("appearance tab", () => {
     fireEvent.change(select, { target: { value: "system" } });
 
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(systemStack);
-    await waitFor(() => expect(savedAppearance).toEqual({ font: "system" }));
+    await waitFor(() => expect(savedAppearance).toEqual({ font: "system", showTechnicalDetails: false }));
     expect(select.value).toBe("system");
   });
 
+  it("saves technical details when switched on, keeping the font", async () => {
+    appearance = { font: "system", showTechnicalDetails: false };
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Appearance" }));
+    const toggle = await screen.findByRole<HTMLInputElement>("checkbox", { name: /Show technical details/ });
+    expect(toggle.checked).toBe(false);
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(savedAppearance).toEqual({ font: "system", showTechnicalDetails: true }));
+    expect(toggle.checked).toBe(true);
+  });
+
   it("shows and uses IBM Plex Sans for a font this build does not know", async () => {
-    appearance = { font: "comic-sans-future" };
+    appearance = { font: "comic-sans-future", showTechnicalDetails: false };
     setTransport(makeTransport());
     render(<SettingsPage />);
 

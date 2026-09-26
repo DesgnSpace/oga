@@ -416,6 +416,7 @@ export interface AdvisorSettings {
 /** `null` means the default font. */
 export interface AppearanceSettings {
   font: string | null;
+  showTechnicalDetails: boolean;
 }
 
 export interface HealthReport {

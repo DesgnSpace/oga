@@ -1,6 +1,7 @@
 // The activity trace panel: flat rows, expansion, and windowing.
 
 import * as React from "react";
+import { useShowTechnicalDetails } from "@/appearance";
 import type { TaskEventView } from "@/bridge/types";
 import { readImagePreview } from "@/bridge";
 import type { FileChange } from "@/domain/changes";
@@ -401,12 +402,15 @@ export function EventExpansionView({
   cwd?: string;
   onOpenPreview: (expansion: ContentExpansion, path: string | undefined, imageDataUrl?: string) => void;
 }) {
+  const showTechnicalDetails = useShowTechnicalDetails();
   const hasPrimaryExpansion = expansion.type !== "payload";
+  // Oga's own events hold only what the reader wrote, so their raw data waits for the setting.
+  const raw = hasPrimaryExpansion && (event.source !== "broker" || showTechnicalDetails) ? event.rawText : undefined;
   const humanText = ["skill", "prose", "detail", "report"].includes(expansion.type)
     || (expansion.type === "content" && event.presentation?.type === "tool");
   if (humanText) {
     return (
-      <TextDetailCard event={event} expansion={expansion} rawResult={event.rawText}>
+      <TextDetailCard event={event} expansion={expansion} rawResult={raw}>
         <ExpansionBody
           expansion={expansion}
           path={event.presentation?.path}
@@ -426,8 +430,8 @@ export function EventExpansionView({
         failed={event.phase === "failed"}
         onOpenPreview={onOpenPreview}
       />
-      {hasPrimaryExpansion && event.rawText !== undefined && (
-        <RawEventDetails source={stripTransportMarkup(event.rawText)} />
+      {raw !== undefined && (
+        <RawEventDetails source={stripTransportMarkup(raw)} />
       )}
     </div>
   );

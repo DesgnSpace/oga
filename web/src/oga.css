@@ -40,9 +40,9 @@
     --color-hover: #f4f4f4;
     --color-selection: rgb(0 0 0 / 9%);
     --color-border: #eeeeee;
-    --color-text: #1c1c1c;
-    --color-text-muted: #6b6b6b;
-    --color-accent: #1c1c1c;
+    --color-text: #141414;
+    --color-text-muted: #5c5c5c;
+    --color-accent: #141414;
     --color-text-inverse: #ffffff;
     --color-danger: #b42318;
     --color-info: #2563eb;
@@ -2862,6 +2862,21 @@ h1 {
     text-align: left;
 }
 
+/* The brief, follow-ups, replies, instructions, and responses sit in a soft
+   card so what was said to or by the worker reads apart from its narration.
+   Barely lifted off the page: a faint tint and a hairline, no white slab. */
+.transcript-card {
+    --transcript-card-bg: color-mix(in srgb, var(--color-text) 2.5%, var(--color-bg));
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    border-radius: var(--radius-lg);
+    background: var(--transcript-card-bg);
+}
+
+.transcript-card .transcript-bubble-preview.is-overflowing::after {
+    background: linear-gradient(to bottom, transparent, var(--transcript-card-bg));
+}
+
 .transcript-bubble .markdown-content h1,
 .transcript-bubble .markdown-content h2,
 .transcript-bubble .markdown-content h3,
@@ -3310,6 +3325,18 @@ h1 {
     font-size: var(--text-base-mono);
 }
 
+/* The result (usually a duration) sits against the disclosure on every row,
+   so times line up in one column however long the target or preview runs. */
+.trace-result {
+    flex: 0 1 auto;
+    margin-left: auto;
+    text-align: right;
+}
+
+.trace-result + .trace-disclosure {
+    margin-left: 0;
+}
+
 .trace-state-failed .trace-result {
     color: color-mix(in srgb, var(--color-danger) 70%, var(--color-text-muted));
 }
@@ -3622,6 +3649,12 @@ body {
     font-family: var(--font-sans);
     font-size: var(--text-base);
     line-height: 1.35;
+    /* WebKit on macOS draws text with thicker subpixel strokes on some layers
+       and thinner greyscale strokes on others (scrolling panes), so the same
+       font reads heavier in one place than another. Greyscale everywhere
+       keeps it one weight, as native Mac apps draw it. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 button,

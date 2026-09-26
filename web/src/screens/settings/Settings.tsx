@@ -26,9 +26,10 @@ import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
 import { workerToastName } from "@/lib/toast-subject";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
-import { applyFont, FONT_OPTIONS, resolveFont } from "@/appearance";
+import { applyFont, applyTechnicalDetails, FONT_OPTIONS, resolveFont } from "@/appearance";
 import type {
   AdvisorSettings,
+  AppearanceSettings,
   BridgeResult,
   CleanupSettings,
   CleanupSnapshot,
@@ -722,18 +723,23 @@ function AdvisorPanel() {
 }
 
 function AppearancePanel() {
-  const [font, setFont] = useState<string | null | undefined>(undefined);
+  const [settings, setSettings] = useState<AppearanceSettings | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<{ heading: string; message: string } | undefined>(undefined);
+
+  const apply = (next: AppearanceSettings) => {
+    setSettings(next);
+    applyFont(next.font);
+    applyTechnicalDetails(next.showTechnicalDetails);
+  };
 
   const loadAppearance = useCallback(async () => {
     const result = await broker.appearance();
     if (result.ok) {
-      setFont(result.value.font);
-      applyFont(result.value.font);
+      apply(result.value);
       setError(undefined);
     } else {
-      setError({ heading: "Couldn't load your font choice", message: result.error.message });
+      setError({ heading: "Couldn't load your appearance settings", message: result.error.message });
     }
   }, []);
 
@@ -741,22 +747,18 @@ function AppearancePanel() {
     void loadAppearance();
   }, [loadAppearance]);
 
-  const save = async (next: string) => {
-    const previous = font;
-    setFont(next);
-    applyFont(next);
+  const save = async (previous: AppearanceSettings, next: AppearanceSettings, heading: string) => {
+    apply(next);
     setSaving(true);
-    const result = await broker.putAppearance({ font: next });
+    const result = await broker.putAppearance(next);
     setSaving(false);
     if (result.ok) {
-      setFont(result.value.font);
-      applyFont(result.value.font);
+      apply(result.value);
       setError(undefined);
       return;
     }
-    setFont(previous);
-    applyFont(previous);
-    setError({ heading: "Couldn't save your font choice", message: result.error.message });
+    apply(previous);
+    setError({ heading, message: result.error.message });
   };
 
   return (
@@ -772,13 +774,15 @@ function AppearancePanel() {
             </button>
           </div>
         ) : null}
-        {font !== undefined ? (
+        {settings !== undefined ? (
           <Card>
             <CardRow as="label" title="Font" description="The font for Oga's interface. Code and logs stay in a monospace font.">
               <select
-                value={resolveFont(font).id}
+                value={resolveFont(settings.font).id}
                 disabled={saving}
-                onChange={(event) => void save(event.target.value)}
+                onChange={(event) =>
+                  void save(settings, { ...settings, font: event.target.value }, "Couldn't save your font choice")
+                }
               >
                 {FONT_OPTIONS.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -786,6 +790,24 @@ function AppearancePanel() {
                   </option>
                 ))}
               </select>
+            </CardRow>
+            <CardRow
+              as="label"
+              title="Show technical details"
+              description="Show the raw data behind Oga's own messages in a task, for troubleshooting."
+            >
+              <input
+                type="checkbox"
+                checked={settings.showTechnicalDetails}
+                disabled={saving}
+                onChange={(event) =>
+                  void save(
+                    settings,
+                    { ...settings, showTechnicalDetails: event.target.checked },
+                    "Couldn't save your technical details choice",
+                  )
+                }
+              />
             </CardRow>
           </Card>
         ) : null}

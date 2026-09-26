@@ -41,6 +41,15 @@ describe("trace rows", () => {
     expect(rows[0].children.length === 0 && rows[0].event !== undefined).toBe(true);
   });
 
+  it("drops terminal colour codes from a command's preview", () => {
+    const commandEvent: TaskEventView = {
+      ...event(1, "command", "Bash"),
+      presentation: { type: "command", command: "bun test" },
+      rawText: JSON.stringify({ tool_response: { stdout: "\u001b[36m</body>\u001b[39m\n" } }),
+    };
+    expect(traceRows([commandEvent], false)[0].preview).toBe("</body>");
+  });
+
   it("uses the command summary instead of an error payload for the collapsed title", () => {
     const command = "cd /tmp && opencode run --format json --model opencode-go/minimax-m2.7";
     const commandEvent: TaskEventView = {

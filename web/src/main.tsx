@@ -1,7 +1,7 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "@/App";
-import { applyFont, readCachedFont } from "@/appearance";
+import { applyFont, applyTechnicalDetails, readCachedFont } from "@/appearance";
 import { broker } from "@/bridge/client";
 import { installNativeChrome } from "@/shell/nativeChrome";
 import { installOverlayScroll } from "@/ui/overlay-scroll";
@@ -57,5 +57,7 @@ createRoot(root).render(
 );
 
 void broker.appearance().then((result) => {
-  if (result.ok) applyFont(result.value.font);
+  if (!result.ok) return;
+  applyFont(result.value.font);
+  applyTechnicalDetails(result.value.showTechnicalDetails);
 });

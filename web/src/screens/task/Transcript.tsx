@@ -1,6 +1,7 @@
 // The conversation transcript: request bubbles, work blocks, and replies.
 
 import * as React from "react";
+import { useShowTechnicalDetails } from "@/appearance";
 import { InlineMarkdown, MarkdownContent } from "@/domain/markdown";
 import { compositionHasThinking, type ActivityComposition } from "@/domain/activity";
 import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
@@ -48,6 +49,7 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
   const previewRef = React.useRef<HTMLDivElement>(null);
   const [hasMore, setHasMore] = React.useState<boolean>();
   const [open, setOpen] = React.useState(false);
+  const showTechnicalDetails = useShowTechnicalDetails();
 
   React.useLayoutEffect(() => {
     if (open) return;
@@ -73,8 +75,8 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
 
   return (
     <div className="transcript-row transcript-row-user">
-      {bubble.kind !== undefined && <TurnMarker kind={bubble.kind} icon={BUBBLE_MARKER_ICONS[bubble.kind]} />}
-      <div className="transcript-bubble">
+      <div className="transcript-bubble transcript-card">
+        {bubble.kind !== undefined && <TurnMarker kind={bubble.kind} icon={BUBBLE_MARKER_ICONS[bubble.kind]} />}
         <div
           ref={previewRef}
           className={`transcript-bubble-preview${collapsed ? " is-clamped" : ""}${overflowing ? " is-overflowing" : ""}`}
@@ -92,7 +94,7 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
             {open ? "Show less" : "Show more"}
           </button>
         )}
-        {bubble.rawText !== undefined && <RawEventDetails source={stripTransportMarkup(bubble.rawText)} />}
+        {showTechnicalDetails && bubble.rawText !== undefined && <RawEventDetails source={stripTransportMarkup(bubble.rawText)} />}
         <AttachmentsRow paths={bubble.attachments} cwd={cwd} />
       </div>
     </div>
@@ -100,11 +102,12 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
 });
 
 const TranscriptResponse = React.memo(function TranscriptResponse({ block, question }: { block: ResponseBlock; question: boolean }) {
+  const card = !question && block.marker !== undefined ? " transcript-card" : "";
   const className = question
     ? "detail-response detail-response-question"
     : block.error
-      ? "detail-response detail-response-error"
-      : "detail-response";
+      ? `detail-response detail-response-error${card}`
+      : `detail-response${card}`;
   const marker = !question && block.marker !== undefined ? <TurnMarker kind={block.marker} icon={ResponseIcon} /> : null;
 
   if (block.text === undefined) {
@@ -327,10 +330,11 @@ function TranscriptCallGroup({
   onRowExpansionChange?: (key: string, expanded: boolean) => void;
 }) {
   const key = `transcript-call-group:${segment.id}:${entry.key}`;
-  const [manualOpen, setManualOpen] = React.useState(false);
-  const expanded = rowExpansion?.get(key) ?? manualOpen;
+  // The saved map only seeds the first render: the controller does not
+  // re-render on each toggle, so reading it afterwards would go stale.
+  const [expanded, setExpanded] = React.useState(() => rowExpansion?.get(key) ?? false);
   const toggle = () => {
-    setManualOpen(!expanded);
+    setExpanded(!expanded);
     onRowExpansionChange?.(key, !expanded);
   };
   return (

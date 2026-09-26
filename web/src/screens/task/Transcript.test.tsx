@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { applyTechnicalDetails } from "@/appearance";
 import type { TaskEventView } from "@/bridge/types";
 import { ActivityStory, type ActivityComposition } from "@/domain/activity";
 import { Transcript } from "./Transcript";
@@ -132,6 +133,30 @@ describe("Transcript", () => {
     expect(summary.textContent).not.toMatch(/calls|\d+\.\d+s|[+−-]/);
   });
 
+  it("reopens a tool group after the saved view catches up with an earlier close", () => {
+    const events: TaskEventView[] = [
+      {
+        id: 1, taskId: "task", source: "claude", type: "agent.tool_use", kind: "command", phase: "completed",
+        title: "Run command", detail: "bun test", actionId: "c1", createdAt: "2026-07-30T15:00:02Z",
+      },
+    ];
+    const item: TranscriptItem = {
+      type: "work",
+      segment: { id: 21, composition: ActivityStory.compose(events), cwd: "/repo", live: false, startsExpanded: true, durationMs: 1_000 },
+    };
+    const saved = new Map<string, boolean>();
+    const remember = (key: string, expanded: boolean) => saved.set(key, expanded);
+    const view = render(<Transcript items={[item]} rowExpansionState={new Map(saved)} onRowExpansionChange={remember} />);
+    const summary = () => screen.getByRole("button", { name: "Ran a command" });
+
+    fireEvent.click(summary());
+    fireEvent.click(summary());
+    view.rerender(<Transcript items={[item]} rowExpansionState={new Map(saved)} onRowExpansionChange={remember} />);
+    fireEvent.click(summary());
+
+    expect(summary().getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("keeps thinking out of the trace until the reader asks for it", () => {
     const thinking: TaskEventView = {
       id: 1,
@@ -211,5 +236,30 @@ describe("Transcript", () => {
       fireEvent.click(preview);
       expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
     });
+  });
+});
+
+describe("Transcript technical details", () => {
+  afterEach(() => applyTechnicalDetails(false));
+
+  const followUp: TranscriptItem = {
+    type: "bubble",
+    bubble: {
+      id: 7,
+      text: "Also cover the empty state.",
+      at: "2026-07-30T15:00:07Z",
+      kind: "resume",
+      rawText: '{"prompt":"Also cover the empty state."}',
+    },
+  };
+
+  it("hides the raw data behind Oga's follow-up until the setting is on", () => {
+    render(<Transcript items={[followUp]} />);
+    expect(screen.getByText("Also cover the empty state.")).toBeTruthy();
+    expect(screen.queryByText("Show technical details")).toBeNull();
+
+    act(() => applyTechnicalDetails(true));
+
+    expect(screen.getByText("Show technical details")).toBeTruthy();
   });
 });

@@ -1,3 +1,5 @@
+import * as React from "react";
+
 export interface FontOption {
   id: string;
   label: string;
@@ -41,4 +43,35 @@ export function readCachedFont(): string | null {
   } catch {
     return null;
   }
+}
+
+const TECHNICAL_DETAILS_CACHE_KEY = "oga.appearance.technicalDetails";
+const technicalDetailsListeners = new Set<() => void>();
+
+function readCachedTechnicalDetails(): boolean {
+  try {
+    return localStorage.getItem(TECHNICAL_DETAILS_CACHE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+/** Whether Oga's own messages in a task show the raw data behind them, remembered for the next launch. */
+export function applyTechnicalDetails(show: boolean): void {
+  try {
+    if (show) localStorage.setItem(TECHNICAL_DETAILS_CACHE_KEY, "on");
+    else localStorage.removeItem(TECHNICAL_DETAILS_CACHE_KEY);
+  } catch {
+    // Storage can be unavailable; the choice still applies for this session.
+  }
+  technicalDetailsListeners.forEach((listener) => listener());
+}
+
+function subscribeTechnicalDetails(listener: () => void): () => void {
+  technicalDetailsListeners.add(listener);
+  return () => technicalDetailsListeners.delete(listener);
+}
+
+export function useShowTechnicalDetails(): boolean {
+  return React.useSyncExternalStore(subscribeTechnicalDetails, readCachedTechnicalDetails, () => false);
 }

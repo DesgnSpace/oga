@@ -906,8 +906,11 @@ function eventText(event: TaskEventView): string | undefined {
  * first non-empty line only. A tool's raw result routinely arrives as a
  * fenced, line-numbered file dump; the row has room for one line, not that.
  */
+// Terminal colour and cursor codes (ESC [ … letter) that command output carries.
+const ANSI_ESCAPE = /\u001b\[[0-9;?]*[A-Za-z]/g;
+
 function previewLine(text: string): string | undefined {
-  const unwrapped = unfenced(text.trim());
+  const unwrapped = unfenced(text.replace(ANSI_ESCAPE, "").trim());
   const firstLine = unwrapped
     .split("\n")
     .map((entry) => entry.trim())

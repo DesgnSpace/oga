@@ -21,7 +21,7 @@ function fileEvent(id: number): TaskEventView {
   return {
     id,
     taskId: "task",
-    source: "broker",
+    source: "claude",
     type: "agent.tool_use",
     kind: "file",
     phase: "completed",
