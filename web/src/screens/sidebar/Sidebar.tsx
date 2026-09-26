@@ -317,29 +317,30 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
   // are, so both are read back from the layout rather than assumed.
   useLayoutEffect(() => {
     const shell = listShellRef.current;
-    if (shell) setViewportHeight((height) => (shell.clientHeight > 0 ? shell.clientHeight : height));
+    if (!shell) return;
+    const measure = () => {
+      if (shell.clientHeight > 0) setViewportHeight(shell.clientHeight);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, []);
+
+  const measuredTaskId = visibleRows.find((row) => row.type === "task")?.task.id;
+  useLayoutEffect(() => {
     // The row wrapper, not the link, so the link's margins count too.
-    const row = taskRowRefs.current.values().next().value?.parentElement;
+    const row = measuredTaskId === undefined ? undefined : taskRowRefs.current.get(measuredTaskId)?.parentElement;
     if (!row) return;
     const measure = () => {
       const height = row.offsetHeight;
-      if (height > 0) setItemHeight((current) => (current === height ? current : height));
+      if (height > 0) setItemHeight(height);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(row);
     return () => observer.disconnect();
-  });
-
-  // A resized window changes how many rows fit without changing any state.
-  useEffect(() => {
-    const measure = () => {
-      const shell = listShellRef.current;
-      if (shell && shell.clientHeight > 0) setViewportHeight(shell.clientHeight);
-    };
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
+  }, [measuredTaskId]);
 
   useEffect(() => {
     if (initialTask) {

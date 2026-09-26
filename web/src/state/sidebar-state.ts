@@ -304,8 +304,9 @@ export function applyEventFrame(state: SidebarState, frame: EventFrame): [Sideba
   }
 }
 
+/** Hands back the same state when the batch changes nothing, so the list is not redrawn. */
 export function applyEventBatch(state: SidebarState, batch: EventBatch): [SidebarState, EventAction] {
-  let next = { ...state, eventCursor: Math.max(state.eventCursor, batch.cursor) };
+  let next = batch.cursor > state.eventCursor ? { ...state, eventCursor: batch.cursor } : state;
   let action: EventAction = batch.stale ? "refresh" : "none";
   for (const pointer of batch.pointers) {
     [next, action] = applyPointer(next, pointer);
@@ -339,7 +340,7 @@ function applyPointer(state: SidebarState, pointer: EventPointer): [SidebarState
 
   const task = state.tasks[index];
   if (!timestampAtLeast(pointer.at, task.updatedAt)) {
-    return [{ ...state, eventCursor }, "none"];
+    return [eventCursor === state.eventCursor ? state : { ...state, eventCursor }, "none"];
   }
   const archived = archiveChange(pointer.type);
   const tasks = state.tasks.slice();
