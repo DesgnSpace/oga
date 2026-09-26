@@ -1,8 +1,10 @@
 //! Which files the index reads. A file is a candidate when an adapter owns
 //! its extension, git is not ignoring it, and it is not a lockfile.
 
+use std::collections::HashMap;
 use std::fs::{self, DirEntry, Metadata};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::UNIX_EPOCH;
 
 use crate::lang;
@@ -89,7 +91,19 @@ fn add_ignore_group(path: &Path, groups: &mut Vec<IgnoreGroup>) {
     }
 }
 
+/// Asking git spawns a process, so each project asks once per process.
 fn global_ignore_path(cwd: &Path) -> Option<PathBuf> {
+    static RESOLVED: OnceLock<Mutex<HashMap<PathBuf, Option<PathBuf>>>> = OnceLock::new();
+    RESOLVED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry(cwd.to_path_buf())
+        .or_insert_with(|| excludes_file(cwd))
+        .clone()
+}
+
+fn excludes_file(cwd: &Path) -> Option<PathBuf> {
     if let Ok(output) = std::process::Command::new("git")
         .arg("-C")
         .arg(cwd)
