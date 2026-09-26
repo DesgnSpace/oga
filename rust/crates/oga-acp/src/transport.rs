@@ -427,6 +427,10 @@ enum Frame {
 struct FrameReader<R> {
     reader: R,
     buffer: Vec<u8>,
+    /// Bytes at the front of `buffer` already handed out as frames.
+    consumed: usize,
+    /// How far into `buffer` is known to hold no newline.
+    scanned: usize,
     max_frame_bytes: usize,
     discarded: usize,
 }
@@ -436,6 +440,8 @@ impl<R: AsyncRead + Send + Unpin> FrameReader<R> {
         Self {
             reader,
             buffer: Vec::new(),
+            consumed: 0,
+            scanned: 0,
             max_frame_bytes,
             discarded: 0,
         }
@@ -444,8 +450,14 @@ impl<R: AsyncRead + Send + Unpin> FrameReader<R> {
     async fn next(&mut self) -> io::Result<Option<Frame>> {
         let mut chunk = [0_u8; 8 * 1024];
         loop {
-            if let Some(end) = self.buffer.iter().position(|byte| *byte == b'\n') {
-                let line: Vec<u8> = self.buffer.drain(..=end).take(end).collect();
+            if let Some(offset) = self.buffer[self.scanned..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+            {
+                let end = self.scanned + offset;
+                let line = self.buffer[self.consumed..end].to_vec();
+                self.consumed = end + 1;
+                self.scanned = self.consumed;
                 if self.discarded > 0 {
                     let dropped = self.discarded + line.len();
                     self.discarded = 0;
@@ -453,12 +465,17 @@ impl<R: AsyncRead + Send + Unpin> FrameReader<R> {
                 }
                 return Ok(Some(Frame::Line(line)));
             }
+            self.buffer.drain(..self.consumed);
+            self.consumed = 0;
+            self.scanned = self.buffer.len();
             if self.buffer.len() > self.max_frame_bytes {
                 self.discarded += self.buffer.len();
                 self.buffer.clear();
+                self.scanned = 0;
             }
             let length = self.reader.read(&mut chunk).await?;
             if length == 0 {
+                self.scanned = 0;
                 if self.discarded > 0 {
                     let dropped = self.discarded + self.buffer.len();
                     self.discarded = 0;

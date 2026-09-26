@@ -7,7 +7,7 @@ pub use confinement::{
 };
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt, io,
     path::PathBuf,
     process::ExitStatus,
@@ -96,6 +96,8 @@ pub struct RunRequest {
     /// them.
     pub env_remove: BTreeSet<String>,
     pub timeout: Option<Duration>,
+    /// Hands each parsed event to `take_provider_events` as it arrives.
+    pub live_events: bool,
 }
 
 impl RunRequest {
@@ -107,6 +109,7 @@ impl RunRequest {
             env: BTreeMap::new(),
             env_remove: BTreeSet::new(),
             timeout: None,
+            live_events: false,
         }
     }
 
@@ -122,6 +125,7 @@ impl RunRequest {
             env: command.env,
             env_remove: command.env_remove,
             timeout: None,
+            live_events: false,
         }
     }
 
@@ -132,6 +136,11 @@ impl RunRequest {
 
     pub fn with_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    pub fn with_live_events(mut self) -> Self {
+        self.live_events = true;
         self
     }
 }
@@ -400,7 +409,12 @@ impl ProviderRunner {
             });
         };
         let (events, _) = broadcast::channel(self.config.event_buffer);
-        let (provider_event_tx, provider_event_rx) = mpsc::unbounded_channel();
+        let (provider_event_tx, provider_event_rx) = if request.live_events {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
         let (result_tx, result_rx) = oneshot::channel();
         let control = Arc::new(Control::new(
             identity.clone(),
@@ -428,7 +442,7 @@ impl ProviderRunner {
             identity: control.identity.clone(),
             control,
             events,
-            provider_event_rx: Mutex::new(Some(provider_event_rx)),
+            provider_event_rx: Mutex::new(provider_event_rx),
             result: Mutex::new(Some(result_rx)),
         })
     }
@@ -623,7 +637,7 @@ struct ProcessContext {
     config: RunnerConfig,
     control: Arc<Control>,
     events: broadcast::Sender<RunnerEvent>,
-    provider_event_tx: mpsc::UnboundedSender<ParsedEvent>,
+    provider_event_tx: Option<mpsc::UnboundedSender<ParsedEvent>>,
 }
 
 impl Control {
@@ -780,7 +794,7 @@ async fn run_process(
                                 message,
                                 &mut state,
                                 &events,
-                                &provider_event_tx,
+                                provider_event_tx.as_ref(),
                                 &request.provider,
                                 &config,
                             ) && read_error.is_none() {
@@ -819,7 +833,7 @@ async fn run_process(
                         message,
                         &mut state,
                         &events,
-                        &provider_event_tx,
+                        provider_event_tx.as_ref(),
                         &request.provider,
                         &config,
                     ) && read_error.is_none()
@@ -835,7 +849,12 @@ async fn run_process(
 
     let _ = stdout_reader.await;
     let _ = stderr_reader.await;
-    state.finish_lines(&events, &provider_event_tx, &request.provider, &config);
+    state.finish_lines(
+        &events,
+        provider_event_tx.as_ref(),
+        &request.provider,
+        &config,
+    );
     if state.stdout.dropped_bytes > 0 {
         let sequence = state.next_sequence();
         state.emit(
@@ -950,7 +969,7 @@ impl CaptureState {
     fn finish_lines(
         &mut self,
         sender: &broadcast::Sender<RunnerEvent>,
-        provider_event_tx: &mpsc::UnboundedSender<ParsedEvent>,
+        provider_event_tx: Option<&mpsc::UnboundedSender<ParsedEvent>>,
         provider: &Provider,
         config: &RunnerConfig,
     ) {
@@ -981,7 +1000,7 @@ impl CaptureState {
         stream: OutputStream,
         action: LineAction,
         sender: &broadcast::Sender<RunnerEvent>,
-        provider_event_tx: &mpsc::UnboundedSender<ParsedEvent>,
+        provider_event_tx: Option<&mpsc::UnboundedSender<ParsedEvent>>,
         provider: &Provider,
         config: &RunnerConfig,
     ) {
@@ -1044,7 +1063,9 @@ impl CaptureState {
             }
             accumulate_usage(&mut self.usage, &event);
             self.provider_events.push(event.clone());
-            if provider_event_tx.send(event.clone()).is_err() {
+            if let Some(live) = provider_event_tx
+                && live.send(event.clone()).is_err()
+            {
                 self.delivery_dropped = self.delivery_dropped.saturating_add(1);
             }
             let sequence = self.next_sequence();
@@ -1057,7 +1078,7 @@ fn handle_message(
     message: RawMessage,
     state: &mut CaptureState,
     events: &broadcast::Sender<RunnerEvent>,
-    provider_event_tx: &mpsc::UnboundedSender<ParsedEvent>,
+    provider_event_tx: Option<&mpsc::UnboundedSender<ParsedEvent>>,
     provider: &Provider,
     config: &RunnerConfig,
 ) -> Option<RunnerError> {
@@ -1094,10 +1115,12 @@ fn handle_message(
     None
 }
 
+/// The last `limit` bytes of a stream, kept in a ring so trimming the front
+/// costs only what is dropped.
 #[derive(Debug)]
 struct BoundedOutput {
     limit: usize,
-    data: Vec<u8>,
+    data: VecDeque<u8>,
     dropped_bytes: usize,
 }
 
@@ -1105,13 +1128,13 @@ impl BoundedOutput {
     fn new(limit: usize) -> Self {
         Self {
             limit,
-            data: Vec::new(),
+            data: VecDeque::new(),
             dropped_bytes: 0,
         }
     }
 
     fn push(&mut self, bytes: &[u8]) {
-        self.data.extend_from_slice(bytes);
+        self.data.extend(bytes);
         if self.data.len() > self.limit {
             let excess = self.data.len() - self.limit;
             self.data.drain(..excess);
@@ -1119,8 +1142,8 @@ impl BoundedOutput {
         }
     }
 
-    fn finish(self) -> String {
-        String::from_utf8_lossy(&self.data).into_owned()
+    fn finish(mut self) -> String {
+        String::from_utf8_lossy(self.data.make_contiguous()).into_owned()
     }
 }
 
@@ -1143,20 +1166,23 @@ impl LineFramer {
     }
 
     fn push(&mut self, bytes: &[u8]) -> Vec<LineAction> {
+        let mut segments = bytes.split(|byte| *byte == b'\n');
+        if let Some(first) = segments.next() {
+            self.append(first);
+        }
         let mut actions = Vec::new();
-        for byte in bytes {
-            if *byte == b'\n' {
-                actions.push(self.take_line());
-            } else {
-                self.bytes = self.bytes.saturating_add(1);
-                if self.data.len() < self.limit {
-                    self.data.push(*byte);
-                } else {
-                    self.oversized = true;
-                }
-            }
+        for segment in segments {
+            actions.push(self.take_line());
+            self.append(segment);
         }
         actions
+    }
+
+    fn append(&mut self, part: &[u8]) {
+        self.bytes = self.bytes.saturating_add(part.len());
+        let room = self.limit - self.data.len();
+        self.data.extend_from_slice(&part[..part.len().min(room)]);
+        self.oversized |= part.len() > room;
     }
 
     fn finish(&mut self) -> Option<LineAction> {

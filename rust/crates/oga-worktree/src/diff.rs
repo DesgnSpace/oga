@@ -25,9 +25,22 @@ const MAX_UNTRACKED_FILES: usize = 200;
 const MAX_BRANCHES: usize = 400;
 
 pub async fn task_diff(task: &Task, against: Option<&str>) -> Result<TaskDiff, WorktreeError> {
+    diff_within(task, against, None).await
+}
+
+/// The task's diff limited to `paths`, relative to its folder.
+pub async fn task_diff_of(task: &Task, paths: &[String]) -> Result<TaskDiff, WorktreeError> {
+    diff_within(task, None, Some(paths)).await
+}
+
+async fn diff_within(
+    task: &Task,
+    against: Option<&str>,
+    paths: Option<&[String]>,
+) -> Result<TaskDiff, WorktreeError> {
     let cwd = PathBuf::from(&task.cwd);
     let worktree = task.worktree.as_ref();
-    let pathspecs = match worktree {
+    let scoped = match worktree {
         Some(worktree) => {
             require_worktree_paths(worktree)?;
             Vec::new()
@@ -36,6 +49,13 @@ pub async fn task_diff(task: &Task, against: Option<&str>) -> Result<TaskDiff, W
             require_repository(&cwd).await?;
             scope_pathspecs(&task.scope.write)
         }
+    };
+    let pathspecs = match paths {
+        Some(paths) => paths
+            .iter()
+            .map(|path| format!(":(literal){path}"))
+            .collect(),
+        None => scoped,
     };
     let (basis, against, base) = match (against, worktree) {
         (Some("HEAD"), _) | (None, None) => (TaskDiffBasis::WorkingTree, "HEAD".to_owned(), None),

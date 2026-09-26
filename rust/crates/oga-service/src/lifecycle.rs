@@ -483,9 +483,21 @@ pub(crate) async fn run_task_with_session_and_active(
             )
             .map_err(|error| LifecycleError::Refusal(error.to_string()))?
         };
-        let request = RunRequest::from_command(profile.provider, command, &task.cwd)
+        let live_events = matches!(
+            profile.provider,
+            Provider::Codex
+                | Provider::OpenCode
+                | Provider::OpenCode2
+                | Provider::Antigravity
+                | Provider::Pi
+                | Provider::Fx
+        );
+        let mut request = RunRequest::from_command(profile.provider, command, &task.cwd)
             .with_env(worker_env(&task.id, &task.cwd))
             .with_timeout(task.timeout_ms.map(Duration::from_millis));
+        if live_events {
+            request = request.with_live_events();
+        }
         let process = match runner.spawn(request).await {
             Ok(run) => run,
             Err(error) => {
@@ -499,20 +511,7 @@ pub(crate) async fn run_task_with_session_and_active(
             }
         };
         let process = Arc::new(process);
-        let process_events = matches!(
-            profile.provider,
-            Provider::Codex
-                | Provider::OpenCode
-                | Provider::OpenCode2
-                | Provider::Antigravity
-                | Provider::Pi
-                | Provider::Fx
-        )
-        .then(|| {
-            process
-                .take_provider_events()
-                .expect("provider events are available")
-        });
+        let process_events = process.take_provider_events();
         let resumed_session = session_id.as_deref();
         let now = now_iso();
         let mut spawn_payload = json!({
@@ -820,14 +819,14 @@ async fn persist_live_provider_event(
 ) -> Result<(), LifecycleError> {
     let event = enrich_codex_file_change(task, event).await;
     let now = now_iso();
-    let task = task.clone();
+    let task_id = task.id.clone();
     let resumed_session = resumed_session.map(str::to_owned);
     let mut session_event_written = capture.session_event_written;
     let session_event_written = store
         .write(move |tx| {
             append_provider_event_tx(
                 tx,
-                &task,
+                &task_id,
                 turn_id,
                 &event,
                 resumed_session.as_deref(),
@@ -856,10 +855,20 @@ async fn enrich_codex_file_change(task: &Task, mut event: ParsedEvent) -> Parsed
         return event;
     }
 
-    let Ok(diff) = oga_worktree::task_diff(task, None).await else {
+    let cwd = Path::new(&task.cwd);
+    let paths: Vec<String> = event.payload["item"]["changes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|change| change.get("path")?.as_str())
+        .filter_map(|path| relative_codex_path(cwd, path))
+        .collect();
+    if paths.is_empty() {
+        return event;
+    }
+    let Ok(diff) = oga_worktree::task_diff_of(task, &paths).await else {
         return event;
     };
-    let cwd = Path::new(&task.cwd);
     let Some(changes) = event
         .payload
         .get_mut("item")
@@ -1114,7 +1123,7 @@ fn append_provider_events(
     for event in run.events.iter().skip(already_persisted) {
         append_provider_event_tx(
             tx,
-            task,
+            &task.id,
             turn_id,
             event,
             resumed_session,
@@ -1163,7 +1172,7 @@ fn append_provider_events(
 
 fn append_provider_event_tx(
     tx: &rusqlite::Transaction<'_>,
-    task: &Task,
+    task_id: &str,
     turn_id: i64,
     event: &ParsedEvent,
     resumed_session: Option<&str>,
@@ -1172,7 +1181,7 @@ fn append_provider_event_tx(
 ) -> Result<(), rusqlite::Error> {
     append_event_tx(
         tx,
-        &task.id,
+        task_id,
         &format!("agent.{}", event_kind(event)),
         TaskState::Running,
         event.payload.clone(),
@@ -1204,7 +1213,7 @@ fn append_provider_event_tx(
         };
         append_event_tx(
             tx,
-            &task.id,
+            task_id,
             kind,
             TaskState::Running,
             payload,

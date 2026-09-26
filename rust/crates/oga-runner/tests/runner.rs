@@ -28,7 +28,8 @@ async fn codex_events_arrive_before_the_process_exits() {
     let process = runner(8 * 1024, 64 * 1024)
         .spawn(
             fake_for(Provider::Codex, "codex-stream", temp.path())
-                .with_env(env(&[("FAKE_PROVIDER_DELAY_MS", "100")])),
+                .with_env(env(&[("FAKE_PROVIDER_DELAY_MS", "100")]))
+                .with_live_events(),
         )
         .await
         .expect("provider spawned");
@@ -104,7 +105,11 @@ async fn captures_provider_events_session_usage_and_liveness() {
 async fn provider_event_stream_keeps_burst_events() {
     let temp = TempDir::new().expect("temporary directory");
     let process = ProviderRunner::default()
-        .spawn(fake("burst", temp.path()).with_env(env(&[("FAKE_PROVIDER_LINES", "1000")])))
+        .spawn(
+            fake("burst", temp.path())
+                .with_env(env(&[("FAKE_PROVIDER_LINES", "1000")]))
+                .with_live_events(),
+        )
         .await
         .expect("provider spawned");
     let mut events = process
