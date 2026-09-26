@@ -1,7 +1,7 @@
 // The persistent chrome: the task sidebar beside whichever screen the route
 // picks.
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SidebarController } from "@/state";
 import { onOpenTask } from "@/bridge/events";
 import { setTaskNotifications } from "@/bridge/client";
@@ -61,7 +61,7 @@ interface ReplyFocusRequest {
   nonce: number;
 }
 
-function TaskDetailRoute({ taskId, onHeader, focusRequest, onFocusRequestConsumed }: {
+const TaskDetailRoute = memo(function TaskDetailRoute({ taskId, onHeader, focusRequest, onFocusRequestConsumed }: {
   taskId: string;
   onHeader: (info: TaskTitleBarInfo | undefined) => void;
   focusRequest?: ReplyFocusRequest;
@@ -82,7 +82,7 @@ function TaskDetailRoute({ taskId, onHeader, focusRequest, onFocusRequestConsume
       onFocusRequestConsumed={onFocusRequestConsumed}
     />
   );
-}
+});
 
 function offlineBannerCopy(connection: ConnectionState): string | undefined {
   switch (connection) {
@@ -347,6 +347,10 @@ function Shell() {
     setFocusRequest((current) => current?.nonce === nonce ? undefined : current);
   }, []);
   const titleRoute = underlyingRoute;
+  const navigation = useMemo(
+    () => ({ canGoBack, canGoForward, onBack: goBack, onForward: goForward }),
+    [canGoBack, canGoForward, goBack, goForward],
+  );
 
   return (
     <main className="app-shell" data-route={routePath(route)}>
@@ -358,7 +362,7 @@ function Shell() {
           onSelectTask={selectTask}
             onOpenSettings={openSettings}
             onOpenUsage={openUsage}
-          navigation={{ canGoBack, canGoForward, onBack: goBack, onForward: goForward }}
+          navigation={navigation}
         />
         <div className="app-main" onPointerDown={closeFloatingSidebar}>
           <TitleBar

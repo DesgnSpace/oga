@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { broker, streamStatus } from "@/bridge/client";
 import { onBrokerStatus, onEventBatch } from "@/bridge/events";
 import type { BridgeError, EventBatch } from "@/bridge/types";
@@ -193,7 +193,7 @@ export interface HistoryNavigation {
   onForward: () => void;
 }
 
-export default function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage, initialTask, navigation }: SidebarProps) {
+function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage, initialTask, navigation }: SidebarProps) {
   const sidebarRef = useMemo(() => sidebarController ?? new SidebarController(), [sidebarController]);
 
   const sidebar = useStore(sidebarRef as unknown as { snapshot: SidebarState; subscribe: (l: () => void) => () => void });
@@ -1122,3 +1122,5 @@ function SidebarFooter({
   }
   return null;
 }
+
+export default memo(Sidebar);

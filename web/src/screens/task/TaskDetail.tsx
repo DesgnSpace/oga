@@ -3,10 +3,11 @@
 import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
+import { LiveDuration } from "@/components/atoms/LiveDuration";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
-import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
+import { formatCost, formatTokenCount } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
 import { taskOutcomeKey, taskOutcomeViews } from "@/state/task-outcome-views";
@@ -104,7 +105,7 @@ function useTaskBranches(taskId: string, active: boolean): BranchChoices {
 }
 
 interface StatItem {
-  text: string;
+  text: React.ReactNode;
   title?: string;
 }
 
@@ -120,12 +121,14 @@ function durationTitle(task: NonNullable<TaskDetailState["task"]>): string | und
 function taskDetailStatItems(task: NonNullable<TaskDetailState["task"]>, events: TaskEventView[]): StatItem[] {
   const cost = formatCost(task.costUsd, task.costUsdEstimated);
   const { tokensIn, tokensOut, tokensCached } = usageTotals(events);
-  const duration = taskDuration(task.durationMs, task.runningSince, !activityIsSettled(task.state));
 
   const items: StatItem[] = [];
   if (cost) items.push({ text: cost, title: task.costUsdEstimated ? "Estimated from public pricing" : undefined });
   if (task.turns !== undefined && task.turns > 0) items.push({ text: `${task.turns} turn${task.turns === 1 ? "" : "s"}` });
-  if (duration) items.push({ text: duration, title: durationTitle(task) });
+  items.push({
+    text: <LiveDuration durationMs={task.durationMs} runningSince={task.runningSince} running={!activityIsSettled(task.state)} />,
+    title: durationTitle(task),
+  });
   if (tokensIn > 0) items.push({ text: `${formatTokenCount(tokensIn)} in` });
   if (tokensOut > 0) items.push({ text: `${formatTokenCount(tokensOut)} out` });
   if (tokensCached > 0) items.push({ text: `${formatTokenCount(tokensCached)} cached` });
@@ -230,12 +233,6 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     if (task) taskOutcomeViews.markViewed(task);
   }, [task, currentOutcome]);
 
-  React.useEffect(() => {
-    if (task?.state !== "running") return;
-    const timer = setInterval(forceUpdate, 1_000);
-    return () => clearInterval(timer);
-  }, [task?.state, forceUpdate]);
-
   // The newest activity is what a reader opens the task for, so the view sits
   // at the end and stays there as activity arrives — until they scroll away,
   // after which it holds their place.
@@ -304,6 +301,11 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     const maximum = Math.max(0, content.scrollHeight - content.clientHeight);
     content.scrollTop = Math.min(viewState.scrollTop, maximum);
   }, [taskId, transcriptItems, viewState]);
+
+  const setWorkExpansion = React.useCallback(
+    (id: number, expanded: boolean) => watched.controller.setWorkExpansion(id, expanded),
+    [watched],
+  );
 
   const retry = React.useCallback(() => {
     void watched.controller.loadInitial().then(forceUpdate);
@@ -473,7 +475,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
                 showThinking={showThinking}
                 scrollRoot={contentRef}
                 expansionState={viewState.workExpansion}
-                onExpansionChange={(id, expanded) => watched.controller.setWorkExpansion(id, expanded)}
+                onExpansionChange={setWorkExpansion}
               />
             </div>
           </>
