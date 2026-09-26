@@ -30,7 +30,7 @@ uuid = { version = "1", default-features = false, features = ["v4", "fast-rng"] 
 http-body-util = "0.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true

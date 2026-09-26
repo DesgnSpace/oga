@@ -1691,16 +1691,22 @@ fn update_optional<T: Serialize>(
     }
 }
 
-/// How long a fetched usage read is trusted before a profile is asked again —
-/// short enough that a caller watching budget mid-session sees it move, long
-/// enough that a listing opened twice in a row doesn't re-spawn a CLI.
+/// How long a usage read counts as fresh. A stale read is still served at once
+/// while a new one is fetched behind it, so only a profile's first read waits.
 const USAGE_CACHE_TTL: Duration = Duration::from_secs(60);
 /// How long a usage-reading command gets before its read is given up on.
 const USAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
-static USAGE_CACHE: OnceLock<Mutex<HashMap<String, (Instant, ProfileUsage)>>> = OnceLock::new();
+struct CachedUsage {
+    read_at: tokio::time::Instant,
+    usage: ProfileUsage,
+    /// A newer read is already on its way, so a stale hit starts no other.
+    refreshing: bool,
+}
 
-fn usage_cache() -> &'static Mutex<HashMap<String, (Instant, ProfileUsage)>> {
+static USAGE_CACHE: OnceLock<Mutex<HashMap<String, CachedUsage>>> = OnceLock::new();
+
+fn usage_cache() -> &'static Mutex<HashMap<String, CachedUsage>> {
     USAGE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -1715,7 +1721,7 @@ pub fn cached_usage(profiles: &[Profile]) -> Vec<ProfileUsage> {
         .map(|profile| {
             cache
                 .get(&profile.id)
-                .map(|(_, usage)| usage.clone())
+                .map(|cached| cached.usage.clone())
                 .unwrap_or_else(|| unsupported_usage(profile, "usage not read yet"))
         })
         .collect()
@@ -1745,19 +1751,31 @@ async fn usage_for_profiles(
 
 async fn usage_for_profile(profile: &Profile, refresh: bool) -> ProfileUsage {
     if !refresh
-        && let Some((at, cached)) = usage_cache()
+        && let Some(cached) = usage_cache()
             .lock()
             .expect("usage cache poisoned")
-            .get(&profile.id)
-        && at.elapsed() < USAGE_CACHE_TTL
+            .get_mut(&profile.id)
     {
-        return cached.clone();
+        if cached.read_at.elapsed() >= USAGE_CACHE_TTL && !cached.refreshing {
+            cached.refreshing = true;
+            let profile = profile.clone();
+            tokio::spawn(async move { read_usage_into_cache(&profile).await });
+        }
+        return cached.usage.clone();
     }
+    read_usage_into_cache(profile).await
+}
+
+async fn read_usage_into_cache(profile: &Profile) -> ProfileUsage {
     let usage = fetch_usage(profile).await;
-    usage_cache()
-        .lock()
-        .expect("usage cache poisoned")
-        .insert(profile.id.clone(), (Instant::now(), usage.clone()));
+    usage_cache().lock().expect("usage cache poisoned").insert(
+        profile.id.clone(),
+        CachedUsage {
+            read_at: tokio::time::Instant::now(),
+            usage: usage.clone(),
+            refreshing: false,
+        },
+    );
     usage
 }
 

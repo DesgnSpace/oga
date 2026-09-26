@@ -1408,6 +1408,79 @@ async fn settings_routes() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn stale_usage_is_served_at_once_and_replaced_behind_the_caller() {
+    let fixture = Fixture::new();
+    let codex_home = tempfile::tempdir().expect("codex home");
+    let rollout = codex_home.path().join("sessions").join("rollout-1.jsonl");
+    fs::create_dir_all(rollout.parent().expect("sessions")).expect("sessions dir");
+    let write_used = |percent: u32| {
+        fs::write(
+            &rollout,
+            format!(
+                r#"{{"timestamp":"2026-08-25T00:00:00Z","payload":{{"rate_limits":{{"primary":{{"used_percent":{percent}.0,"window_minutes":300}}}}}}}}"#
+            ),
+        )
+        .expect("rollout")
+    };
+    fixture
+        .store
+        .repositories()
+        .profiles()
+        .insert(
+            &Profile {
+                id: "stale-usage-codex".into(),
+                label: "Codex".into(),
+                provider: Provider::Codex,
+                default_model: "gpt".into(),
+                enabled: true,
+                env: BTreeMap::from([(
+                    String::from("CODEX_HOME"),
+                    codex_home.path().display().to_string(),
+                )]),
+                capabilities: Vec::new(),
+                command: None,
+            },
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("profile insert");
+    let used = || async {
+        let (status, usage) = json_response(
+            request(
+                &fixture.router,
+                Method::GET,
+                "/api/provider-usage?profile=stale-usage-codex",
+                Body::empty(),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        usage[0]["windows"][0]["usedPercent"].as_f64()
+    };
+
+    write_used(40);
+    assert_eq!(used().await, Some(40.0));
+
+    write_used(70);
+    tokio::time::advance(Duration::from_secs(61)).await;
+    assert_eq!(
+        used().await,
+        Some(40.0),
+        "a stale read answers from cache instead of waiting on the provider"
+    );
+
+    let mut refreshed = None;
+    for _ in 0..200 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        refreshed = used().await;
+        if refreshed == Some(70.0) {
+            break;
+        }
+    }
+    assert_eq!(refreshed, Some(70.0), "the background read replaces it");
+}
+
 async fn appearance(fixture: &Fixture, method: Method, body: Value) -> (StatusCode, Value) {
     let body = if method == Method::GET {
         Body::empty()
