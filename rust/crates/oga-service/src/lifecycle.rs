@@ -376,7 +376,7 @@ pub(crate) async fn run_task_with_session_and_active(
     } else {
         assemble_worker_message(&prompt)
     };
-    if let Some(reason) = oga_providers::cannot_start(&profile) {
+    if let Some(reason) = start_refusal(&profile).await {
         return refuse_run(&store, task, &shipped_prompt, reason);
     }
     let preference = transport::transport_preference(&store, &profile.id)?;
@@ -621,6 +621,21 @@ pub(crate) async fn run_task_with_session_and_active(
             worker,
         });
     }
+}
+
+/// Why this profile can't start a task, if it can't. Finding an OpenCode
+/// executable runs each candidate's `--version`, which can take seconds, so it
+/// runs off the async threads and leaves its answer cached for the start.
+async fn start_refusal(profile: &Profile) -> Option<String> {
+    let profile = profile.clone();
+    tokio::task::spawn_blocking(move || {
+        if profile.provider == Provider::OpenCode2 && profile.command.is_none() {
+            oga_providers::opencode2_executable(&profile);
+        }
+        oga_providers::cannot_start(&profile)
+    })
+    .await
+    .unwrap_or_else(|error| Some(format!("checking this worker's executable failed: {error}")))
 }
 
 /// Settles a run that has no transport it may use, so the reason is on the

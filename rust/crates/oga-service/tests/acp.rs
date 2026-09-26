@@ -3700,3 +3700,46 @@ async fn a_cursor_sign_in_oga_cannot_claim_never_opens_a_session() {
     );
     assert!(harness.cli_runs().is_empty());
 }
+
+#[tokio::test]
+async fn an_opencode_that_is_slow_to_report_its_version_once_still_runs_the_next_task() {
+    let harness = opencode_harness("opencode");
+    let opencode = harness
+        .cwd
+        .parent()
+        .expect("harness directory")
+        .join("bin/opencode");
+    let answers = fs::read_to_string(&opencode).expect("fake opencode");
+    let slow_once = answers.replacen(
+        "if [ \"$1\" = --version ]; then\n",
+        "if [ \"$1\" = --version ]; then\n  if [ ! -e \"$0.asked\" ]; then touch \"$0.asked\"; exec sleep 120; fi\n",
+        1,
+    );
+    fs::write(&opencode, slow_once).expect("slow opencode");
+
+    let first = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new("work", "summarise", &harness.cwd))
+        .await
+        .expect("dispatched");
+    let waited = std::time::Instant::now();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        waited.elapsed() < Duration::from_secs(2),
+        "the version check held up the broker for {:?}",
+        waited.elapsed()
+    );
+    let mut first = harness.dispatcher.task(&first.task.id).expect("task");
+    for _ in 0..600 {
+        if first.state.settled() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        first = harness.dispatcher.task(&first.id).expect("task");
+    }
+    assert_eq!(first.state, TaskState::Failed, "{first:?}");
+
+    let next = harness.run("summarise again").await;
+
+    assert_eq!(next.state, TaskState::Completed, "{next:?}");
+}

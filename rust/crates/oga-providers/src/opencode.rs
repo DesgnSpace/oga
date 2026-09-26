@@ -30,11 +30,13 @@ const INSTALL_DIRECTORIES: &[&str] = &[
     "~/.local/bin",
 ];
 
-const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+/// OpenCode 1 takes seconds to print its version on a loaded machine.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The version each executable reported, keyed by its resolved path and last
-/// change, so an upgrade in place is checked again.
-type ReportedVersions = HashMap<(PathBuf, SystemTime), Option<String>>;
+/// change, so an upgrade in place is checked again. A check that failed is
+/// not kept, so the next start asks again.
+type ReportedVersions = HashMap<(PathBuf, SystemTime), String>;
 
 static REPORTED: Mutex<Option<ReportedVersions>> = Mutex::new(None);
 
@@ -177,15 +179,15 @@ pub(crate) fn reported_version(executable: &Path) -> Option<String> {
         .ok()
         .and_then(|cache| cache.as_ref()?.get(&key).cloned())
     {
-        return known;
+        return Some(known);
     }
-    let answer = version_of(executable).and_then(|printed| version_number(&printed));
+    let answer = version_of(executable).and_then(|printed| version_number(&printed))?;
     if let Ok(mut cache) = REPORTED.lock() {
         cache
             .get_or_insert_with(HashMap::new)
             .insert(key, answer.clone());
     }
-    answer
+    Some(answer)
 }
 
 /// What `<executable> --version` prints, or nothing when it fails or hangs.

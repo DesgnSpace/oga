@@ -601,10 +601,15 @@ pub async fn model_rows(
         .collect::<Vec<_>>();
     let models = discover_catalog(&profiles, query.refresh == Some(true)).await;
     let empty_overrides = Default::default();
-    let unavailable = profiles
-        .iter()
-        .filter_map(|profile| cannot_start(profile).map(|reason| (profile.id.clone(), reason)))
-        .collect::<HashMap<_, _>>();
+    let checked = profiles.clone();
+    let unavailable = tokio::task::spawn_blocking(move || {
+        checked
+            .iter()
+            .filter_map(|profile| cannot_start(profile).map(|reason| (profile.id.clone(), reason)))
+            .collect::<HashMap<_, _>>()
+    })
+    .await
+    .map_err(|error| HttpError::internal(format!("checking workers failed: {error}")))?;
     let rows = select_model_rows(
         &models,
         settings.overrides.as_ref().unwrap_or(&empty_overrides),
