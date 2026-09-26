@@ -4,8 +4,11 @@
 use std::collections::HashMap;
 use std::fs::{self, DirEntry, Metadata};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::UNIX_EPOCH;
+
+use rayon::prelude::*;
 
 use crate::lang;
 
@@ -61,14 +64,33 @@ struct IgnoreGroup {
     rules: Vec<IgnoreRule>,
 }
 
+/// Directories are read in parallel. The files kept are the first
+/// `max_files` in the order a one-thread walk meets them, so a partial walk
+/// keeps the same files every time.
 pub fn walk_files(cwd: &Path, max_files: usize) -> WalkResult {
-    let mut result = WalkResult::default();
-    let mut ignores = repository_ignore_groups(cwd);
-    walk_directory(cwd, cwd, max_files, &mut ignores, &mut result);
-    result
-        .files
-        .sort_by(|left, right| left.path.cmp(&right.path));
-    result
+    let groups = repository_ignore_groups(cwd);
+    let ignores = groups.iter().collect::<Vec<_>>();
+    let walk = Walk {
+        cwd,
+        found: AtomicUsize::new(0),
+        give_up_after: max_files.saturating_mul(GIVE_UP_FACTOR),
+    };
+    let mut files = walk.directory(cwd, &ignores);
+    let partial = files.len() > max_files;
+    files.truncate(max_files);
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    WalkResult { files, partial }
+}
+
+/// A tree this many times past the file cap stops being read. Below it the
+/// whole tree is read, so which files a partial walk keeps never depends on
+/// which thread finished first.
+const GIVE_UP_FACTOR: usize = 4;
+
+struct Walk<'a> {
+    cwd: &'a Path,
+    found: AtomicUsize,
+    give_up_after: usize,
 }
 
 fn repository_ignore_groups(cwd: &Path) -> Vec<IgnoreGroup> {
@@ -144,70 +166,64 @@ pub fn is_indexable(path: &str) -> bool {
     lang::adapter_for(path).is_some()
 }
 
-fn walk_directory(
-    cwd: &Path,
-    directory: &Path,
-    max_files: usize,
-    ignores: &mut Vec<IgnoreGroup>,
-    result: &mut WalkResult,
-) {
-    if result.partial {
-        return;
-    }
-    let Ok(entries) = read_sorted(directory) else {
-        return;
-    };
-    let group_start = ignores.len();
-    if let Ok(source) = fs::read_to_string(directory.join(".gitignore")) {
-        ignores.push(IgnoreGroup {
-            base: relative_path(cwd, directory),
-            rules: parse_ignore_rules(&source),
-        });
-    }
-
-    let mut directories = Vec::new();
-    for entry in entries {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            continue;
+impl Walk<'_> {
+    /// This directory's files, then each subdirectory's, in name order.
+    fn directory(&self, directory: &Path, inherited: &[&IgnoreGroup]) -> Vec<WalkFile> {
+        if self.found.load(Ordering::Relaxed) > self.give_up_after {
+            return Vec::new();
+        }
+        let Ok(entries) = read_sorted(directory) else {
+            return Vec::new();
         };
-        let relative = relative_path(cwd, &path);
-        if metadata.is_dir() {
-            if !EXCLUDED_DIRS.contains(&name.as_ref()) && !is_ignored(ignores, &relative, true) {
-                directories.push(path);
-            }
-            continue;
-        }
-        if !metadata.is_file()
-            || !is_indexable(&relative)
-            || LOCKFILES.contains(&name.as_ref())
-            || is_ignored(ignores, &relative, false)
-        {
-            continue;
-        }
-        if result.files.len() == max_files {
-            result.partial = true;
-            break;
-        }
-        result.files.push(WalkFile {
-            path: relative,
-            size: metadata.len(),
-            mtime_ms: mtime_ms(&metadata),
-            ctime_ms: ctime_ms(&metadata),
-        });
-    }
+        let own = fs::read_to_string(directory.join(".gitignore"))
+            .ok()
+            .map(|source| IgnoreGroup {
+                base: relative_path(self.cwd, directory),
+                rules: parse_ignore_rules(&source),
+            });
+        let mut ignores = inherited.to_vec();
+        ignores.extend(own.as_ref());
 
-    if !result.partial {
-        for directory in directories {
-            walk_directory(cwd, &directory, max_files, ignores, result);
-            if result.partial {
-                break;
+        let mut files = Vec::new();
+        let mut directories = Vec::new();
+        for entry in entries {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            let relative = relative_path(self.cwd, &path);
+            if metadata.is_dir() {
+                if !EXCLUDED_DIRS.contains(&name.as_ref()) && !is_ignored(&ignores, &relative, true)
+                {
+                    directories.push(path);
+                }
+                continue;
             }
+            if !metadata.is_file()
+                || !is_indexable(&relative)
+                || LOCKFILES.contains(&name.as_ref())
+                || is_ignored(&ignores, &relative, false)
+            {
+                continue;
+            }
+            files.push(WalkFile {
+                path: relative,
+                size: metadata.len(),
+                mtime_ms: mtime_ms(&metadata),
+                ctime_ms: ctime_ms(&metadata),
+            });
         }
+        self.found.fetch_add(files.len(), Ordering::Relaxed);
+
+        let nested = directories
+            .par_iter()
+            .map(|directory| self.directory(directory, &ignores))
+            .collect::<Vec<_>>();
+        files.extend(nested.into_iter().flatten());
+        files
     }
-    ignores.truncate(group_start);
 }
 
 fn read_sorted(directory: &Path) -> std::io::Result<Vec<DirEntry>> {
@@ -272,7 +288,7 @@ fn ignore_regex(pattern: &str, anchored: bool) -> Option<regex::Regex> {
     regex::Regex::new(&format!("{prefix}{expression}$")).ok()
 }
 
-fn is_ignored(groups: &[IgnoreGroup], path: &str, is_dir: bool) -> bool {
+fn is_ignored(groups: &[&IgnoreGroup], path: &str, is_dir: bool) -> bool {
     let mut verdict = false;
     for group in groups {
         let relative = if group.base.is_empty() {
