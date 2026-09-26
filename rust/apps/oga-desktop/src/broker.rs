@@ -1,5 +1,6 @@
 use std::{
     env,
+    fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::Duration,
@@ -14,6 +15,8 @@ use tokio::time::{sleep, timeout};
 const HEALTH_ATTEMPTS: usize = 20;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(1);
 const HEALTH_INTERVAL: Duration = Duration::from_millis(350);
+/// Past this size the log moves to `broker.log.1` when the broker next starts.
+const LOG_LIMIT: u64 = 5 * 1024 * 1024; // 5 MiB
 
 #[derive(Debug, Error)]
 pub enum BrokerError {
@@ -114,6 +117,7 @@ pub struct BrokerSupervisor {
     command: Option<BrokerCommand>,
     command_error: Option<String>,
     child: Option<Child>,
+    log: Option<PathBuf>,
     snapshot: BrokerSnapshot,
 }
 
@@ -137,6 +141,7 @@ impl BrokerSupervisor {
             command,
             command_error,
             child: None,
+            log: broker_log_path(),
             snapshot,
         })
     }
@@ -263,11 +268,25 @@ impl BrokerSupervisor {
 
     fn spawn(&mut self, command: &BrokerCommand) -> Result<(), BrokerError> {
         let mut child_command = Command::new(&command.executable);
-        child_command
-            .args(&command.arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        child_command.args(&command.arguments).stdin(Stdio::null());
+        let log = self
+            .log
+            .as_deref()
+            .map(open_log)
+            .transpose()
+            .unwrap_or_else(|error| {
+                eprintln!("could not open the broker log: {error}");
+                None
+            });
+        match log {
+            Some(log) => {
+                let stderr = log.try_clone().map_or_else(|_| Stdio::null(), Stdio::from);
+                child_command.stdout(log).stderr(stderr);
+            }
+            None => {
+                child_command.stdout(Stdio::null()).stderr(Stdio::null());
+            }
+        }
         if let Some(directory) = &command.working_directory {
             child_command.current_dir(directory);
         }
@@ -280,6 +299,26 @@ impl BrokerSupervisor {
         })?);
         Ok(())
     }
+}
+
+/// `broker.log` beside the database the broker opens: the folder `OGA_DB`
+/// names, else `~/.oga`.
+fn broker_log_path() -> Option<PathBuf> {
+    let home = match env::var_os("OGA_DB") {
+        Some(database) => PathBuf::from(database).parent()?.to_path_buf(),
+        None => PathBuf::from(env::var_os("HOME")?).join(".oga"),
+    };
+    Some(home.join("broker.log"))
+}
+
+fn open_log(path: &Path) -> std::io::Result<File> {
+    if let Some(directory) = path.parent() {
+        fs::create_dir_all(directory)?;
+    }
+    if fs::metadata(path).is_ok_and(|metadata| metadata.len() > LOG_LIMIT) {
+        fs::rename(path, path.with_extension("log.1"))?;
+    }
+    OpenOptions::new().create(true).append(true).open(path)
 }
 
 impl Drop for BrokerSupervisor {
@@ -303,6 +342,69 @@ mod tests {
 
         assert_eq!(command.executable, server);
         assert_eq!(command.arguments, vec!["serve".to_owned()]);
+    }
+
+    fn supervisor_logging_to(log: &Path) -> BrokerSupervisor {
+        let mut supervisor = BrokerSupervisor::new(None).expect("supervisor");
+        supervisor.log = Some(log.to_path_buf());
+        supervisor
+    }
+
+    fn server_script(directory: &Path, body: &str) -> BrokerCommand {
+        use std::os::unix::fs::PermissionsExt;
+        let server = directory.join("oga-server");
+        fs::write(&server, format!("#!/bin/sh\n{body}\n")).expect("server script");
+        fs::set_permissions(&server, fs::Permissions::from_mode(0o755)).expect("executable");
+        BrokerCommand::from_path(server, None).expect("command")
+    }
+
+    fn run_to_exit(supervisor: &mut BrokerSupervisor, command: &BrokerCommand) {
+        supervisor.spawn(command).expect("spawned");
+        supervisor
+            .child
+            .take()
+            .expect("child")
+            .wait()
+            .expect("server exited");
+    }
+
+    #[test]
+    fn the_brokers_output_lands_in_its_log() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let log = directory.path().join("home/.oga/broker.log");
+        let command = server_script(
+            directory.path(),
+            "echo 'listening on 7331'; echo 'restart recovery failed: locked' >&2",
+        );
+        let mut supervisor = supervisor_logging_to(&log);
+
+        run_to_exit(&mut supervisor, &command);
+
+        let written = fs::read_to_string(&log).expect("log");
+        assert!(written.contains("listening on 7331"), "{written}");
+        assert!(
+            written.contains("restart recovery failed: locked"),
+            "{written}"
+        );
+    }
+
+    #[test]
+    fn a_full_log_is_set_aside_when_the_broker_starts() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let log = directory.path().join("broker.log");
+        fs::write(&log, vec![b'x'; LOG_LIMIT as usize + 1]).expect("full log");
+        let command = server_script(directory.path(), "echo 'cleanup failed' >&2");
+        let mut supervisor = supervisor_logging_to(&log);
+
+        run_to_exit(&mut supervisor, &command);
+
+        assert_eq!(fs::read_to_string(&log).expect("log"), "cleanup failed\n");
+        assert_eq!(
+            fs::metadata(directory.path().join("broker.log.1"))
+                .expect("set aside")
+                .len(),
+            LOG_LIMIT + 1
+        );
     }
 
     #[test]
