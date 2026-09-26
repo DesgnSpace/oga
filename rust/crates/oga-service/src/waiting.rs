@@ -4,7 +4,8 @@
 use std::{
     collections::BTreeSet,
     net::{SocketAddr, TcpStream, ToSocketAddrs},
-    sync::Arc,
+    sync::{Arc, mpsc},
+    thread,
     time::Duration,
 };
 
@@ -108,8 +109,14 @@ impl HoldProbe for StoreProbe {
     /// One provider host answering is enough to call the connection back: a
     /// completed TCP handshake proves a run can leave the machine again, which
     /// a name that merely resolves does not.
-    fn network_available(&self, _cwd: &str) -> Result<bool, String> {
-        Ok(PROBE_HOSTS.iter().any(|host| reachable(host)))
+    fn network_available(&self) -> Result<bool, String> {
+        let (answers, answered) = mpsc::channel();
+        for host in PROBE_HOSTS {
+            let answers = answers.clone();
+            thread::spawn(move || answers.send(reachable(host)));
+        }
+        drop(answers);
+        Ok(answered.iter().any(|reached| reached))
     }
 }
 

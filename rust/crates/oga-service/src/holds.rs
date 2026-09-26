@@ -1,6 +1,7 @@
 //! Durable task holds and the clock-driven release sweep.
 
 use std::{
+    cell::OnceCell,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -94,7 +95,30 @@ pub trait HoldProbe {
         cwd: &str,
     ) -> Result<Availability, String>;
 
-    fn network_available(&self, cwd: &str) -> Result<bool, String>;
+    fn network_available(&self) -> Result<bool, String>;
+}
+
+/// Asks the network once per sweep, however many holds wait on it.
+struct SweepProbe<'a, P> {
+    probe: &'a P,
+    network: OnceCell<Result<bool, String>>,
+}
+
+impl<P: HoldProbe> HoldProbe for SweepProbe<'_, P> {
+    fn profile_available(
+        &self,
+        profile: &str,
+        model: Option<&str>,
+        cwd: &str,
+    ) -> Result<Availability, String> {
+        self.probe.profile_available(profile, model, cwd)
+    }
+
+    fn network_available(&self) -> Result<bool, String> {
+        self.network
+            .get_or_init(|| self.probe.network_available())
+            .clone()
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -110,7 +134,7 @@ impl HoldProbe for AlwaysAvailable {
         Ok(Availability::available())
     }
 
-    fn network_available(&self, _cwd: &str) -> Result<bool, String> {
+    fn network_available(&self) -> Result<bool, String> {
         Ok(true)
     }
 }
@@ -174,9 +198,13 @@ impl<C: Clock> HoldSweep<C> {
         let now_iso = lifecycle::iso_from_system_time(now);
         let holds = due_holds(&self.store, &now_iso)?;
         let mut report = HoldSweepReport::default();
+        let probe = SweepProbe {
+            probe,
+            network: OnceCell::new(),
+        };
 
         for hold in holds {
-            match self.evaluate(&hold, now, &now_iso, probe)? {
+            match self.evaluate(&hold, now, &now_iso, &probe)? {
                 HoldAction::Released => report.released.push(hold),
                 HoldAction::Rechecked => report.rechecked.push(hold.task_id),
                 HoldAction::Expired => report.expired.push(hold.task_id),
@@ -315,7 +343,7 @@ impl<C: Clock> HoldSweep<C> {
                 )?;
                 return Ok(HoldAction::Expired);
             }
-            let online = match probe.network_available(&task.cwd) {
+            let online = match probe.network_available() {
                 Ok(value) => value,
                 Err(_) => {
                     touch_hold(
@@ -867,7 +895,7 @@ pub(crate) mod tests {
             Ok(self.account.clone())
         }
 
-        fn network_available(&self, _cwd: &str) -> Result<bool, String> {
+        fn network_available(&self) -> Result<bool, String> {
             Ok(self.online)
         }
     }
@@ -1046,5 +1074,63 @@ pub(crate) mod tests {
             lifecycle::load_task(&store, "held").unwrap().unwrap().state,
             TaskState::Queued
         );
+    }
+
+    /// Counts how often the sweep asks whether the network is back.
+    #[derive(Default)]
+    struct CountingProbe {
+        network_checks: Mutex<usize>,
+    }
+
+    impl HoldProbe for CountingProbe {
+        fn profile_available(
+            &self,
+            _profile: &str,
+            _model: Option<&str>,
+            _cwd: &str,
+        ) -> Result<Availability, String> {
+            Ok(Availability::available())
+        }
+
+        fn network_available(&self) -> Result<bool, String> {
+            *self.network_checks.lock().expect("count") += 1;
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn one_sweep_asks_the_network_once_for_every_task_waiting_on_it() {
+        let (_directory, store, clock, cwd) = service();
+        let sweep = HoldSweep::with_clock(store.clone(), clock.clone());
+        let now = lifecycle::iso_from_system_time(clock.now());
+        for id in ["first", "second", "third"] {
+            store
+                .repositories()
+                .tasks()
+                .insert(&task(id, &cwd, TaskState::Queued))
+                .expect("task");
+            sweep
+                .arm(&TaskHold {
+                    task_id: id.into(),
+                    verb: HoldVerb::Resume,
+                    args: network_wait(12),
+                    start_at: None,
+                    await_profile: None,
+                    await_model: None,
+                    next_check_at: now.clone(),
+                    expires_at: lifecycle::iso_from_system_time(clock.now() + HOLD_EXPIRY),
+                    probe_count: 0,
+                    note: "waiting".into(),
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                })
+                .expect("arm");
+        }
+        let probe = CountingProbe::default();
+
+        let report = sweep.sweep_with(&probe).expect("sweep");
+
+        assert_eq!(report.rechecked.len(), 3);
+        assert_eq!(*probe.network_checks.lock().expect("count"), 1);
     }
 }
