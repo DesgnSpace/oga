@@ -39,7 +39,7 @@ async fn a_spawn_during_the_login_shell_capture_gets_the_captured_path() {
 
     // The broker starts the capture as it starts serving, on another thread
     // than the one that later spawns workers.
-    std::thread::spawn(worker_path::refresh_login_path);
+    std::thread::spawn(worker_path::warm_login_path);
     for _ in 0..200 {
         if started.exists() {
             break;

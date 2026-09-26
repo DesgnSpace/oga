@@ -228,7 +228,7 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
     )?;
     // A login shell can take seconds to start, so its PATH is read in the
     // background while the broker serves; worker spawns wait for it.
-    oga_service::refresh_login_path();
+    oga_service::warm_login_path();
     // Before anything is served: the rows still reading `running` belong to a
     // broker that is gone, and every surface reads the row.
     match state.dispatcher.reconcile(ReconcileTrigger::BrokerStart) {

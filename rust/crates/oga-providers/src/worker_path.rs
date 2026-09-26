@@ -18,11 +18,14 @@ const END: &str = "__OGA_END__";
 struct LoginPath {
     captured: Option<String>,
     capturing: bool,
+    /// The capture the broker starts with is still running; spawns wait for it.
+    startup_pending: bool,
 }
 
 static LOGIN_PATH: Mutex<LoginPath> = Mutex::new(LoginPath {
     captured: None,
     capturing: false,
+    startup_pending: false,
 });
 static CAPTURE_SETTLED: Condvar = Condvar::new();
 
@@ -31,7 +34,7 @@ static CAPTURE_SETTLED: Condvar = Condvar::new();
 /// nothing. A CLI on a directory only the user's shell knows about is then
 /// invisible, and the spawn fails with "No such file or directory" on a
 /// command the same user runs fine in a terminal. The login shell's own PATH
-/// closes that gap. Until a first capture lands, this waits for one in flight.
+/// closes that gap.
 pub fn worker_path() -> String {
     merge(
         &env::var("PATH").unwrap_or_default(),
@@ -39,9 +42,17 @@ pub fn worker_path() -> String {
     )
 }
 
-/// Capture the login shell's PATH on its own thread and return at once. The
-/// broker calls this as it starts, and again when a spawn cannot find its
-/// command, which may sit in a directory the shell gained since.
+/// Capture the login shell's PATH on its own thread and return at once, so the
+/// broker can serve while the shell loads. Spawns wait for this capture.
+pub fn warm_login_path() {
+    if let Ok(mut state) = LOGIN_PATH.lock() {
+        state.startup_pending = true;
+    }
+    refresh_login_path();
+}
+
+/// Capture the login shell's PATH again on its own thread. Called when a spawn
+/// cannot find its command, which may sit in a directory the shell gained since.
 pub fn refresh_login_path() {
     let Ok(mut state) = LOGIN_PATH.lock() else {
         return;
@@ -62,9 +73,7 @@ pub fn refresh_login_path() {
 fn login_path() -> Option<String> {
     let state = LOGIN_PATH.lock().ok()?;
     let (state, _) = CAPTURE_SETTLED
-        .wait_timeout_while(state, CAPTURE_TIMEOUT, |state| {
-            state.capturing && state.captured.is_none()
-        })
+        .wait_timeout_while(state, CAPTURE_TIMEOUT, |state| state.startup_pending)
         .ok()?;
     state.captured.clone()
 }
@@ -75,6 +84,7 @@ fn settle_capture(captured: Option<String>) {
             state.captured = captured;
         }
         state.capturing = false;
+        state.startup_pending = false;
     }
     CAPTURE_SETTLED.notify_all();
 }
