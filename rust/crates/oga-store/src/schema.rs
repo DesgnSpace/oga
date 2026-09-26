@@ -88,6 +88,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "code search by name word",
         run: migrate_v50_to_v51,
     },
+    Migration {
+        version: 52,
+        name: "code search by project token",
+        run: migrate_v51_to_v52,
+    },
 ];
 
 /// The schema this binary can read.
@@ -385,8 +390,10 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
       CREATE INDEX context_symbols_name ON context_symbols(cwd, name_key);
       CREATE INDEX context_symbols_digest ON context_symbols(cwd, digest);
       CREATE INDEX context_symbols_path ON context_symbols(cwd, path, line);
+      -- `project` holds hex(cwd): one opaque token per project, so a lookup
+      -- matches its own project exactly and never a folder nested inside it.
       CREATE VIRTUAL TABLE context_symbols_fts USING fts5(
-        cwd,
+        project,
         name,
         qualified,
         tokens,
@@ -400,20 +407,20 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
       );
       CREATE TRIGGER context_symbols_ai
       AFTER INSERT ON context_symbols BEGIN
-        INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
-        VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path, new.name_key);
+        INSERT INTO context_symbols_fts(rowid, project, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES (new.id, hex(new.cwd), new.name, new.qualified, new.tokens, new.signature, new.doc, new.path, new.name_key);
       END;
       CREATE TRIGGER context_symbols_ad
       AFTER DELETE ON context_symbols BEGIN
-        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
-        VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path, old.name_key);
+        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, project, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES ('delete', old.id, hex(old.cwd), old.name, old.qualified, old.tokens, old.signature, old.doc, old.path, old.name_key);
       END;
       CREATE TRIGGER context_symbols_au
       AFTER UPDATE ON context_symbols BEGIN
-        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
-        VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path, old.name_key);
-        INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
-        VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path, new.name_key);
+        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, project, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES ('delete', old.id, hex(old.cwd), old.name, old.qualified, old.tokens, old.signature, old.doc, old.path, old.name_key);
+        INSERT INTO context_symbols_fts(rowid, project, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES (new.id, hex(new.cwd), new.name, new.qualified, new.tokens, new.signature, new.doc, new.path, new.name_key);
       END;"#;
 
 /// Learned routes keep one bounded alias set for each place a worker found.
@@ -838,6 +845,21 @@ pub fn migrate_v50_to_v51(conn: &Connection) -> Result<(), StoreError> {
         {}
         {CONTEXT_INDEX}
         INSERT INTO schema_migrations(version, name) VALUES (51, 'code search by name word');
+        COMMIT;"#,
+        drop_context_index(conn)?
+    ))?;
+    Ok(())
+}
+
+/// Key the symbol search table by an opaque token per project instead of the
+/// project's path, whose words also matched every folder nested under it.
+/// The index is dropped and rebuilt on each project's next lookup, as at v51.
+pub fn migrate_v51_to_v52(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        {}
+        {CONTEXT_INDEX}
+        INSERT INTO schema_migrations(version, name) VALUES (52, 'code search by project token');
         COMMIT;"#,
         drop_context_index(conn)?
     ))?;

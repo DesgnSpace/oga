@@ -12,7 +12,7 @@ use crate::text::fts_query;
 
 /// The index layout this binary writes. An index built by an older layout is
 /// rebuilt rather than read.
-pub(crate) const INDEX_SCHEME: u32 = 10;
+pub(crate) const INDEX_SCHEME: u32 = 11;
 
 /// What the index knows about its own last build for one project.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,7 +147,7 @@ pub fn symbols_by_name(
         format!(
             " UNION SELECT s.id,{},s.name_key FROM context_symbols_fts \
              JOIN context_symbols s ON s.id=context_symbols_fts.rowid \
-             WHERE context_symbols_fts MATCH ? AND s.cwd=? AND ({})",
+             WHERE context_symbols_fts MATCH ? AND ({})",
             prefixed_symbol_columns(),
             names
                 .iter()
@@ -180,17 +180,16 @@ pub fn symbols_by_name(
             .iter()
             .map(|path| path.trim_end_matches("/**").to_owned())
             .collect::<Vec<_>>();
-        let word_match = project_match(cwd, &format!("{{name_key}} : ({})", fts_query(&words)));
+        let word_match = project_match(cwd, "name_key", &fts_query(&words));
         let cwd = cwd.display().to_string();
         let mut arguments: Vec<&dyn rusqlite::ToSql> =
-            Vec::with_capacity(names.len() * 2 + 3 + path_values.len() * 2);
+            Vec::with_capacity(names.len() * 2 + 2 + path_values.len() * 2);
         arguments.push(&cwd);
         for name in names {
             arguments.push(name);
         }
         if !words.is_empty() {
             arguments.push(&word_match);
-            arguments.push(&cwd);
             for name in names {
                 arguments.push(name);
             }
@@ -243,7 +242,7 @@ pub fn symbols_by_search(
              ORDER BY rank LIMIT {limit}",
             prefixed_symbol_columns()
         ))?;
-        let match_query = project_match(cwd, query);
+        let match_query = project_match(cwd, SYMBOL_TEXT, query);
         let mut arguments: Vec<&dyn rusqlite::ToSql> = vec![&match_query];
         let path_values = paths
             .unwrap_or_default()
@@ -285,6 +284,7 @@ pub fn term_hits(
             let count: i64 = statement.query_row(
                 [project_match(
                     cwd,
+                    SYMBOL_TEXT,
                     &format!("\"{}\"", term.replace('"', "\"\"")),
                 )],
                 |row| row.get(0),
@@ -586,11 +586,19 @@ fn prefixed_symbol_columns() -> String {
         .join(",")
 }
 
-fn project_match(cwd: &Path, query: &str) -> String {
-    format!(
-        "{{cwd}} : \"{}\" AND ({query})",
-        cwd.display().to_string().replace('"', "\"\"")
-    )
+/// Search-table columns a question's words are matched against: the
+/// symbol's own text, never the project token.
+const SYMBOL_TEXT: &str = "name qualified tokens signature doc path";
+
+/// `query` over `columns`, within the project at `cwd` alone.
+fn project_match(cwd: &Path, columns: &str, query: &str) -> String {
+    let token = cwd
+        .display()
+        .to_string()
+        .bytes()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<String>();
+    format!("{{project}} : \"{token}\" AND {{{columns}}} : ({query})")
 }
 
 pub fn save_index(

@@ -324,6 +324,42 @@ fn does_not_present_one_of_two_equal_answers_as_sure() {
     );
 }
 
+/// A project's lookups read its own index alone, even when another indexed
+/// project sits in a folder inside it.
+#[test]
+fn a_lookup_never_answers_from_a_project_nested_inside_it() {
+    let parent = Project::new();
+    parent.write(".gitignore", "nested/\n");
+    parent.write(
+        "src/refund.ts",
+        "export function issueCredit() { return 0; }\n",
+    );
+    parent.build();
+    let nested = parent.dir.path().join("nested");
+    fs::create_dir_all(nested.join("src")).expect("nested project is creatable");
+    fs::write(
+        nested.join("src/refund.ts"),
+        "export function refundCard() { return true; }\n",
+    )
+    .expect("nested source writes");
+    parent
+        .index()
+        .build(&nested, BuildOptions::default())
+        .expect("nested project indexes");
+
+    let answer = parent
+        .index()
+        .question(&parent.target(), "refundCard")
+        .expect("the question answers");
+
+    assert!(
+        !anchors(&answer).contains(&"src/refund.ts#refundCard".to_owned())
+            && !answer.markdown.contains("no longer on disk"),
+        "the parent answered from the nested project's index: {}",
+        answer.markdown
+    );
+}
+
 /// A question about code the task may not read is answered with the reason,
 /// not with the next best thing.
 #[test]
