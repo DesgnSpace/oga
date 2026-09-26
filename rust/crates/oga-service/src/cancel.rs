@@ -1,6 +1,7 @@
 //! Cancellation and timeout transitions.
 
 use oga_domain::{CompletionCode, Task, TaskCompletion, TaskState};
+use oga_store::append_event;
 use serde_json::json;
 
 use crate::{
@@ -9,7 +10,6 @@ use crate::{
     lifecycle::{close_running_turn, now_iso},
     require_task,
 };
-use oga_store::append_event;
 
 #[derive(Debug, Clone, Default)]
 pub struct CancelRequest {

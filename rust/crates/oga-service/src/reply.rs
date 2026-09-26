@@ -1,6 +1,7 @@
 //! Answering a worker question and reopening its provider session.
 
 use oga_domain::{Task, TaskScope, TaskState};
+use oga_store::append_event;
 use serde_json::json;
 
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
     dispatch::Dispatcher, encode_store, lifecycle::now_iso, require_existing_worktree,
     require_profile, require_task,
 };
-use oga_store::append_event;
 
 #[derive(Debug, Clone)]
 pub struct ReplyRequest {

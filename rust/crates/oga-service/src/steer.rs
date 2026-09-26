@@ -1,13 +1,13 @@
 //! Live instruction and model-switch validation.
 
 use oga_domain::{Task, TaskControlState, TaskState};
+use oga_store::append_event;
 use serde_json::json;
 
 use crate::{
     ContinuationError, acp_run::Delivered, dispatch::Dispatcher, follow_ups::queue_follow_up,
     lifecycle::now_iso, require_task, validate_model,
 };
-use oga_store::append_event;
 
 /// Why no instruction travels with a model change, whether or not the run
 /// takes one at all.

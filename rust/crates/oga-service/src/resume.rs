@@ -1,6 +1,7 @@
 //! Resume and fresh-session reseed transitions.
 
 use oga_domain::{HoldArgs, HoldVerb, Task, TaskHold, TaskScope, TaskState};
+use oga_store::append_event;
 use serde_json::json;
 
 use crate::{
@@ -14,7 +15,6 @@ use crate::{
     schedule::{StartAt, parse_start_at},
     validate_model, waiting,
 };
-use oga_store::append_event;
 
 /// How long a `rate_limit` hold waits when the failed run named no reset time.
 const RATE_LIMIT_FALLBACK_MS: i64 = 10 * 60 * 1_000;

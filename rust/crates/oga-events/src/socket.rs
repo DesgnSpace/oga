@@ -481,8 +481,8 @@ fn any_settled(store: &Store, task_ids: &[String]) -> Result<bool, StoreError> {
         ));
     }
     Ok(states
-        .iter()
-        .filter_map(|state| serde_json::from_value::<TaskState>(Value::String(state.clone())).ok())
+        .into_iter()
+        .filter_map(|state| serde_json::from_value::<TaskState>(Value::String(state)).ok())
         .any(TaskState::settled))
 }
 

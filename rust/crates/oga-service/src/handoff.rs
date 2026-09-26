@@ -1,6 +1,7 @@
 //! Moving a task between profiles or models.
 
 use oga_domain::{Task, TaskScope, TaskState};
+use oga_store::append_event;
 use serde_json::json;
 
 use crate::{
@@ -11,7 +12,6 @@ use crate::{
     lifecycle::now_iso,
     require_existing_worktree, require_profile, require_task, validate_model,
 };
-use oga_store::append_event;
 
 #[derive(Debug, Clone, Default)]
 pub struct HandoffRequest {

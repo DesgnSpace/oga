@@ -6,6 +6,7 @@ use oga_domain::{
     BranchOutcome, Task, TaskState, TaskWorktree, WorktreeDeleteBatchResult, WorktreeDeleteEntry,
     WorktreeDeleteResult, WorktreeDeleteSkipped,
 };
+use oga_store::append_event;
 use serde_json::json;
 use tokio::time::{sleep, timeout};
 
@@ -16,7 +17,6 @@ use crate::{
     lifecycle::{self, now_iso},
     require_task,
 };
-use oga_store::append_event;
 
 const ARCHIVE_STOPS_REASON: &str = "archived while running — stopped first";
 const ARCHIVE_CANCEL_TIMEOUT: Duration = Duration::from_secs(10);
