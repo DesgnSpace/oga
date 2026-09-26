@@ -107,7 +107,7 @@ async fn initialize_advertises_protocol_and_instructions() {
     assert!(instructions.contains("oga watch <taskId>"));
     assert!(instructions.contains("`query` locates code in a project"));
     assert!(instructions.contains("Every task response carries `next`"));
-    assert!(instructions.contains(oga_config::DEFAULT_CALLER_PROMPT));
+    assert!(!instructions.contains(oga_config::DEFAULT_CALLER_PROMPT));
 
     let tools = server
         .handle_value(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
@@ -142,12 +142,8 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
     let instructions = initialize["result"]["instructions"]
         .as_str()
         .expect("instructions");
-    assert!(!instructions.contains(oga_config::DEFAULT_CALLER_PROMPT));
+    assert!(!instructions.contains("Always name the entry file."));
     let project = std::fs::canonicalize(directory.path()).expect("canonical project path");
-    assert!(instructions.ends_with(&format!(
-        "Project root: {}. Always name the entry file.",
-        project.display()
-    )));
 
     let tools = server
         .handle_value(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
@@ -162,11 +158,9 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
     let description = delegate["inputSchema"]["properties"]["prompt"]["description"]
         .as_str()
         .expect("prompt description");
-    assert!(description.contains("It is sent as written"));
-    assert!(!description.contains("Headings and numbered steps"));
+    assert!(description.contains("sent as written"));
     assert!(description.contains("Always name the entry file."));
-    assert!(description.contains("directory's memories"));
-    assert!(description.contains("commit attribution"));
+    assert!(!description.contains("memories"));
     assert!(!description.contains("reporting protocol"));
     assert!(!description.contains("the scope"));
     assert!(description.contains(&format!(
@@ -299,6 +293,30 @@ fn insert_worker(server: &McpServer, profile: &Profile, id: &str, can_delegate: 
             ..Task::default()
         })
         .expect("task insert");
+}
+
+/// Every session loads the instructions and, in most clients, the whole tool
+/// list, so their size is a cost paid on every caller's context.
+#[tokio::test]
+async fn advertised_text_stays_within_budget() {
+    let (_directory, server) = test_server();
+    let initialize = post(
+        &server,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }),
+    )
+    .await;
+    let instructions = initialize["result"]["instructions"]
+        .as_str()
+        .expect("instructions");
+    assert!(instructions.len() <= 1_000, "{} chars", instructions.len());
+
+    let tools = post(
+        &server,
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+    )
+    .await;
+    let size = tools["result"]["tools"].to_string().len();
+    assert!(size <= 28_000, "{size} chars");
 }
 
 #[tokio::test]

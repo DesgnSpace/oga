@@ -90,6 +90,7 @@ impl McpServer {
         self
     }
 
+    /// An unreadable project config falls back to the default brief rules.
     fn caller_prompt(&self) -> String {
         let cwd = self
             .project
@@ -97,7 +98,8 @@ impl McpServer {
             .unwrap_or_else(global_cwd)
             .display()
             .to_string();
-        oga_http::settings::caller_prompt(&self.state.store, &cwd).unwrap_or_default()
+        oga_http::settings::caller_prompt(&self.state.store, &cwd)
+            .unwrap_or_else(|_| oga_config::DEFAULT_CALLER_PROMPT.to_owned())
     }
 
     pub fn state(&self) -> &HttpState {
@@ -194,11 +196,7 @@ impl McpServer {
                     }
                     _ => MCP_PROTOCOL_VERSION,
                 };
-                Ok(protocol::initialize_result(
-                    version,
-                    oga_domain::VERSION,
-                    &self.caller_prompt(),
-                ))
+                Ok(protocol::initialize_result(version, oga_domain::VERSION))
             }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(protocol::tool_list(
