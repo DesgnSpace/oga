@@ -23,6 +23,7 @@ import {
   type HandoffBriefTier,
 } from "@/domain/activity";
 import { ogaResultText } from "@/domain/oga";
+import { parseRawJson } from "@/lib/raw-json";
 
 export type TraceStyle = "work" | "message" | "notice";
 export type TraceState = "running" | "needs-input" | "failed" | "interrupted" | "done";
@@ -309,11 +310,12 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
         : previewKind === "markdown" && text !== undefined
           ? { kind: "markdown" }
           : undefined;
+      const shown = text !== undefined ? firstLines(text, 200) : { text: "", hidden: 0 };
       return {
         type: "content",
-        hiddenLines: text !== undefined ? hiddenLines(text) : 0,
+        hiddenLines: shown.hidden,
         language: codeLanguageFromPath(path),
-        text: text !== undefined ? capLines(text, 200) : "",
+        text: shown.text,
         preview,
       };
     }
@@ -992,7 +994,7 @@ function findValue(value: unknown, keys: string[]): unknown {
 }
 
 function findText(raw: string, keys: string[]): string | undefined {
-  const value = parseJson(raw);
+  const value = parseRawJson(raw);
   if (value === undefined) return undefined;
   const text = stringValue(findValue(value, keys));
   return text !== undefined ? stripTransportWrappers(text) : undefined;
@@ -1186,17 +1188,9 @@ function isBase64(value: unknown): value is string {
 }
 
 function imageDataUrlFromRaw(raw: string): string | undefined {
-  const value = parseJson(raw);
+  const value = parseRawJson(raw);
   if (value === undefined) return undefined;
   return findImageDataUrl(value);
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
 }
 
 function commandOutput(raw: string): string | undefined {
@@ -1208,7 +1202,7 @@ function commandOutput(raw: string): string | undefined {
  * block; a shell result usually arrives fenced as a console block.
  */
 function acpContentText(raw: string): string | undefined {
-  const value = parseJson(raw);
+  const value = parseRawJson(raw);
   if (typeof value !== "object" || value === null || !("content" in value)) return undefined;
   const blocks = (value as { content: unknown }).content;
   if (!Array.isArray(blocks)) return undefined;
@@ -1272,16 +1266,20 @@ function todoItems(raw: string): TodoItem[] | undefined {
     }
     return undefined;
   };
-  const value = parseJson(raw);
+  const value = parseRawJson(raw);
   return value === undefined ? undefined : find(value);
 }
 
-function hiddenLines(value: string): number {
-  return Math.max(value.split("\n").length - 200, 0);
-}
-
-function capLines(value: string, limit: number): string {
-  return value.split("\n").slice(0, limit).join("\n");
+/** The first `limit` lines of the text, and how many lines follow them. */
+function firstLines(value: string, limit: number): { text: string; hidden: number } {
+  let end = -1;
+  for (let line = 0; line < limit; line += 1) {
+    end = value.indexOf("\n", end + 1);
+    if (end === -1) return { text: value, hidden: 0 };
+  }
+  let hidden = 0;
+  for (let at = end; at !== -1; at = value.indexOf("\n", at + 1)) hidden += 1;
+  return { text: value.slice(0, end), hidden };
 }
 
 function relative(path: string, cwd: string): string {

@@ -1,6 +1,7 @@
 // Changed-file derivation and the bounded diff model used by the task detail UI.
 
 import type { TaskDiffFileStatus, TaskEventView } from "@/bridge/types";
+import { parseRawJson } from "@/lib/raw-json";
 
 export type DiffKind = "context" | "added" | "removed" | "skipped";
 
@@ -55,13 +56,8 @@ export function fileChangeMayContainEdit(raw: string): boolean {
 }
 
 export function fileChangeFromRaw(raw: string): FileChange | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  return search(value, undefined, false);
+  const value = parseRawJson(raw);
+  return value === undefined ? undefined : search(value, undefined, false);
 }
 
 export function countDiffLines(change: FileChange, kind: DiffKind): number {

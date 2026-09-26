@@ -1,3 +1,5 @@
+import { parseRawJson } from "@/lib/raw-json";
+
 export type OgaValue = string | number | boolean | null | OgaValue[] | OgaObject;
 
 export interface OgaObject {
@@ -165,7 +167,8 @@ export function ogaResultSummary(operation: string, output: string | undefined):
 }
 
 export function ogaResultText(raw: string): OgaResultText | undefined {
-  const value = parseOgaJson(raw);
+  // SAFETY: JSON.parse returns only JSON primitives, arrays, and objects.
+  const value = parseRawJson(raw) as OgaValue | undefined;
   if (value === undefined) return undefined;
   const call = findOgaCall(value);
   if (call?.result === undefined) return undefined;

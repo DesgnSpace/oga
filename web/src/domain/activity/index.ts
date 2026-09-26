@@ -15,6 +15,7 @@ import {
   ogaVerb,
   type OgaObject,
 } from "@/domain/oga";
+import { parseRawJson } from "@/lib/raw-json";
 import { absoluteTime } from "@/ui/time";
 
 export interface ActivityComposition {
@@ -1215,12 +1216,8 @@ interface AntigravityPayload {
 
 function parseAntigravityPayload(raw: string | undefined): AntigravityPayload | undefined {
   if (raw === undefined) return undefined;
-  try {
-    // SAFETY: provider payloads are decoded into this boundary shape before use.
-    return JSON.parse(raw) as AntigravityPayload;
-  } catch {
-    return undefined;
-  }
+  // SAFETY: provider payloads are decoded into this boundary shape before use.
+  return parseRawJson(raw) as AntigravityPayload | undefined;
 }
 
 /**
@@ -1448,12 +1445,7 @@ interface RetryInfo {
 function retryInfoFromRaw(raw: string | undefined): RetryInfo {
   const empty: RetryInfo = { attempt: 0, maxAttempts: 0 };
   if (!raw) return empty;
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return empty;
-  }
+  const value = parseRawJson(raw);
   if (typeof value !== "object" || value === null) return empty;
   const object = value as Record<string, unknown>;
   const rawError = object.error;
@@ -1642,12 +1634,7 @@ function parentActionId(event: TaskEventView): string | undefined {
 }
 
 function rawValue(event: TaskEventView): unknown {
-  if (!event.rawText) return undefined;
-  try {
-    return JSON.parse(event.rawText);
-  } catch {
-    return undefined;
-  }
+  return event.rawText ? parseRawJson(event.rawText) : undefined;
 }
 
 function rawString(event: TaskEventView, key: string): string | undefined {
