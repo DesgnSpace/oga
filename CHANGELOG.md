@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Oga is ready as soon as it opens or restarts, instead of keeping the app and your agents waiting several seconds while your terminal setup loads.
+- Tasks waiting on the same task now all start together when it finishes. One that can't start no longer leaves the others stuck waiting, and replies you queued on a finished task are sent.
+- A long-running task stays smooth to watch and scroll, and a new task shows up in the task list as soon as it starts.
+- Cancelling a task keeps what its worker did and what it cost up to that point.
+- Your agents get answers about models, tasks, and task progress without long pauses, and use less of their context reading them.
+- Looking up where code lives is faster, answers only from the project you're in, and takes much less disk space.
+- An OpenCode 1 worker that is slow to report its version once no longer has every later task refused.
+- The desktop app now keeps a log of Oga's background service, so you can include it when you report a problem.
 - A task's status dot now looks the same everywhere it shows — the task list, its header, and its reply box — so a running, waiting, or blocked task reads the same no matter where you're looking. A task blocked on another task now shows as blocked instead of looking like it's merely waiting.
 - A task's subagents now carry that same status dot, so you can tell at a glance which are still running, done, or hit a problem, without opening each one. A collapsed group of subagents shows how many are still running, and reads as done once none are.
 - You can choose the font Oga's interface uses in Settings → Appearance.

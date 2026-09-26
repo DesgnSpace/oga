@@ -21,54 +21,96 @@ Effort: **S** = hours, **M** = a day or two, **L** = more. **Measured** = number
 
 ## Summary
 
-| # | Finding | Area | Effort | Evidence |
-|---|---|---|---|---|
-| P1 | Broker waits 8–15 s on an interactive login shell before opening its port | cli, providers | S | Measured |
-| P2 | Live task screen re-parses the whole turn on every update (grows with task length) | web | S / M | Measured |
-| P3 | MCP `models` stalls 16–18 s whenever the usage cache is over 60 s old | mcp, http | S | Measured |
-| P4 | Tasks waiting on the same prerequisite start one after another | service | S | Measured |
-| P5 | `oga query` spends ~0.3–0.5 s per call on route healing, a `git config` spawn, and a symbol scan | context | S | Measured |
-| P6 | `oga watch` makes the broker replay a task's full history, then discards it | cli, events | S | Measured |
-| P7 | Streamed thinking/message text shows up only when the next step starts | service | S | Measured |
-| P8 | MCP `tasks` loads every task, and it and MCP `query` block broker threads | mcp | S–M | Measured |
-| P9 | CLI commands that take a task id download 2,000 task summaries first | cli | S | Measured |
-| P10 | Worktree creation copies ignored build folders: 72 GB on disk, ~19 s per Oga worktree | worktree | M | Measured |
-| P11 | Agent events stored at full size and pretty-printed per event, per client | service, events | S / S–M | Measured |
-| P12 | Search is one full-text table for all projects, filtered by a path phrase | context, store | M | Measured |
-| P13 | Every `oga query` walks the whole tree on one thread | context, http | M | Measured |
-| P14 | First query in a new worktree rebuilds the index in one write transaction | context | M | Measured |
-| P15 | Code-index rows are never pruned; subfolder and home-folder queries build their own indexes | context | S | Measured |
-| P16 | Task screen re-renders the app shell twice per update, plus once a second | web | S | Measured / Inferred |
-| P17 | Task-screen chunk is 535 KB; the bundle ships ~10 MB of Shiki grammars | web | S / M | Measured |
-| P18 | Model settings sends 627 KB and starts a full provider refresh on every open | http, web | S | Measured |
-| P19 | MCP results are pretty-printed; unfiltered `models` returns 712 KB | mcp | S | Measured |
-| P20 | Leaving a long task stringifies all its events; long tasks are never cached | web | S | Measured |
-| P21 | DB and CPU work runs on async worker threads in several broker paths | events, http | M | Inferred |
-| P22 | Task start is dominated by the agent connecting (3–22 s); no per-stage timings | acp, service | M–L | Measured |
-| P23 | Worker output capture goes quadratic on large output | runner, acp | S | Measured (bench) |
-| P24 | Sidebar re-renders on every stream batch and forces layout each time | web | S | Measured / Inferred |
-| P25 | Full scans of `tasks` on hot small queries; unused case-insensitive indexes | store | S | Measured |
-| P26 | Advisor builds a new HTTP client per call; pricing catalogue deep-cloned per call | advisor, pricing | S | Inferred |
-| P27 | Network probes for parked tasks run one after another | service | S | Inferred |
-| P28 | Release binary is unstripped; dev installs carry a duplicate binary and a 2.5 GB backup | build | S | Measured |
-| P29 | Broker memory stays at ~160 MB after heavy event reads | http, events | via P9/P11 | Measured (cause inferred) |
-| C1 | One refused dependent leaves its siblings `queued` forever; follow-ups skipped | service | S | Measured |
-| C2 | A dependent created as its prerequisite finishes waits for the 30 s sweep | service | S | Measured |
-| C3 | One slow `opencode --version` refuses every OpenCode 1 task until restart | providers | S | Measured |
-| C4 | New tasks can be missing from the sidebar for 15 s or indefinitely | web | S | Measured |
-| C5 | Cancel and force-complete drop the end of the run | service | S–M | Measured |
-| C6 | Single writer lock and a second writing process risk "database is locked" for workers | store, context, cli | M | Inferred |
-| C7 | CLI task lookup is capped at 2,000 tasks; older ids will stop resolving in ~25 days | cli | S | Measured |
-| C8 | Title-bar duration stops counting between updates | web | S | Inferred |
-| C9 | Wake recovery can cancel tasks that are still connecting | service | S | Inferred |
-| C10 | Desktop app discards the broker's stdout and stderr | desktop | S | Inferred |
-| C11 | Code-index edge cases: symbol cap skipped, trailing-slash duplicates, `.gitignore` classes | context | S | Measured |
-| X1 | Two `append_event_tx` copies and ~8 raw `INSERT INTO task_events` sites | service | S | Inferred |
-| X2 | Delivery inbox (684 lines) has no in-repo client, and its GET writes | service, http | owner call | Inferred |
-| X3 | Two syntax highlighters (refractor and Shiki) | web | M / L | Measured |
-| X4 | Dead gap check in the sidebar's batch path | web | S | Measured |
+| # | Finding | Area | Effort | Evidence | Status |
+|---|---|---|---|---|---|
+| P1 | Broker waits 8–15 s on an interactive login shell before opening its port | cli, providers | S | Measured | Done |
+| P2 | Live task screen re-parses the whole turn on every update (grows with task length) | web | S / M | Measured | Done (partly: parse cache, no incremental fold) |
+| P3 | MCP `models` stalls 16–18 s whenever the usage cache is over 60 s old | mcp, http | S | Measured | Done |
+| P4 | Tasks waiting on the same prerequisite start one after another | service | S | Measured | Done |
+| P5 | `oga query` spends ~0.3–0.5 s per call on route healing, a `git config` spawn, and a symbol scan | context | S | Measured | Done |
+| P6 | `oga watch` makes the broker replay a task's full history, then discards it | cli, events | S | Measured | Done |
+| P7 | Streamed thinking/message text shows up only when the next step starts | service | S | Measured | Open: needs owner decision |
+| P8 | MCP `tasks` loads every task, and it and MCP `query` block broker threads | mcp | S–M | Measured | Done |
+| P9 | CLI commands that take a task id download 2,000 task summaries first | cli | S | Measured | Done |
+| P10 | Worktree creation copies ignored build folders: 72 GB on disk, ~19 s per Oga worktree | worktree | M | Measured | Out of scope (build-size task) |
+| P11 | Agent events stored at full size and pretty-printed per event, per client | service, events | S / S–M | Measured | Done (CPU part); payload cap is an owner decision |
+| P12 | Search is one full-text table for all projects, filtered by a path phrase | context, store | M | Measured | Done |
+| P13 | Every `oga query` walks the whole tree on one thread | context, http | M | Measured | Done |
+| P14 | First query in a new worktree rebuilds the index in one write transaction | context | M | Measured | Done |
+| P15 | Code-index rows are never pruned; subfolder and home-folder queries build their own indexes | context | S | Measured | Done |
+| P16 | Task screen re-renders the app shell twice per update, plus once a second | web | S | Measured / Inferred | Done |
+| P17 | Task-screen chunk is 535 KB; the bundle ships ~10 MB of Shiki grammars | web | S / M | Measured | Done (partly: lazy diff chunk; Shiki trim is an owner decision) |
+| P18 | Model settings sends 627 KB and starts a full provider refresh on every open | http, web | S | Measured | Done |
+| P19 | MCP results are pretty-printed; unfiltered `models` returns 712 KB | mcp | S | Measured | Done |
+| P20 | Leaving a long task stringifies all its events; long tasks are never cached | web | S | Measured | Done |
+| P21 | DB and CPU work runs on async worker threads in several broker paths | events, http | M | Inferred | Done |
+| P22 | Task start is dominated by the agent connecting (3–22 s); no per-stage timings | acp, service | M–L | Measured | Done (timings recorded; pre-start not built) |
+| P23 | Worker output capture goes quadratic on large output | runner, acp | S | Measured (bench) | Done |
+| P24 | Sidebar re-renders on every stream batch and forces layout each time | web | S | Measured / Inferred | Done |
+| P25 | Full scans of `tasks` on hot small queries; unused case-insensitive indexes | store | S | Measured | Done |
+| P26 | Advisor builds a new HTTP client per call; pricing catalogue deep-cloned per call | advisor, pricing | S | Inferred | Done |
+| P27 | Network probes for parked tasks run one after another | service | S | Inferred | Done |
+| P28 | Release binary is unstripped; dev installs carry a duplicate binary and a 2.5 GB backup | build | S | Measured | Done (strip only) |
+| P29 | Broker memory stays at ~160 MB after heavy event reads | http, events | via P9/P11 | Measured (cause inferred) | Done (re-measured; no longer held) |
+| C1 | One refused dependent leaves its siblings `queued` forever; follow-ups skipped | service | S | Measured | Done |
+| C2 | A dependent created as its prerequisite finishes waits for the 30 s sweep | service | S | Measured | Done |
+| C3 | One slow `opencode --version` refuses every OpenCode 1 task until restart | providers | S | Measured | Done |
+| C4 | New tasks can be missing from the sidebar for 15 s or indefinitely | web | S | Measured | Done |
+| C5 | Cancel and force-complete drop the end of the run | service | S–M | Measured | Done |
+| C6 | Single writer lock and a second writing process risk "database is locked" for workers | store, context, cli | M | Inferred | Done |
+| C7 | CLI task lookup is capped at 2,000 tasks; older ids will stop resolving in ~25 days | cli | S | Measured | Done |
+| C8 | Title-bar duration stops counting between updates | web | S | Inferred | Done |
+| C9 | Wake recovery can cancel tasks that are still connecting | service | S | Inferred | Done |
+| C10 | Desktop app discards the broker's stdout and stderr | desktop | S | Inferred | Done |
+| C11 | Code-index edge cases: symbol cap skipped, trailing-slash duplicates, `.gitignore` classes | context | S | Measured | Done |
+| X1 | Two `append_event_tx` copies and ~8 raw `INSERT INTO task_events` sites | service | S | Inferred | Done |
+| X2 | Delivery inbox (684 lines) has no in-repo client, and its GET writes | service, http | owner call | Inferred | Out of scope (owner decision) |
+| X3 | Two syntax highlighters (refractor and Shiki) | web | M / L | Measured | Skipped (see fix log) |
+| X4 | Dead gap check in the sidebar's batch path | web | S | Measured | Out of scope (cleanup task) |
 
 Suggested order: P1, P4 + C1 + C2 (one fix), P3, P2 (parse cache), P5, P6, P7, P8, P9 + C7, P11 + X1. All of these are S or S–M. Then P10, P12–P15 (the index work), and P17.
+
+## Fix log
+
+Fixed on `main` on 2026-09-26, one commit per fix, each measured before and after with the method named below. The machine load was lower than during the audit, so compare each "before" only with its own "after", not with the audit's numbers.
+
+| # | Commits | Before → after |
+|---|---|---|
+| P1 | `645c9e4` `5aaeda2` `4c98238` | First `/health` on a scratch broker with the user's shell: median 6.8 s → 0.40 s. The 60 s re-capture is gone; PATH is re-read only when a spawn fails with "not found". |
+| P2 | `de8a751` | CPU per live update (real events): opencode 150/1,000/3,000 events 26/185/580 ms → 7/37/60 ms; claude 5.4/38/110 → 3.4/13/20 ms. Cost still grows with turn length (incremental fold not done: the pipeline's lookbacks need a resumable rewrite). |
+| P3 | `9245782` | MCP `models` after more than 60 s idle: 6.9–7.5 s → 0.05 s. The very first read for a profile still waits. |
+| P4, C1, C2, C9 | `7225580` | Harness, 3 dependents of 1 s: all done at +3.06 s → +1.03 s. A refused dependent no longer strands its sibling. A follow-up on a task with dependents now starts. Race: 5/20 left `pending` → 0/20. Wake recovery leaves connecting runs alone. |
+| P5 | `ff8de43` `1dc9d21` `b81bdbe` | Route heal 37 ms per lookup → skipped unless the index changed; `git config` 12.5 ms → 0; name lookups use the name index. |
+| P6 | `0163a02` | `oga watch` on a 21k-event task: 0.35 s and 6.2 MB replayed → under 1 ms, 605 B. |
+| P8 | `5c91e21` | MCP `tasks` 0.08–0.13 s → 0.001–0.004 s. `/health` max under 12 concurrent calls 0.63–1.06 s → 9–11 ms. |
+| P9, C7 | `3df8443` | `oga tasks` 55 → 10 ms; `oga inspect` 53 → 7–9 ms. Ids older than the newest 2,000 resolve. |
+| P11 (CPU), X1 | `5dc4e07` `abac42a` `28ccb79` | `event_views` on a 21k-event task 419–451 → 252–302 ms. Summary views 220–238 → 50–59 ms. `/api/events` replay 0.40–0.43 → 0.27–0.30 s. What is stored is unchanged. |
+| P12 | `35b3bed` | Term counts 15.0 → 1.2 ms and search 22.0 → 4.7 ms here. Answers no longer include hits from nested indexes. |
+| P13 | `805cdf0` `40ecdd4` | Walk: pitasgrid 85 → 32 ms. A lookup within 2 s of the last walk skips it, unless git moved the checkout. |
+| P14 | `4a9fd6a` | Longest index write transaction 890–909 → 74–76 ms. First lookup in a fresh clone 1.25 → 0.30 s (4 files parsed instead of 388). |
+| P15 | `d9f3abc` | Snapshot: 67 → 20 indexed folders, 1.53M → 185k symbols, 1,487 → 494 MB after vacuum. Subfolder lookups answer from the repository's index; non-repo folders are refused. |
+| P16, C8 | `ed77030` | Renders per update: TaskDetail 2 → 1, Sidebar 1 → 0.05. Idle CPU per second 30 → 15 ms. The title-bar time keeps counting. |
+| P17 | `396957e` | TaskDetail chunk 535 KB → 64 KB. Diff renderer loads on the first diff. Dist total unchanged at 11.6 MB. Trimming Shiki's languages needs a fragile import shim: owner decision. |
+| P18 | `f32df29` `e08cc02` `3c65a79` | Provider refreshes over 6 opens within the TTL: 6 → 1. Empty sidebar no longer reads model settings. Handoff dialog reads enabled models only: 386 KB → 8.8 KB on the scratch catalog. |
+| P19 | `3d0bb90` `29f9e41` | `models` default 14.2 → 6.4 KB; unfiltered 750 KB → 8.5 KB (50-row default cap, `limit` for more); `inspect` 1.4 → 0.9 KB. |
+| P20 | `1c4193c` | Sizing on leave, 150/1,000/5,000 events: 2.5/24/111 ms → 0.1/0.2/0.9 ms. Long tasks keep their newest 150 events in the cache. |
+| P21 | `d47ea36` | `/health` p95 with 16 replaying watchers 15–66 → 4–10 ms. |
+| P22 | `6a4da02` | `worker_spawned` records spawn, initialize, session, configure, and opened times. Pre-starting agents is not built. |
+| P23 | `b429b9a` | Capture at 50 MiB 1.38–1.60 → 0.03 s. Frame reader at 4 MiB 0.35 → 0.002 s. Codex diff with 1,000 changed files 0.19 → 0.045 s. |
+| P24 | `9176ca1` | No-op batch 10.1 ms and 1 render → 0.03 ms and 0 renders. |
+| P25 | `d804238` | Activity 2–3 → 0–1 ms, usage 3–7 → 0–1 ms, projects 3–8 → 2–3 ms. Three unused case-insensitive indexes dropped. |
+| P26 | `57facdf` | `catalogue()` 3.3 ms → 0.3 µs per call; one shared advisor client. |
+| P27 | `34c76f2` | Sweep with 4 network-parked tasks against unreachable hosts 48 → 3 s. |
+| P28 | `baeced4` `2e3146a` `37062bc` | Binary 50.1 → 44.1 MB (`strip`; LTO measured and not worth it). Dev install keeps one broker copy (−48.9 MB). DB backup 5.3 s and 2.6 GB → 0.23 s, no extra disk. |
+| P29 | — | Re-measured after heavy reads: footprint returns to 41–51 MB after 15 s idle (audit: held at 160 MB). |
+| C3 | `99e44ad` `acb9f8b` | A version check that hangs once no longer refuses later OpenCode 1 tasks, and no longer blocks an async thread for 5 s. |
+| C4 | `ae18f59` | A second new task within 15 s now refreshes the list. |
+| C5 | `88df67f` | Cancel closes the turn; a late run's events and spend are kept; the task stays cancelled. |
+| C6 | `09b1d73` | Writer transactions `BEGIN IMMEDIATE`; a second writer waits instead of failing "database is locked". VACUUM (25.6 s on the snapshot) runs only while no task works. |
+| C10 | `f64e88c` | Desktop broker output goes to `broker.log` beside the DB, set aside at 5 MiB on start. |
+| C11 | `2cf5571` | Symbol cap holds on partial walks and reconciles; trailing-slash folders share one index; `.gitignore` bracket classes match. |
+| P7 | — | Open. Flushing text early splits one message into several events, and the task screen, closing answer, handoff brief, and `oga watch` each read one event as one message. Needs a choice of storage shape first. |
+| X3 | — | Skipped. `@pierre/diffs` is built on Shiki, so diffs can't move to refractor; moving markdown to Shiki saves only refractor's 95 KB and changes code colours. |
 
 ---
 
