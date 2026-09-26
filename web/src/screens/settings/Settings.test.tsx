@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
+import { FONT_OPTIONS } from "@/appearance";
 import type {
+  AppearanceSettings,
+  BrokerCall,
   CleanupResult,
   CleanupSettings,
   CleanupSnapshot,
@@ -16,12 +19,17 @@ const defaultBriefRules = "The brief is all the worker gets: it can't see this c
 const inheritedPrompt: PromptConfig = { cwd: "/tmp/project", scope: "global", written: false, value: defaultBriefRules, inherited: defaultBriefRules };
 let callerPrompt = inheritedPrompt;
 let savedCallerPrompt: { cwd: string; written: boolean; value: string } | undefined;
+let appearance: AppearanceSettings = { font: null };
+let savedAppearance: AppearanceSettings | undefined;
 
 afterEach(() => {
   cleanup();
   clearCachedSettingsState();
   callerPrompt = inheritedPrompt;
   savedCallerPrompt = undefined;
+  appearance = { font: null };
+  savedAppearance = undefined;
+  document.documentElement.removeAttribute("style");
 });
 
 const longModelId =
@@ -153,14 +161,8 @@ function makeTransport(
   return {
     async invoke<T>(command: string, args?: Record<string, unknown>) {
       if (command !== "broker_call") throw new Error(`Unexpected command: ${command}`);
-      const call = args?.call as {
-        call: string;
-        request?: unknown;
-        profileId?: string;
-        patch?: { enabled?: boolean };
-        refresh?: boolean;
-        settings?: CleanupSettings;
-      };
+      // SAFETY: the broker client always sends a `BrokerCall` under `call`.
+      const call = args?.call as BrokerCall;
       switch (call.call) {
         case "summary":
           return { profiles, tasks: [], memoryProjects: [] } as T;
@@ -181,12 +183,18 @@ function makeTransport(
         case "callerPrompt":
           return callerPrompt as T;
         case "putCallerPrompt":
-          savedCallerPrompt = call.request as { cwd: string; written: boolean; value: string };
+          savedCallerPrompt = call.request;
           return { ...callerPrompt, ...savedCallerPrompt } as T;
         case "cleanup":
           return (onCleanup ? onCleanup() : cleanupSnapshot()) as T;
         case "putCleanup":
-          return (onPutCleanup ? onPutCleanup(call.settings!) : cleanupSnapshot(call.settings!)) as T;
+          return (onPutCleanup ? onPutCleanup(call.settings) : cleanupSnapshot(call.settings)) as T;
+        case "appearance":
+          return appearance as T;
+        case "putAppearance":
+          savedAppearance = call.settings;
+          appearance = call.settings;
+          return appearance as T;
         case "runCleanup":
           return (
             onRunCleanup
@@ -349,6 +357,71 @@ describe("settings navigation", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Memories" }));
     expect(await screen.findByRole("heading", { name: "Project memories" })).toBeTruthy();
+  });
+});
+
+describe("appearance tab", () => {
+  const plexStack = FONT_OPTIONS.find((option) => option.id === "plex-sans")!.stack;
+  const systemStack = FONT_OPTIONS.find((option) => option.id === "system")!.stack;
+
+  it("opens the App group, and the arrow keys reach it from the tab above", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    const appearanceTab = await screen.findByRole("tab", { name: "Appearance" });
+    const group = appearanceTab.closest(".settings-nav-group")!;
+    expect(group.querySelector(".settings-nav-label")?.textContent).toBe("App");
+    expect(group.querySelector('[role="tab"]')).toBe(appearanceTab);
+
+    const briefRules = screen.getByRole("tab", { name: "Brief rules" });
+    fireEvent.click(briefRules);
+    fireEvent.keyDown(briefRules, { key: "ArrowDown" });
+
+    expect(appearanceTab.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(appearanceTab);
+    fireEvent.keyDown(appearanceTab, { key: "ArrowDown" });
+    expect(screen.getByRole("tab", { name: "Task history" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("is found by searching for appearance or font", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+    const search = await screen.findByRole("searchbox", { name: "Search settings" });
+
+    for (const query of ["appearance", "Font"]) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(screen.getByRole("tab", { name: "Appearance" })).toBeTruthy();
+      expect(screen.queryByRole("tab", { name: "Workers" })).toBeNull();
+    }
+  });
+
+  it("switches the interface font as soon as one is picked, and saves it", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Appearance" }));
+    const select = await screen.findByRole<HTMLSelectElement>("combobox", { name: /^Font/ });
+    expect(select.value).toBe("plex-sans");
+
+    fireEvent.change(select, { target: { value: "system" } });
+
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(systemStack);
+    await waitFor(() => expect(savedAppearance).toEqual({ font: "system" }));
+    expect(select.value).toBe("system");
+  });
+
+  it("shows and uses IBM Plex Sans for a font this build does not know", async () => {
+    appearance = { font: "comic-sans-future" };
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Appearance" }));
+    const select = await screen.findByRole<HTMLSelectElement>("combobox", { name: /^Font/ });
+
+    expect(select.value).toBe("plex-sans");
+    expect(select.selectedOptions[0]?.textContent).toBe("IBM Plex Sans");
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(plexStack);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

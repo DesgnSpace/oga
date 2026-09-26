@@ -3,6 +3,7 @@
 import { getTransport } from "./transport";
 import type {
   AdvisorSettings,
+  AppearanceSettings,
   BrokerCall,
   BrokerCallResult,
   BridgeError,
@@ -95,6 +96,8 @@ export const broker = {
   putWaiting: (settings: WaitSettings) => call({ call: "putWaiting", settings }),
   advisor: () => call({ call: "advisor" }),
   putAdvisor: (settings: AdvisorSettings) => call({ call: "putAdvisor", settings }),
+  appearance: () => call({ call: "appearance" }),
+  putAppearance: (settings: AppearanceSettings) => call({ call: "putAppearance", settings }),
 
   putModelSettings: (request: ModelSettingsUpdate) => call({ call: "putModelSettings", request }),
 

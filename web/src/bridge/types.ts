@@ -413,6 +413,11 @@ export interface AdvisorSettings {
   apiKey: string;
 }
 
+/** `null` means the default font. */
+export interface AppearanceSettings {
+  font: string | null;
+}
+
 export interface HealthReport {
   status: string;
   version: string;
@@ -758,6 +763,8 @@ export type BrokerCall =
   | { call: "putWaiting"; settings: WaitSettings }
   | { call: "advisor" }
   | { call: "putAdvisor"; settings: AdvisorSettings }
+  | { call: "appearance" }
+  | { call: "putAppearance"; settings: AppearanceSettings }
   | { call: "archiveTask"; taskId: string; archived: boolean; deleteBranch?: boolean }
   | { call: "cancelTask"; taskId: string }
   | { call: "resumeTask"; taskId: string; request: ResumeRequest }
@@ -794,6 +801,8 @@ export interface BrokerCallResult {
   putWaiting: WaitSettings;
   advisor: AdvisorSettings;
   putAdvisor: AdvisorSettings;
+  appearance: AppearanceSettings;
+  putAppearance: AppearanceSettings;
   archiveTask: ArchiveTaskResponse;
   cancelTask: void;
   resumeTask: void;

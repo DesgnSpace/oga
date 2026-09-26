@@ -462,6 +462,16 @@ export function KeyboardIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function TypeIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M2.5 12.5 5.8 3.5l3.3 9M3.7 9.5h4.2" />
+      <circle cx={11.4} cy={10.7} r={1.8} />
+      <path d="M13.2 8.4v4.1" />
+    </Svg>
+  );
+}
+
 // Toast-semantic aliases — same strokes, callers pick by intent.
 export const ToastPendingIcon = RefreshIcon;
 export const ToastSuccessIcon = CheckIcon;
@@ -514,6 +524,7 @@ export const iconRegistry: Array<{ name: string; Component: React.ComponentType<
   { name: "ListIcon", Component: ListIcon },
   { name: "HistoryIcon", Component: HistoryIcon },
   { name: "KeyboardIcon", Component: KeyboardIcon },
+  { name: "TypeIcon", Component: TypeIcon },
   { name: "DisclosureIcon", Component: DisclosureIcon },
   { name: "DiffMarkIcon", Component: DiffMarkIcon },
 ];

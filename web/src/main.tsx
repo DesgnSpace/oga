@@ -1,6 +1,8 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "@/App";
+import { applyFont, readCachedFont } from "@/appearance";
+import { broker } from "@/bridge/client";
 import { installNativeChrome } from "@/shell/nativeChrome";
 import { installOverlayScroll } from "@/ui/overlay-scroll";
 import "@/oga.css";
@@ -39,6 +41,7 @@ function applyPlatformClass(): void {
 }
 
 applyPlatformClass();
+applyFont(readCachedFont());
 installNativeChrome();
 installOverlayScroll();
 
@@ -52,3 +55,7 @@ createRoot(root).render(
     </StrictMode>
   </StartupErrorBoundary>,
 );
+
+void broker.appearance().then((result) => {
+  if (result.ok) applyFont(result.value.font);
+});

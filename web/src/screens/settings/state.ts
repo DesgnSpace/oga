@@ -26,6 +26,7 @@ export type SettingsTab =
   | "notifications"
   | "memories"
   | "callerPrompts"
+  | "appearance"
   | "storage"
   | "shortcuts"
   | "about";
@@ -36,6 +37,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   "notifications",
   "memories",
   "callerPrompts",
+  "appearance",
   "storage",
   "shortcuts",
   "about",
@@ -45,7 +47,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
 export const SETTINGS_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
   { label: "General", tabs: ["workers", "connections", "notifications"] },
   { label: "Instructions", tabs: ["memories", "callerPrompts"] },
-  { label: "App", tabs: ["storage", "shortcuts", "about"] },
+  { label: "App", tabs: ["appearance", "storage", "shortcuts", "about"] },
 ];
 
 export function tabLabel(tab: SettingsTab): string {
@@ -60,6 +62,8 @@ export function tabLabel(tab: SettingsTab): string {
       return "Memories";
     case "callerPrompts":
       return "Brief rules";
+    case "appearance":
+      return "Appearance";
     case "storage":
       return "Task history";
     case "shortcuts":
@@ -67,6 +71,21 @@ export function tabLabel(tab: SettingsTab): string {
     case "about":
       return "About";
   }
+}
+
+function tabSearchTerms(tab: SettingsTab): string[] {
+  switch (tab) {
+    case "appearance":
+      return ["font", "typeface"];
+    default:
+      return [];
+  }
+}
+
+export function tabMatchesQuery(tab: SettingsTab, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [tabLabel(tab), ...tabSearchTerms(tab)].some((term) => term.toLowerCase().includes(needle));
 }
 
 export type ProjectSettingsScope = { kind: "global" } | { kind: "project"; path: string };

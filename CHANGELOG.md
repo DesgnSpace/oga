@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- You can choose the font Oga's interface uses in Settings → Appearance.
 - You can replace Oga's default handoff instructions with your own.
 
 - You can no longer set custom worker instructions. Workers receive your brief, project memories, and optional commit attribution; scope stays enforced by permissions, and your brief sets how they report back.

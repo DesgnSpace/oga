@@ -18,6 +18,7 @@ import {
   LinkIcon,
   ListIcon,
   TerminalIcon,
+  TypeIcon,
 } from "@/ui/icons";
 import { Card, CardRow, PageHeader, Section } from "@/components/primitives/Page";
 import { MarkdownContent } from "@/domain/markdown";
@@ -25,6 +26,7 @@ import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
 import { workerToastName } from "@/lib/toast-subject";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
+import { applyFont, FONT_OPTIONS, resolveFont } from "@/appearance";
 import type {
   AdvisorSettings,
   BridgeResult,
@@ -77,7 +79,7 @@ import {
   writeCachedSettingsState,
 } from "./state";
 import type { ProjectSettingsScope, PromptsModel, SettingsState, SettingsTab } from "./state";
-import { SETTINGS_GROUPS, SETTINGS_TABS, tabLabel } from "./state";
+import { SETTINGS_GROUPS, SETTINGS_TABS, tabLabel, tabMatchesQuery } from "./state";
 
 function defaultModelFor(provider: Provider): string {
   switch (provider) {
@@ -122,10 +124,10 @@ export default function SettingsPage({
   const wasOpen = useRef(false);
   const tabRefs = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
 
-  const visibleTabs = useMemo(() => {
-    const needle = sectionQuery.trim().toLowerCase();
-    return SETTINGS_TABS.filter((tab) => !needle || tabLabel(tab).toLowerCase().includes(needle));
-  }, [sectionQuery]);
+  const visibleTabs = useMemo(
+    () => SETTINGS_TABS.filter((tab) => tabMatchesQuery(tab, sectionQuery)),
+    [sectionQuery],
+  );
 
   const handleTabKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>, tab: SettingsTab) => {
@@ -387,6 +389,16 @@ export default function SettingsPage({
             />
           </div>
           <div
+            id="settings-panel-appearance"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-appearance"
+            hidden={activeTab !== "appearance"}
+            className={activeTab !== "appearance" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <AppearancePanel />
+          </div>
+          <div
             id="settings-panel-storage"
             role="tabpanel"
             tabIndex={0}
@@ -440,6 +452,8 @@ function TabIcon({ tab }: { tab: SettingsTab }) {
       return <BookmarkIcon />;
     case "callerPrompts":
       return <ListIcon />;
+    case "appearance":
+      return <TypeIcon />;
     case "storage":
       return <HistoryIcon />;
     case "shortcuts":
@@ -704,6 +718,79 @@ function AdvisorPanel() {
         </Card>
       ) : null}
     </Section>
+  );
+}
+
+function AppearancePanel() {
+  const [font, setFont] = useState<string | null | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<{ heading: string; message: string } | undefined>(undefined);
+
+  const loadAppearance = useCallback(async () => {
+    const result = await broker.appearance();
+    if (result.ok) {
+      setFont(result.value.font);
+      applyFont(result.value.font);
+      setError(undefined);
+    } else {
+      setError({ heading: "Couldn't load your font choice", message: result.error.message });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAppearance();
+  }, [loadAppearance]);
+
+  const save = async (next: string) => {
+    const previous = font;
+    setFont(next);
+    applyFont(next);
+    setSaving(true);
+    const result = await broker.putAppearance({ font: next });
+    setSaving(false);
+    if (result.ok) {
+      setFont(result.value.font);
+      applyFont(result.value.font);
+      setError(undefined);
+      return;
+    }
+    setFont(previous);
+    applyFont(previous);
+    setError({ heading: "Couldn't save your font choice", message: result.error.message });
+  };
+
+  return (
+    <>
+      <PageHeader title={tabLabel("appearance")} />
+      <Section>
+        {error ? (
+          <div className="settings-message settings-message-error" role="alert">
+            <strong>{error.heading}</strong>
+            <p>{error.message}</p>
+            <button className="text-button" type="button" onClick={() => void loadAppearance()}>
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {font !== undefined ? (
+          <Card>
+            <CardRow as="label" title="Font" description="The font for Oga's interface. Code and logs stay in a monospace font.">
+              <select
+                value={resolveFont(font).id}
+                disabled={saving}
+                onChange={(event) => void save(event.target.value)}
+              >
+                {FONT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </CardRow>
+          </Card>
+        ) : null}
+      </Section>
+    </>
   );
 }
 
