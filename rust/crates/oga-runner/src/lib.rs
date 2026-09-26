@@ -326,11 +326,16 @@ impl ProviderRunner {
             return Err(RunnerError::EmptyCommand);
         }
 
-        // Confinement resolves the executable from this PATH. It can wait on
-        // the login shell right after the broker starts.
-        let path = tokio::task::spawn_blocking(worker_path::worker_path)
-            .await
-            .map_err(|_| RunnerError::LostResult)?;
+        // Confinement resolves the executable from this PATH. Only a wait on
+        // the startup capture goes off the runtime: the hop itself delays the
+        // spawn, and a task reads `running` with no worker until it lands.
+        let path = if worker_path::awaits_startup_capture() {
+            tokio::task::spawn_blocking(worker_path::worker_path)
+                .await
+                .map_err(|_| RunnerError::LostResult)?
+        } else {
+            worker_path::worker_path()
+        };
         let mut env = BTreeMap::from([("PATH".to_owned(), path)]);
         env.extend(request.env.clone());
         let prepared = self.confinement.prepare(

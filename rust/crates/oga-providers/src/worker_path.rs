@@ -51,6 +51,11 @@ pub fn warm_login_path() {
     refresh_login_path();
 }
 
+/// Whether [`worker_path`] would wait on the broker's startup capture.
+pub fn awaits_startup_capture() -> bool {
+    LOGIN_PATH.lock().is_ok_and(|state| state.startup_pending)
+}
+
 /// Capture the login shell's PATH again on its own thread. Called when a spawn
 /// cannot find its command, which may sit in a directory the shell gained since.
 pub fn refresh_login_path() {
