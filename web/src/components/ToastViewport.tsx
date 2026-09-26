@@ -11,6 +11,8 @@ import {
 const EMPTY_TOASTS: ToastRecord[] = [];
 const DISMISS_DISTANCE = 100;
 const DISMISS_VELOCITY = 0.35;
+// A card that leaves before it is painted gets no transitionend; this outlasts the 200ms exit.
+const EXIT_FALLBACK_MS = 300;
 
 function toastRole(kind: ToastRecord["kind"]): "alert" | "status" {
   return kind === "error" ? "alert" : "status";
@@ -34,7 +36,13 @@ function ToastCard({ record, onClose }: { record: ToastRecord; onClose: () => vo
   const [entered, setEntered] = useState(false);
   const [dragX, setDragX] = useState(0);
   const drag = useRef<{ pointerId: number; startX: number } | null>(null);
+  const exiting = record.phase === "exiting";
   useEffect(() => setEntered(true), []);
+  useEffect(() => {
+    if (!exiting) return undefined;
+    const timer = setTimeout(onClose, EXIT_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, [exiting]);
   return (
     <article
       ref={ref}
@@ -61,7 +69,7 @@ function ToastCard({ record, onClose }: { record: ToastRecord; onClose: () => vo
       role={toastRole(record.kind)}
       aria-live={record.kind === "error" ? "assertive" : "polite"}
       onTransitionEnd={(event) => {
-        if (event.target === ref.current && record.phase === "exiting") onClose();
+        if (event.target === ref.current && exiting) onClose();
       }}
     >
       <ToastIcon kind={record.kind} />
@@ -92,7 +100,7 @@ export function ToastViewport() {
   const [positions, setPositions] = useState<Record<number, number>>({});
   const [stackHeight, setStackHeight] = useState(0);
   const itemRefs = useRef(new Map<number, HTMLDivElement>());
-  const more = Math.max(0, rendered.length - 3);
+  const more = rendered.filter((record, index) => index < rendered.length - 3 && record.phase !== "exiting").length;
   const errorCount = rendered.filter((record) => record.kind === "error").length;
 
   useEffect(() => {

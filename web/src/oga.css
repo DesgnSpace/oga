@@ -254,6 +254,7 @@ a {
     right: var(--space-4);
     bottom: var(--space-4);
     width: min(360px, calc(100vw - var(--space-4) * 2));
+    /* Cards and the stack's buttons opt back in; the rest passes clicks to the page. */
     pointer-events: none;
 }
 
@@ -264,7 +265,6 @@ a {
     right: 0;
     bottom: 0;
     width: 100%;
-    pointer-events: auto;
     transform-origin: bottom center;
     transform: translate3d(0, calc(-1 * var(--toast-y, 0px)), 0) scale(var(--toast-scale, 1));
     transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out), visibility 0s linear 0s;
@@ -283,6 +283,7 @@ a {
     box-shadow: 0 4px 12px color-mix(in srgb, #000 14%, transparent);
     color: var(--color-text);
     opacity: 1;
+    pointer-events: auto;
     transform: translate3d(var(--toast-x, 0px), 0, 0);
     touch-action: pan-y;
     transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
@@ -290,6 +291,7 @@ a {
 
 .toast-card-exiting {
     opacity: 0;
+    pointer-events: none;
     transform: translate3d(var(--toast-x, 0px), 12px, 0);
 }
 
@@ -410,6 +412,7 @@ a {
     background: color-mix(in srgb, var(--color-text) 7%, var(--color-surface));
     color: var(--color-text-muted);
     font-size: var(--text-sm);
+    pointer-events: auto;
     transform: translateY(-100%);
 }
 
@@ -424,6 +427,7 @@ a {
     border-radius: 4px;
     background: var(--color-surface);
     box-shadow: 0 2px 8px color-mix(in srgb, #000 14%, transparent);
+    pointer-events: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
