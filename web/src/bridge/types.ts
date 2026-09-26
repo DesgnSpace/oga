@@ -756,6 +756,7 @@ export type BrokerCall =
   | { call: "memories"; cwd: string }
   | { call: "callerPrompt"; cwd?: string }
   | { call: "modelSettings"; cwd?: string; refresh?: boolean }
+  | { call: "enabledModels"; cwd?: string }
   | { call: "cleanup" }
   | { call: "putCleanup"; settings: CleanupSettings }
   | { call: "runCleanup" }
@@ -794,6 +795,7 @@ export interface BrokerCallResult {
   memories: MemoryEntry[];
   callerPrompt: PromptConfig;
   modelSettings: ModelSettingsSnapshot;
+  enabledModels: ModelSettingsSnapshot;
   cleanup: CleanupSnapshot;
   putCleanup: CleanupSnapshot;
   runCleanup: CleanupResult;

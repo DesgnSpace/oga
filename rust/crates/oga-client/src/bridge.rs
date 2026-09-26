@@ -69,6 +69,10 @@ pub enum BrokerCall {
         cwd: Option<String>,
         refresh: Option<bool>,
     },
+    /// The model settings trimmed to enabled workers and their enabled models.
+    EnabledModels {
+        cwd: Option<String>,
+    },
     Cleanup,
     PutCleanup {
         settings: CleanupSettings,
@@ -303,6 +307,9 @@ mod native {
                     self.model_settings(cwd.as_deref(), refresh == Some(true))
                         .await,
                 ),
+                BrokerCall::EnabledModels { cwd } => {
+                    encode(self.enabled_models(cwd.as_deref()).await)
+                }
                 BrokerCall::Cleanup => encode(self.cleanup().await),
                 BrokerCall::PutCleanup { settings } => encode(self.put_cleanup(&settings).await),
                 BrokerCall::RunCleanup => encode(self.run_cleanup().await),

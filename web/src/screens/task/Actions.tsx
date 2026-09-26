@@ -658,7 +658,7 @@ function HandoffDialog({
     setNoOtherWorker(false);
     void Promise.all([
       broker.summary({ compact: true, limit: 1 }),
-      broker.modelSettings(task.cwd),
+      broker.enabledModels(task.cwd),
     ]).then(([summary, settings]) => {
       if (disposed) return;
       if (!summary.ok) {
@@ -673,7 +673,7 @@ function HandoffDialog({
       const currentProfile = summary.value.profiles.find((candidate) => candidate.id === task.profileId);
       setCurrentLabels({
         profile: currentProfile?.label,
-        model: currentWorker?.models.find((model) => model.id === task.model)?.label,
+        model: currentWorker?.models.find((model) => model.id === task.model)?.label ?? task.model,
       });
       const available = settings.value.workers.flatMap((worker) => {
         const profile = summary.value.profiles.find((candidate) => candidate.id === worker.id);

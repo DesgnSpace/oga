@@ -721,6 +721,18 @@ impl LoopbackClient {
         self.get_json(url).await
     }
 
+    pub async fn enabled_models(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<ModelSettingsSnapshot, ClientError> {
+        let mut url = self.endpoint(&["api", "model-settings"]);
+        if let Some(cwd) = cwd {
+            url.query_pairs_mut().append_pair("cwd", cwd);
+        }
+        url.query_pairs_mut().append_pair("enabled", "true");
+        self.get_json(url).await
+    }
+
     pub async fn put_model_settings(
         &self,
         request: &ModelSettingsUpdate,
@@ -1704,6 +1716,10 @@ mod tests {
             .model_settings(Some("/home/test"), false)
             .await
             .expect("model settings");
+        client
+            .enabled_models(Some("/home/test"))
+            .await
+            .expect("enabled models");
         client
             .put_model_settings(&ModelSettingsUpdate {
                 cwd: "/home/test".into(),

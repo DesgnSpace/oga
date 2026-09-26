@@ -59,7 +59,14 @@ const MAX_MEMORY_CHARS: u64 = 64_000;
 #[derive(Debug, Deserialize)]
 pub struct CwdQuery {
     pub cwd: Option<String>,
-    pub refresh: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelSettingsQuery {
+    cwd: Option<String>,
+    refresh: Option<bool>,
+    /// Only the workers and models a task can move to.
+    enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -734,7 +741,7 @@ pub async fn delete_grant(
 
 pub async fn get_model_settings(
     State(state): State<HttpState>,
-    Query(query): Query<CwdQuery>,
+    Query(query): Query<ModelSettingsQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
     let cwd = canonical_cwd(
         query
@@ -742,9 +749,26 @@ pub async fn get_model_settings(
             .as_deref()
             .unwrap_or(&global_cwd().display().to_string()),
     );
-    Ok(Json(
-        model_settings_view(&state.store, &cwd, query.refresh == Some(true)).await?,
-    ))
+    let mut view = model_settings_view(&state.store, &cwd, query.refresh == Some(true)).await?;
+    if query.enabled == Some(true) {
+        keep_enabled(&mut view);
+    }
+    Ok(Json(view))
+}
+
+fn keep_enabled(view: &mut Value) {
+    let Some(workers) = view["workers"].as_array_mut() else {
+        return;
+    };
+    workers.retain_mut(|worker| {
+        if worker["enabled"] != true {
+            return false;
+        }
+        if let Some(models) = worker["models"].as_array_mut() {
+            models.retain(|model| model["enabled"] == true);
+        }
+        true
+    });
 }
 
 pub async fn put_model_settings(

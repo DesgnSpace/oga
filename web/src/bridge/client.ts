@@ -85,6 +85,8 @@ export const broker = {
 
   modelSettings: (cwd?: string, refresh = false) => call({ call: "modelSettings", cwd, refresh }),
 
+  enabledModels: (cwd?: string) => call({ call: "enabledModels", cwd }),
+
   cleanup: () => call({ call: "cleanup" }),
 
   putCleanup: (settings: CleanupSettings) => call({ call: "putCleanup", settings }),

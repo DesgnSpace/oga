@@ -2637,3 +2637,100 @@ async fn a_save_waiting_on_the_database_leaves_other_requests_answered() {
         Ok(StatusCode::OK)
     );
 }
+
+#[tokio::test]
+async fn the_enabled_model_read_lists_only_enabled_workers_and_their_enabled_models() {
+    let fixture = Fixture::new();
+    fixture
+        .store
+        .repositories()
+        .profiles()
+        .insert(
+            &Profile {
+                id: "enabled-read-claude".into(),
+                label: "Claude".into(),
+                provider: Provider::Claude,
+                default_model: "sonnet".into(),
+                enabled: true,
+                env: BTreeMap::new(),
+                capabilities: Vec::new(),
+                command: None,
+            },
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("profile insert");
+    fixture
+        .store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &json!({ "profiles": {
+                "profile": { "enabled": false, "modelEnabled": { "fake": true } },
+                "enabled-read-claude": { "modelEnabled": { "opus": true, "haiku": false } },
+            } })
+            .to_string(),
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("model settings");
+    let read = |query: &'static str| {
+        let router = fixture.router.clone();
+        let cwd = fixture.cwd.clone();
+        async move {
+            json_response(
+                request(
+                    &router,
+                    Method::GET,
+                    &format!("/api/model-settings?cwd={cwd}{query}"),
+                    Body::empty(),
+                )
+                .await,
+            )
+            .await
+        }
+    };
+    let model_ids = |worker: &Value| {
+        worker["models"]
+            .as_array()
+            .expect("models")
+            .iter()
+            .map(|model| model["id"].as_str().expect("model id").to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    let (status, full) = read("").await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, enabled) = read("&enabled=true").await;
+    assert_eq!(status, StatusCode::OK);
+
+    let full_workers = full["workers"].as_array().expect("workers");
+    assert!(full_workers.iter().any(|worker| worker["id"] == "profile"));
+    let full_claude = full_workers
+        .iter()
+        .find(|worker| worker["id"] == "enabled-read-claude")
+        .expect("claude in the full read");
+    assert!(model_ids(full_claude).contains(&"haiku".to_owned()));
+
+    let workers = enabled["workers"].as_array().expect("workers");
+    assert_eq!(
+        workers
+            .iter()
+            .map(|worker| worker["id"].as_str().expect("worker id"))
+            .collect::<Vec<_>>(),
+        ["enabled-read-claude"]
+    );
+    let models = model_ids(&workers[0]);
+    assert!(models.contains(&"opus".to_owned()));
+    assert!(!models.contains(&"haiku".to_owned()));
+    assert!(
+        workers[0]["models"]
+            .as_array()
+            .expect("models")
+            .iter()
+            .all(|model| model["enabled"] == true)
+    );
+    assert_eq!(enabled["revision"], full["revision"]);
+}
