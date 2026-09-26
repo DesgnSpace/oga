@@ -580,3 +580,29 @@ async fn archiving_a_batch_deletes_each_clean_branch() {
         assert!(!branch_exists(&project, &branch).await.unwrap());
     }
 }
+
+#[tokio::test]
+async fn inspect_names_the_transport_only_when_routing_is_asked_for() {
+    let (_directory, server) = test_server();
+    let mut connected = task("connected", TaskState::Completed);
+    connected.transport = Some(oga_domain::TaskTransport::cli(
+        oga_domain::TransportReason::Unavailable,
+        Some("spawn: could not spawn provider".into()),
+        "2026-09-05T00:00:00.000Z",
+    ));
+    insert(&server, &connected);
+
+    let default = tool_body(&call(&server, "inspect", json!({ "taskId": "connected" })).await);
+    let routing = tool_body(
+        &call(
+            &server,
+            "inspect",
+            json!({ "taskId": "connected", "fields": ["routing"] }),
+        )
+        .await,
+    );
+
+    assert_eq!(default["profileId"], "main");
+    assert!(default.get("transport").is_none());
+    assert_eq!(routing["transport"]["kind"], "cli");
+}

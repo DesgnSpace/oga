@@ -509,6 +509,13 @@ fn shared_tools() -> Vec<Value> {
                         "Include each account's quota use. Set false to skip the extra read per account.",
                     ),
                 ),
+                (
+                    "limit".into(),
+                    described(
+                        json!({ "type": "integer", "minimum": 1, "default": 50 }),
+                        "How many model rows come back; `moreRows` counts the rest.",
+                    ),
+                ),
             ]),
             &[],
         ),

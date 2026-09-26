@@ -451,3 +451,73 @@ async fn models_honor_project_model_enablement() {
     assert!(rows.iter().all(|row| row["model"] != "sonnet"));
     assert_eq!(catalog["love"], json!([]));
 }
+
+#[tokio::test]
+async fn models_report_usage_once_per_profile_and_cap_the_rows() {
+    let (directory, server) = test_server();
+    for id in ["capped-a", "capped-b", "capped-c"] {
+        server
+            .state()
+            .store
+            .repositories()
+            .profiles()
+            .insert(
+                &Profile {
+                    id: id.into(),
+                    label: id.into(),
+                    provider: Provider::Fx,
+                    default_model: format!("{id}-model"),
+                    enabled: true,
+                    env: std::collections::BTreeMap::from([("PATH".into(), "/missing".into())]),
+                    capabilities: Vec::new(),
+                    command: None,
+                },
+                TIMESTAMP,
+            )
+            .expect("profile");
+    }
+    let models = |arguments: Value| {
+        let server = &server;
+        async move {
+            let response = post(
+                server,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 6,
+                    "method": "tools/call",
+                    "params": { "name": "models", "arguments": arguments }
+                }),
+            )
+            .await;
+            let text = response["result"]["content"][0]["text"]
+                .as_str()
+                .expect("model rows")
+                .to_owned();
+            (serde_json::from_str::<Value>(&text).expect("JSON"), text)
+        }
+    };
+    let cwd = directory.path().display().to_string();
+
+    let (capped, text) = models(json!({
+        "cwd": cwd, "onlyPreferred": false, "onlyEnabled": false, "provider": "fx", "limit": 2
+    }))
+    .await;
+    let (all, _) = models(json!({
+        "cwd": cwd, "onlyPreferred": false, "onlyEnabled": false, "provider": "fx", "limit": 10
+    }))
+    .await;
+
+    assert!(!text.contains('\n'), "compact JSON");
+    let rows = capped["models"].as_array().expect("rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(capped["moreRows"], 1);
+    assert!(rows.iter().all(|row| row.get("usage").is_none()));
+    let usage = capped["usage"].as_object().expect("usage by profile");
+    assert_eq!(usage.len(), 2);
+    assert!(
+        rows.iter()
+            .all(|row| { usage[row["profile"].as_str().expect("profile")]["known"] == false })
+    );
+    assert_eq!(all["models"].as_array().expect("rows").len(), 3);
+    assert!(all.get("moreRows").is_none());
+}

@@ -70,6 +70,9 @@ impl From<oga_service::DispatchError> for McpError {
     }
 }
 
+/// Model rows `models` answers with unless the caller asks for more.
+const MODELS_LIMIT: usize = 50;
+
 #[derive(Clone)]
 pub struct McpServer {
     state: HttpState,
@@ -162,7 +165,7 @@ impl McpServer {
                     id,
                     json!({
                         "content": [protocol::text_content(
-                            serde_json::to_string_pretty(&body).expect("refusal is serializable"),
+                            serde_json::to_string(&body).expect("refusal is serializable"),
                         )],
                         "isError": true,
                     }),
@@ -270,7 +273,7 @@ impl McpServer {
 
     fn mcp_response(&self, value: Value, cwd: Option<&str>) -> Result<Value, McpError> {
         let content = vec![protocol::text_content(
-            serde_json::to_string_pretty(&value).expect("tool value is serializable"),
+            serde_json::to_string(&value).expect("tool value is serializable"),
         )];
         let _ = cwd;
         Ok(json!({ "content": content }))
@@ -385,7 +388,7 @@ impl McpServer {
                 .task(&task_id)
                 .map_err(McpError::from)?,
         )?;
-        let fields = fields(args.get("fields"))?.unwrap_or_else(shaping::default_inspect_fields);
+        let fields = fields(args.get("fields"))?;
         let cwd = project_cwd(&task);
         let branch_gone = task_branch_unavailable(&task).await;
         let action = if task.archived_at.is_some() {
@@ -394,7 +397,11 @@ impl McpServer {
             hints::Move::Settled { branch_gone }
         };
         Ok((
-            shaping::with_next(shaping::task_view(&task, &fields), &task, action),
+            shaping::with_next(
+                shaping::inspect_view(&task, fields.as_deref()),
+                &task,
+                action,
+            ),
             Some(cwd),
         ))
     }
@@ -419,7 +426,7 @@ impl McpServer {
             .map(|cwd| canonical_cwd(cwd).display().to_string())
             .unwrap_or_else(|| global_cwd().display().to_string());
         let include_usage = optional_bool(args, "usage").unwrap_or(true);
-        let rows = oga_http::settings::model_rows(
+        let mut rows = oga_http::settings::model_rows(
             &self.state.store,
             &SettingsModelQuery {
                 profile: profile_filter,
@@ -437,13 +444,19 @@ impl McpServer {
         .map_err(|error| McpError::Message(error.message))?;
         let love = oga_http::settings::love_rules(&cwd)
             .map_err(|error| McpError::Message(error.message))?;
-        Ok((
-            json!({
-                "love": love,
-                "models": rows,
-            }),
-            requested_cwd,
-        ))
+        let limit =
+            optional_u64(args, "limit")?.map_or(MODELS_LIMIT, |limit| limit.max(1) as usize);
+        let more_rows = rows.len().saturating_sub(limit);
+        rows.truncate(limit);
+        let mut body = json!({ "love": love });
+        if include_usage {
+            body["usage"] = Value::Object(shaping::usage_by_profile(&mut rows));
+        }
+        body["models"] = json!(rows);
+        if more_rows > 0 {
+            body["moreRows"] = json!(more_rows);
+        }
+        Ok((body, requested_cwd))
     }
 
     fn health(&self) -> Value {

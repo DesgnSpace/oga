@@ -1,6 +1,6 @@
 //! Public task response shaping for MCP tools.
 
-use oga_domain::{BranchOutcome, Task, TaskMatch, TaskSummary};
+use oga_domain::{BranchOutcome, ModelSettingsRow, Task, TaskMatch, TaskSummary};
 use serde_json::{Map, Value, json};
 
 use crate::hints;
@@ -359,8 +359,13 @@ pub fn wanted_fields(fields: &[String]) -> std::collections::BTreeSet<&'static s
     result
 }
 
-pub fn default_inspect_fields() -> Vec<String> {
-    [
+/// With no fields named, inspect answers with every group but the prompts,
+/// attempts, and the transport detail, which stays one `routing` away.
+pub fn inspect_view(task: &Task, fields: Option<&[String]>) -> Value {
+    if let Some(fields) = fields {
+        return task_view(task, fields);
+    }
+    let defaults = [
         "routing",
         "context",
         "label",
@@ -370,9 +375,43 @@ pub fn default_inspect_fields() -> Vec<String> {
         "completion",
         "spend",
     ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect()
+    .map(str::to_owned);
+    let mut view = task_view(task, &defaults);
+    view.as_object_mut()
+        .expect("task view is an object")
+        .remove("transport");
+    view
+}
+
+/// Lifts usage off the model rows into one entry per profile. A row keeps its
+/// own only where a model-scoped window or limit makes it differ.
+pub fn usage_by_profile(rows: &mut [ModelSettingsRow]) -> Map<String, Value> {
+    let mut shared = Map::new();
+    for index in 0..rows.len() {
+        let profile = rows[index].profile.clone();
+        if shared.contains_key(&profile) {
+            continue;
+        }
+        let summaries = rows
+            .iter()
+            .filter(|row| row.profile == profile)
+            .filter_map(|row| row.usage.clone())
+            .collect::<Vec<_>>();
+        let Some(common) = summaries
+            .iter()
+            .max_by_key(|summary| summaries.iter().filter(|other| other == summary).count())
+            .cloned()
+        else {
+            continue;
+        };
+        for row in rows.iter_mut().filter(|row| row.profile == profile) {
+            if row.usage.as_ref() == Some(&common) {
+                row.usage = None;
+            }
+        }
+        shared.insert(profile, json!(common));
+    }
+    shared
 }
 
 pub fn with_next(mut value: Value, task: &Task, action: hints::Move) -> Value {
@@ -497,8 +536,10 @@ mod tests {
             ..Default::default()
         };
 
-        let known = task_view(&fallback, &default_inspect_fields());
-        let unknown = task_view(&Task::default(), &default_inspect_fields());
+        let routing = ["routing".to_owned()];
+        let known = inspect_view(&fallback, Some(&routing));
+        let unknown = inspect_view(&Task::default(), Some(&routing));
+        let default = inspect_view(&fallback, None);
 
         assert_eq!(known["transport"]["kind"], "cli");
         assert_eq!(known["transport"]["reason"], "unavailable");
@@ -507,6 +548,7 @@ mod tests {
             "spawn: could not spawn provider"
         );
         assert!(unknown.get("transport").is_none());
+        assert!(default.get("transport").is_none());
     }
 
     #[test]
