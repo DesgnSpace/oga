@@ -231,6 +231,31 @@ impl<'a> ContextIndex<'a> {
             .is_none_or(|row| row.scheme != INDEX_SCHEME || row.state == "building"))
     }
 
+    /// Drop a folder's index, written with or without a trailing slash.
+    pub fn forget(&self, cwd: impl AsRef<Path>) -> Result<(), ContextError> {
+        let cwd = cwd.as_ref().display().to_string();
+        let cwd = cwd.trim_end_matches('/');
+        for variant in [cwd.to_owned(), format!("{cwd}/")] {
+            index_store::forget(self.store, Path::new(&variant))?;
+        }
+        Ok(())
+    }
+
+    /// Drop every index no lookup reads: of a folder that is gone or is not
+    /// a repository's top folder, or written to a layout this binary no
+    /// longer reads. Returns how many folders it dropped.
+    pub fn prune(&self) -> Result<usize, ContextError> {
+        let mut dropped = 0;
+        for (cwd, scheme) in index_store::indexed_folders(self.store)? {
+            if scheme == Some(INDEX_SCHEME) && Path::new(&cwd).join(".git").exists() {
+                continue;
+            }
+            index_store::forget(self.store, Path::new(&cwd))?;
+            dropped += 1;
+        }
+        Ok(dropped)
+    }
+
     /// Start a checkout's first index from the index of the checkout it was
     /// cut from, so its first reconcile parses only the files that differ.
     /// Does nothing when `cwd` already has an index or `origin` has none.

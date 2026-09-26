@@ -419,3 +419,43 @@ fn restore_mtime(file: &Path, stamp: &Path) {
         .expect("touch runs");
     assert!(status.success());
 }
+
+/// Pruning keeps the index of a repository that is still there and drops the
+/// ones no lookup reads: a checkout that is gone, and a folder inside a
+/// repository that got an index of its own.
+#[test]
+fn pruning_keeps_live_repositories_and_drops_indexes_no_lookup_reads() {
+    let kept = Checkout::new(ON_MAIN);
+    let removed = Checkout::new(ON_BRANCH);
+    let (_database, store) = store();
+    let index = ContextIndex::new(&store);
+    for folder in [kept.path(), removed.path(), &kept.path().join("src")] {
+        index
+            .build(folder, BuildOptions::default())
+            .expect("the folder indexes");
+    }
+    let removed_path = removed.path().to_path_buf();
+    drop(removed);
+
+    assert_eq!(index.prune().expect("the index prunes"), 2);
+
+    let folders = store
+        .with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT cwd FROM context_index UNION SELECT cwd FROM context_files \
+                 UNION SELECT cwd FROM context_symbols",
+            )?;
+            Ok(statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
+        .expect("indexed folders read");
+    assert_eq!(folders, vec![kept.path().display().to_string()]);
+    assert!(!removed_path.exists());
+    assert_eq!(
+        anchors(&index, &kept.target(), "chargeCard")
+            .first()
+            .map(String::as_str),
+        Some("src/billing.ts#chargeCard")
+    );
+}

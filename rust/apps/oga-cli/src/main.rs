@@ -238,6 +238,16 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
         Ok(_) => {}
         Err(error) => eprintln!("restart recovery failed: {error}"),
     }
+    // Lookups never read the index of a folder that is gone or of an old
+    // layout; dropping it only frees space, so it runs while the broker serves.
+    {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || match ContextIndex::new(&store).prune() {
+            Ok(0) => {}
+            Ok(dropped) => eprintln!("dropped the code index of {dropped} folders"),
+            Err(error) => eprintln!("code index cleanup failed: {error}"),
+        });
+    }
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let bound_port = listener.local_addr()?.port();
     let checkpoint_task = {

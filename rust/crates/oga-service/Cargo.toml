@@ -8,6 +8,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 chrono-tz = "0.10"
 oga-acp = { path = "../oga-acp" }
 oga-config = { path = "../oga-config" }
+oga-context = { path = "../oga-context" }
 oga-domain = { path = "../oga-domain" }
 oga-events = { path = "../oga-events" }
 oga-pricing = { path = "../oga-pricing" }

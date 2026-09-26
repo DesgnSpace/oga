@@ -14,13 +14,12 @@ pub fn query(
     code: Option<bool>,
 ) -> Result<String, String> {
     let cwd = canonical_directory(cwd)?;
-    let target =
-        oga_http::context::target_for(&state.store, &cwd).map_err(|error| error.to_string())?;
-    let options = QuestionOptions {
-        paths: paths.to_vec(),
-        limit,
-        code,
-    };
+    let (target, paths) = oga_http::context::repository_target(&state.store, &cwd, paths.to_vec())
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            format!("{cwd} is not a project repository; enter a git repository, then query there")
+        })?;
+    let options = QuestionOptions { paths, limit, code };
     oga_http::context::answer(
         &state.reconcile_debounce,
         &state.store,

@@ -138,12 +138,29 @@ impl Fixture {
             .to_string()
     }
 
+    /// The fixture's folder as a git repository, which is what a lookup
+    /// answers for.
+    fn repository_cwd(&self) -> String {
+        git_init(std::path::Path::new(&self.cwd));
+        self.canonical_cwd()
+    }
+
     fn write_source(&self, path: &str, body: &str) {
         let absolute = std::path::Path::new(&self.cwd).join(path);
         std::fs::create_dir_all(absolute.parent().expect("source parent"))
             .expect("source directory is creatable");
         std::fs::write(absolute, body).expect("source fixture writes");
     }
+}
+
+fn git_init(path: &std::path::Path) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["init", "--quiet"])
+        .output()
+        .expect("git is installed");
+    assert!(output.status.success(), "git init: {output:?}");
 }
 
 async fn request(
@@ -1815,7 +1832,7 @@ async fn plain_language_lookup_names_the_place_and_carries_source_when_asked() {
         "src/auth.ts",
         "export function checkAuth(token: string): boolean { return !!token; }\n",
     );
-    let cwd = fixture.canonical_cwd();
+    let cwd = fixture.repository_cwd();
 
     let (status, body) = json_response(
         request(
@@ -1855,7 +1872,7 @@ async fn plain_language_lookup_indexes_on_first_use_and_follows_edits() {
         "src/auth.ts",
         "export function checkAuth(token: string): boolean { return !!token; }\n",
     );
-    let cwd = fixture.canonical_cwd();
+    let cwd = fixture.repository_cwd();
 
     let (status, body) = json_response(
         request(
@@ -1997,7 +2014,14 @@ async fn a_question_right_after_a_branch_switch_answers_from_the_new_branch() {
         let output = Command::new("git")
             .arg("-C")
             .arg(&cwd)
-            .args(["-c", "user.name=Oga", "-c", "user.email=oga@example.com"])
+            .args([
+                "-c",
+                "user.name=Oga",
+                "-c",
+                "user.email=oga@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .output()
             .expect("git is installed");
@@ -2047,11 +2071,12 @@ async fn plain_language_lookup_inside_a_worktree_answers_from_the_checkout() {
         "src/auth.ts",
         "export function checkAuth(token: string): boolean { return !!token; }\n",
     );
-    let origin = fixture.canonical_cwd();
+    let origin = fixture.repository_cwd();
 
     // The checkout carries the same file on its own branch, moved down the
     // page, so the line in the answer says which tree it was read from.
     let checkout = tempfile::tempdir().expect("worktree directory");
+    git_init(checkout.path());
     std::fs::create_dir_all(checkout.path().join("src")).expect("checkout source directory");
     std::fs::write(
         checkout.path().join("src/auth.ts"),
@@ -2126,7 +2151,7 @@ async fn a_first_lookup_in_a_worktree_answers_from_the_checkout_after_its_origin
         "src/billing.ts",
         "export function chargeCard(): boolean { return true; }\n",
     );
-    let origin = fixture.canonical_cwd();
+    let origin = fixture.repository_cwd();
     let ask = |cwd: String, question: &'static str| {
         let router = fixture.router.clone();
         async move {
@@ -2151,6 +2176,7 @@ async fn a_first_lookup_in_a_worktree_answers_from_the_checkout_after_its_origin
     );
 
     let checkout = tempfile::tempdir().expect("worktree directory");
+    git_init(checkout.path());
     std::fs::create_dir_all(checkout.path().join("src")).expect("checkout source directory");
     std::fs::write(
         checkout.path().join("src/auth.ts"),
@@ -2212,6 +2238,7 @@ async fn a_first_lookup_in_a_worktree_answers_from_the_checkout_after_its_origin
 async fn plain_language_lookup_in_an_unindexed_directory_says_so() {
     let fixture = Fixture::new();
     let empty = tempfile::tempdir().expect("empty directory");
+    git_init(empty.path());
     let cwd = std::fs::canonicalize(empty.path())
         .expect("canonicalize empty directory")
         .display()
@@ -2235,6 +2262,186 @@ async fn plain_language_lookup_in_an_unindexed_directory_says_so() {
             .contains("is not indexed"),
         "unexpected error: {body}"
     );
+}
+
+#[tokio::test]
+async fn a_lookup_outside_any_repository_is_refused() {
+    let fixture = Fixture::new();
+    let loose = tempfile::tempdir().expect("loose directory");
+    std::fs::write(
+        loose.path().join("notes.ts"),
+        "export function checkAuth() { return true; }\n",
+    )
+    .expect("loose source writes");
+    let cwd = std::fs::canonicalize(loose.path())
+        .expect("canonicalize loose directory")
+        .display()
+        .to_string();
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={cwd}&q=checkAuth"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .expect("error")
+            .contains("is not a project repository"),
+        "{body}"
+    );
+}
+
+/// A question asked from inside a repository answers from the repository's
+/// one index, narrowed to the folder it was asked from.
+#[tokio::test]
+async fn a_lookup_from_a_subfolder_answers_from_the_repository_index() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    fixture.write_source(
+        "lib/legacy.ts",
+        "export function checkAuth(): boolean { return false; }\n",
+    );
+    let root = fixture.repository_cwd();
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={root}/src&q=checkAuth"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let markdown = body["markdown"].as_str().expect("markdown");
+    assert!(markdown.contains("src/auth.ts:1#checkAuth"), "{markdown}");
+    assert!(!markdown.contains("lib/legacy.ts"), "{markdown}");
+    let indexed = fixture
+        .store
+        .with_connection(|connection| {
+            let mut statement = connection.prepare("SELECT cwd FROM context_index")?;
+            Ok(statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
+        .expect("indexed folders read");
+    assert_eq!(indexed, vec![root]);
+}
+
+#[tokio::test]
+async fn removing_a_worktree_drops_its_code_index() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    let origin = fixture.repository_cwd();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&origin)
+            .args([
+                "-c",
+                "user.name=Oga",
+                "-c",
+                "user.email=oga@example.com",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .expect("git is installed");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["add", "src"]);
+    git(&["commit", "--quiet", "-m", "auth"]);
+    let checkouts = tempfile::tempdir().expect("worktrees directory");
+    let checkout = std::fs::canonicalize(checkouts.path())
+        .expect("canonicalize worktrees")
+        .join("auth-task");
+    let checkout_cwd = checkout.display().to_string();
+    git(&[
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "oga/auth",
+        &checkout_cwd,
+    ]);
+    fixture.insert_task(&Task {
+        id: "worktree-task".into(),
+        kind: Some(TaskKind::Delegated),
+        profile_id: "profile".into(),
+        model: "fake".into(),
+        prompt: "work in a checkout".into(),
+        cwd: checkout_cwd.clone(),
+        state: TaskState::Completed,
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: "2026-01-01T00:00:00.000Z".into(),
+        ..Task::default()
+    });
+    fixture
+        .store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET origin_cwd=?,worktree_path=?,worktree_branch=? WHERE id=?",
+                rusqlite::params![&origin, &checkout_cwd, "oga/auth", "worktree-task"],
+            )?;
+            Ok(())
+        })
+        .expect("worktree columns");
+    let indexed_rows = || {
+        fixture
+            .store
+            .with_connection(|connection| {
+                Ok(connection.query_row(
+                    "SELECT (SELECT COUNT(*) FROM context_index WHERE cwd=?1) \
+                     + (SELECT COUNT(*) FROM context_files WHERE cwd=?1) \
+                     + (SELECT COUNT(*) FROM context_symbols WHERE cwd=?1)",
+                    [&checkout_cwd],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .expect("index rows count")
+    };
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/query?cwd={checkout_cwd}&q=checkAuth"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(indexed_rows() > 0, "the checkout was never indexed");
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::DELETE,
+            "/api/tasks/worktree-task/worktree",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["checkout"], "removed", "{body}");
+    assert_eq!(indexed_rows(), 0, "the removed checkout kept its index");
 }
 
 #[tokio::test]

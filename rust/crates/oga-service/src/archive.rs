@@ -3,7 +3,7 @@
 use std::{path::Path, time::Duration};
 
 use oga_domain::{
-    BranchOutcome, Task, TaskState, WorktreeDeleteBatchResult, WorktreeDeleteEntry,
+    BranchOutcome, Task, TaskState, TaskWorktree, WorktreeDeleteBatchResult, WorktreeDeleteEntry,
     WorktreeDeleteResult, WorktreeDeleteSkipped,
 };
 use serde_json::json;
@@ -248,6 +248,9 @@ async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_bran
             .await
             .map_err(|error| format!("could not prune the checkout: {error}"))
     };
+    if outcome.is_ok() {
+        forget_index(&dispatcher, worktree).await;
+    }
     let mut error = outcome.err();
     let branch = if error.is_none() && delete_branch {
         match oga_worktree::remove_task_branch_safely(worktree).await {
@@ -293,6 +296,27 @@ async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_bran
         }
         Ok(())
     });
+}
+
+/// A removed checkout's code index goes with it. Failing to drop it leaves
+/// rows the next broker start prunes, so it never fails the removal.
+async fn forget_index(dispatcher: &Dispatcher, worktree: &TaskWorktree) {
+    let store = dispatcher.store().clone();
+    let path = worktree.path.clone();
+    let forgotten = tokio::task::spawn_blocking(move || {
+        oga_context::ContextIndex::new(&store)
+            .forget(&path)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|result| result);
+    if let Err(error) = forgotten {
+        eprintln!(
+            "could not drop the code index for {}: {error}",
+            worktree.path
+        );
+    }
 }
 
 fn set_archived(
@@ -368,6 +392,7 @@ pub async fn remove_worktree(
         oga_worktree::remove_task_worktree(&worktree).await?;
         oga_domain::CheckoutOutcome::AlreadyGone
     };
+    forget_index(dispatcher, &worktree).await;
     let (branch, branch_reason) = if request.delete_branch {
         let result = oga_worktree::remove_task_branch_safely(&worktree).await?;
         (result.outcome, result.reason)

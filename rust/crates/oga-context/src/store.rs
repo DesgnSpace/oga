@@ -455,6 +455,39 @@ pub fn clear(store: &Store, cwd: &Path) -> Result<(), StoreError> {
     })
 }
 
+/// Drop `cwd`'s index: its rows and the record that it was built.
+pub fn forget(store: &Store, cwd: &Path) -> Result<(), StoreError> {
+    clear(store, cwd)?;
+    store.transaction(|transaction| {
+        transaction.execute(
+            "DELETE FROM context_index WHERE cwd=?",
+            [cwd.display().to_string()],
+        )?;
+        Ok(())
+    })
+}
+
+/// Every folder the index holds rows for, with the layout its build was
+/// written to. Rows left without a build record carry no layout.
+pub fn indexed_folders(store: &Store) -> Result<Vec<(String, Option<u32>)>, StoreError> {
+    store.with_connection(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT cwd, scheme FROM context_index \
+             UNION SELECT DISTINCT cwd, NULL FROM context_files \
+             WHERE cwd NOT IN (SELECT cwd FROM context_index)",
+        )?;
+        Ok(statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<i64>>(1)?
+                        .map(|scheme| scheme.max(0) as u32),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
 /// Start `cwd`'s index as a copy of `origin`'s, a batch of files at a time.
 /// Stamps are copied too, so the next reconcile re-reads every file but
 /// parses only those whose contents differ.

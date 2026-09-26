@@ -3,7 +3,6 @@
 use std::{
     collections::HashMap,
     path::Path,
-    process::Command,
     sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant, SystemTime},
 };
@@ -55,28 +54,37 @@ pub async fn get_query(
         .filter(|question| !question.is_empty())
         .ok_or_else(|| HttpError::bad_request("usage: oga query \"<question>\""))?
         .to_owned();
-    let target = match query.task.as_deref() {
+    let paths = split_paths(query.in_paths.as_deref());
+    let (target, paths) = match query.task.as_deref() {
         Some(task_id) => {
             let task = state::load_task(&state.store, task_id)?
                 .filter(|task| {
                     task.kind != Some(TaskKind::Orchestrator) && task.archived_at.is_none()
                 })
                 .ok_or_else(|| HttpError::not_found("unknown task"))?;
-            task.worktree.as_ref().map_or_else(
+            let target = task.worktree.as_ref().map_or_else(
                 || ContextTarget::new(&task.cwd, task.scope.clone()),
                 |worktree| {
                     ContextTarget::worktree(&task.cwd, &worktree.origin_cwd, task.scope.clone())
                 },
-            )
+            );
+            (target, paths)
         }
-        None => target_for(&state.store, &require_directory(query.cwd.as_deref())?)?,
+        None => {
+            let cwd = require_directory(query.cwd.as_deref())?;
+            repository_target(&state.store, &cwd, paths)?.ok_or_else(|| {
+                HttpError::bad_request(format!(
+                    "{cwd} is not a project repository; enter a git repository, then run 'oga query' there"
+                ))
+            })?
+        }
     };
     let store = state.store.clone();
     let gate = state.reconcile_debounce.clone();
     let options = QuestionOptions {
         limit: query.limit.map(|limit| limit as usize),
         code: query.code,
-        paths: split_paths(query.in_paths.as_deref()),
+        paths,
     };
     let result = run_blocking(move || {
         let cwd = target.cwd.display().to_string();
@@ -99,15 +107,14 @@ pub async fn init_index(
     let store = state.store.clone();
     let gate = state.reconcile_debounce.clone();
     let body = run_blocking(move || {
-        let is_repository = Command::new("git")
-            .args(["-C", &cwd, "rev-parse", "--show-toplevel"])
-            .output()
-            .is_ok_and(|output| output.status.success());
-        if !is_repository {
-            return Err(HttpError::bad_request(format!(
-                "{cwd} is not a project repository; enter a git repository, then run 'oga query --init'"
-            )));
-        }
+        let cwd = repository_root(Path::new(&cwd))
+            .ok_or_else(|| {
+                HttpError::bad_request(format!(
+                    "{cwd} is not a project repository; enter a git repository, then run 'oga query --init'"
+                ))
+            })?
+            .display()
+            .to_string();
         let index = ContextIndex::new(&store);
         let started = Instant::now();
         let checkout = oga_context::checkout_stamp(Path::new(&cwd));
@@ -145,6 +152,44 @@ pub async fn init_index(
     })
     .await?;
     Ok(Json(body))
+}
+
+/// Where a lookup asked from `cwd` runs: the repository holding `cwd`, with
+/// the folder it was asked from narrowing `paths`, so every folder of one
+/// repository answers from one index. `None` when `cwd` is in no repository.
+pub fn repository_target(
+    store: &Store,
+    cwd: &str,
+    paths: Vec<String>,
+) -> Result<Option<(ContextTarget, Vec<String>)>, StoreError> {
+    let cwd = Path::new(cwd);
+    let Some(root) = repository_root(cwd) else {
+        return Ok(None);
+    };
+    let folder = cwd
+        .strip_prefix(root)
+        .unwrap_or(Path::new(""))
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    let paths = if folder.is_empty() {
+        paths
+    } else if paths.is_empty() {
+        vec![folder]
+    } else {
+        paths
+            .iter()
+            .map(|path| format!("{folder}/{}", path.trim_start_matches("./")))
+            .collect()
+    };
+    Ok(Some((
+        target_for(store, &root.display().to_string())?,
+        paths,
+    )))
+}
+
+/// The nearest folder from `cwd` up that is a git checkout.
+fn repository_root(cwd: &Path) -> Option<&Path> {
+    cwd.ancestors().find(|folder| folder.join(".git").exists())
 }
 
 /// Where a lookup in `cwd` runs.
