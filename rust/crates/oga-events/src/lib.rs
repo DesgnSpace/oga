@@ -2053,7 +2053,7 @@ fn item_event_view(
     let complete = event_type == "item.completed";
     let status = text_value(item.get("status"));
     // The item id is what lets a `started`/`updated`/`completed` triple settle
-    // into one row (see `foldActions` in the activity domain); without it every
+    // into one row (see `foldCalls` in the activity domain); without it every
     // phase of the same item would render as its own row.
     let item_id = string_value(item, &["id"]);
 
@@ -2824,7 +2824,7 @@ fn pi_result_text(payload: &BTreeMap<String, Value>) -> Option<&str> {
 /// Pi carries no id across a message's `start`/`update`*/`end` triple, unlike
 /// its tool calls (`toolCallId`) — the payloads show no field that survives
 /// the whole stream. One message stream is open at a time, so a fixed key
-/// stands in for a real id: `foldActions` merges same-key rows while the slot
+/// stands in for a real id: `foldCalls` merges same-key rows while the slot
 /// is still open and reopens a fresh row once a prior one has closed
 /// (`message_end` completes it), which is exactly the start/update/end
 /// lifecycle this collapses.
@@ -5086,8 +5086,8 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
         return Some(true);
     }
 
-    // Never show: routing, bookkeeping, and high-volume keepalives the
-    // catalogue marks as pure plumbing.
+    // Never show: routing, bookkeeping, and high-volume keepalives that are
+    // pure plumbing.
     if matches!(
         event_type,
         "heartbeat"
@@ -6560,7 +6560,7 @@ mod tests {
     /// A command execution's `started`/`completed` pair shares `$.item.id`;
     /// the mapper must carry it as `action_id`/`source_id` so the activity
     /// layer can fold the two into one row. A failing run's detail names its
-    /// exit code and the first line of output, per the catalogue.
+    /// exit code and the first line of output.
     #[test]
     fn codex_command_execution_pairs_by_item_id_and_reports_failure_detail() {
         let started = event_view(
@@ -7443,9 +7443,8 @@ mod tests {
     }
 
     /// Pi's `read` tool sends only `args.path` — never an offset or limit.
-    /// The catalogue's own example row borrows a line count from the
-    /// output text, but the mapper must not do that: the range comes from
-    /// the payload's input shape or not at all.
+    /// The mapper must not borrow a line count from the output text: the
+    /// range comes from the payload's input shape or not at all.
     #[test]
     fn pi_read_row_names_the_file_with_no_range() {
         let event = event_view(
@@ -7602,8 +7601,8 @@ mod tests {
         assert_eq!(call.source_id, result.source_id);
 
         // The result also arrives on a separate agent.user tool_result event;
-        // the catalogue says that one carries no actionable content and must
-        // not render its own row (it would otherwise duplicate this pair).
+        // that one carries no actionable content and must not render its own
+        // row (it would otherwise duplicate this pair).
         let tool_result_echo = event_view(
             &provider_event(
                 3,
@@ -8608,7 +8607,7 @@ mod tests {
         assert_eq!(end.phase, EventPhase::Completed);
         assert_eq!(end.complete, Some(true));
         assert_eq!(end.detail.as_deref(), Some("Hello there"));
-        // The three events share the one correlation key `foldActions` (the
+        // The three events share the one correlation key `foldCalls` (the
         // web activity domain) needs to settle them into a single row.
         assert_eq!(end.action_id, start.action_id);
 

@@ -1,7 +1,6 @@
 //! Rebuilds a dead run's context from Oga's own event rows so a fresh
 //! provider session — same account or a different one — can pick a task up
-//! without the original brief. Port of `src/handoff-brief.ts`; keep the two
-//! in step.
+//! without the original brief.
 
 use oga_domain::{EventPhase, Provider, Task, TaskEvent, TaskState};
 use oga_events::event_view;

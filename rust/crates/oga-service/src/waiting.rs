@@ -72,8 +72,8 @@ impl StoreProbe {
 }
 
 impl HoldProbe for StoreProbe {
-    /// Availability is read from the same recorded outcomes the routing screen
-    /// reads, so a hold releases on exactly what the rest of the app calls
+    /// Availability is read from the same recorded outcomes the router reads,
+    /// so a hold releases on exactly what the rest of the app calls
     /// usable. An account whose retry time has passed but which nothing has
     /// exercised since reads `unknown`, and unknown is enough to try again —
     /// only a real generation can prove more.

@@ -1,5 +1,5 @@
 //! Run language-adapter capture queries and turn tree matches into symbols.
-/// Parsing stays language-agnostic; language semantics live in `lang`.
+//! Parsing stays language-agnostic; language semantics live in `lang`.
 
 use oga_domain::SymbolKind;
 use streaming_iterator::StreamingIterator;

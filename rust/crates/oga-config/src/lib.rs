@@ -1430,7 +1430,7 @@ pub fn read_caller_prompt(layer: Option<&ConfigLayer>) -> Result<Option<String>,
 
 const CALLER_SHAPE: &str = "caller takes prompt, holding the brief rules text";
 
-/// Whether this scope stamps worker output with the Done-with-Oga line.
+/// Whether this scope stamps worker commits with Oga's co-author trailer.
 /// `None` means the file says nothing and the next scope up decides.
 /// `prompt` is accepted and ignored, so files written before worker prompts
 /// were dropped keep loading; any other key is a rule the writer expects Oga
