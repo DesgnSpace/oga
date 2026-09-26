@@ -162,8 +162,8 @@ export function applyDelta(
  * reports whether the stream came back from a drop, which is the one case
  * where what is held may have fallen behind the broker.
  *
- * `streamFloor`/`stale` on `StreamStatus` are not consulted here — matching
- * the Rust controller, only `connected` drives this state.
+ * `streamFloor`/`stale` on `StreamStatus` are not consulted here; only
+ * `connected` drives this state.
  */
 export function applyConnection(state: TaskDetailState, status: StreamStatus): [TaskDetailState, boolean] {
   if (!status.connected) {

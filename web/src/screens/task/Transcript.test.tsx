@@ -125,7 +125,7 @@ describe("Transcript", () => {
     expect(screen.getByText("Weighing two options")).toBeTruthy();
   });
 
-  // happy-dom reports no layout, so pretend every bubble overflows its preview.
+  // jsdom reports no layout, so pretend every bubble overflows its preview.
   function withOverflowingBubble(run: () => void): void {
     const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
     const clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");

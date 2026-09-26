@@ -1,5 +1,3 @@
-// Ported from rust/crates/oga-ui/src/review/mod.rs `#[cfg(test)] mod tests`.
-
 import { describe, expect, it } from "bun:test";
 import { codeLanguageFromPath } from "@/domain/trace";
 import { highlight, MAX_HIGHLIGHTED_CHARS, resolveCodeLanguage } from "./index";

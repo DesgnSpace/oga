@@ -353,7 +353,7 @@ describe("settings navigation", () => {
 
     expect(screen.getByRole("tab", { name: "Memories" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Workers" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Prompts" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Brief rules" })).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Memories" }));
     expect(await screen.findByRole("heading", { name: "Project memories" })).toBeTruthy();
@@ -594,11 +594,11 @@ describe("brief rules", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "Brief rules" }));
     const editor = await screen.findByLabelText("How briefs are written");
-    fireEvent.change(editor, { target: { value: "{{default}} Name the entry file." } });
+    fireEvent.change(editor, { target: { value: "Name the entry file." } });
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(savedCallerPrompt).toBeTruthy());
-    expect(savedCallerPrompt).toMatchObject({ written: true, value: "{{default}} Name the entry file." });
+    expect(savedCallerPrompt).toMatchObject({ written: true, value: "Name the entry file." });
   });
 
   it("leaves the default unset when the user clears the editor", async () => {

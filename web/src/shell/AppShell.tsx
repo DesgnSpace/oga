@@ -1,5 +1,5 @@
 // The persistent chrome: the task sidebar beside whichever screen the route
-// picks. Mirrors rust/crates/oga-ui/src/lib.rs `App`.
+// picks.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SidebarController } from "@/state";

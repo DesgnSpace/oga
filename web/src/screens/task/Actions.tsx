@@ -308,7 +308,7 @@ export function awaitsPermission(task: Pick<Task, "state">, events: Pick<TaskEve
   return false;
 }
 
-/** Explains why a task is blocked, in the copy the reference draws. */
+/** Explains why a task is blocked. */
 export function explainBlocked(
   completion: TaskCompletion | undefined,
   currentScope: TaskScope | undefined,

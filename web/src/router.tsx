@@ -1,7 +1,6 @@
-// Hand-rolled client-side routing, matching the previous Rust app's router
-// (rust/crates/oga-ui/src/lib.rs, src/router.rs): three routes plus a
-// fallback, history push/pop with no page reload, and link clicks
-// intercepted unless the user asked the platform for something else.
+// Hand-rolled client-side routing: a few fixed routes plus a fallback, history
+// push/pop with no page reload, and link clicks intercepted unless the user
+// asked the platform for something else.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { SettingsTab } from "@/screens/settings/state";

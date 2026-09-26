@@ -1,5 +1,3 @@
-// Ported from rust/crates/oga-ui/src/trace/mod.rs `#[cfg(test)] mod tests`.
-
 import { describe, expect, it } from "bun:test";
 import type { EventKind, TaskEventView } from "@/bridge/types";
 import { ActivityStory, type ReasoningPulse } from "@/domain/activity";

@@ -1,5 +1,3 @@
-// Ported from rust/crates/oga-ui/src/changes/mod.rs `#[cfg(test)] mod tests`.
-
 import { describe, expect, it } from "bun:test";
 import type { EventKind, TaskEventView } from "@/bridge/types";
 import {

@@ -1,5 +1,5 @@
-// Safe `localStorage` access. Ported preferences read the same keys the Rust
-// app wrote, so a user's choices survive the framework switch.
+// Safe `localStorage` access. Keys are what saved preferences already use, so
+// renaming one drops the user's choice.
 
 export function readStorage(key: string): string | undefined {
   if (typeof window === "undefined") return undefined;

@@ -121,9 +121,8 @@ describe("parseInline", () => {
   });
   it("bold rejects newline inner", () => {
     const inlines = parseInline("**a\nb**");
-    // newline in inner is rejected — parser treats as text (newline remains inside plain chunk)
-    // parseInline receives single line strings mostly; direct test: bold with newline should not match
-    // We simulate: the parser checks !inner.contains('\n') so this would be rejected
+    // Bold never spans a newline: the parser checks `!inner.includes("\n")`, so
+    // the run stays plain text.
     expect(hasInline(inlines, "bold")).toBe(false);
   });
   it("bold unclosed stays text", () => {
@@ -192,7 +191,7 @@ describe("parseBlocks", () => {
   });
   it("bullet lists with - and * and indentation", () => {
     const { blocks } = parseBlocks("- **Verdict**: ok\n- second\n  - indented? actually not bullet due to leading spaces? it is");
-    // is_bullet uses trim_start, so indented still qualifies
+    // listMarker skips leading indentation, so an indented item still qualifies
     expect(blocks[0].type).toBe("bulletList");
     // bullet list terminates before paragraph
     const { blocks: b2 } = parseBlocks("- a\n- b\nnot bullet");
@@ -203,10 +202,10 @@ describe("parseBlocks", () => {
     const { blocks } = parseBlocks("1. first\n2. second");
     expect(blocks[0].type).toBe("orderedList");
     const { blocks: b2 } = parseBlocks("10. ok\n2. ok");
-    // "10." has 2 digits -> still allowed, but need ". " after. So 10-digit-like but 2 digits okay
+    // "10." has 2 digits -> still allowed, as long as ". " follows
     expect(b2[0].type).toBe("orderedList");
     const { blocks: b3 } = parseBlocks("1234567890. too long");
-    // 10 digits -> idx >9 -> not ordered
+    // 10 digits -> more than 9 -> not ordered
     expect(b3[0].type).toBe("paragraph");
     const { blocks: b4 } = parseBlocks("1.first no space");
     expect(b4[0].type).toBe("paragraph");

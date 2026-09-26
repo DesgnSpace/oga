@@ -1,5 +1,3 @@
-// Ported from rust/crates/oga-ui/src/task_detail/mod.rs `#[cfg(test)] mod tests`.
-
 import { describe, expect, it } from "bun:test";
 import type { Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
 import {
@@ -268,10 +266,10 @@ describe("connection state", () => {
     expect(returningAgain).toBe(false);
   });
 
-  // Matches the Rust controller exactly: `streamFloor`/`stale` are carried
-  // on the wire type but not consulted here, so a stale cursor below the
-  // stream floor is not a separate branch — it resyncs through the same
-  // "connection returned" path as any other reconnect.
+  // `streamFloor`/`stale` are carried on the wire type but not consulted
+  // here, so a stale cursor below the stream floor is not a separate branch —
+  // it resyncs through the same "connection returned" path as any other
+  // reconnect.
   it("a stale cursor below the stream floor still resyncs via the reconnect path, not a special case", () => {
     const [offline] = applyConnection(defaultTaskDetailState(), {
       connected: false,

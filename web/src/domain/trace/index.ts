@@ -1,7 +1,6 @@
-// Flat, readable rows for the task activity trace.
-// Ported from rust/crates/oga-ui/src/trace/mod.rs — keep behavior identical.
-// The syntax-highlighted rendering (`ReviewContent`, `CodeLanguage` highlighting) is
-// out of scope here — this module only ports the pure row/expansion composition.
+// Flat, readable rows for the task activity trace. Syntax highlighting lives
+// in `@/domain/review`; this module only composes the rows and their
+// expansions.
 
 import type { TaskEventView } from "@/bridge/types";
 import { fileChangeFromRaw, type FileChange } from "@/domain/changes";

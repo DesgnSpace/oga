@@ -1,8 +1,7 @@
-// Reusable modal overlay. Mirrors pluk's ui/src/modal.ts pattern (overlay +
-// dialog, Escape/outside-click/close-button dismissal, a hand-rolled Tab
-// focus trap, body scroll lock, focus moved in on open and restored on
-// close) adapted to React: state-driven mount/unmount instead of imperative
-// DOM creation, since callers here are components, not one-shot triggers.
+// Reusable modal overlay: overlay + dialog, Escape/outside-click/close-button
+// dismissal, a hand-rolled Tab focus trap, body scroll lock, and focus moved
+// in on open and restored on close. Mounts and unmounts with the caller's
+// state.
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { CloseIcon } from "@/ui/icons";

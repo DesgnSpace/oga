@@ -2100,7 +2100,7 @@ function MemoriesPanel({
 }
 
 
-/** The two texts the Prompts tabs edit, told apart by what each one reads and writes. */
+/** A prompt text a settings tab edits: its copy, and how the tab reads and writes it. */
 interface PromptSurface {
   tab: SettingsTab;
   label: string;

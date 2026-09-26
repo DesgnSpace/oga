@@ -331,9 +331,6 @@ export interface WatchedTaskDetail {
  * Wires a `TaskDetailController` to the shell for the lifetime of a mounted
  * task detail view: follows the task, applies pushed deltas (resyncing on a
  * gap), and mirrors the broker connection (resyncing on reconnect).
- *
- * Mirrors the effects the Leptos `TaskDetail` component installs on mount
- * and tears down with `on_cleanup`.
  */
 export function watchTaskDetail(taskId: string): WatchedTaskDetail {
   let entry = taskDetailEntries.get(taskId);

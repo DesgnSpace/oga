@@ -1,5 +1,5 @@
-// Ported from rust/crates/oga-ui/src/settings/state.rs — keep behavior identical.
-// Local to the settings screen; not part of the shared store.
+// Settings screen state. Local to the settings screen; not part of the shared
+// store.
 
 import type {
   BrokerSummaryState,
