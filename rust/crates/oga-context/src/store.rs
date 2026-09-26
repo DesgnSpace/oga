@@ -1,12 +1,14 @@
 //! Every read and write the index makes against SQLite. One transaction per
 //! rebuild, one prepared statement per shape of write.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use oga_domain::SymbolKind;
 use oga_store::{Store, StoreError};
 use rusqlite::{OptionalExtension, Row, Transaction, params};
+
+use crate::text::fts_query;
 
 /// The index layout this binary writes. An index built by an older layout is
 /// rebuilt rather than read.
@@ -116,7 +118,9 @@ pub fn files_by_path(
     })
 }
 
-/// Symbols whose exact name matches one of `names`, folded to lookup keys.
+/// Symbols whose name folds to one of `names`, or holds one of them as whole
+/// words. Exact names come off the name index and words off the search index,
+/// so neither reads every symbol in the project.
 pub fn symbols_by_name(
     store: &Store,
     cwd: &Path,
@@ -126,17 +130,38 @@ pub fn symbols_by_name(
     if names.is_empty() {
         return Ok(Vec::new());
     }
-    let name_conditions = names
+    let words = names
         .iter()
-        .map(|_| "(name_key = ? OR instr(' ' || name_key || ' ', ' ' || ? || ' ') > 0)")
-        .collect::<Vec<_>>()
-        .join(" OR ");
+        .flat_map(|name| name.split_whitespace())
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let exact_sql = format!(
+        "SELECT id,{SYMBOL_COLUMNS},name_key FROM context_symbols WHERE cwd=? AND name_key IN ({})",
+        vec!["?"; names.len()].join(",")
+    );
+    // The search index stems words, so its hits are held to the same
+    // whole-word test the name key is built for.
+    let word_sql = (!words.is_empty()).then(|| {
+        format!(
+            " UNION SELECT s.id,{},s.name_key FROM context_symbols_fts \
+             JOIN context_symbols s ON s.id=context_symbols_fts.rowid \
+             WHERE context_symbols_fts MATCH ? AND s.cwd=? AND ({})",
+            prefixed_symbol_columns(),
+            names
+                .iter()
+                .map(|_| "instr(' ' || s.name_key || ' ', ' ' || ? || ' ') > 0")
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        )
+    });
     store.with_connection(|connection| {
         let path_sql = paths
             .filter(|paths| !paths.is_empty())
             .map(|paths| {
                 format!(
-                    " AND ({})",
+                    " WHERE ({})",
                     paths
                         .iter()
                         .map(|_| "path = ? OR path LIKE ? || '/%' ESCAPE '\\'")
@@ -146,28 +171,33 @@ pub fn symbols_by_name(
             })
             .unwrap_or_default();
         let mut statement = connection.prepare(&format!(
-            "SELECT {SYMBOL_COLUMNS} FROM context_symbols WHERE cwd=? AND ({name_conditions}){path_sql} ORDER BY length(name_key), exported DESC, length(qualified)"
+            "SELECT {SYMBOL_COLUMNS} FROM ({exact_sql}{}){path_sql} \
+             ORDER BY length(name_key), exported DESC, length(qualified)",
+            word_sql.unwrap_or_default()
         ))?;
         let path_values = paths
             .unwrap_or_default()
             .iter()
             .map(|path| path.trim_end_matches("/**").to_owned())
             .collect::<Vec<_>>();
-        let mut arguments: Vec<&dyn rusqlite::ToSql> =
-            Vec::with_capacity(names.len() * 2 + 1 + path_values.len() * 2);
+        let word_match = project_match(cwd, &format!("{{name_key}} : ({})", fts_query(&words)));
         let cwd = cwd.display().to_string();
+        let mut arguments: Vec<&dyn rusqlite::ToSql> =
+            Vec::with_capacity(names.len() * 2 + 3 + path_values.len() * 2);
         arguments.push(&cwd);
         for name in names {
             arguments.push(name);
-            arguments.push(name);
+        }
+        if !words.is_empty() {
+            arguments.push(&word_match);
+            arguments.push(&cwd);
+            for name in names {
+                arguments.push(name);
+            }
         }
         let escaped = path_values
             .iter()
-            .map(|path| {
-                path
-                    .replace('%', "\\%")
-                    .replace('_', "\\_")
-            })
+            .map(|path| path.replace('%', "\\%").replace('_', "\\_"))
             .collect::<Vec<_>>();
         for (path, value) in path_values.iter().zip(&escaped) {
             arguments.push(path);
@@ -206,16 +236,12 @@ pub fn symbols_by_search(
             })
             .unwrap_or_default();
         let mut statement = connection.prepare(&format!(
-            "SELECT {}, bm25(context_symbols_fts, 0.0, 12.0, 8.0, 10.0, 3.0, 4.0, 2.0) AS rank \
+            "SELECT {}, bm25(context_symbols_fts, 0.0, 12.0, 8.0, 10.0, 3.0, 4.0, 2.0, 0.0) AS rank \
              FROM context_symbols_fts \
              JOIN context_symbols s ON s.id=context_symbols_fts.rowid \
               WHERE context_symbols_fts MATCH ? {path_sql} \
              ORDER BY rank LIMIT {limit}",
-            SYMBOL_COLUMNS
-                .split(',')
-                .map(|column| format!("s.{column}"))
-                .collect::<Vec<_>>()
-                .join(",")
+            prefixed_symbol_columns()
         ))?;
         let match_query = project_match(cwd, query);
         let mut arguments: Vec<&dyn rusqlite::ToSql> = vec![&match_query];
@@ -550,6 +576,14 @@ pub fn index_row(store: &Store, cwd: &Path) -> Result<Option<IndexRow>, StoreErr
             )
             .optional()?)
     })
+}
+
+fn prefixed_symbol_columns() -> String {
+    SYMBOL_COLUMNS
+        .split(',')
+        .map(|column| format!("s.{column}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn project_match(cwd: &Path, query: &str) -> String {

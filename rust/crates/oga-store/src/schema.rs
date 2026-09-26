@@ -83,6 +83,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "providers named in code",
         run: migrate_v49_to_v50,
     },
+    Migration {
+        version: 51,
+        name: "code search by name word",
+        run: migrate_v50_to_v51,
+    },
 ];
 
 /// The schema this binary can read.
@@ -362,7 +367,7 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
         kind TEXT NOT NULL,
         name TEXT NOT NULL,
         -- The name folded to one lookup key, so an exact-name question is an
-        -- index seek rather than a scan.
+        -- index seek rather than a scan, and each word of it is searchable.
         name_key TEXT NOT NULL,
         qualified TEXT NOT NULL,
         parent TEXT NOT NULL DEFAULT '',
@@ -381,33 +386,34 @@ const CONTEXT_INDEX: &str = r#"      CREATE TABLE context_files (
       CREATE INDEX context_symbols_digest ON context_symbols(cwd, digest);
       CREATE INDEX context_symbols_path ON context_symbols(cwd, path, line);
       CREATE VIRTUAL TABLE context_symbols_fts USING fts5(
-         cwd,
-         name,
+        cwd,
+        name,
         qualified,
         tokens,
         signature,
         doc,
         path,
+        name_key,
         content='context_symbols',
         content_rowid='id',
         tokenize='porter unicode61 remove_diacritics 2'
       );
       CREATE TRIGGER context_symbols_ai
       AFTER INSERT ON context_symbols BEGIN
-         INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path)
-         VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
+        INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path, new.name_key);
       END;
       CREATE TRIGGER context_symbols_ad
       AFTER DELETE ON context_symbols BEGIN
-         INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path)
-         VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
+        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path, old.name_key);
       END;
       CREATE TRIGGER context_symbols_au
       AFTER UPDATE ON context_symbols BEGIN
-         INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path)
-         VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path);
-         INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path)
-         VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path);
+        INSERT INTO context_symbols_fts(context_symbols_fts, rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES ('delete', old.id, old.cwd, old.name, old.qualified, old.tokens, old.signature, old.doc, old.path, old.name_key);
+        INSERT INTO context_symbols_fts(rowid, cwd, name, qualified, tokens, signature, doc, path, name_key)
+        VALUES (new.id, new.cwd, new.name, new.qualified, new.tokens, new.signature, new.doc, new.path, new.name_key);
       END;"#;
 
 /// Learned routes keep one bounded alias set for each place a worker found.
@@ -818,6 +824,48 @@ pub fn migrate_v49_to_v50(conn: &Connection) -> Result<(), StoreError> {
         PRAGMA legacy_alter_table=OFF;"#,
     )?;
     Ok(())
+}
+
+/// Rebuild the code index tables in their current shape.
+///
+/// The symbol search table gained a column, and an external-content search
+/// table cannot be re-derived row by row from what it held. Every index is
+/// dropped instead; each project rebuilds its own on its next lookup. Learned
+/// routes live in their own table and are kept.
+pub fn migrate_v50_to_v51(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        {}
+        {CONTEXT_INDEX}
+        INSERT INTO schema_migrations(version, name) VALUES (51, 'code search by name word');
+        COMMIT;"#,
+        drop_context_index(conn)?
+    ))?;
+    Ok(())
+}
+
+/// Every code index table, and the rows that say which projects are indexed.
+fn drop_context_index(conn: &Connection) -> Result<String, StoreError> {
+    let forget = if has_table(conn, "context_index")? {
+        "DELETE FROM context_index;"
+    } else {
+        ""
+    };
+    Ok(format!(
+        r#"DROP TRIGGER IF EXISTS context_symbols_ai;
+        DROP TRIGGER IF EXISTS context_symbols_ad;
+        DROP TRIGGER IF EXISTS context_symbols_au;
+        DROP TABLE IF EXISTS context_symbols_fts;
+        DROP TABLE IF EXISTS context_symbols;
+        DROP TABLE IF EXISTS context_files;
+        {forget}"#
+    ))
+}
+
+fn has_table(conn: &Connection, table: &str) -> Result<bool, StoreError> {
+    Ok(conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")?
+        .exists([table])?)
 }
 
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, StoreError> {

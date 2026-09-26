@@ -160,18 +160,13 @@ fn opening_a_v47_database_upgrades_it_and_keeps_what_was_taught() {
     assert!(columns(&store, "context_files").contains(&"ctime_ms".to_owned()));
     assert!(columns(&store, "context_learned_routes").contains(&"missing_since".to_owned()));
 
-    let ctime: i64 = store
+    // The code index is rebuilt on the next lookup rather than carried over.
+    let indexed: i64 = store
         .with_connection(|connection| {
-            Ok(connection.query_row(
-                "SELECT ctime_ms FROM context_files WHERE path='src/billing.ts'",
-                [],
-                |row| row.get(0),
-            )?)
+            Ok(connection.query_row("SELECT COUNT(*) FROM context_files", [], |row| row.get(0))?)
         })
-        .expect("indexed file reads");
-    // A file indexed before the upgrade has no change time on record, and zero
-    // is what makes it compare unequal to a real one and be read again.
-    assert_eq!(ctime, 0);
+        .expect("indexed files count");
+    assert_eq!(indexed, 0);
 
     let route = store
         .with_connection(|connection| {
