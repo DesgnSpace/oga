@@ -163,19 +163,22 @@ function WorktreeChip({ worktree, label }: { worktree: NonNullable<NonNullable<T
 // their own elements, so the bar stays to one muted chip plus the menu.
 function TaskDetailSecondary({
   task,
+  workerLabel,
   events,
   onChanged,
 }: {
   task: NonNullable<TaskDetailState["task"]>;
+  workerLabel: string | undefined;
   events: TaskEventView[];
   onChanged: () => void;
 }) {
   const effort = effortDisplay(task);
-  const factTitle = `${task.model} · ${taskDetailStatsSummary(task, events)}`;
+  const factTitle = [workerLabel, task.model, taskDetailStatsSummary(task, events)].filter(Boolean).join(" · ");
   return (
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
       {task.worktree && <WorktreeChip worktree={task.worktree} label={task.worktreeLabel} />}
       <span className="task-detail-fact" title={factTitle}>
+        {workerLabel && <span className="task-detail-worker">{workerLabel} · </span>}
         <span className="task-detail-model">{task.model}</span>
         {effort && (
           <span className="task-detail-effort" title={effort.title}>
@@ -400,11 +403,9 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     onLoadEarlier: loadEarlier,
   } : undefined;
 
-  // Profiles carry each worker's provider and environment, which the
-  // terminal resume command is built from. Only read when the task holds a
-  // session worth continuing.
+  // Profiles name the worker in the header and carry its provider and
+  // environment, which the terminal resume command is built from.
   React.useEffect(() => {
-    if (!task?.sessionId) return;
     let disposed = false;
     setProfiles(undefined);
     void broker.summary({ compact: true, limit: 1 }).then((result) => {
@@ -414,11 +415,12 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     return () => {
       disposed = true;
     };
-  }, [taskId, task?.profileId, task?.sessionId]);
+  }, [taskId, task?.profileId]);
 
+  const profile = profiles?.find((candidate) => candidate.id === task?.profileId);
   const terminalCommand = React.useMemo(
-    () => (task ? (terminalResumeCommand(task, profiles?.find((profile) => profile.id === task.profileId)) ?? undefined) : undefined),
-    [task, profiles],
+    () => (task ? (terminalResumeCommand(task, profile) ?? undefined) : undefined),
+    [task, profile],
   );
 
   React.useEffect(() => {
@@ -439,10 +441,10 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
       onToggleChanges: () => setShowingChanges((value) => !value),
       terminalCommand,
       status: <TaskStatusDot state={task.state} label={statusLabel} />,
-      secondary: <TaskDetailSecondary task={task} events={events} onChanged={refreshDetail} />,
+      secondary: <TaskDetailSecondary task={task} workerLabel={profile?.label} events={events} onChanged={refreshDetail} />,
     });
     return () => onHeader(undefined);
-  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, terminalCommand, onHeader]);
+  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, terminalCommand, profile, onHeader]);
 
   React.useEffect(() => {
     const listener = () => refreshDetail();

@@ -2284,22 +2284,6 @@ h1 {
     white-space: nowrap;
 }
 
-/* What the run is using, kept where the eye lands before sending: the model,
-   the effort it runs at, and whether it is working right now. */
-.composer-run-facts {
-    display: inline-flex;
-    min-width: 0;
-    align-items: center;
-    gap: var(--space-2);
-}
-
-.composer-run-model {
-    overflow: hidden;
-    color: var(--color-text);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* Shares the toolbar's inset, and keeps its line when empty so the input and
    toolbar hold still as the hint comes and goes. */
 .composer-note {
@@ -2558,6 +2542,7 @@ h1 {
     white-space: nowrap;
 }
 
+.task-detail-worker,
 .task-detail-effort {
     flex: 0 0 auto;
 }

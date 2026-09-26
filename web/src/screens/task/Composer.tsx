@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import type { Task, TaskEventView, TaskScope } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { CheckIcon, ChevronIcon, PlusIcon, ReturnIcon } from "@/ui/icons";
-import { effortDisplay, taskStatusLabel } from "./format";
+import { taskStatusLabel } from "./format";
 import { TaskMetadata } from "./TaskMetadata";
 
 const MENU_MARGIN = 8;
@@ -184,7 +184,6 @@ export function ConversationComposer({
       ? "This run can read files but not change them."
       : "This run can change files."
     : undefined;
-  const effort = effortDisplay(task);
   const branch = task.worktree?.branch ?? task.branch;
 
   // Resetting height first makes scrollHeight reflect only the content, so it shrinks back too.
@@ -308,16 +307,6 @@ export function ConversationComposer({
               Send now
             </button>
           )}
-          <span className="composer-run-facts">
-            <span className="composer-run-model" title={task.model}>
-              {task.model}
-            </span>
-            {effort && (
-              <span className="composer-run-effort" title={effort.title}>
-                {effort.label.charAt(0).toUpperCase() + effort.label.slice(1)}
-              </span>
-            )}
-          </span>
           <TaskStatusDot state={task.state} label={taskStatusLabel(task)} />
         </div>
       </div>
