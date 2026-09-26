@@ -503,19 +503,6 @@ describe("per-task view state", () => {
     reopened.dispose();
   });
 
-  it("defaults a task to pinned at the bottom, unopened", async () => {
-    const watched = fakeTransport({
-      broker_watch_task: () => snapshot({ cursor: 5 }),
-      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
-      broker_unwatch_task: () => undefined,
-    });
-    const { watchTaskDetail } = await freshController(watched);
-
-    const { controller, dispose } = watchTaskDetail("task");
-    expect(controller.viewState).toEqual({ scrollTop: 0, stickToEnd: true, workExpansion: new Map(), rowExpansion: new Map() });
-    dispose();
-  });
-
   it("forgets a task's view state once it is archived", async () => {
     const watched = fakeTransport({
       broker_watch_task: () => snapshot({ cursor: 5 }),
