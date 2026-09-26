@@ -114,10 +114,12 @@ export function TitleBar({
             </button>
           </>
         )}
-        {task && <span className="title-bar-task-status">{task.status}</span>}
-        <h1 id={task ? "page-title" : undefined} className="title-bar-title" title={title || undefined}>
-          {title}
-        </h1>
+        <span className="title-bar-heading">
+          {task && <span className="title-bar-task-status">{task.status}</span>}
+          <h1 id={task ? "page-title" : undefined} className="title-bar-title" title={title || undefined}>
+            {title}
+          </h1>
+        </span>
         <span className="title-bar-drag" data-tauri-drag-region />
         {task && (
           <div className="title-bar-actions">

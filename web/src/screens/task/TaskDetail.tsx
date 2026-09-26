@@ -3,11 +3,10 @@
 import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
-import { LiveDuration } from "@/components/atoms/LiveDuration";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
-import { formatCost, formatTokenCount } from "@/lib/format";
+import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
 import { taskOutcomeKey, taskOutcomeViews } from "@/state/task-outcome-views";
@@ -104,11 +103,6 @@ function useTaskBranches(taskId: string, active: boolean): BranchChoices {
   return state;
 }
 
-interface StatItem {
-  text: React.ReactNode;
-  title?: string;
-}
-
 function durationTitle(task: NonNullable<TaskDetailState["task"]>): string | undefined {
   const running = !activityIsSettled(task.state);
   if (running) return task.runningSince ? `Started ${absoluteTime(task.runningSince)}` : undefined;
@@ -118,24 +112,28 @@ function durationTitle(task: NonNullable<TaskDetailState["task"]>): string | und
   return `Started ${absoluteTime(startedAt)} · Finished ${absoluteTime(finishedAt)}`;
 }
 
-function taskDetailStatItems(task: NonNullable<TaskDetailState["task"]>, events: TaskEventView[]): StatItem[] {
+// Cost, turns, duration, and tokens, folded into one line for the model
+// chip's tooltip instead of sitting in the bar as their own elements.
+function taskDetailStatsSummary(task: NonNullable<TaskDetailState["task"]>, events: TaskEventView[]): string {
   const cost = formatCost(task.costUsd, task.costUsdEstimated);
   const { tokensIn, tokensOut, tokensCached } = usageTotals(events);
+  const duration = taskDuration(task.durationMs, task.runningSince, !activityIsSettled(task.state));
 
-  const items: StatItem[] = [];
-  if (cost) items.push({ text: cost, title: task.costUsdEstimated ? "Estimated from public pricing" : undefined });
-  if (task.turns !== undefined && task.turns > 0) items.push({ text: `${task.turns} turn${task.turns === 1 ? "" : "s"}` });
-  items.push({
-    text: <LiveDuration durationMs={task.durationMs} runningSince={task.runningSince} running={!activityIsSettled(task.state)} />,
-    title: durationTitle(task),
-  });
-  if (tokensIn > 0) items.push({ text: `${formatTokenCount(tokensIn)} in` });
-  if (tokensOut > 0) items.push({ text: `${formatTokenCount(tokensOut)} out` });
-  if (tokensCached > 0) items.push({ text: `${formatTokenCount(tokensCached)} cached` });
-  return items;
+  const parts: string[] = [];
+  if (cost) parts.push(task.costUsdEstimated ? `${cost} (estimated from public pricing)` : cost);
+  if (task.turns !== undefined && task.turns > 0) parts.push(`${task.turns} turn${task.turns === 1 ? "" : "s"}`);
+  parts.push(duration);
+  if (tokensIn > 0) parts.push(`${formatTokenCount(tokensIn)} in`);
+  if (tokensOut > 0) parts.push(`${formatTokenCount(tokensOut)} out`);
+  if (tokensCached > 0) parts.push(`${formatTokenCount(tokensCached)} cached`);
+  const detail = durationTitle(task);
+  if (detail) parts.push(detail);
+  return parts.join(" · ");
 }
 
-// The title bar's secondary strip scrolls instead of wrapping the bar.
+// The title bar's secondary strip scrolls instead of wrapping the bar. Cost,
+// duration, and token stats live in the model chip's tooltip rather than as
+// their own elements, so the bar stays to one muted chip plus the menu.
 function TaskDetailSecondary({
   task,
   events,
@@ -146,10 +144,10 @@ function TaskDetailSecondary({
   onChanged: () => void;
 }) {
   const effort = effortDisplay(task);
-  const items = taskDetailStatItems(task, events);
+  const factTitle = `${task.model} · ${taskDetailStatsSummary(task, events)}`;
   return (
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
-      <span className="task-detail-fact" title={task.model}>
+      <span className="task-detail-fact" title={factTitle}>
         <span className="task-detail-model">{task.model}</span>
         {effort && (
           <span className="task-detail-effort" title={effort.title}>
@@ -158,12 +156,6 @@ function TaskDetailSecondary({
           </span>
         )}
       </span>
-      {items.map((item, index) => (
-        <span key={index} className="title-bar-stat-group">
-          <span className="title-bar-stat-separator" aria-hidden="true">·</span>
-          <span className="task-detail-stat" title={item.title}>{item.text}</span>
-        </span>
-      ))}
       <span className="title-bar-secondary-spacer" />
       <TaskHeaderActions task={task} onChanged={onChanged} />
       <WaitNotice task={task} onChanged={onChanged} />

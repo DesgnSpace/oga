@@ -502,6 +502,14 @@ a {
     background: var(--color-sidebar);
 }
 
+/* Marks the boundary with the sidebar's own topbar (toggle, back, forward,
+   settings, usage, refresh) so that group reads as separate from the title,
+   rather than one long run of icons. Collapsed, the sidebar is gone and the
+   title bar draws those controls itself, so no divider is needed. */
+.task-sidebar:not(.task-sidebar-collapsed) + .app-main .title-bar {
+    border-left: 1px solid var(--color-border);
+}
+
 .title-bar-row {
     display: flex;
     height: var(--topbar-height);
@@ -517,13 +525,24 @@ a {
     align-self: stretch;
 }
 
+/* Groups the status dot and title as one unit, set apart from whatever
+   precedes it (window controls, or the sidebar's own topbar) so the title
+   reads as the bar's lead element rather than one more icon in a row. */
+.title-bar-heading {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    align-items: center;
+    margin-left: var(--space-4);
+}
+
 .title-bar-title {
     flex: 1 1 auto;
     min-width: 0;
     margin: 0 0 0 var(--space-2);
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: var(--text-base);
+    font-size: var(--text-heading);
     font-weight: 600;
     white-space: nowrap;
 }
@@ -566,13 +585,6 @@ a {
 .title-bar-stat-separator {
     color: var(--color-text-muted);
 }
-
-.title-bar-stat-group {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-3);
-}
-
 
 .title-bar-diff {
     color: var(--color-success);
@@ -2529,9 +2541,12 @@ h1 {
     flex: 0 1 auto;
     align-items: baseline;
     gap: 4px;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius);
+    background: var(--color-bg);
     color: var(--color-text-muted);
     font-family: var(--font-mono);
-    font-size: var(--text-base-mono);
+    font-size: var(--text-sm);
     white-space: nowrap;
 }
 
@@ -2545,14 +2560,6 @@ h1 {
 
 .task-detail-effort {
     flex: 0 0 auto;
-}
-
-.task-detail-stat {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 4px;
-    font-family: var(--font-mono);
-    font-size: var(--text-base-mono);
 }
 
 .task-detail-header-actions {

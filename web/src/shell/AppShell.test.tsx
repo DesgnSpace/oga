@@ -121,25 +121,6 @@ describe("the app shell", () => {
     expect(screen.queryByRole("textbox", { name: "Add a follow-up…" })).toBeNull();
   });
 
-  it("keeps the title bar's run time counting while a running task sends nothing", async () => {
-    const runningSince = new Date(Date.now() - 5_000).toISOString();
-    setTransport({
-      ...transport,
-      invoke: async (command, args) => {
-        if (command !== "broker_watch_task") return transport.invoke(command, args);
-        // SAFETY: this fixture returns the broker_watch_task response shape expected by TaskDetail.
-        return { task: { ...fullTask("one", "prompt for one"), runningSince }, events: [], cursor: 0, hasEarlier: false } as never;
-      },
-    });
-    window.history.replaceState(null, "", "/tasks/one");
-    render(<AppShell />);
-
-    const stats = await screen.findByLabelText("Task status and usage", undefined, { timeout: 5_000 });
-    await waitFor(() => expect(stats.textContent).toMatch(/\ds/));
-    const shown = stats.textContent;
-    await waitFor(() => expect(stats.textContent).not.toBe(shown), { timeout: 3_000 });
-  });
-
   it("hides and shows the task list on Cmd+B, focusing the list when it reopens", async () => {
     setTransport(transport);
     window.history.replaceState(null, "", "/");
