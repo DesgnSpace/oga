@@ -178,6 +178,96 @@ async fn task_search_returns_the_matching_field() {
 }
 
 #[tokio::test]
+async fn task_list_filters_before_it_caps_the_page() {
+    let (_directory, server) = test_server();
+    for index in 0..30 {
+        let mut listed = task(&format!("done-{index:02}"), TaskState::Completed);
+        listed.updated_at = format!("2026-09-05T00:00:{index:02}.000Z");
+        insert(&server, &listed);
+    }
+    let mut failed = task("failed", TaskState::Failed);
+    failed.updated_at = "2026-09-05T00:01:00.000Z".into();
+    insert(&server, &failed);
+    let mut child = task("child", TaskState::Completed);
+    child.parent_task_id = Some("done-03".into());
+    insert(&server, &child);
+    let mut archived = task("archived", TaskState::Completed);
+    archived.archived_at = Some("2026-09-05T00:02:00.000Z".into());
+    insert(&server, &archived);
+    let mut orchestrator = task("orchestrator", TaskState::Running);
+    orchestrator.kind = Some(oga_domain::TaskKind::Orchestrator);
+    insert(&server, &orchestrator);
+    let ids = |body: Value| {
+        body.as_array()
+            .expect("task rows")
+            .iter()
+            .map(|row| row["id"].as_str().expect("id").to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    let newest = ids(tool_body(
+        &call(
+            &server,
+            "tasks",
+            json!({ "state": "completed", "limit": 3 }),
+        )
+        .await,
+    ));
+    let oldest = ids(tool_body(
+        &call(
+            &server,
+            "tasks",
+            json!({ "state": ["completed", "failed"], "order": "oldest", "limit": 2 }),
+        )
+        .await,
+    ));
+    let window = ids(tool_body(
+        &call(
+            &server,
+            "tasks",
+            json!({ "since": "2026-09-05T00:00:28.000Z", "until": "2026-09-05T00:02:00.000Z" }),
+        )
+        .await,
+    ));
+    let family = ids(tool_body(
+        &call(&server, "tasks", json!({ "parent": "done-03" })).await,
+    ));
+    let only_archived = ids(tool_body(
+        &call(&server, "tasks", json!({ "archived": "only" })).await,
+    ));
+
+    assert_eq!(newest, ["done-29", "done-28", "done-27"]);
+    assert_eq!(oldest, ["child", "done-00"]);
+    assert_eq!(window, ["failed", "done-29", "done-28"]);
+    assert_eq!(family, ["done-03", "child"]);
+    assert_eq!(only_archived, ["archived"]);
+}
+
+#[tokio::test]
+async fn task_list_says_what_a_held_task_waits_for() {
+    let (_directory, server) = test_server();
+    insert(&server, &task("blocker", TaskState::Running));
+    insert(&server, &task("held", TaskState::Queued));
+    server
+        .state()
+        .store
+        .transaction(|connection| {
+            connection.execute(
+                "INSERT INTO task_holds(task_id,verb,next_check_at,expires_at,note,created_at,updated_at) VALUES('held','delegate','2026-09-05T00:05:00.000Z','2026-09-06T00:00:00.000Z','waiting for blocker to finish','2026-09-05T00:00:00.000Z','2026-09-05T00:00:00.000Z')",
+                [],
+            )?;
+            Ok(())
+        })
+        .expect("hold");
+
+    let body = tool_body(&call(&server, "tasks", json!({ "state": "queued" })).await);
+
+    assert_eq!(body[0]["id"], "held");
+    assert_eq!(body[0]["hold"]["kind"], "dependency");
+    assert_eq!(body[0]["hold"]["waitingOn"], "blocker");
+}
+
+#[tokio::test]
 async fn cancelling_a_worktree_task_offers_the_checkout_it_left_behind() {
     let (directory, server) = test_server();
     let project = directory.path().join("project");

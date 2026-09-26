@@ -52,6 +52,12 @@ impl From<oga_store::StoreError> for McpError {
     }
 }
 
+impl From<oga_http::HttpError> for McpError {
+    fn from(error: oga_http::HttpError) -> Self {
+        Self::Message(error.message)
+    }
+}
+
 impl From<oga_service::ContinuationError> for McpError {
     fn from(error: oga_service::ContinuationError) -> Self {
         Self::Message(error.to_string())
@@ -225,9 +231,18 @@ impl McpServer {
             "models" => self.models(&args).await?,
             "inspect" => self.inspect(&args).await?,
             "health" => (self.health(), None),
-            "tasks" => (self.tasks(&args)?, None),
+            "tasks" => {
+                let args = args.clone();
+                (
+                    self.off_thread(move |server| server.tasks(&args)).await?,
+                    None,
+                )
+            }
             "memory" => self.memory(&args)?,
-            "query" => self.query(&args)?,
+            "query" => {
+                let args = args.clone();
+                self.off_thread(move |server| server.query(&args)).await?
+            }
             "reply" => self.reply(&args).await?,
             "resume" => self.resume(&args).await?,
             "steer" => self.steer(&args).await?,
@@ -239,6 +254,18 @@ impl McpServer {
             _ => return Err(McpError::Message(format!("unknown tool: {name}"))),
         };
         self.mcp_response(value, cwd.as_deref())
+    }
+
+    /// Runs a tool that reads the database or walks a tree on the blocking
+    /// pool, so a burst of calls never stalls the broker's async workers.
+    async fn off_thread<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Self) -> Result<T, McpError> + Send + 'static,
+    ) -> Result<T, McpError> {
+        let server = self.clone();
+        tokio::task::spawn_blocking(move || work(&server))
+            .await
+            .map_err(|error| McpError::Message(error.to_string()))?
     }
 
     fn mcp_response(&self, value: Value, cwd: Option<&str>) -> Result<Value, McpError> {
@@ -427,12 +454,18 @@ impl McpServer {
     }
 
     fn tasks(&self, args: &Value) -> Result<Value, McpError> {
-        let query = task_query(args)?;
-        let rows = self.list_tasks(&query).map_err(McpError::Message)?;
+        let mut query = task_query(args)?;
+        query.limit = Some(query.limit.unwrap_or(20).clamp(1, 100));
         let fields = fields(args.get("fields"))?;
+        let prompt_chars =
+            if shaping::wanted_fields(fields.as_deref().unwrap_or_default()).contains("prompt") {
+                shaping::PROMPT_PREVIEW_CHARS
+            } else {
+                0
+            };
+        let rows = self.list_tasks(&query, prompt_chars)?;
         Ok(Value::Array(
             rows.into_iter()
-                .take(query.limit.unwrap_or(20).clamp(1, 100) as usize)
                 .map(|row| {
                     let summary = shaping::task_summary(&row.task);
                     shaping::summary_view(&summary, fields.as_deref(), row.matched)
@@ -1041,83 +1074,36 @@ impl McpServer {
         Ok((shaping::with_next(value, &task, action), Some(cwd)))
     }
 
-    fn list_tasks(&self, query: &TaskListQuery) -> Result<Vec<ListedTask>, String> {
-        if query.query.is_some() {
-            let matches = self
-                .state
-                .store
-                .repositories()
-                .tasks()
-                .search(query)
-                .map_err(|error| error.to_string())?;
-            return matches
+    fn list_tasks(
+        &self,
+        query: &TaskListQuery,
+        prompt_chars: usize,
+    ) -> Result<Vec<ListedTask>, McpError> {
+        let store = &self.state.store;
+        if query.query.is_none() {
+            return Ok(oga_http::state::list_task_rows(store, query, prompt_chars)?
                 .into_iter()
-                .map(|matched| {
-                    let task = self
-                        .state
-                        .dispatcher
-                        .task(&matched.id)
-                        .map_err(|error| error.to_string())?;
-                    Ok(ListedTask {
-                        task: self.enrich_task(task).map_err(|error| error.to_string())?,
-                        matched: Some(matched.matched),
-                    })
+                .map(|task| ListedTask {
+                    task,
+                    matched: None,
                 })
-                .collect();
+                .collect());
         }
-        let ids = self
-            .state
-            .store
-            .with_connection(|connection| {
-                let order = if query.order == Some(ListOrder::Oldest) {
-                    "ASC"
-                } else {
-                    "DESC"
-                };
-                let sql = format!("SELECT id FROM tasks ORDER BY updated_at {order},id {order}");
-                let mut statement = connection.prepare(&sql)?;
-                Ok(statement
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?)
-            })
-            .map_err(|error| error.to_string())?;
-        let mut tasks = Vec::new();
-        for id in ids {
-            let task = self
-                .state
-                .dispatcher
-                .task(&id)
-                .map_err(|error| error.to_string())?;
-            if task.kind == Some(TaskKind::Orchestrator) {
-                continue;
-            }
-            let task = self.enrich_task(task).map_err(|error| error.to_string())?;
-            if !archive_matches(task.archived_at.is_some(), query.archived)
-                || !state_matches(task.state, query.state.as_ref())
-                || query
-                    .profile
-                    .as_deref()
-                    .is_some_and(|profile| profile != task.profile_id)
-                || query.parent.as_deref().is_some_and(|parent| {
-                    task.id != parent && task.parent_task_id.as_deref() != Some(parent)
-                })
-                || query
-                    .since
-                    .as_deref()
-                    .is_some_and(|since| task.updated_at.as_str() < since)
-                || query
-                    .until
-                    .as_deref()
-                    .is_some_and(|until| task.updated_at.as_str() >= until)
-            {
-                continue;
-            }
-            tasks.push(ListedTask {
+        let matches = store.repositories().tasks().search(query)?;
+        let ids = matches
+            .iter()
+            .map(|matched| matched.id.clone())
+            .collect::<Vec<_>>();
+        Ok(oga_http::state::task_rows_by_id(store, &ids, prompt_chars)?
+            .into_iter()
+            .map(|task| ListedTask {
+                matched: matches
+                    .iter()
+                    .find(|matched| matched.id == task.id)
+                    .map(|matched| matched.matched),
                 task,
-                matched: None,
-            });
-        }
-        Ok(tasks)
+            })
+            .collect())
     }
 }
 
@@ -1589,22 +1575,6 @@ fn parse_state_filter(value: &Value) -> Result<StateFilter, McpError> {
 fn parse_state(value: &str) -> Result<TaskState, McpError> {
     serde_json::from_value(json!(value))
         .map_err(|_| McpError::InvalidParams(format!("unknown task state: {value}")))
-}
-
-fn state_matches(state: TaskState, filter: Option<&StateFilter>) -> bool {
-    match filter {
-        None => true,
-        Some(StateFilter::One(value)) => state == *value,
-        Some(StateFilter::Many(values)) => values.contains(&state),
-    }
-}
-
-fn archive_matches(archived: bool, filter: Option<ArchivedFilter>) -> bool {
-    match filter.unwrap_or(ArchivedFilter::Active) {
-        ArchivedFilter::Active => !archived,
-        ArchivedFilter::Only => archived,
-        ArchivedFilter::Include => true,
-    }
 }
 
 fn local_midnight() -> String {

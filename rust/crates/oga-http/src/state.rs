@@ -8,9 +8,9 @@ use axum::{
     response::IntoResponse,
 };
 use oga_domain::{
-    ActivityCounts, ArchivedFilter, FailureCode, MemoryProject, ProfileFailure, ProfileView,
-    Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskHoldView, TaskKind,
-    TaskState, TaskSummary, TaskWorktree,
+    ActivityCounts, ArchivedFilter, FailureCode, ListOrder, MemoryProject, ProfileFailure,
+    ProfileView, Provider, ScopeGrant, SpendTotals, Task, TaskCompletion, TaskEvent, TaskHoldView,
+    TaskKind, TaskListQuery, TaskState, TaskSummary, TaskWorktree,
 };
 use oga_events::{event_views, mark_repeated_retries};
 use oga_store::{Store, attach_task_timing};
@@ -547,6 +547,87 @@ fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Res
         attach_task_timing(connection, task)?;
     }
     Ok(task)
+}
+
+/// `TASK_COLUMNS` with output, shipped prompt, attempts, and transport read as
+/// empty; `{prompt}` becomes the prompt's opening or an empty string.
+const LIST_COLUMNS: &str = "id,kind,profile_id,model,{prompt},NULL,cwd,branch,origin_cwd,worktree_path,worktree_branch,NULL,state,'',error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,NULL,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,NULL";
+
+/// Tasks for a list view, read through `LIST_COLUMNS`.
+pub fn list_task_rows(
+    store: &Store,
+    query: &TaskListQuery,
+    prompt_chars: usize,
+) -> Result<Vec<Task>, HttpError> {
+    let (clauses, values) = oga_store::task_list_filter(query);
+    let order = if query.order == Some(ListOrder::Oldest) {
+        "ASC"
+    } else {
+        "DESC"
+    };
+    let limit = query
+        .limit
+        .map_or_else(String::new, |limit| format!(" LIMIT {limit}"));
+    task_rows(
+        store,
+        &format!(
+            "{} ORDER BY updated_at {order},id {order}{limit}",
+            clauses.join(" AND ")
+        ),
+        &values,
+        prompt_chars,
+    )
+}
+
+/// The same rows as `list_task_rows` for tasks picked by id, in the order given.
+pub fn task_rows_by_id(
+    store: &Store,
+    ids: &[String],
+    prompt_chars: usize,
+) -> Result<Vec<Task>, HttpError> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut rows = task_rows(
+        store,
+        &format!(
+            "id IN ({})",
+            std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        ids,
+        prompt_chars,
+    )?;
+    rows.sort_by_key(|task| ids.iter().position(|id| *id == task.id));
+    Ok(rows)
+}
+
+fn task_rows(
+    store: &Store,
+    condition: &str,
+    values: &[String],
+    prompt_chars: usize,
+) -> Result<Vec<Task>, HttpError> {
+    let prompt = if prompt_chars == 0 {
+        "''".to_owned()
+    } else {
+        format!("substr(prompt,1,{prompt_chars})")
+    };
+    let sql = format!(
+        "SELECT {} FROM tasks WHERE {condition}",
+        LIST_COLUMNS.replace("{prompt}", &prompt)
+    );
+    store
+        .with_connection(|connection| {
+            let mut statement = connection.prepare(&sql)?;
+            let mut tasks = statement
+                .query_map(rusqlite::params_from_iter(values), task_from_row)?
+                .collect::<Result<Vec<_>, _>>()?;
+            attach_task_read_fields(connection, &mut tasks)?;
+            Ok(tasks)
+        })
+        .map_err(HttpError::from)
 }
 
 /// Reads the follow-up counts and holds for a whole page of tasks in two

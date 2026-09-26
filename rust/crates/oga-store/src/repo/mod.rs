@@ -314,47 +314,9 @@ impl Tasks<'_> {
             .filter(|text| !text.trim().is_empty())
             .ok_or_else(|| StoreError::Refusal("task search needs query".into()))?;
         let pattern = format!("%{}%", escape_like(text));
-        let mut clauses = vec!["kind != 'orchestrator'".to_owned()];
+        let (mut clauses, filter_values) = task_list_filter(query);
         let mut values = vec![pattern.clone(), pattern.clone()];
-
-        match query.archived.unwrap_or(ArchivedFilter::Active) {
-            ArchivedFilter::Active => clauses.push("archived_at IS NULL".into()),
-            ArchivedFilter::Only => clauses.push("archived_at IS NOT NULL".into()),
-            ArchivedFilter::Include => {}
-        }
-        if let Some(state) = &query.state {
-            match state {
-                StateFilter::One(state) => {
-                    clauses.push("state = ?".into());
-                    values.push(state.as_str().into());
-                }
-                StateFilter::Many(states) => {
-                    clauses.push(format!(
-                        "state IN ({})",
-                        std::iter::repeat_n("?", states.len())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    ));
-                    values.extend(states.iter().map(|state| state.as_str().to_owned()));
-                }
-            }
-        }
-        if let Some(since) = &query.since {
-            clauses.push("updated_at >= ?".into());
-            values.push(since.clone());
-        }
-        if let Some(until) = &query.until {
-            clauses.push("updated_at < ?".into());
-            values.push(until.clone());
-        }
-        if let Some(profile) = &query.profile {
-            clauses.push("profile_id = ?".into());
-            values.push(profile.clone());
-        }
-        if let Some(parent) = &query.parent {
-            clauses.push("(id = ? OR parent_task_id = ?)".into());
-            values.extend([parent.clone(), parent.clone()]);
-        }
+        values.extend(filter_values);
         clauses.push("(title LIKE ? ESCAPE '\\' COLLATE NOCASE OR tldr LIKE ? ESCAPE '\\' COLLATE NOCASE OR prompt LIKE ? ESCAPE '\\' COLLATE NOCASE)".into());
         values.extend([pattern.clone(), pattern.clone(), pattern.clone()]);
         values.extend([pattern.clone(), pattern]);
@@ -365,8 +327,11 @@ impl Tasks<'_> {
             "DESC"
         };
         let sql = format!(
-            "SELECT id, state, title, tldr, cwd, created_at, updated_at, archived_at, CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'title' WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'tldr' ELSE 'prompt' END, COALESCE((SELECT SUM(CASE WHEN ended_at IS NULL THEN 0 ELSE CAST(MAX(0, ROUND((julianday(ended_at)-julianday(started_at))*86400000.0)) AS INTEGER) END) FROM task_turns WHERE task_id=tasks.id),0), (SELECT started_at FROM task_turns WHERE task_id=tasks.id AND status='running' LIMIT 1) FROM tasks WHERE {} ORDER BY CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, updated_at {order}, id {order}",
-            clauses.join(" AND ")
+            "SELECT id, state, title, tldr, cwd, created_at, updated_at, archived_at, CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'title' WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 'tldr' ELSE 'prompt' END, COALESCE((SELECT SUM(CASE WHEN ended_at IS NULL THEN 0 ELSE CAST(MAX(0, ROUND((julianday(ended_at)-julianday(started_at))*86400000.0)) AS INTEGER) END) FROM task_turns WHERE task_id=tasks.id),0), (SELECT started_at FROM task_turns WHERE task_id=tasks.id AND status='running' LIMIT 1) FROM tasks WHERE {} ORDER BY CASE WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 0 WHEN tldr LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1 ELSE 2 END, updated_at {order}, id {order}{}",
+            clauses.join(" AND "),
+            query
+                .limit
+                .map_or_else(String::new, |limit| format!(" LIMIT {limit}"))
         );
         self.store.with_connection(|connection| {
             let mut statement = connection.prepare(&sql)?;
@@ -405,6 +370,52 @@ impl Tasks<'_> {
             )? != 0)
         })
     }
+}
+
+/// SQL conditions for a task list's filters, joined with AND by the caller,
+/// and their bound values in order. Orchestrator tasks are never listed.
+pub fn task_list_filter(query: &TaskListQuery) -> (Vec<String>, Vec<String>) {
+    let mut clauses = vec!["kind != 'orchestrator'".to_owned()];
+    let mut values = Vec::new();
+    match query.archived.unwrap_or(ArchivedFilter::Active) {
+        ArchivedFilter::Active => clauses.push("archived_at IS NULL".into()),
+        ArchivedFilter::Only => clauses.push("archived_at IS NOT NULL".into()),
+        ArchivedFilter::Include => {}
+    }
+    if let Some(state) = &query.state {
+        match state {
+            StateFilter::One(state) => {
+                clauses.push("state = ?".into());
+                values.push(state.as_str().into());
+            }
+            StateFilter::Many(states) => {
+                clauses.push(format!(
+                    "state IN ({})",
+                    std::iter::repeat_n("?", states.len())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+                values.extend(states.iter().map(|state| state.as_str().to_owned()));
+            }
+        }
+    }
+    if let Some(since) = &query.since {
+        clauses.push("updated_at >= ?".into());
+        values.push(since.clone());
+    }
+    if let Some(until) = &query.until {
+        clauses.push("updated_at < ?".into());
+        values.push(until.clone());
+    }
+    if let Some(profile) = &query.profile {
+        clauses.push("profile_id = ?".into());
+        values.push(profile.clone());
+    }
+    if let Some(parent) = &query.parent {
+        clauses.push("(id = ? OR parent_task_id = ?)".into());
+        values.extend([parent.clone(), parent.clone()]);
+    }
+    (clauses, values)
 }
 
 fn escape_like(text: &str) -> String {

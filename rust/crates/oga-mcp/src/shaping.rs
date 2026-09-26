@@ -307,6 +307,8 @@ pub fn summary_view(
     Value::Object(view)
 }
 
+pub const PROMPT_PREVIEW_CHARS: usize = 200;
+
 pub fn task_summary(task: &Task) -> TaskSummary {
     TaskSummary {
         id: task.id.clone(),
@@ -320,7 +322,7 @@ pub fn task_summary(task: &Task) -> TaskSummary {
         branch: task.effective_branch().map(str::to_owned),
         worktree_label: task.worktree_label.clone(),
         state: task.state,
-        prompt_preview: task.prompt.chars().take(200).collect(),
+        prompt_preview: task.prompt.chars().take(PROMPT_PREVIEW_CHARS).collect(),
         tldr: task.tldr.clone(),
         title: task.title.clone(),
         created_at: task.created_at.clone(),
