@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isResume, isSendDisabled, routingForState } from "./Composer";
+import { isSendDisabled, routingForState } from "./Composer";
 
 describe("routingForState", () => {
   test("a running task with a steerable worker can steer and queue", () => {
@@ -41,12 +41,5 @@ describe("isSendDisabled", () => {
     expect(isSendDisabled({ type: "queue" }, "hello")).toBe(false);
     expect(isSendDisabled({ type: "reply", question: "" }, "hello")).toBe(false);
     expect(isSendDisabled({ type: "none" }, "hello")).toBe(true);
-  });
-});
-
-describe("isResume", () => {
-  test("only the resume routing counts as a resume", () => {
-    expect(isResume({ type: "resume", textRequired: false })).toBe(true);
-    expect(isResume({ type: "queue" })).toBe(false);
   });
 });

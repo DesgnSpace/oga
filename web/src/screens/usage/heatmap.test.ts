@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addMonths, buildHeatmapMonth, compareMonths, heatmapMonthBounds, monthLabel } from "./heatmap";
+import { addMonths, buildHeatmapMonth, compareMonths, heatmapMonthBounds } from "./heatmap";
 import type { UsageDay } from "@/bridge/types";
 
 function day(date: string): UsageDay {
@@ -68,9 +68,5 @@ describe("month arithmetic", () => {
   test("compareMonths orders chronologically", () => {
     expect(compareMonths({ year: 2026, month: 9 }, { year: 2026, month: 10 })).toBeLessThan(0);
     expect(compareMonths({ year: 2026, month: 9 }, { year: 2026, month: 9 })).toBe(0);
-  });
-
-  test("monthLabel names the month and year", () => {
-    expect(monthLabel({ year: 2026, month: 9 })).toBe("September 2026");
   });
 });

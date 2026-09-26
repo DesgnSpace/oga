@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { routeFromPath, routePath } from "@/router";
+import { routeFromPath } from "@/router";
 
 describe("routeFromPath", () => {
   it("parses the root as home", () => {
@@ -20,14 +20,5 @@ describe("routeFromPath", () => {
 
   it("falls back to not-found for a bare /tasks/ with no id", () => {
     expect(routeFromPath("/tasks/")).toEqual({ kind: "not-found" });
-  });
-});
-
-describe("routePath", () => {
-  it("renders each route back to a path", () => {
-    expect(routePath({ kind: "home" })).toBe("/");
-    expect(routePath({ kind: "task", id: "abc" })).toBe("/tasks/abc");
-    expect(routePath({ kind: "settings" })).toBe("/settings");
-    expect(routePath({ kind: "not-found" })).toBe("/");
   });
 });

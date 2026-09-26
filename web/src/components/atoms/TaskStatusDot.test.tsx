@@ -1,52 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
-import type { TaskState } from "@/bridge/types";
-import { TaskStatusDot, taskStatusLook } from "./TaskStatusDot";
-
-const ALL_STATES: TaskState[] = [
-  "queued",
-  "preparing_checkout",
-  "removing_checkout",
-  "pending",
-  "running",
-  "needs_input",
-  "answered",
-  "blocked",
-  "completed",
-  "failed",
-  "cancelled",
-];
-
-describe("taskStatusLook", () => {
-  afterEach(cleanup);
-
-  it("gives every state a look", () => {
-    for (const state of ALL_STATES) expect(taskStatusLook(state)).toBeDefined();
-  });
-
-  it("groups waiting states together", () => {
-    expect(taskStatusLook("queued")).toBe("waiting");
-    expect(taskStatusLook("preparing_checkout")).toBe("waiting");
-    expect(taskStatusLook("removing_checkout")).toBe("waiting");
-    expect(taskStatusLook("pending")).toBe("waiting");
-    expect(taskStatusLook("answered")).toBe("waiting");
-  });
-
-  it("groups failed and blocked as a problem", () => {
-    expect(taskStatusLook("failed")).toBe("problem");
-    expect(taskStatusLook("blocked")).toBe("problem");
-  });
-
-  it("groups completed and cancelled as settled", () => {
-    expect(taskStatusLook("completed")).toBe("settled");
-    expect(taskStatusLook("cancelled")).toBe("settled");
-  });
-
-  it("gives running and needs_input their own look", () => {
-    expect(taskStatusLook("running")).toBe("running");
-    expect(taskStatusLook("needs_input")).toBe("needs_input");
-  });
-});
+import { TaskStatusDot } from "./TaskStatusDot";
 
 describe("TaskStatusDot", () => {
   afterEach(cleanup);

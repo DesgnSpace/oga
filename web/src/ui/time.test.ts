@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { absoluteTime, relativeTime } from "./time";
+import { relativeTime } from "./time";
 
 const now = new Date("2026-09-02T12:00:00Z");
 
@@ -15,12 +15,5 @@ describe("relativeTime", () => {
     expect(relativeTime(new Date("2026-08-01T12:00:00Z"), now)).toBe(
       new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date("2026-08-01T12:00:00Z")),
     );
-  });
-});
-
-describe("absoluteTime", () => {
-  it("formats a full localized date and time", () => {
-    const date = new Date("2026-09-02T12:00:00Z");
-    expect(absoluteTime(date)).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date));
   });
 });

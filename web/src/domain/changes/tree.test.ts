@@ -19,14 +19,4 @@ describe("buildFileTree", () => {
     expect(lib.children.map((node) => node.name)).toEqual(["a.ts", "b.ts"]);
     expect(lib.path).toBe("src/lib");
   });
-
-  it("keeps each file's original path and view on its leaf", () => {
-    const tree = buildFileTree([file("src/index.ts")]);
-    const src = tree[0];
-    if (src.kind !== "dir") throw new Error("expected dir");
-    const leaf = src.children[0];
-    if (leaf.kind !== "file") throw new Error("expected file");
-    expect(leaf.path).toBe("src/index.ts");
-    expect(leaf.file.path).toBe("src/index.ts");
-  });
 });

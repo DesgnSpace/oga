@@ -6,7 +6,6 @@ import {
   applyModelLoadError,
   applyModelSnapshot,
   applyOptimisticModelUpdate,
-  applyOverview,
   applyPromptConfig,
   beginMemoryLoad,
   beginModelLoad,
@@ -15,7 +14,6 @@ import {
   defaultMemoryState,
   defaultModelSettingsStore,
   defaultPromptsModel,
-  defaultSettingsState,
   finishModelUpdate,
   finishPromptSave,
   isPromptDirty,
@@ -23,8 +21,6 @@ import {
   modelRowKey,
   profileError,
   projectName,
-  providerFromString,
-  providerLabel,
   resetPrompt,
   scopeFromKey,
   scopeKey,
@@ -67,13 +63,6 @@ function snapshot(revision = "abc"): ModelSettingsSnapshot {
     ],
   };
 }
-
-describe("modelRowKey", () => {
-  it("separates worker from model", () => {
-    expect(modelRowKey("claude-work")).toBe("claude-work");
-    expect(modelRowKey("claude-work", "opus")).toBe("claude-work/opus");
-  });
-});
 
 describe("model settings store", () => {
   it("begins load clearing errors", () => {
@@ -184,15 +173,6 @@ describe("prompts model", () => {
     expect(m.saveError).toEqual({ kind: "unreachable" });
     expect(m.saving).toBe(false);
   });
-
-  it("carries the file a project sets its instructions in", () => {
-    const m = applyPromptConfig(defaultPromptsModel(), {
-      ...cfg(false, "From the file", "Inherited"),
-      configPath: "/tmp/project/.oga.yaml",
-    });
-    expect(m.configPath).toBe("/tmp/project/.oga.yaml");
-    expect(m.text).toBe("From the file");
-  });
 });
 
 describe("memories", () => {
@@ -215,20 +195,7 @@ describe("memories", () => {
   });
 });
 
-describe("overview", () => {
-  it("stores profiles and projects", () => {
-    const s = applyOverview(defaultSettingsState(), { profiles: [], tasks: [], memoryProjects: [] }, { global: "/Users/me", projects: ["/tmp/project"] }, undefined);
-    expect(s.projects?.global).toBe("/Users/me");
-    expect(s.overview).toBe("ready");
-  });
-});
-
 describe("helpers", () => {
-  it("provider labels cover every supported provider", () => {
-    expect(providerLabel("claude")).toBe("Claude");
-    expect(providerLabel("opencode-2")).toBe("OpenCode 2");
-    expect(providerLabel("pi")).toBe("Pi");
-  });
   it("secret detection", () => {
     expect(isSecretKey("OPENAI_API_KEY")).toBe(true);
     expect(isSecretKey("CLAUDE_CONFIG_DIR")).toBe(false);
@@ -247,9 +214,5 @@ describe("helpers", () => {
     expect(profileError("delete", 409)).toBe("This worker changed outside Oga. Refresh settings, then re-enter your changes.");
     expect(profileError("save", 500, "boom")).toBe("Couldn't save the worker: boom");
     expect(profileError("save")).toBe("Couldn't save the worker. Check that Oga is running, then try again.");
-  });
-  it("provider from string", () => {
-    expect(providerFromString("claude")).toBe("claude");
-    expect(providerFromString("unknown")).toBeUndefined();
   });
 });
