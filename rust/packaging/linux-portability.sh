@@ -8,7 +8,7 @@ fi
 
 TARGET="${1:-x86_64-unknown-linux-gnu}"
 missing=()
-for command_name in cargo rustc rustup pkg-config bwrap trunk; do
+for command_name in cargo rustc rustup pkg-config bwrap bun; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         missing+=("$command_name")
     fi
@@ -22,7 +22,7 @@ fi
 printf 'Linux host: %s\n' "$(uname -srmo)"
 printf 'Rust: %s\n' "$(rustc --version)"
 printf 'Cargo: %s\n' "$(cargo --version)"
-printf 'Trunk: %s\n' "$(trunk --version)"
+printf 'Bun: %s\n' "$(bun --version)"
 printf 'Tauri: %s\n' "$(cargo tauri --version)"
 printf 'Bubblewrap: %s\n' "$(bwrap --version)"
 

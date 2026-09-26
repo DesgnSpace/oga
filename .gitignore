@@ -14,14 +14,11 @@ dist/
 oga.config.json
 .mcp.json
 opencode.json
-# The compatibility fixture of the same name is a recorded contract, not config.
-!rust/compat/fixtures/providers/opencode.json
 .cursor/
 .wrangler/
 .DS_Store
 
-# Icon staging, rebuilt by `make bundle`
-*.iconset/
+# Icon staging, rebuilt by `bun logos/generate.js`
 *.icns
 
 # Rust build output

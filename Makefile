@@ -1,8 +1,6 @@
 DIST := dist
 APP := $(DIST)/Oga.app
 VERSION := $(shell tr -d ' \n' < VERSION 2>/dev/null)
-TARGET := universal-apple-darwin
-# The newest v* tag names the build (v stripped); unreleased trees start at 0.0.1.
 BINDIR ?= $(HOME)/.local/bin
 OGA_DB ?= $(HOME)/.oga/oga.db
 CUTOVER_BACKUP ?= $(OGA_DB).cutover-backup
