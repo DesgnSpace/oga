@@ -2,12 +2,18 @@ use std::fs;
 
 use oga_domain::{CleanupPlan, CleanupRecord, CleanupResult, CleanupStateCount, TaskState};
 use rusqlite::types::Value;
-use rusqlite::{Connection, params, params_from_iter};
+use rusqlite::{Connection, TransactionBehavior, params, params_from_iter};
 use serde_json::json;
 
 use crate::{Store, StoreError, append_event};
 
 const SETTLED_STATES: &str = "'completed','failed','cancelled'";
+/// States whose worker may be writing. A rewrite holds every write until it
+/// ends, which on a large file is tens of seconds.
+const AT_WORK_STATES: &str =
+    "'queued','preparing_checkout','removing_checkout','running','answered'";
+/// Free space left by an earlier pass that is worth a rewrite on its own.
+const COMPACT_MIN_FREE_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
 
 impl Store {
     pub fn cleanup_plan(
@@ -25,7 +31,8 @@ impl Store {
         })
     }
 
-    /// Delete old activity and rewrite the database while broker writes wait.
+    /// Delete old activity, then rewrite the file to its new size while broker
+    /// writes wait. The rewrite waits for a pass with no task at work.
     pub fn cleanup(
         &self,
         cutoff: &str,
@@ -35,7 +42,7 @@ impl Store {
         let before = file_bytes(self.path());
         let result = self.with_maintenance(|connection| {
             let viewed = self.viewed_task();
-            let transaction = connection.transaction()?;
+            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let plan = cleanup_plan_connection(
                 &transaction,
                 cutoff,
@@ -81,7 +88,9 @@ impl Store {
                 )?;
             }
             transaction.commit()?;
-            if plan.events > 0 {
+            if (plan.events > 0 || free_bytes(connection)? >= COMPACT_MIN_FREE_BYTES)
+                && !tasks_at_work(connection)?
+            {
                 connection.execute_batch("VACUUM; PRAGMA wal_checkpoint(TRUNCATE);")?;
             }
             Ok((plan,))
@@ -96,6 +105,22 @@ impl Store {
             file_bytes_after: file_bytes(self.path()),
         })
     }
+}
+
+fn tasks_at_work(connection: &Connection) -> Result<bool, StoreError> {
+    Ok(connection
+        .prepare(&format!(
+            "SELECT 1 FROM tasks WHERE state IN ({AT_WORK_STATES}) LIMIT 1"
+        ))?
+        .exists([])?)
+}
+
+fn free_bytes(connection: &Connection) -> Result<u64, StoreError> {
+    Ok(connection.query_row(
+        "SELECT freelist_count * page_size FROM pragma_freelist_count, pragma_page_size",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 fn cleanup_plan_connection(

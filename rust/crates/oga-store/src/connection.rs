@@ -5,7 +5,7 @@ use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 
 use crate::schema::{LATEST_SCHEMA_VERSION, create_fresh_schema, migration_after};
 
@@ -234,7 +234,9 @@ impl Store {
             .read()
             .map_err(|_| StoreError::Refusal("maintenance lock poisoned".to_string()))?;
         let mut connection = self.lock()?;
-        let transaction = connection.transaction()?;
+        // Taking the write lock at BEGIN lets the busy timeout wait out another
+        // process's writer; a read that later writes would fail at once instead.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         match work(&transaction) {
             Ok(value) => {
                 transaction.commit()?;

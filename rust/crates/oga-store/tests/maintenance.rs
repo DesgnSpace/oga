@@ -171,3 +171,61 @@ fn cleanup_holds_back_active_children_and_viewed_tasks() {
         1
     );
 }
+
+#[test]
+fn a_cleanup_while_a_task_runs_leaves_the_file_rewrite_for_a_later_pass() {
+    let database = TestDatabase::new();
+    let store = database.open_writable();
+    insert_profile(&store);
+    let archived = Some("2025-01-03T00:00:00Z");
+    for task in [
+        task("old", TaskState::Completed, archived, None),
+        task("working", TaskState::Running, None, None),
+    ] {
+        store
+            .repositories()
+            .tasks()
+            .insert(&task)
+            .expect("task inserts");
+    }
+    let bulky = "x".repeat(16 * 1024);
+    for _ in 0..1_000 {
+        let mut old = event("old", TaskState::Completed, "2025-01-02T00:00:00Z");
+        old.payload.insert("text".to_owned(), json!(bulky));
+        store
+            .repositories()
+            .events()
+            .append(&old)
+            .expect("event inserts");
+    }
+    store.checkpoint().expect("checkpoint");
+
+    let during = store
+        .cleanup("2025-02-01T00:00:00Z", true, "2026-01-01T00:00:00Z")
+        .expect("cleanup succeeds");
+
+    assert_eq!(during.record.plan.events, 1_000);
+    assert!(
+        during.file_bytes_after >= during.file_bytes_before,
+        "the file was rewritten while a task ran: {} -> {}",
+        during.file_bytes_before,
+        during.file_bytes_after
+    );
+
+    store
+        .transaction(|tx| {
+            Ok(tx.execute("UPDATE tasks SET state='completed' WHERE id='working'", [])?)
+        })
+        .expect("task settles");
+    let later = store
+        .cleanup("2025-02-01T00:00:00Z", true, "2026-01-02T00:00:00Z")
+        .expect("cleanup succeeds");
+
+    assert_eq!(later.record.plan.events, 0);
+    assert!(
+        later.file_bytes_after + 8 * 1024 * 1024 < later.file_bytes_before,
+        "the next idle pass reclaims the space: {} -> {}",
+        later.file_bytes_before,
+        later.file_bytes_after
+    );
+}

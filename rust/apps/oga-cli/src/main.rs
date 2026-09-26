@@ -2384,11 +2384,16 @@ fn scheduled_cleanup_settings(store: &Store) -> CliResult<Option<CleanupSettings
     }))
 }
 
-async fn scheduled_cleanup_pass(store: &Store, settings: CleanupSettings) -> CliResult<()> {
+async fn scheduled_cleanup_pass(store: &Arc<Store>, settings: CleanupSettings) -> CliResult<()> {
     let cutoff =
         format_rfc3339_ms(now_ms().saturating_sub((settings.older_than_days * 86_400_000) as i64));
     let finished_at = format_rfc3339_ms(now_ms());
-    let result = store.cleanup(&cutoff, settings.archived_only, &finished_at)?;
+    let store = Arc::clone(store);
+    let result = tokio::task::spawn_blocking(move || {
+        store.cleanup(&cutoff, settings.archived_only, &finished_at)
+    })
+    .await
+    .map_err(|error| CliError::new(format!("cleanup stopped: {error}")))??;
     if result.record.plan.events > 0 {
         eprintln!(
             "cleanup: removed {} activity records from {} tasks; file {} to {}",
