@@ -25,7 +25,7 @@ use oga_providers::{
     resume_command_for_with_options,
 };
 use oga_runner::{ProviderRunner, RunRequest, RunResult, RunnerError, RunningProcess, Termination};
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::{OptionalExtension, params};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -534,12 +534,12 @@ pub(crate) async fn run_task_with_session_and_active(
                 "UPDATE tasks SET worker_json=? WHERE id=?",
                 params![worker_json, task.id],
             )?;
-            append_event_tx(
+            append_event(
                 tx,
                 &task.id,
                 "worker_spawned",
                 TaskState::Running,
-                spawn_payload,
+                &spawn_payload,
                 &now,
                 Some(turn_id),
             )?;
@@ -676,12 +676,12 @@ fn record_cli_transport(
             "UPDATE tasks SET transport_json=? WHERE id=?",
             params![transport_json, task_id],
         )?;
-        append_event_tx(
+        append_event(
             tx,
             task_id,
             event,
             TaskState::Running,
-            json!({
+            &json!({
                 "transport": decision.kind,
                 "reason": decision.reason,
                 "detail": decision.detail,
@@ -1031,12 +1031,12 @@ pub(crate) fn settle_task(
         if let Some(question) = &worker.question {
             completion_payload["question"] = json!(question);
         }
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             event_type(worker.state),
             worker.state,
-            completion_payload,
+            &completion_payload,
             &now,
             Some(turn_id),
         )?;
@@ -1131,23 +1131,23 @@ fn append_provider_events(
         )?;
     }
     if run.events_dropped > 0 {
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "events_truncated",
             TaskState::Running,
-            json!({"dropped": run.events_dropped}),
+            &json!({"dropped": run.events_dropped}),
             now,
             Some(turn_id),
         )?;
     }
     if run.malformed_lines > 0 || run.oversized_lines > 0 {
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "line_dropped",
             TaskState::Running,
-            json!({
+            &json!({
                 "malformed": run.malformed_lines,
                 "oversized": run.oversized_lines,
             }),
@@ -1156,12 +1156,12 @@ fn append_provider_events(
         )?;
     }
     if !run.stderr.trim().is_empty() {
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "worker_stderr",
             TaskState::Running,
-            json!({"text": run.stderr}),
+            &json!({"text": run.stderr}),
             now,
             Some(turn_id),
         )?;
@@ -1178,12 +1178,12 @@ fn append_provider_event_tx(
     session_event_written: &mut bool,
     now: &str,
 ) -> Result<(), rusqlite::Error> {
-    append_event_tx(
+    append_event(
         tx,
         task_id,
         &format!("agent.{}", event_kind(event)),
         TaskState::Running,
-        event.payload.clone(),
+        &event.payload,
         now,
         Some(turn_id),
     )?;
@@ -1210,12 +1210,12 @@ fn append_provider_event_tx(
                 }),
             )
         };
-        append_event_tx(
+        append_event(
             tx,
             task_id,
             kind,
             TaskState::Running,
-            payload,
+            &payload,
             now,
             Some(turn_id),
         )?;
@@ -1267,12 +1267,12 @@ fn append_retry_events(
             live_events.persisted_provider_events,
             live_events.session_event_written,
         )?;
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "provider_retry",
             TaskState::Running,
-            json!({
+            &json!({
                 "provider": provider.as_str(),
                 "kind": "abort",
                 "attempt": attempt,
@@ -1562,12 +1562,12 @@ fn claim_dependency_hold(store: &Store, task_id: &str, note: &str) -> Result<boo
             if removed != 1 {
                 return Ok(false);
             }
-            append_event_tx(
+            append_event(
                 tx,
                 task_id,
                 "hold_released",
                 TaskState::Pending,
-                json!({"note": note}),
+                &json!({"note": note}),
                 &now,
                 None,
             )?;
@@ -1588,12 +1588,12 @@ fn queue_held_task(
             params![now, task_id],
         )?;
         if changed == 1 {
-            append_event_tx(
+            append_event(
                 tx,
                 task_id,
                 "queued",
                 TaskState::Queued,
-                json!({"note": note}),
+                &json!({"note": note}),
                 &now,
                 None,
             )?;
@@ -1632,21 +1632,21 @@ fn block_dependent(
             "UPDATE tasks SET state='blocked',error=?,completion_json=?,updated_at=? WHERE id=? AND state='pending'",
             params![reason, encode(&completion)?, now, dependent.id],
         )?;
-        append_event_tx(
+        append_event(
             tx,
             &dependent.id,
             "hold_dropped",
             TaskState::Pending,
-            json!({"reason": reason, "note": note, "blockerId": blocker.id, "blockerState": blocker.state}),
+            &json!({"reason": reason, "note": note, "blockerId": blocker.id, "blockerState": blocker.state}),
             &now,
             None,
         )?;
-        append_event_tx(
+        append_event(
             tx,
             &dependent.id,
             "blocked",
             TaskState::Blocked,
-            json!({"error": reason, "completion": completion}),
+            &json!({"error": reason, "completion": completion}),
             &now,
             None,
         )?;
@@ -1672,12 +1672,12 @@ pub(crate) fn block_queued_task(
             "UPDATE tasks SET state='blocked',error=?,completion_json=?,updated_at=? WHERE id=? AND state='queued'",
             params![reason, encode(&completion)?, now, task_id],
         )?;
-        append_event_tx(
+        append_event(
             tx,
             task_id,
             "blocked",
             TaskState::Blocked,
-            json!({"error": reason, "completion": completion}),
+            &json!({"error": reason, "completion": completion}),
             &now,
             None,
         )?;
@@ -1714,12 +1714,12 @@ pub(crate) fn fail_unstarted_task(
             params![reason, encode(&completion)?, now, task_id, expected_updated_at],
         )?;
         if changed == 1 {
-            append_event_tx(
+            append_event(
                 tx,
                 task_id,
                 "failed",
                 TaskState::Failed,
-                json!({"error": reason, "completion": completion}),
+                &json!({"error": reason, "completion": completion}),
                 &now,
                 None,
             )?;
@@ -1757,12 +1757,12 @@ fn claim_task(store: &Store, task_id: &str, shipped_prompt: &str) -> Result<i64,
                 params![task_id, ordinal, "running", now],
             )?;
             let turn_id = tx.last_insert_rowid();
-            append_event_tx(
+            append_event(
                 tx,
                 task_id,
                 "started",
                 TaskState::Running,
-                json!({}),
+                &json!({}),
                 &now,
                 Some(turn_id),
             )?;
@@ -1815,22 +1815,6 @@ fn event_type(state: TaskState) -> &'static str {
 pub(crate) fn encode<T: Serialize>(value: &T) -> Result<String, StoreError> {
     serde_json::to_string(value)
         .map_err(|error| StoreError::Refusal(format!("invalid lifecycle JSON: {error}")))
-}
-
-pub(crate) fn append_event_tx(
-    tx: &rusqlite::Transaction<'_>,
-    task_id: &str,
-    kind: &str,
-    state: TaskState,
-    payload: Value,
-    at: &str,
-    turn_id: Option<i64>,
-) -> Result<i64, rusqlite::Error> {
-    tx.execute(
-        "INSERT INTO task_events(task_id,event_type,state,payload,created_at,turn_id) VALUES(?,?,?,?,?,?)",
-        params![task_id, kind, state.as_str(), payload.to_string(), at, turn_id],
-    )?;
-    Ok(tx.last_insert_rowid())
 }
 
 pub(crate) fn now_iso() -> String {

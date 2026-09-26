@@ -7,7 +7,7 @@ use std::{
 };
 
 use oga_domain::{CompletionCode, HoldVerb, Task, TaskCompletion, TaskHold, TaskState};
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 use thiserror::Error;
@@ -454,12 +454,13 @@ pub fn arm_hold(store: &Store, hold: &TaskHold) -> Result<(), StoreError> {
             &hold.task_id,
             "hold_armed",
             TaskState::Pending,
-            json!({
+            &json!({
                 "note": hold.note,
                 "wait": wait_kind(hold),
                 "resumesAt": hold.start_at.as_deref().unwrap_or(&hold.next_check_at),
             }),
             &hold.updated_at,
+            None,
         )?;
         Ok(())
     })
@@ -517,7 +518,7 @@ pub fn drop_hold(
             return Ok(false);
         }
         let state = task_state(tx, &hold.task_id)?.unwrap_or(TaskState::Pending);
-        append_event(tx, &hold.task_id, event, state, payload, now)?;
+        append_event(tx, &hold.task_id, event, state, &payload, now, None)?;
         Ok(true)
     })
 }
@@ -542,16 +543,18 @@ fn release_hold(store: &Store, hold: &TaskHold, now: &str) -> Result<bool, Store
             &hold.task_id,
             "hold_released",
             TaskState::Pending,
-            json!({"note": hold.note, "wait": wait_kind(hold)}),
+            &json!({"note": hold.note, "wait": wait_kind(hold)}),
             now,
+            None,
         )?;
         append_event(
             tx,
             &hold.task_id,
             "queued",
             TaskState::Queued,
-            json!({"note": hold.note, "verb": hold_verb(hold.verb)}),
+            &json!({"note": hold.note, "verb": hold_verb(hold.verb)}),
             now,
+            None,
         )?;
         Ok(true)
     })
@@ -595,8 +598,9 @@ fn block_held_task(
                 &task.id,
                 "blocked",
                 TaskState::Blocked,
-                json!({"error": reason, "completion": completion}),
+                &json!({"error": reason, "completion": completion}),
                 now,
+                None,
             )?;
         }
         Ok(changed == 1)
@@ -632,8 +636,9 @@ fn fail_held_task(
                 &task.id,
                 "failed",
                 TaskState::Failed,
-                json!({"error": reason, "completion": completion}),
+                &json!({"error": reason, "completion": completion}),
                 now,
+                None,
             )?;
         }
         Ok(changed == 1)
@@ -675,21 +680,6 @@ fn task_state(
     })
     .optional()
     .map_err(StoreError::from)
-}
-
-fn append_event(
-    tx: &rusqlite::Transaction<'_>,
-    task_id: &str,
-    kind: &str,
-    state: TaskState,
-    payload: serde_json::Value,
-    now: &str,
-) -> Result<i64, StoreError> {
-    tx.execute(
-        "INSERT INTO task_events(task_id,event_type,state,payload,created_at) VALUES(?,?,?,?,?)",
-        params![task_id, kind, state.as_str(), payload.to_string(), now],
-    )?;
-    Ok(tx.last_insert_rowid())
 }
 
 fn hold_verb(verb: HoldVerb) -> &'static str {

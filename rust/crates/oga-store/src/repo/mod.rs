@@ -495,13 +495,41 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
     })
 }
 
+/// Every task event is written through here.
+pub fn append_event(
+    connection: &rusqlite::Connection,
+    task_id: &str,
+    kind: &str,
+    state: TaskState,
+    payload: &impl Serialize,
+    created_at: &str,
+    turn_id: Option<i64>,
+) -> rusqlite::Result<i64> {
+    let payload = serde_json::to_string(payload)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    connection.execute(
+        "INSERT INTO task_events(task_id,event_type,state,payload,created_at,turn_id) VALUES(?,?,?,?,?,?)",
+        params![task_id, kind, state.as_str(), payload, created_at, turn_id],
+    )?;
+    Ok(connection.last_insert_rowid())
+}
+
 pub struct Events<'a> {
     store: &'a Store,
 }
 impl Events<'_> {
     pub fn append(&self, event: &TaskEvent) -> Result<i64, StoreError> {
-        let payload = encode(&event.payload)?;
-        self.store.transaction(|tx|{tx.execute("INSERT INTO task_events(task_id,event_type,state,payload,created_at,turn_id) VALUES(?,?,?,?,?,?)",params![event.task_id,event.kind,event.state.as_str(),payload,event.created_at,event.turn_id])?;Ok(tx.last_insert_rowid())})
+        self.store.transaction(|tx| {
+            Ok(append_event(
+                tx,
+                &event.task_id,
+                &event.kind,
+                event.state,
+                &event.payload,
+                &event.created_at,
+                event.turn_id,
+            )?)
+        })
     }
     pub fn list(&self, task_id: &str) -> Result<Vec<TaskEvent>, StoreError> {
         self.store.with_connection(|c|{let mut s=c.prepare("SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? ORDER BY id")?;Ok(s.query_map([task_id],|r|{let state=decode(&format!("\"{}\"",r.get::<_,String>(3)?)).map_err(store_row_error)?;let payload=decode(&r.get::<_,String>(4)?).map_err(store_row_error)?;Ok(TaskEvent{id:r.get(0)?,task_id:r.get(1)?,kind:r.get(2)?,state,payload,created_at:r.get(5)?,turn_id:r.get(6)?})})?.collect::<Result<Vec<_>,_>>()?)})

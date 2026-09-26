@@ -2,7 +2,6 @@
 
 use oga_domain::{Profile, Task, TaskAttempt, TaskState};
 use oga_store::{Store, StoreError};
-use rusqlite::Transaction;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -124,21 +123,6 @@ pub(crate) fn close_attempt(task: &Task, ended_at: &str, always_close: bool) -> 
 }
 
 pub use oga_runner::worker_path::warm_login_path;
-
-pub(crate) fn append_event_tx(
-    tx: &Transaction<'_>,
-    task_id: &str,
-    kind: &str,
-    state: oga_domain::TaskState,
-    payload: serde_json::Value,
-    at: &str,
-) -> Result<i64, rusqlite::Error> {
-    tx.execute(
-        "INSERT INTO task_events(task_id,event_type,state,payload,created_at) VALUES(?,?,?,?,?)",
-        rusqlite::params![task_id, kind, state.as_str(), payload.to_string(), at],
-    )?;
-    Ok(tx.last_insert_rowid())
-}
 
 pub(crate) fn continuation_prompt(task: &str, instruction: &str) -> String {
     format!(

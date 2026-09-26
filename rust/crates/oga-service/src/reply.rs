@@ -4,10 +4,11 @@ use oga_domain::{Task, TaskScope, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, SteerRequest, acp_question::Answer, append_event_tx, close_attempt,
-    continuation_prompt, dispatch::Dispatcher, encode_store, lifecycle::now_iso,
-    require_existing_worktree, require_profile, require_task,
+    ContinuationError, SteerRequest, acp_question::Answer, close_attempt, continuation_prompt,
+    dispatch::Dispatcher, encode_store, lifecycle::now_iso, require_existing_worktree,
+    require_profile, require_task,
 };
+use oga_store::append_event;
 
 #[derive(Debug, Clone)]
 pub struct ReplyRequest {
@@ -96,17 +97,18 @@ pub async fn reply(
                 old.id
             )));
         }
-        append_event_tx(
+        append_event(
             tx,
             &old.id,
             "answered",
             TaskState::Queued,
-            json!({
+            &json!({
                 "attempt": attempts.len(),
                 "answer": answer,
                 "scopeUpdated": scope_updated,
             }),
             &now,
+            None,
         )?;
         Ok(())
     })?;
@@ -157,13 +159,14 @@ async fn answer_live_question(
                 old.id
             )));
         }
-        append_event_tx(
+        append_event(
             tx,
             &old.id,
             "permission_replied",
             TaskState::Running,
-            payload,
+            &payload,
             &now,
+            None,
         )?;
         Ok(())
     })?;

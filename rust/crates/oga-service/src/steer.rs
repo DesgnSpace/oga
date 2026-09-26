@@ -4,9 +4,10 @@ use oga_domain::{Task, TaskControlState, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, acp_run::Delivered, append_event_tx, dispatch::Dispatcher,
-    follow_ups::queue_follow_up, lifecycle::now_iso, require_task, validate_model,
+    ContinuationError, acp_run::Delivered, dispatch::Dispatcher, follow_ups::queue_follow_up,
+    lifecycle::now_iso, require_task, validate_model,
 };
+use oga_store::append_event;
 
 /// Why no instruction travels with a model change, whether or not the run
 /// takes one at all.
@@ -188,13 +189,14 @@ fn record_delivery(
 ) -> Result<(), ContinuationError> {
     let now = now_iso();
     dispatcher.store().transaction(|tx| {
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "steered",
             task.state,
-            json!({"instruction": instruction}),
+            &json!({"instruction": instruction}),
             &now,
+            None,
         )?;
         Ok(())
     })?;
@@ -212,13 +214,14 @@ fn record_rejection(
     };
     let now = now_iso();
     dispatcher.store().transaction(|tx| {
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "steer_rejected",
             task.state,
-            json!({"instruction": instruction, "reason": reason}),
+            &json!({"instruction": instruction, "reason": reason}),
             &now,
+            None,
         )?;
         Ok(())
     })?;

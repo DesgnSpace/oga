@@ -5,7 +5,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, params, params_from_iter};
 use serde_json::json;
 
-use crate::{Store, StoreError};
+use crate::{Store, StoreError, append_event};
 
 const SETTLED_STATES: &str = "'completed','failed','cancelled'";
 
@@ -70,15 +70,14 @@ impl Store {
                 )));
             }
             for (task_id, state, count) in rows {
-                transaction.execute(
-                    "INSERT INTO task_events(task_id,event_type,state,payload,created_at,turn_id) VALUES(?,?,?,?,?,NULL)",
-                    params![
-                        task_id,
-                        "history_dropped",
-                        state.as_str(),
-                        json!({ "dropped": count, "before": cutoff }).to_string(),
-                        finished_at,
-                    ],
+                append_event(
+                    &transaction,
+                    &task_id,
+                    "history_dropped",
+                    state,
+                    &json!({ "dropped": count, "before": cutoff }),
+                    finished_at,
+                    None,
                 )?;
             }
             transaction.commit()?;

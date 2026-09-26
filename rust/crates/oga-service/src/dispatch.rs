@@ -14,7 +14,7 @@ use oga_domain::{
 };
 use oga_providers::AcpAdapters;
 use oga_runner::ProviderRunner;
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use oga_worktree::{
     PlannedWorktree, current_branch, joined_worktree_of, plan_task_worktree, prepare_task_worktree,
     project_cwd, worktree_request,
@@ -559,12 +559,12 @@ impl Dispatcher {
                 params![ready.as_str(), now, task_id],
             )?;
             if changed == 1 {
-                append_event_tx(
+                append_event(
                     tx,
                     task_id,
                     "checkout_prepared",
                     ready,
-                    json!({}),
+                    &json!({}),
                     &now,
                     None,
                 )?;
@@ -609,12 +609,12 @@ impl Dispatcher {
                 params![message, now, task_id],
             )?;
             if changed == 1 {
-                append_event_tx(
+                append_event(
                     tx,
                     task_id,
                     "checkout_preparation_failed",
                     TaskState::Failed,
-                    json!({"error": message}),
+                    &json!({"error": message}),
                     &now,
                     None,
                 )?;
@@ -716,12 +716,12 @@ impl Dispatcher {
                 "UPDATE tasks SET session_id=NULL,updated_at=? WHERE id=?",
                 rusqlite::params![now, task.id],
             )?;
-            append_event_tx(
+            append_event(
                 tx,
                 &task.id,
                 "session_rejected",
                 task.state,
-                json!({"sessionId": task.session_id, "profile": task.profile_id}),
+                &json!({"sessionId": task.session_id, "profile": task.profile_id}),
                 &now,
                 None,
             )?;
@@ -879,7 +879,7 @@ impl Dispatcher {
     ) -> Result<(), StoreError> {
         let now = lifecycle::now_iso();
         self.store.transaction(|tx| {
-            append_event_tx(tx, task_id, kind, state, payload, &now, None)?;
+            append_event(tx, task_id, kind, state, &payload, &now, None)?;
             Ok(())
         })
     }
@@ -912,17 +912,18 @@ impl Dispatcher {
                             [&task_id_clone],
                             |row| row.get(0),
                         )?;
-                        crate::append_event_tx(
+                        append_event(
                             tx,
                             &task_id_clone,
                             "follow_ups_paused",
                             oga_domain::TaskState::Completed,
-                            serde_json::json!({
+                            &serde_json::json!({
                                 "instruction": instruction_for_error,
                                 "waiting": waiting,
                                 "error": error.to_string()
                             }),
                             &now,
+                            None,
                         )?;
                         Ok(())
                     });
@@ -1488,7 +1489,7 @@ fn persist_plan(store: &Store, mut plan: DispatchPlan) -> Result<DispatchPlan, D
                 params![task.id, blocker, task.created_at],
             )?;
         }
-        append_event_tx(tx, &task.id, "created", state, json!({}), &task.created_at, None)?;
+        append_event(tx, &task.id, "created", state, &json!({}), &task.created_at, None)?;
         if let Some(hold) = plan.hold.as_ref().filter(|_| !released) {
             let args = serde_json::to_string(&hold.args)
                 .map_err(|error| StoreError::Refusal(format!("invalid hold JSON: {error}")))?;
@@ -1509,23 +1510,23 @@ fn persist_plan(store: &Store, mut plan: DispatchPlan) -> Result<DispatchPlan, D
                     hold.updated_at,
                 ],
             )?;
-            append_event_tx(
+            append_event(
                 tx,
                 &task.id,
                 "hold_armed",
                 TaskState::Pending,
-                json!({"note": hold.note}),
+                &json!({"note": hold.note}),
                 &hold.created_at,
                 None,
             )?;
         }
         if task.state == TaskState::Blocked && let Some(completion) = &task.completion {
-            append_event_tx(
+            append_event(
                 tx,
                 &task.id,
                 "blocked",
                 TaskState::Blocked,
-                json!({"error": task.error, "completion": completion}),
+                &json!({"error": task.error, "completion": completion}),
                 &task.updated_at,
                 None,
             )?;
@@ -1589,22 +1590,6 @@ fn hold_verb_string(verb: HoldVerb) -> &'static str {
 fn encode<T: Serialize>(value: &T) -> Result<String, DispatchError> {
     serde_json::to_string(value)
         .map_err(|error| DispatchError::Refusal(format!("invalid task JSON: {error}")))
-}
-
-fn append_event_tx(
-    tx: &rusqlite::Transaction<'_>,
-    task_id: &str,
-    kind: &str,
-    state: TaskState,
-    payload: serde_json::Value,
-    at: &str,
-    turn_id: Option<i64>,
-) -> Result<i64, rusqlite::Error> {
-    tx.execute(
-        "INSERT INTO task_events(task_id,event_type,state,payload,created_at,turn_id) VALUES(?,?,?,?,?,?)",
-        params![task_id, kind, state.as_str(), payload.to_string(), at, turn_id],
-    )?;
-    Ok(tx.last_insert_rowid())
 }
 
 #[cfg(test)]

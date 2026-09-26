@@ -35,7 +35,7 @@ use oga_providers::{
     skill_directories,
 };
 use oga_runner::{ProviderRunner, RunRequest, Termination};
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::params;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
@@ -44,8 +44,8 @@ use crate::{
     acp_question::{Answer, Questions, TurnClock, permission_question},
     lifecycle::{
         ActiveRun, ActiveRuns, LifecycleError, MAX_ABORT_RETRIES, RunOutcome, Settlement,
-        append_event_tx, broker_base_url, completion, encode, load_task, now_iso,
-        record_profile_outcome, settle_task, worker_env,
+        broker_base_url, completion, encode, load_task, now_iso, record_profile_outcome,
+        settle_task, worker_env,
     },
     prompt::{WorkerOutcome, interpret_worker_outcome, rate_limit_reset_at},
     transport::{self, AcpStart},
@@ -596,12 +596,12 @@ fn open_failed(turn: &AcpTurn<'_>, error: AcpError) -> Result<AcpEnd, LifecycleE
                 "UPDATE tasks SET transport_json=json_remove(transport_json,'$.acpSessionId') WHERE id=?",
                 [&turn.task.id],
             )?;
-            append_event_tx(
+            append_event(
                 tx,
                 &turn.task.id,
                 "session_rejected",
                 TaskState::Running,
-                json!({"transport": Transport::Acp, "profile": turn.task.profile_id}),
+                &json!({"transport": Transport::Acp, "profile": turn.task.profile_id}),
                 &now,
                 Some(turn.turn_id),
             )?;
@@ -685,12 +685,12 @@ fn record_session(
             "UPDATE tasks SET transport_json=?,worker_json=?,session_id=COALESCE(?,session_id) WHERE id=?",
             params![transport_json, worker_json, native_session, task.id],
         )?;
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "worker_spawned",
             TaskState::Running,
-            json!({
+            &json!({
                 "provider": turn.profile.provider,
                 "model": &task.model,
                 "pid": identity.pid,
@@ -712,7 +712,7 @@ fn record_session(
         if restored {
             payload["replayedUpdates"] = json!(replayed);
         }
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             if restored {
@@ -721,7 +721,7 @@ fn record_session(
                 "session_captured"
             },
             TaskState::Running,
-            payload,
+            &payload,
             &now,
             Some(turn.turn_id),
         )?;
@@ -899,12 +899,12 @@ async fn append_turn_event(
     let now = now_iso();
     store
         .write(move |tx| {
-            append_event_tx(
+            append_event(
                 tx,
                 &task_id,
                 &kind,
                 TaskState::Running,
-                payload,
+                &payload,
                 &now,
                 Some(turn_id),
             )?;
@@ -1118,12 +1118,12 @@ impl TaskPolicy {
                         params![question, now, task_id],
                     )?;
                     if changed == 1 {
-                        append_event_tx(
+                        append_event(
                             tx,
                             &task_id,
                             "permission_asked",
                             TaskState::NeedsInput,
-                            payload,
+                            &payload,
                             &now,
                             Some(turn_id),
                         )?;

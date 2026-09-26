@@ -4,13 +4,14 @@ use oga_domain::{Task, TaskScope, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, close_attempt,
+    ContinuationError, close_attempt,
     dispatch::Dispatcher,
     encode_store,
     handoff_brief::{FreshSessionCause, HandoffBriefOptions, handoff_brief},
     lifecycle::now_iso,
     require_existing_worktree, require_profile, require_task, validate_model,
 };
+use oga_store::append_event;
 
 #[derive(Debug, Clone, Default)]
 pub struct HandoffRequest {
@@ -140,12 +141,12 @@ pub async fn handoff(
                     old.id
                 )));
             }
-            append_event_tx(
+            append_event(
                 tx,
                 &old.id,
                 "handed_off",
                 old.state,
-                json!({
+                &json!({
                     "previousState": old.state,
                     "fromProfile": old.profile_id,
                     "toProfile": profile_id,
@@ -155,19 +156,21 @@ pub async fn handoff(
                     "scopeUpdated": scope_updated,
                 }),
                 &now,
+                None,
             )?;
             if !same_profile && !scope_updated {
-                append_event_tx(
+                append_event(
                     tx,
                     &old.id,
                     "scope_inherited",
                     old.state,
-                    json!({
+                    &json!({
                         "scope": scope,
                         "approvedFor": old.profile_id,
                         "usedBy": profile_id,
                     }),
                     &now,
+                    None,
                 )?;
             }
             Ok(())
@@ -259,24 +262,25 @@ pub async fn handoff(
         )?;
         tx.execute("DELETE FROM task_holds WHERE task_id=?", [old.id.as_str()])?;
         if held_on_old_account {
-            append_event_tx(
+            append_event(
                 tx,
                 &old.id,
                 "hold_released",
                 TaskState::Queued,
-                json!({
+                &json!({
                     "note": format!("moved to {profile_id}, no longer waiting for {} to have usage again", old.profile_id),
                     "wait": "rate_limit",
                 }),
                 &now,
+                None,
             )?;
         }
-        append_event_tx(
+        append_event(
             tx,
             &old.id,
             "handed_off",
             TaskState::Queued,
-            json!({
+            &json!({
                 "previousState": old.state,
                 "fromProfile": old.profile_id,
                 "toProfile": profile_id,
@@ -287,19 +291,21 @@ pub async fn handoff(
                 "scopeUpdated": scope_updated,
             }),
             &now,
+            None,
         )?;
         if !same_profile && !scope_updated {
-            append_event_tx(
+            append_event(
                 tx,
                 &old.id,
                 "scope_inherited",
                 TaskState::Queued,
-                json!({
+                &json!({
                     "scope": scope,
                     "approvedFor": old.profile_id,
                     "usedBy": profile_id,
                 }),
                 &now,
+                None,
             )?;
         }
         Ok(())
@@ -312,17 +318,18 @@ pub async fn handoff(
     let prompt = match &brief {
         Some(brief) => {
             dispatcher.store().transaction(|tx| {
-                append_event_tx(
+                append_event(
                     tx,
                     &task.id,
                     "handoff_brief",
                     task.state,
-                    json!({
+                    &json!({
                         "tier": brief.tier,
                         "chars": brief.chars,
                         "omittedMessages": brief.omitted_messages,
                     }),
                     &now_iso(),
+                    None,
                 )?;
                 Ok(())
             })?;

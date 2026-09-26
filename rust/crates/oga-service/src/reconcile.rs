@@ -18,7 +18,7 @@ use oga_domain::{
     TaskWorker,
 };
 use oga_runner::{Liveness, ProcessIdentity, Signal};
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::params;
 use serde_json::json;
 
@@ -288,13 +288,14 @@ fn park_question(
             "UPDATE task_turns SET status='needs_input',ended_at=? WHERE task_id=? AND status='running'",
             params![now, task_id],
         )?;
-        crate::append_event_tx(
+        append_event(
             tx,
             task_id,
             "run_interrupted",
             TaskState::NeedsInput,
-            json!({"reason": trigger.stopped_reason(), "trigger": trigger.label(), "question": question}),
+            &json!({"reason": trigger.stopped_reason(), "trigger": trigger.label(), "question": question}),
             &now,
+            None,
         )?;
         Ok(())
     })
@@ -504,7 +505,7 @@ fn settle(
         if let Some(attempt) = attempt {
             payload["attempt"] = json!(attempt);
         }
-        crate::append_event_tx(tx, task_id, "run_interrupted", state, payload, &now)?;
+        append_event(tx, task_id, "run_interrupted", state, &payload, &now, None)?;
         Ok(())
     })
 }

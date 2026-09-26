@@ -4,7 +4,7 @@ use oga_domain::{HoldArgs, HoldVerb, Task, TaskHold, TaskScope, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, close_attempt,
+    ContinuationError, close_attempt,
     dispatch::Dispatcher,
     encode_store,
     handoff_brief::{FreshSessionCause, HandoffBriefOptions, handoff_brief},
@@ -14,6 +14,7 @@ use crate::{
     schedule::{StartAt, parse_start_at},
     validate_model, waiting,
 };
+use oga_store::append_event;
 
 /// How long a `rate_limit` hold waits when the failed run named no reset time.
 const RATE_LIMIT_FALLBACK_MS: i64 = 10 * 60 * 1_000;
@@ -192,36 +193,39 @@ pub async fn resume(
         }
         if old.state == TaskState::Pending {
             tx.execute("DELETE FROM task_holds WHERE task_id=?", [old.id.as_str()])?;
-            append_event_tx(
+            append_event(
                 tx,
                 &old.id,
                 "hold_released",
                 TaskState::Pending,
-                json!({"forced": true}),
+                &json!({"forced": true}),
                 &now,
+                None,
             )?;
         }
         if was_archived {
-            append_event_tx(
+            append_event(
                 tx,
                 &old.id,
                 "unarchived",
                 TaskState::Queued,
-                json!({"reason": "resumed"}),
+                &json!({"reason": "resumed"}),
                 &now,
+                None,
             )?;
         }
         if recreated_worktree {
-            append_event_tx(
+            append_event(
                 tx,
                 &old.id,
                 "worktree_recreated",
                 TaskState::Queued,
-                json!({
+                &json!({
                     "worktree": old.worktree.as_ref().map(|value| value.path.clone()),
                     "branch": old.worktree.as_ref().map(|value| value.branch.clone()),
                 }),
                 &now,
+                None,
             )?;
         }
         let mut resumed_payload = json!({
@@ -240,13 +244,14 @@ pub async fn resume(
         if let Some(instruction) = &instruction {
             resumed_payload["instruction"] = json!(instruction);
         }
-        append_event_tx(
+        append_event(
             tx,
             &old.id,
             "resumed",
             TaskState::Queued,
-            resumed_payload,
+            &resumed_payload,
             &now,
+            None,
         )?;
         Ok(())
     })?;
@@ -291,17 +296,18 @@ pub async fn resume(
         );
         let fallback_now = now_iso();
         dispatcher.store().transaction(|tx| {
-            append_event_tx(
+            append_event(
                 tx,
                 &task.id,
                 "resume_fallback",
                 task.state,
-                json!({
+                &json!({
                     "reason": "session_not_captured",
                     "tier": fresh.tier,
                     "chars": fresh.chars,
                 }),
                 &fallback_now,
+                None,
             )?;
             Ok(())
         })?;

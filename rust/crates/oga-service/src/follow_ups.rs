@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use oga_domain::TaskState;
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 use serde_json::json;
@@ -142,7 +142,7 @@ pub fn queue_follow_up(
         if let Some(reason) = reason {
             payload["reason"] = json!(reason);
         }
-        append_event(tx, task_id, "follow_up_queued", state, payload, now)?;
+        append_event(tx, task_id, "follow_up_queued", state, &payload, now, None)?;
         Ok(waiting as usize)
     })
 }
@@ -235,8 +235,9 @@ pub fn remove_follow_up_at(
             task_id,
             "follow_ups_dropped",
             state,
-            json!({"dropped": 1, "reason": "removed by user"}),
+            &json!({"dropped": 1, "reason": "removed by user"}),
             now,
+            None,
         )?;
         Ok(true)
     })
@@ -268,8 +269,9 @@ pub fn clear_follow_ups(
             task_id,
             "follow_ups_dropped",
             state,
-            json!({"dropped": count, "reason": reason}),
+            &json!({"dropped": count, "reason": reason}),
             now,
+            None,
         )?;
         Ok(count as usize)
     })
@@ -303,8 +305,9 @@ pub fn feed_follow_up(
                     task_id,
                     "follow_ups_paused",
                     state,
-                    json!({"waiting": waiting}),
+                    &json!({"waiting": waiting}),
                     now,
+                    None,
                 )?;
                 Ok(())
             })?;
@@ -325,8 +328,9 @@ pub fn feed_follow_up(
             task_id,
             "follow_up_started",
             state,
-            json!({"instruction": follow_up.instruction, "waiting": waiting}),
+            &json!({"instruction": follow_up.instruction, "waiting": waiting}),
             now,
+            None,
         )?;
         Ok(())
     })?;
@@ -335,21 +339,6 @@ pub fn feed_follow_up(
         waiting,
         ..FollowUpFeed::default()
     })
-}
-
-fn append_event(
-    tx: &rusqlite::Transaction<'_>,
-    task_id: &str,
-    kind: &str,
-    state: TaskState,
-    payload: serde_json::Value,
-    now: &str,
-) -> Result<i64, StoreError> {
-    tx.execute(
-        "INSERT INTO task_events(task_id,event_type,state,payload,created_at) VALUES(?,?,?,?,?)",
-        params![task_id, kind, state.as_str(), payload.to_string(), now],
-    )?;
-    Ok(tx.last_insert_rowid())
 }
 
 #[cfg(test)]

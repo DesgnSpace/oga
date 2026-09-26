@@ -6,7 +6,7 @@ use std::{
 };
 
 use oga_domain::{HoldArgs, HoldVerb, OnBlockerFailure, Task, TaskHold, TaskState};
-use oga_store::{Store, StoreError};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 
@@ -217,8 +217,9 @@ pub fn restore_dependency_hold(
             &hold.task_id,
             "hold_armed",
             TaskState::Pending,
-            json!({"note": hold.note}),
+            &json!({"note": hold.note}),
             now,
+            None,
         )?;
         Ok(true)
     })
@@ -270,21 +271,6 @@ fn dependency_cycle(
         }
     }
     Ok(None)
-}
-
-fn append_event(
-    tx: &rusqlite::Transaction<'_>,
-    task_id: &str,
-    kind: &str,
-    state: TaskState,
-    payload: serde_json::Value,
-    now: &str,
-) -> Result<i64, StoreError> {
-    tx.execute(
-        "INSERT INTO task_events(task_id,event_type,state,payload,created_at) VALUES(?,?,?,?,?)",
-        params![task_id, kind, state.as_str(), payload.to_string(), now],
-    )?;
-    Ok(tx.last_insert_rowid())
 }
 
 fn parse_iso(value: &str) -> Option<std::time::SystemTime> {

@@ -4,11 +4,12 @@ use oga_domain::{CompletionCode, Task, TaskCompletion, TaskCompletionOverride, T
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx,
+    ContinuationError,
     dispatch::Dispatcher,
     lifecycle::{close_running_turn, now_iso},
     require_task,
 };
+use oga_store::append_event;
 
 #[derive(Debug, Clone)]
 pub struct CompletionAssertion {
@@ -139,18 +140,19 @@ fn write_completion(
             )));
         }
         close_running_turn(tx, &task.id, TaskState::Completed, &now)?;
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "completion_asserted",
             TaskState::Completed,
-            json!({
+            &json!({
                 "assertedBy": asserted_by,
                 "reason": reason,
                 "previousState": task.state,
                 "replacedCode": task.completion.as_ref().map(|value| value.code),
             }),
             &now,
+            None,
         )?;
         Ok(())
     })?;

@@ -4,11 +4,12 @@ use oga_domain::{CompletionCode, Task, TaskCompletion, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx,
+    ContinuationError,
     dispatch::Dispatcher,
     lifecycle::{close_running_turn, now_iso},
     require_task,
 };
+use oga_store::append_event;
 
 #[derive(Debug, Clone, Default)]
 pub struct CancelRequest {
@@ -121,32 +122,35 @@ pub async fn cancel(
                     "DELETE FROM task_follow_ups WHERE task_id=?",
                     [request.task_id.as_str()],
                 )?;
-                append_event_tx(
+                append_event(
                     tx,
                     &request.task_id,
                     "follow_ups_dropped",
                     state,
-                    json!({"dropped": waiting, "reason": reason}),
+                    &json!({"dropped": waiting, "reason": reason}),
                     &now,
+                    None,
                 )?;
             } else {
-                append_event_tx(
+                append_event(
                     tx,
                     &request.task_id,
                     "follow_ups_paused",
                     state,
-                    json!({"waiting": waiting}),
+                    &json!({"waiting": waiting}),
                     &now,
+                    None,
                 )?;
             }
         }
-        append_event_tx(
+        append_event(
             tx,
             &request.task_id,
             state.as_str(),
             state,
-            json!({"error": reason, "completion": completion}),
+            &json!({"error": reason, "completion": completion}),
             &now,
+            None,
         )?;
         Ok(())
     })?;

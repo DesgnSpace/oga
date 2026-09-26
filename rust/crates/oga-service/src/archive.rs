@@ -10,12 +10,13 @@ use serde_json::json;
 use tokio::time::{sleep, timeout};
 
 use crate::{
-    ContinuationError, append_event_tx,
+    ContinuationError,
     cancel::{self, CancelRequest},
     dispatch::Dispatcher,
     lifecycle::{self, now_iso},
     require_task,
 };
+use oga_store::append_event;
 
 const ARCHIVE_STOPS_REASON: &str = "archived while running — stopped first";
 const ARCHIVE_CANCEL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -215,13 +216,14 @@ fn begin_checkout_removal(dispatcher: &Dispatcher, task: &Task) -> Result<Task, 
                 task.id
             )));
         }
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             "checkout_removal_started",
             TaskState::RemovingCheckout,
-            json!({}),
+            &json!({}),
             &now,
+            None,
         )?;
         Ok(())
     })?;
@@ -281,17 +283,18 @@ async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_bran
             rusqlite::params![state.as_str(), error, now, task.id],
         )?;
         if changed == 1 {
-            append_event_tx(
+            append_event(
                 tx,
                 &task.id,
                 if error.is_some() { "checkout_removal_failed" } else { "checkout_removed" },
                 state,
-                json!({
+                &json!({
                     "error": error,
                     "branchOutcome": branch.as_ref().map(|result| result.outcome),
                     "branchReason": branch.as_ref().and_then(|result| result.reason.as_deref()),
                 }),
                 &now,
+                None,
             )?;
         }
         Ok(())
@@ -339,13 +342,14 @@ fn set_archived(
                 task.id
             )));
         }
-        append_event_tx(
+        append_event(
             tx,
             &task.id,
             if archived { "archived" } else { "unarchived" },
             task.state,
-            json!({}),
+            &json!({}),
             &now,
+            None,
         )?;
         Ok(())
     })?;
