@@ -120,11 +120,16 @@ validate_backup_path() {
     fi
 }
 
+# An APFS clone copies no data up front; other file systems get a full copy.
+copy_file() {
+    cp -c -p "$1" "$2" 2>/dev/null || cp -p "$1" "$2"
+}
+
 copy_database_file() {
     local database_file="$1"
     local destination_directory="$2"
 
-    cp -p "$database_file" "$destination_directory/$(basename "$database_file")"
+    copy_file "$database_file" "$destination_directory/$(basename "$database_file")"
 }
 
 backup_database() {
@@ -218,7 +223,7 @@ restore_database() {
             source="$backup/$(basename "$destination")"
             [[ -f "$source" ]] || fail "backup file is missing: $source"
             temporary="$(mktemp "$(dirname "$destination")/.oga-restore.XXXXXX")"
-            cp -p "$source" "$temporary"
+            copy_file "$source" "$temporary"
             mv -f "$temporary" "$destination"
         else
             rm -f "$destination"
