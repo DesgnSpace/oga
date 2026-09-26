@@ -290,11 +290,40 @@ fn ignore_regex(pattern: &str, anchored: bool) -> Option<regex::Regex> {
             }
             '*' => expression.push_str("[^/]*"),
             '?' => expression.push_str("[^/]"),
+            '[' => match bracket_class(&mut chars) {
+                Some(class) => expression.push_str(&class),
+                None => expression.push_str(r"\["),
+            },
             other => expression.push_str(&regex::escape(&other.to_string())),
         }
     }
     let prefix = if anchored { "^" } else { "^(?:.*/)?" };
     regex::Regex::new(&format!("{prefix}{expression}$")).ok()
+}
+
+/// A `[...]` class, read just past its `[`, as a regex class that never
+/// matches `/`: `[cod]`, `[a-z]`, and `[!0-9]` or `[^0-9]` for the negation.
+/// `None` when the class is never closed, and nothing is consumed.
+fn bracket_class(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+    let mut ahead = chars.clone();
+    let negated = ahead.next_if(|char| matches!(char, '!' | '^')).is_some();
+    let mut members = String::new();
+    loop {
+        match ahead.next()? {
+            ']' if !members.is_empty() => break,
+            char @ ('\\' | '[' | ']' | '^' | '&' | '~') => {
+                members.push('\\');
+                members.push(char);
+            }
+            char => members.push(char),
+        }
+    }
+    *chars = ahead;
+    Some(if negated {
+        format!("[^/{members}]")
+    } else {
+        format!("[{members}]")
+    })
 }
 
 fn is_ignored(groups: &[&IgnoreGroup], path: &str, is_dir: bool) -> bool {

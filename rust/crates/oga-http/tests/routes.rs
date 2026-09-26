@@ -2444,6 +2444,60 @@ async fn removing_a_worktree_drops_its_code_index() {
     assert_eq!(indexed_rows(), 0, "the removed checkout kept its index");
 }
 
+/// A task recorded with a trailing slash on its folder asks the same index
+/// as a lookup from that folder.
+#[tokio::test]
+async fn a_task_folder_with_a_trailing_slash_shares_the_folder_index() {
+    let fixture = Fixture::new();
+    fixture.write_source(
+        "src/auth.ts",
+        "export function checkAuth(token: string): boolean { return !!token; }\n",
+    );
+    let cwd = fixture.repository_cwd();
+    fixture.insert_task(&Task {
+        id: "slashed-task".into(),
+        kind: Some(TaskKind::Delegated),
+        profile_id: "profile".into(),
+        model: "fake".into(),
+        prompt: "look something up".into(),
+        cwd: format!("{cwd}/"),
+        state: TaskState::Running,
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: Vec::new(),
+        },
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: "2026-01-01T00:00:00.000Z".into(),
+        ..Task::default()
+    });
+
+    for query in [
+        "/api/query?task=slashed-task&q=checkAuth".to_owned(),
+        format!("/api/query?cwd={cwd}&q=checkAuth"),
+    ] {
+        let (status, body) =
+            json_response(request(&fixture.router, Method::GET, &query, Body::empty()).await).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            body["markdown"]
+                .as_str()
+                .expect("markdown")
+                .contains("src/auth.ts:1#checkAuth"),
+            "{body}"
+        );
+    }
+    let indexed = fixture
+        .store
+        .with_connection(|connection| {
+            let mut statement = connection.prepare("SELECT cwd FROM context_index")?;
+            Ok(statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
+        .expect("indexed folders read");
+    assert_eq!(indexed, vec![cwd]);
+}
+
 #[tokio::test]
 async fn transport_preference_routes_report_what_a_new_session_would_use() {
     let fixture = Fixture::new();

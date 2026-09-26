@@ -97,7 +97,7 @@ pub struct ContextTarget {
 impl ContextTarget {
     pub fn new(cwd: impl Into<PathBuf>, scope: oga_domain::TaskScope) -> Self {
         Self {
-            cwd: cwd.into(),
+            cwd: folder(cwd),
             source_cwd: None,
             scope,
         }
@@ -109,8 +109,8 @@ impl ContextTarget {
         scope: oga_domain::TaskScope,
     ) -> Self {
         Self {
-            cwd: cwd.into(),
-            source_cwd: Some(origin.into()),
+            cwd: folder(cwd),
+            source_cwd: Some(folder(origin)),
             scope,
         }
     }
@@ -199,7 +199,8 @@ impl<'a> ContextIndex<'a> {
         let cwd = cwd.as_ref();
         let walk = walk::walk_files(cwd, options.max_files);
         let mut updates = parse_all(cwd, &walk.files, &HashMap::new()).0;
-        let partial = walk.partial || truncate_to_budget(&mut updates, options.max_symbols);
+        let truncated = truncate_to_budget(&mut updates, options.max_symbols);
+        let partial = walk.partial || truncated;
         let now = timestamp_now();
         index_store::replace_files(self.store, cwd, &updates, &now)?;
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
@@ -247,7 +248,11 @@ impl<'a> ContextIndex<'a> {
     pub fn prune(&self) -> Result<usize, ContextError> {
         let mut dropped = 0;
         for (cwd, scheme) in index_store::indexed_folders(self.store)? {
-            if scheme == Some(INDEX_SCHEME) && Path::new(&cwd).join(".git").exists() {
+            let path = Path::new(&cwd);
+            if scheme == Some(INDEX_SCHEME)
+                && path.join(".git").exists()
+                && folder(path).as_os_str() == path.as_os_str()
+            {
                 continue;
             }
             index_store::forget(self.store, Path::new(&cwd))?;
@@ -318,13 +323,30 @@ impl<'a> ContextIndex<'a> {
                 candidates.push(file.clone());
             }
         }
-        let (updates, touched) = parse_all(cwd, &candidates, &known);
+        let (mut updates, touched) = parse_all(cwd, &candidates, &known);
         let vanished = known
             .keys()
             .filter(|path| !seen.contains(*path))
             .cloned()
             .collect::<Vec<_>>();
         let moved = detect_moves(&known, &updates, &vanished);
+        let moved_to = moved.iter().map(|(_, to)| to).collect::<HashSet<_>>();
+        let indexed = index_store::index_row(self.store, cwd)?.map_or(0, |row| row.symbol_count);
+        let mut budget = options.max_symbols.saturating_sub(indexed);
+        let before = updates.len();
+        // Files the index already holds, or that moved, replace what they
+        // held; only files new to the index draw on the symbol budget.
+        updates.retain(|update| {
+            if known.contains_key(&update.path) || moved_to.contains(&update.path) {
+                return true;
+            }
+            let fits = update.symbols.len() <= budget;
+            if fits {
+                budget -= update.symbols.len();
+            }
+            fits
+        });
+        let partial = walk.partial || updates.len() < before;
         let moved_from = moved.iter().map(|(from, _)| from).collect::<HashSet<_>>();
         let removed = vanished
             .iter()
@@ -347,17 +369,10 @@ impl<'a> ContextIndex<'a> {
         };
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
         if changed {
-            index_store::save_index(
-                self.store,
-                cwd,
-                walk.partial,
-                file_count,
-                symbol_count,
-                &now,
-            )?;
+            index_store::save_index(self.store, cwd, partial, file_count, symbol_count, &now)?;
         }
         Ok(ReconcileResult {
-            partial: walk.partial,
+            partial,
             changed,
             file_count,
             symbol_count,
@@ -474,11 +489,11 @@ impl<'a> ContextIndex<'a> {
                 }],
             });
         }
-        let read_cwd = PathBuf::from(&task.cwd);
-        let routes_cwd = task.worktree.as_ref().map_or_else(
-            || read_cwd.clone(),
-            |worktree| PathBuf::from(&worktree.origin_cwd),
-        );
+        let read_cwd = folder(&task.cwd);
+        let routes_cwd = task
+            .worktree
+            .as_ref()
+            .map_or_else(|| read_cwd.clone(), |worktree| folder(&worktree.origin_cwd));
         let scope = task
             .scope
             .read
@@ -771,6 +786,11 @@ impl<'a> ContextIndex<'a> {
             symbol: symbol.to_owned(),
         })
     }
+}
+
+/// A folder as the index keys it: `/repo/` and `/repo` are one project.
+fn folder(path: impl Into<PathBuf>) -> PathBuf {
+    path.into().components().collect()
 }
 
 /// A route proposal that passed every check, ready to save.

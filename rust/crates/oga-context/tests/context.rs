@@ -1499,6 +1499,79 @@ fn marks_the_file_budget_as_partial() {
     assert_eq!(result.file_count, 1);
 }
 
+/// The symbol budget holds whether the walk stopped early or not, and
+/// whether the files arrived in one build or in later reconciles.
+#[test]
+fn the_symbol_budget_holds_for_a_partial_walk_and_across_reconciles() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "export function one() {}\nexport function two() {}\nexport function three() {}\n",
+    );
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    let capped = BuildOptions {
+        max_files: 1,
+        max_symbols: 2,
+    };
+    let built = index
+        .build(fixture.project.path(), capped)
+        .expect("partial index builds");
+    assert!(built.partial);
+    assert!(built.symbol_count <= 2, "{built:?}");
+
+    let budget = BuildOptions {
+        max_files: 20,
+        max_symbols: 2,
+    };
+    fs::remove_file(fixture.project.path().join("src/auth.ts")).expect("auth fixture goes");
+    let rebuilt = index
+        .build(fixture.project.path(), budget)
+        .expect("index builds within budget");
+    assert_eq!(rebuilt.symbol_count, 1, "{rebuilt:?}");
+    fixture.write_auth(
+        "export function one() {}\nexport function two() {}\nexport function three() {}\n",
+    );
+    let reconciled = index
+        .reconcile(fixture.project.path(), budget)
+        .expect("index reconciles");
+    assert!(reconciled.partial, "{reconciled:?}");
+    assert!(reconciled.symbol_count <= 2, "{reconciled:?}");
+}
+
+/// A `.gitignore` character class keeps its meaning: `gen[0-9].ts` names
+/// `gen1.ts`, not a file called `gen[0-9].ts`.
+#[test]
+fn a_gitignore_character_class_ignores_what_it_names() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.project.path().join(".gitignore"),
+        "src/gen[0-9].ts\n",
+    )
+    .expect("gitignore writes");
+    fs::write(
+        fixture.project.path().join("src/gen1.ts"),
+        "export function generatedCheck() { return true; }\n",
+    )
+    .expect("generated fixture writes");
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    let answer = index
+        .question(&fixture.target(), "generatedCheck")
+        .expect("question answers");
+    assert!(
+        answer
+            .candidates
+            .iter()
+            .all(|candidate| candidate.path != "src/gen1.ts"),
+        "{}",
+        answer.markdown
+    );
+}
+
 #[test]
 fn reconcile_reparses_only_what_changed() {
     let fixture = Fixture::new();
