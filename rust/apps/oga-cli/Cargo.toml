@@ -24,5 +24,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time", "io-util"] }
 serde_yaml = "0.9"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

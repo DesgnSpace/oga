@@ -2,29 +2,36 @@
 
 use std::{
     env,
-    process::Command,
-    sync::{
-        Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    io::Read,
+    process::{Child, Command, Stdio},
+    sync::{Condvar, Mutex, mpsc},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-const REFRESH_TTL: Duration = Duration::from_secs(60);
+/// Rc files that load plugin managers take 3–15 s on a busy machine; one that
+/// hangs is killed after this.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 const START: &str = "__OGA_PATH__";
 const END: &str = "__OGA_END__";
 
-static LOGIN_PATH: Mutex<Option<(String, Instant)>> = Mutex::new(None);
-static REFRESHING: AtomicBool = AtomicBool::new(false);
+struct LoginPath {
+    captured: Option<String>,
+    capturing: bool,
+}
+
+static LOGIN_PATH: Mutex<LoginPath> = Mutex::new(LoginPath {
+    captured: None,
+    capturing: false,
+});
+static CAPTURE_SETTLED: Condvar = Condvar::new();
 
 /// The broker outlives the session that launched it, so `PATH` is a snapshot
 /// from whenever that was — and an app launched from Finder carries almost
 /// nothing. A CLI on a directory only the user's shell knows about is then
 /// invisible, and the spawn fails with "No such file or directory" on a
 /// command the same user runs fine in a terminal. The login shell's own PATH
-/// closes that gap, and is read on demand so the broker heals without a
-/// restart.
+/// closes that gap. Until a first capture lands, this waits for one in flight.
 pub fn worker_path() -> String {
     merge(
         &env::var("PATH").unwrap_or_default(),
@@ -32,50 +39,124 @@ pub fn worker_path() -> String {
     )
 }
 
-/// Capture the login shell's PATH now, on the calling thread. The broker
-/// calls this once at start so the first spawn already has it.
-pub fn warm_login_path() {
-    refresh_login_path();
+/// Capture the login shell's PATH on its own thread and return at once. The
+/// broker calls this as it starts, and again when a spawn cannot find its
+/// command, which may sit in a directory the shell gained since.
+pub fn refresh_login_path() {
+    let Ok(mut state) = LOGIN_PATH.lock() else {
+        return;
+    };
+    if state.capturing {
+        return;
+    }
+    state.capturing = true;
+    drop(state);
+    let spawned = thread::Builder::new()
+        .name("login-path".into())
+        .spawn(|| settle_capture(capture_login_path()));
+    if spawned.is_err() {
+        settle_capture(None);
+    }
 }
 
-/// The last captured login PATH. A stale value is handed back as it is and a
-/// fresh capture starts on its own thread: the shell takes over a second to
-/// start, and a spawn must never wait on it.
 fn login_path() -> Option<String> {
-    let cached = LOGIN_PATH.lock().ok()?.clone();
-    let fresh = cached
-        .as_ref()
-        .is_some_and(|(_, read_at)| read_at.elapsed() < REFRESH_TTL);
-    if !fresh && !REFRESHING.swap(true, Ordering::AcqRel) {
-        thread::spawn(refresh_login_path);
-    }
-    cached.map(|(path, _)| path)
+    let state = LOGIN_PATH.lock().ok()?;
+    let (state, _) = CAPTURE_SETTLED
+        .wait_timeout_while(state, CAPTURE_TIMEOUT, |state| {
+            state.capturing && state.captured.is_none()
+        })
+        .ok()?;
+    state.captured.clone()
 }
 
-fn refresh_login_path() {
-    let captured = capture_login_path();
-    if let Some(captured) = captured
-        && let Ok(mut cached) = LOGIN_PATH.lock()
-    {
-        *cached = Some((captured, Instant::now()));
+fn settle_capture(captured: Option<String>) {
+    if let Ok(mut state) = LOGIN_PATH.lock() {
+        if captured.is_some() {
+            state.captured = captured;
+        }
+        state.capturing = false;
     }
-    REFRESHING.store(false, Ordering::Release);
+    CAPTURE_SETTLED.notify_all();
 }
 
 /// Login *and* interactive: PATH edits live in profile files and rc files
 /// alike, and a shell that sources only one of them misses half the installs.
 /// The value is fenced by sentinels because rc files print banners, and a
-/// banner concatenated into PATH breaks every later lookup.
+/// banner concatenated into PATH breaks every later lookup. The shell gets its
+/// own session so it cannot stop on the broker's terminal, and can be killed whole.
 fn capture_login_path() -> Option<String> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_owned());
-    let output = Command::new(shell)
+    let mut command = Command::new(shell);
+    command
         .args(["-lic", &format!("printf '{START}%s{END}' \"$PATH\"")])
-        .output()
-        .ok()?;
-    let captured = String::from_utf8_lossy(&output.stdout);
-    let start = captured.find(START)? + START.len();
-    let end = captured[start..].find(END)? + start;
-    Some(captured[start..end].to_owned()).filter(|value: &String| !value.is_empty())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    detach_session(&mut command);
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take();
+    let (sender, receiver) = mpsc::channel();
+    if let Some(stdout) = stdout {
+        thread::spawn(move || {
+            if let Some(path) = read_fenced(stdout) {
+                let _ = sender.send(path);
+            }
+        });
+    }
+    let captured = receiver.recv_timeout(CAPTURE_TIMEOUT).ok();
+    kill_session(&mut child);
+    captured
+}
+
+/// Reads until the fenced value is complete rather than to end of file: a
+/// background job an rc file starts can hold the pipe open long after the
+/// shell has printed.
+fn read_fenced(mut stdout: impl Read) -> Option<String> {
+    let mut seen = Vec::new();
+    let mut chunk = [0; 4096];
+    loop {
+        let read = stdout.read(&mut chunk).ok().filter(|read| *read > 0)?;
+        seen.extend_from_slice(&chunk[..read]);
+        let text = String::from_utf8_lossy(&seen);
+        if let Some(start) = text.find(START).map(|index| index + START.len())
+            && let Some(end) = text[start..].find(END)
+        {
+            let value = &text[start..start + end];
+            return (!value.is_empty()).then(|| value.to_owned());
+        }
+    }
+}
+
+#[cfg(unix)]
+fn detach_session(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: `setsid` is async-signal-safe and touches no parent state.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn detach_session(_command: &mut Command) {}
+
+fn kill_session(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // SAFETY: the shell leads its own process group and is not reaped
+        // yet, so the group id still names it.
+        unsafe {
+            libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// The broker's own entries stay in front, so they still win on ambiguity.

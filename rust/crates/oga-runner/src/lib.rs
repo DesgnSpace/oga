@@ -326,8 +326,12 @@ impl ProviderRunner {
             return Err(RunnerError::EmptyCommand);
         }
 
-        // Confinement resolves the executable from this PATH.
-        let mut env = BTreeMap::from([("PATH".to_owned(), worker_path::worker_path())]);
+        // Confinement resolves the executable from this PATH. It can wait on
+        // the login shell right after the broker starts.
+        let path = tokio::task::spawn_blocking(worker_path::worker_path)
+            .await
+            .map_err(|_| RunnerError::LostResult)?;
+        let mut env = BTreeMap::from([("PATH".to_owned(), path)]);
         env.extend(request.env.clone());
         let prepared = self.confinement.prepare(
             &ConfinementRequest::new(request.argv.clone(), request.cwd.clone(), scope)
@@ -345,9 +349,14 @@ impl ProviderRunner {
             command.env_remove(key);
         }
         detach_process_group(&mut command);
-        let mut child = command.spawn().map_err(|source| RunnerError::Spawn {
-            cwd: request.cwd.clone(),
-            source,
+        let mut child = command.spawn().map_err(|source| {
+            if source.kind() == io::ErrorKind::NotFound {
+                worker_path::refresh_login_path();
+            }
+            RunnerError::Spawn {
+                cwd: request.cwd.clone(),
+                source,
+            }
         })?;
         let Some(pid) = child.id() else {
             let _ = child.kill().await;
