@@ -4,7 +4,6 @@ mod acp;
 pub mod socket;
 
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, HashMap, VecDeque},
     sync::{
         Arc, Mutex,
@@ -648,28 +647,27 @@ pub fn task_to_batch(task: &Task) -> BatchTask {
 /// Claude transcript repeats a call its hooks reported first. A hook carries no
 /// turn of its own, so it belongs to the turn the task was last in, and a call
 /// id seen again in another turn is another call.
-pub fn event_views(events: &[TaskEvent], provider: Provider) -> Vec<TaskEventView> {
+pub fn event_views(events: Vec<TaskEvent>, provider: Provider) -> Vec<TaskEventView> {
     let mut calls = acp::AcpCalls::default();
     let mut ended = HashMap::<String, Option<i64>>::new();
     let mut claude_stream_subagents = HashMap::<String, String>::new();
     let mut claude_acp_subagents = HashMap::<String, SubagentLink>::new();
     let mut turn = None;
     events
-        .iter()
-        .map(|event| {
+        .into_iter()
+        .map(|mut event| {
             turn = event.turn_id.or(turn);
-            let patched = calls.patch(event);
-            let mut view = event_view_base(&patched, provider);
+            // The row shows the payload as recorded, before the patch fills it in.
+            let raw_text = raw_text(&event);
+            calls.patch(&mut event);
+            let mut view = event_view_base(&event, provider, raw_text);
             annotate_subagents(
                 &mut view,
-                &patched,
+                &event,
                 provider,
                 &mut claude_stream_subagents,
                 &mut claude_acp_subagents,
             );
-            if matches!(patched, Cow::Owned(_)) {
-                view.raw_text = raw_payload_text(&event.payload);
-            }
             if let Some(id) = &view.action_id {
                 match view.phase {
                     EventPhase::Completed | EventPhase::Failed => {
@@ -1075,8 +1073,16 @@ fn fx_report(text: Option<&str>) -> Option<String> {
         .filter(|report| !report.trim().is_empty())
 }
 
-fn raw_payload_text(payload: &BTreeMap<String, Value>) -> Option<String> {
-    (!payload.is_empty()).then(|| serde_json::to_string_pretty(payload).unwrap())
+/// A worker log line reads as its text; any other event as its pretty-printed payload.
+fn raw_text(event: &TaskEvent) -> Option<String> {
+    if event.kind == "worker_stderr" {
+        return event
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    (!event.payload.is_empty()).then(|| serde_json::to_string_pretty(&event.payload).unwrap())
 }
 
 /// Upgrades the third and later retry for one target into a visible failure.
@@ -1128,7 +1134,20 @@ fn ordinal(value: usize) -> String {
 /// Produces a provider-neutral view for events whose payload already carries a
 /// normalized `kind`, `phase`, and `title`. Provider adapters can enrich it.
 pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
-    let mut view = event_view_base(event, provider);
+    event_view_with_raw_text(event, provider, raw_text(event))
+}
+
+/// [`event_view`] without `raw_text`, for readers that keep only the summary.
+pub fn event_summary_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
+    event_view_with_raw_text(event, provider, None)
+}
+
+fn event_view_with_raw_text(
+    event: &TaskEvent,
+    provider: Provider,
+    raw_text: Option<String>,
+) -> TaskEventView {
+    let mut view = event_view_base(event, provider, raw_text);
     let mut claude_stream_subagents = HashMap::new();
     let mut claude_acp_subagents = HashMap::new();
     annotate_subagents(
@@ -1141,7 +1160,11 @@ pub fn event_view(event: &TaskEvent, provider: Provider) -> TaskEventView {
     view
 }
 
-fn event_view_base(event: &TaskEvent, provider: Provider) -> TaskEventView {
+fn event_view_base(
+    event: &TaskEvent,
+    provider: Provider,
+    raw_text: Option<String>,
+) -> TaskEventView {
     let hook_name = (event.kind == "agent.hook")
         .then(|| {
             text_value(event.payload.get("hook_event_name"))
@@ -1207,18 +1230,10 @@ fn event_view_base(event: &TaskEvent, provider: Provider) -> TaskEventView {
             Some(complete),
         )
     });
-    let raw_text = if event.kind == "worker_stderr" {
-        event
-            .payload
-            .get("text")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-    } else {
-        raw_payload_text(&event.payload)
-    };
     if event.kind.starts_with("agent.")
-        && let Some(view) = provider_event_view(event, provider, raw_text.clone())
+        && let Some(mut view) = provider_event_view(event, provider)
     {
+        view.raw_text = raw_text;
         return view;
     }
     let lifecycle_detail = hook_error_detail(&event.payload)
@@ -1277,31 +1292,25 @@ fn event_view_base(event: &TaskEvent, provider: Provider) -> TaskEventView {
     }
 }
 
-fn provider_event_view(
-    event: &TaskEvent,
-    provider: Provider,
-    raw_text: Option<String>,
-) -> Option<TaskEventView> {
+fn provider_event_view(event: &TaskEvent, provider: Provider) -> Option<TaskEventView> {
     let payload = &event.payload;
     // An ACP update names itself and says nothing about which provider is
     // behind it, so it is read the same way whoever the agent is.
     if payload.contains_key("sessionUpdate") {
-        return acp::acp_event_view(event, provider, payload, raw_text);
+        return acp::acp_event_view(event, provider, payload);
     }
     let event_type = text_value(payload.get("type"));
     if let Some("item.started" | "item.updated" | "item.completed") = event_type {
-        return item_event_view(event, provider, payload, raw_text);
+        return item_event_view(event, provider, payload);
     }
     if event_type == Some("error") {
-        return Some(agent_error_view(event, provider, payload, raw_text));
+        return Some(agent_error_view(event, provider, payload));
     }
     match provider {
         Provider::Claude => match event_type {
-            Some("system") => claude_system_view(event, provider, payload, raw_text),
-            Some("rate_limit_event") => {
-                Some(claude_rate_limit_view(event, provider, payload, raw_text))
-            }
-            Some("assistant") => claude_assistant_view(event, provider, payload, raw_text),
+            Some("system") => claude_system_view(event, provider, payload),
+            Some("rate_limit_event") => Some(claude_rate_limit_view(event, provider, payload)),
+            Some("assistant") => claude_assistant_view(event, provider, payload),
             Some("result") => {
                 let usage = payload.get("usage").and_then(Value::as_object);
                 let tokens_in =
@@ -1340,7 +1349,6 @@ fn provider_event_view(
                         detail: (!detail.is_empty()).then_some(detail),
                         presentation: Some(presentation),
                         minor: None,
-                        raw_text,
                     },
                 ))
             }
@@ -1360,7 +1368,6 @@ fn provider_event_view(
                         .map(str::to_owned),
                     presentation: None,
                     minor: Some(true),
-                    raw_text,
                 },
             )),
             Some("turn.completed") => {
@@ -1396,7 +1403,6 @@ fn provider_event_view(
                         detail: (!detail.is_empty()).then_some(detail),
                         presentation: Some(presentation),
                         minor: None,
-                        raw_text,
                     },
                 ))
             }
@@ -1419,7 +1425,6 @@ fn provider_event_view(
                         detail: message.clone(),
                         presentation: None,
                         minor: None,
-                        raw_text,
                     },
                 );
                 view.verb = Some("Failed".to_owned());
@@ -1440,7 +1445,6 @@ fn provider_event_view(
                     detail: None,
                     presentation: None,
                     minor: Some(true),
-                    raw_text,
                 },
             )),
             Some("step_finish") => {
@@ -1477,7 +1481,6 @@ fn provider_event_view(
                         detail: (!detail.is_empty()).then_some(detail),
                         presentation: Some(presentation),
                         minor: Some(true),
-                        raw_text,
                     },
                 ))
             }
@@ -1502,7 +1505,6 @@ fn provider_event_view(
                             detail: Some(text.clone()),
                             presentation: Some(message_presentation(text)),
                             minor: None,
-                            raw_text,
                         },
                     )
                 })
@@ -1517,9 +1519,8 @@ fn provider_event_view(
                     .get("part")
                     .and_then(|value| text_value(value.get("text")))
                     .map(str::to_owned),
-                raw_text,
             )),
-            Some("tool_use") => opencode_tool_view(event, provider, payload, raw_text),
+            Some("tool_use") => opencode_tool_view(event, provider, payload),
             _ => None,
         },
         Provider::Antigravity => {
@@ -1539,7 +1540,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 ));
             }
@@ -1562,7 +1562,6 @@ fn provider_event_view(
                             detail: None,
                             presentation: None,
                             minor: Some(true),
-                            raw_text,
                         },
                     ));
                 }
@@ -1584,7 +1583,6 @@ fn provider_event_view(
                         detail,
                         presentation: None,
                         minor: None,
-                        raw_text,
                     },
                 ));
             }
@@ -1603,7 +1601,6 @@ fn provider_event_view(
                             .map(str::to_owned),
                         presentation: None,
                         minor: None,
-                        raw_text,
                     },
                 )),
                 Some("result") => Some(provider_view(
@@ -1616,10 +1613,9 @@ fn provider_event_view(
                         detail: None,
                         presentation: Some(usage_presentation()),
                         minor: None,
-                        raw_text,
                     },
                 )),
-                Some("step_update") => antigravity_step_view(event, provider, payload, raw_text),
+                Some("step_update") => antigravity_step_view(event, provider, payload),
                 _ => None,
             }
         }
@@ -1638,7 +1634,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 ));
             }
@@ -1656,11 +1651,10 @@ fn provider_event_view(
                             .map(str::to_owned),
                         presentation: None,
                         minor: None,
-                        raw_text,
                     },
                 )),
                 Some("message_start" | "message_update" | "message_end") => {
-                    pi_message_view(event, provider, payload, raw_text)
+                    pi_message_view(event, provider, payload)
                 }
                 // Turn and agent boundaries are markers, not work: the messages
                 // and tool calls that happened during them already have rows.
@@ -1674,7 +1668,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 )),
                 Some("turn_end") => Some(provider_view(
@@ -1687,7 +1680,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 )),
                 Some("agent_start") => Some(provider_view(
@@ -1700,7 +1692,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 )),
                 Some("agent_end") => Some(provider_view(
@@ -1713,7 +1704,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 )),
                 Some("agent_settled") => Some(provider_view(
@@ -1726,7 +1716,6 @@ fn provider_event_view(
                         detail: None,
                         presentation: None,
                         minor: Some(true),
-                        raw_text,
                     },
                 )),
                 Some("auto_retry_start") => {
@@ -1753,7 +1742,6 @@ fn provider_event_view(
                             detail,
                             presentation: None,
                             minor: Some(true),
-                            raw_text,
                         },
                     ))
                 }
@@ -1773,7 +1761,6 @@ fn provider_event_view(
                                 detail: None,
                                 presentation: None,
                                 minor: Some(true),
-                                raw_text,
                             },
                         ))
                     } else {
@@ -1788,17 +1775,16 @@ fn provider_event_view(
                                 detail: attempt.map(|value| format!("Attempt {value} failed")),
                                 presentation: None,
                                 minor: None,
-                                raw_text,
                             },
                         ))
                     }
                 }
                 Some("tool_execution_start" | "tool_execution_update" | "tool_execution_end") => {
-                    pi_tool_view(event, provider, payload, raw_text)
+                    pi_tool_view(event, provider, payload)
                 }
                 // Pi's rare raw tool-call shape shares opencode's `part.tool`
                 // envelope byte for byte, `callID` included.
-                Some("tool_use") => opencode_tool_view(event, provider, payload, raw_text),
+                Some("tool_use") => opencode_tool_view(event, provider, payload),
                 _ => None,
             }
         }
@@ -1825,7 +1811,6 @@ fn provider_event_view(
                         .map(|value| format!("{value} step{}", if value == 1 { "" } else { "s" })),
                     presentation: Some(presentation),
                     minor: None,
-                    raw_text,
                 },
             ))
         }
@@ -1849,7 +1834,6 @@ fn claude_system_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     match text_value(payload.get("subtype"))? {
         "init" => Some(provider_view(
@@ -1862,7 +1846,6 @@ fn claude_system_view(
                 detail: text_value(payload.get("model")).map(str::to_owned),
                 presentation: None,
                 minor: None,
-                raw_text,
             },
         )),
         // The counter is cumulative; the delta is what can be added up across a
@@ -1872,7 +1855,7 @@ fn claude_system_view(
                 .get("estimated_tokens_delta")
                 .or_else(|| payload.get("estimated_tokens")),
         )
-        .map(|tokens| reasoning_tokens_view(event, provider, tokens, raw_text)),
+        .map(|tokens| reasoning_tokens_view(event, provider, tokens)),
         "task_started" => Some(provider_view(
             event,
             provider,
@@ -1883,7 +1866,6 @@ fn claude_system_view(
                 detail: text_value(payload.get("description")).map(str::to_owned),
                 presentation: None,
                 minor: None,
-                raw_text,
             },
         )),
         "task_notification" => {
@@ -1905,7 +1887,6 @@ fn claude_system_view(
                     detail: status.filter(|value| *value != "completed").map(humanize),
                     presentation: None,
                     minor: None,
-                    raw_text,
                 },
             ))
         }
@@ -1930,7 +1911,6 @@ fn claude_system_view(
                     detail: Some(text.clone()),
                     presentation: Some(signal_presentation(text, EventLevel::Warning)),
                     minor: Some(false),
-                    raw_text,
                 },
             ))
         }
@@ -1945,7 +1925,6 @@ fn claude_rate_limit_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     provider_view(
         event,
@@ -1957,7 +1936,6 @@ fn claude_rate_limit_view(
             detail: rate_limit_detail(payload),
             presentation: None,
             minor: Some(true),
-            raw_text,
         },
     )
 }
@@ -1966,7 +1944,6 @@ fn claude_assistant_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let content = payload
         .get("message")
@@ -1987,7 +1964,6 @@ fn claude_assistant_view(
                 detail: Some(text.to_owned()),
                 presentation: Some(message_presentation(text.to_owned())),
                 minor: None,
-                raw_text,
             },
         ));
     }
@@ -2008,7 +1984,6 @@ fn claude_assistant_view(
             event,
             provider,
             (!thinking.is_empty()).then(|| thinking.join("\n\n")),
-            raw_text,
         ));
     };
     let name = text_value(tool.get("name"))?;
@@ -2027,7 +2002,6 @@ fn claude_assistant_view(
             detail: presentation_detail(presentation.as_ref()),
             presentation: presentation.clone(),
             minor: None,
-            raw_text,
         },
     );
     view.verb = Some(tool_verb_with_input(name, Some(input), false));
@@ -2045,7 +2019,6 @@ fn item_event_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let item = payload.get("item")?.as_object()?;
     let item_type = text_value(item.get("type"))?;
@@ -2069,7 +2042,6 @@ fn item_event_view(
                 detail: Some(text.clone()),
                 presentation: Some(message_presentation(text)),
                 minor: None,
-                raw_text,
             },
         );
         view.complete = Some(true);
@@ -2092,7 +2064,7 @@ fn item_event_view(
                 .collect::<Vec<_>>();
             (!parts.is_empty()).then(|| parts.join("\n\n"))
         });
-        return Some(reasoning_view(event, provider, text, raw_text));
+        return Some(reasoning_view(event, provider, text));
     }
     if item_type == "error" {
         let message = string_value(item, &["message", "error"]);
@@ -2107,7 +2079,6 @@ fn item_event_view(
                 detail: message,
                 presentation: None,
                 minor: None,
-                raw_text,
             },
         );
         view.verb = Some("Failed".to_owned());
@@ -2336,7 +2307,6 @@ fn item_event_view(
             detail: presentation_detail(presentation.as_ref()),
             presentation: presentation.clone(),
             minor: None,
-            raw_text,
         },
     );
     view.verb = Some(verb);
@@ -2373,7 +2343,6 @@ fn opencode_tool_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let part = payload.get("part")?.as_object()?;
     let name = text_value(part.get("tool"))?;
@@ -2458,7 +2427,6 @@ fn opencode_tool_view(
             detail: presentation_detail(presentation.as_ref()),
             presentation,
             minor: is_captured_output_read(name, Some(&input)).then_some(true),
-            raw_text,
         },
     );
     view.verb = Some(tool_verb_with_input(name, Some(&input), complete));
@@ -2482,12 +2450,11 @@ fn antigravity_step_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let step = payload.get("step_update")?.as_object()?;
     let step_index = number_u64(step.get("step_index"));
     match text_value(step.get("step_type")) {
-        Some("tool") => antigravity_tool_step_view(event, provider, step, raw_text),
+        Some("tool") => antigravity_tool_step_view(event, provider, step),
         // A response still being written streams its text one piece at a
         // time; only the finished step carries the usage summary.
         Some("agent_response")
@@ -2505,7 +2472,6 @@ fn antigravity_step_view(
                     detail: text.clone(),
                     presentation: text.map(message_presentation),
                     minor: None,
-                    raw_text,
                 },
             );
             view.complete = Some(false);
@@ -2516,14 +2482,12 @@ fn antigravity_step_view(
             provider,
             step,
             "Assistant responded",
-            raw_text,
         )),
         Some("checkpoint") => Some(antigravity_usage_step_view(
             event,
             provider,
             step,
             "Checkpoint",
-            raw_text,
         )),
         Some("user_input") => Some(provider_view(
             event,
@@ -2535,7 +2499,6 @@ fn antigravity_step_view(
                 detail: step_index.map(|value| format!("step {value}")),
                 presentation: None,
                 minor: None,
-                raw_text,
             },
         )),
         Some("error_message") => {
@@ -2550,7 +2513,6 @@ fn antigravity_step_view(
                     detail: message.or_else(|| step_index.map(|value| format!("step {value}"))),
                     presentation: None,
                     minor: None,
-                    raw_text,
                 },
             ))
         }
@@ -2564,7 +2526,6 @@ fn antigravity_step_view(
                 detail: step_index.map(|value| format!("step {value}")),
                 presentation: None,
                 minor: Some(true),
-                raw_text,
             },
         )),
         // `unknown` is exactly that to us too — provider-internal bookkeeping
@@ -2580,7 +2541,6 @@ fn antigravity_step_view(
                 detail: step_index.map(|value| format!("step {value}")),
                 presentation: None,
                 minor: Some(true),
-                raw_text,
             },
         )),
     }
@@ -2590,7 +2550,6 @@ fn antigravity_tool_step_view(
     event: &TaskEvent,
     provider: Provider,
     step: &Map<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let name = text_value(step.get("tool_name").or_else(|| step.get("toolName")))?;
     let info = step.get("tool_info").and_then(Value::as_object);
@@ -2661,7 +2620,6 @@ fn antigravity_tool_step_view(
             detail: presentation_detail(presentation.as_ref()),
             presentation,
             minor: None,
-            raw_text,
         },
     );
     view.verb = Some(tool_verb_with_input(name, Some(&input), complete));
@@ -2681,7 +2639,6 @@ fn antigravity_usage_step_view(
     provider: Provider,
     step: &Map<String, Value>,
     title: &str,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let duration = number_f64(step.get("duration_seconds"));
     let usage = step.get("usage").and_then(Value::as_object);
@@ -2725,7 +2682,6 @@ fn antigravity_usage_step_view(
             detail: (!detail.is_empty()).then_some(detail),
             presentation: Some(presentation),
             minor: None,
-            raw_text,
         },
     )
 }
@@ -2734,7 +2690,6 @@ fn pi_tool_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let name = text_value(payload.get("toolName").or_else(|| payload.get("tool_name")))?;
     let input = payload
@@ -2795,7 +2750,6 @@ fn pi_tool_view(
             detail: presentation_detail(presentation.as_ref()),
             presentation,
             minor: (event_type == "tool_execution_update").then_some(true),
-            raw_text,
         },
     );
     view.verb = Some(tool_verb_with_input(name, Some(&input), complete));
@@ -2844,7 +2798,6 @@ fn pi_message_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     let event_type = text_value(payload.get("type")).unwrap_or_default();
     let message = payload
@@ -2874,12 +2827,7 @@ fn pi_message_view(
             .filter_map(|item| text_value(item.get("thinking")))
             .collect::<Vec<_>>();
         if !thinking.is_empty() {
-            return Some(reasoning_view(
-                event,
-                provider,
-                Some(thinking.join("\n\n")),
-                raw_text,
-            ));
+            return Some(reasoning_view(event, provider, Some(thinking.join("\n\n"))));
         }
     }
     let title = match role {
@@ -2903,7 +2851,6 @@ fn pi_message_view(
             detail: text.map(str::to_owned),
             presentation: text.map(|value| message_presentation(value.to_owned())),
             minor: None,
-            raw_text,
         },
     );
     view.action_id = Some(PI_MESSAGE_ACTION_ID.to_owned());
@@ -2916,7 +2863,6 @@ struct ProviderViewOptions {
     detail: Option<String>,
     presentation: Option<TaskEventPresentation>,
     minor: Option<bool>,
-    raw_text: Option<String>,
 }
 
 fn provider_view(
@@ -2940,7 +2886,7 @@ fn provider_view(
         target: None,
         result: None,
         presentation: options.presentation,
-        raw_text: options.raw_text,
+        raw_text: None,
         created_at: event.created_at.clone(),
         parent_action_id: None,
         turn_id: event.turn_id,
@@ -2959,7 +2905,6 @@ fn agent_error_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let error = payload.get("error").and_then(Value::as_object);
     let message = error
@@ -2982,7 +2927,6 @@ fn agent_error_view(
             detail,
             presentation: None,
             minor: None,
-            raw_text,
         },
     )
 }
@@ -3016,12 +2960,7 @@ fn usage_presentation() -> TaskEventPresentation {
 /// a single row. A block the provider redacted arrives text-less rather than
 /// not at all: it still says the model paused to think, and dropping it would
 /// shorten the elapsed time the row reports.
-fn reasoning_view(
-    event: &TaskEvent,
-    provider: Provider,
-    text: Option<String>,
-    raw_text: Option<String>,
-) -> TaskEventView {
+fn reasoning_view(event: &TaskEvent, provider: Provider, text: Option<String>) -> TaskEventView {
     provider_view(
         event,
         provider,
@@ -3032,7 +2971,6 @@ fn reasoning_view(
             detail: text.clone(),
             presentation: text.map(message_presentation),
             minor: None,
-            raw_text,
         },
     )
 }
@@ -3040,12 +2978,7 @@ fn reasoning_view(
 /// A running count of reasoning tokens, which providers tick out far faster
 /// than they produce readable blocks. It belongs on the run's receipt, never on
 /// a row of its own, so it ships minor and carries nothing but the number.
-fn reasoning_tokens_view(
-    event: &TaskEvent,
-    provider: Provider,
-    tokens: u64,
-    raw_text: Option<String>,
-) -> TaskEventView {
+fn reasoning_tokens_view(event: &TaskEvent, provider: Provider, tokens: u64) -> TaskEventView {
     let mut presentation = usage_presentation();
     presentation.tokens_thinking = Some(tokens);
     provider_view(
@@ -3058,7 +2991,6 @@ fn reasoning_tokens_view(
             detail: None,
             presentation: Some(presentation),
             minor: Some(true),
-            raw_text,
         },
     )
 }
@@ -8795,7 +8727,7 @@ mod tests {
             ),
         ];
 
-        let views = event_views(&events, Provider::OpenCode);
+        let views = event_views(events.into(), Provider::OpenCode);
         let ended = &views[2];
 
         assert_eq!(ended.title, "Read file");
@@ -8825,7 +8757,7 @@ mod tests {
             acp_update(3, 10, ended),
         ];
 
-        let views = event_views(&events, Provider::Antigravity);
+        let views = event_views(events.into(), Provider::Antigravity);
 
         assert_eq!(views[1].title, "Read file");
         assert_eq!(views[1].verb.as_deref(), Some("Read"));
@@ -8876,7 +8808,7 @@ mod tests {
             transcript(6, "toolu_A", 1294),
         ];
 
-        let views = event_views(&events, Provider::Claude);
+        let views = event_views(events.into(), Provider::Claude);
 
         assert_eq!(views[2].phase, EventPhase::Completed);
         assert_eq!(views[3].action_id.as_deref(), Some("toolu_A"));

@@ -1,9 +1,6 @@
 //! ACP `session/update` notifications as activity rows.
 
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, HashMap},
-};
+use std::collections::{BTreeMap, HashMap};
 
 use oga_domain::{
     EventKind, EventPhase, PresentationType, Provider, TaskEvent, TaskEventPresentation,
@@ -67,50 +64,34 @@ pub(crate) fn acp_event_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> Option<TaskEventView> {
     match text_value(payload.get("sessionUpdate"))? {
-        "agent_message_chunk" => Some(message_view(event, provider, payload, raw_text)),
-        "agent_thought_chunk" => Some(reasoning_view(
-            event,
-            provider,
-            chunk_text(payload),
-            raw_text,
-        )),
+        "agent_message_chunk" => Some(message_view(event, provider, payload)),
+        "agent_thought_chunk" => Some(reasoning_view(event, provider, chunk_text(payload))),
         // The person's own words, which the task already shows in full. On a
         // restored session the agent replays every one of them, so the row
         // stays out of the story and behind the technical toggle.
-        "user_message_chunk" => Some(prompt_view(event, provider, payload, raw_text)),
-        "tool_call" | "tool_call_update" => Some(tool_view(event, provider, payload, raw_text)),
-        "plan" => Some(plan_view(event, provider, payload, raw_text)),
-        "usage_update" => Some(context_view(event, provider, payload, raw_text)),
+        "user_message_chunk" => Some(prompt_view(event, provider, payload)),
+        "tool_call" | "tool_call_update" => Some(tool_view(event, provider, payload)),
+        "plan" => Some(plan_view(event, provider, payload)),
+        "usage_update" => Some(context_view(event, provider, payload)),
         // Session bookkeeping: the agent listing what it can run, and restating
         // the session's own title. Neither is work, and both arrive around the
         // agent's closing words, where an ordinary row would compete with them.
-        "available_commands_update" => Some(bookkeeping_view(
-            event,
-            provider,
-            "Commands listed",
-            raw_text,
-        )),
+        "available_commands_update" => Some(bookkeeping_view(event, provider, "Commands listed")),
         // Session bookkeeping is also where an agent reports its own model
         // provider failing, and that is the one thing here a reader needs.
         "session_info_update" => Some(
             match payload.get("_meta").and_then(ModelRecovery::from_meta) {
-                Some(recovery) => recovery_view(event, provider, &recovery, raw_text),
-                None => bookkeeping_view(event, provider, "Session updated", raw_text),
+                Some(recovery) => recovery_view(event, provider, &recovery),
+                None => bookkeeping_view(event, provider, "Session updated"),
             },
         ),
         _ => None,
     }
 }
 
-fn bookkeeping_view(
-    event: &TaskEvent,
-    provider: Provider,
-    title: &str,
-    raw_text: Option<String>,
-) -> TaskEventView {
+fn bookkeeping_view(event: &TaskEvent, provider: Provider, title: &str) -> TaskEventView {
     provider_view(
         event,
         provider,
@@ -121,17 +102,11 @@ fn bookkeeping_view(
             detail: None,
             presentation: None,
             minor: Some(true),
-            raw_text,
         },
     )
 }
 
-fn recovery_view(
-    event: &TaskEvent,
-    provider: Provider,
-    recovery: &ModelRecovery,
-    raw_text: Option<String>,
-) -> TaskEventView {
+fn recovery_view(event: &TaskEvent, provider: Provider, recovery: &ModelRecovery) -> TaskEventView {
     let title = recovery.title();
     let stage = match (recovery.paused, recovery.attempt, recovery.attempt_limit) {
         (true, _, Some(limit)) => format!("stopped after {limit} attempts"),
@@ -153,7 +128,6 @@ fn recovery_view(
             detail: Some(format!("{title} · {stage}")),
             presentation: None,
             minor: None,
-            raw_text,
         },
     );
     view.result = recovery
@@ -180,7 +154,6 @@ fn message_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let text = chunk_text(payload);
     let mut view = provider_view(
@@ -193,7 +166,6 @@ fn message_view(
             detail: text.clone(),
             presentation: text.map(message_presentation),
             minor: None,
-            raw_text,
         },
     );
     view.complete = Some(true);
@@ -204,7 +176,6 @@ fn prompt_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let text = chunk_text(payload);
     provider_view(
@@ -217,7 +188,6 @@ fn prompt_view(
             detail: text.clone(),
             presentation: text.map(message_presentation),
             minor: Some(true),
-            raw_text,
         },
     )
 }
@@ -301,7 +271,6 @@ fn tool_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let kind = text_value(payload.get("kind"));
     let status = text_value(payload.get("status"));
@@ -318,7 +287,7 @@ fn tool_view(
     // A thinking call is the model reasoning out loud through a tool. It reads
     // as thinking, so it folds in with the thought chunks around it.
     if kind == Some("think") {
-        let mut view = reasoning_view(event, provider, subject, raw_text);
+        let mut view = reasoning_view(event, provider, subject);
         view.action_id = tool_call_id(payload);
         view.source_id = Some(tool_call_id(payload));
         view.complete = Some(complete);
@@ -326,7 +295,7 @@ fn tool_view(
     }
 
     if let Some(items) = todo_items(payload) {
-        let mut view = todo_view(event, provider, items, Some(complete), raw_text);
+        let mut view = todo_view(event, provider, items, Some(complete));
         view.action_id = tool_call_id(payload);
         view.source_id = Some(tool_call_id(payload));
         return view;
@@ -352,7 +321,6 @@ fn tool_view(
             detail: presentation_detail(Some(&presentation)),
             presentation: Some(presentation.clone()),
             minor: None,
-            raw_text,
         },
     );
     view.verb = Some(
@@ -385,34 +353,30 @@ pub(crate) struct AcpCalls {
 }
 
 impl AcpCalls {
-    pub(crate) fn patch<'a>(&mut self, event: &'a TaskEvent) -> Cow<'a, TaskEvent> {
+    pub(crate) fn patch(&mut self, event: &mut TaskEvent) {
         let update = text_value(event.payload.get("sessionUpdate"));
         if !matches!(update, Some("tool_call" | "tool_call_update")) {
-            return Cow::Borrowed(event);
+            return;
         }
         let Some(id) = tool_call_id(&event.payload) else {
-            return Cow::Borrowed(event);
+            return;
         };
         let known = self.known.entry((event.turn_id, id)).or_default();
         if update == Some("tool_call") {
             known.clear();
         }
-        let carried: Vec<(String, Value)> = CALL_FIELDS
-            .into_iter()
-            .filter(|field| !event.payload.contains_key(*field))
-            .filter_map(|field| Some((field.to_owned(), known.get(field)?.clone())))
-            .collect();
         for field in CALL_FIELDS {
-            if let Some(value) = event.payload.get(field) {
-                known.insert(field.to_owned(), value.clone());
+            match event.payload.get(field) {
+                Some(value) => {
+                    known.insert(field.to_owned(), value.clone());
+                }
+                None => {
+                    if let Some(value) = known.get(field) {
+                        event.payload.insert(field.to_owned(), value.clone());
+                    }
+                }
             }
         }
-        if carried.is_empty() {
-            return Cow::Borrowed(event);
-        }
-        let mut patched = event.clone();
-        patched.payload.extend(carried);
-        Cow::Owned(patched)
     }
 }
 
@@ -506,13 +470,12 @@ fn plan_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let entries = payload
         .get("entries")
         .and_then(Value::as_array)
         .map_or(&[][..], Vec::as_slice);
-    let mut view = todo_view(event, provider, entries, None, raw_text);
+    let mut view = todo_view(event, provider, entries, None);
     view.source_id = Some(None);
     view
 }
@@ -538,7 +501,6 @@ fn todo_view(
     provider: Provider,
     entries: &[Value],
     complete: Option<bool>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let total = entries.len() as u64;
     let completed = entries
@@ -576,7 +538,6 @@ fn todo_view(
             detail: presentation_detail(Some(&presentation)),
             presentation: Some(presentation.clone()),
             minor: None,
-            raw_text,
         },
     );
     view.verb = Some(if done { "Updated" } else { "Updating" }.to_owned());
@@ -590,7 +551,6 @@ fn context_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
-    raw_text: Option<String>,
 ) -> TaskEventView {
     let used = number_u64(payload.get("used"));
     let size = number_u64(payload.get("size"));
@@ -620,7 +580,6 @@ fn context_view(
             detail: (!detail.is_empty()).then_some(detail),
             presentation: Some(presentation),
             minor: Some(true),
-            raw_text,
         },
     )
 }
@@ -868,7 +827,7 @@ mod tests {
     #[test]
     fn a_completion_that_says_only_that_it_finished_keeps_the_call_it_settles() {
         let views = crate::event_views(
-            &[
+            vec![
                 acp_event(
                     1,
                     json!({

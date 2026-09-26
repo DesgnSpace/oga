@@ -3,7 +3,7 @@
 //! without the original brief.
 
 use oga_domain::{EventPhase, Provider, Task, TaskEvent, TaskState};
-use oga_events::event_view;
+use oga_events::event_summary_view;
 use oga_providers::write_targets_from;
 use serde_json::Value;
 
@@ -310,7 +310,7 @@ fn transcript(events: &[TaskEvent], provider: Provider) -> Vec<TranscriptLine> {
         if !event.kind.starts_with("agent.") && event.kind != "scope_refusal" {
             continue;
         }
-        let view = event_view(event, provider);
+        let view = event_summary_view(event, provider);
         if !is_work_view(event, &view) {
             continue;
         }

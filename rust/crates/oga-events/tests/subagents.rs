@@ -66,7 +66,7 @@ fn subagent_fixtures_are_normalized_for_the_web() {
         "pi",
         "fx",
     ] {
-        let views = oga_events::event_views(&events(driver), provider(driver));
+        let views = oga_events::event_views(events(driver), provider(driver));
         for view in views.iter().filter(|view| {
             view.subagents
                 .iter()
@@ -205,7 +205,7 @@ fn claude_acp_tool_response_is_a_live_report_and_links_later_batch_rows() {
             .is_some_and(|report| !report.is_empty())
     );
 
-    let batch = oga_events::event_views(&events, Provider::Claude);
+    let batch = oga_events::event_views(events, Provider::Claude);
     let later = batch.iter().find(|view| view.id == 499726).unwrap();
     let later_link = later
         .subagents

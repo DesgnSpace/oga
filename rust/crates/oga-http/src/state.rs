@@ -361,7 +361,7 @@ async fn event_response(
         store
             .with_connection(|connection| {
                 let events = read_events_with_connection(connection, &task_id, &query)?;
-                let views = mark_repeated_retries(event_views(&events, provider));
+                let views = mark_repeated_retries(event_views(events, provider));
                 let (updated_task, task_updated_at) = if include_task {
                     let updated_at: String = connection.query_row(
                         "SELECT updated_at FROM tasks WHERE id=?",

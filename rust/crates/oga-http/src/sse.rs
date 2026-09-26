@@ -11,7 +11,7 @@ use axum::{
     },
 };
 use oga_domain::{EventKind, EventPointer, Provider, TaskEvent, TaskKind, TaskState};
-use oga_events::{EventFeed, event_view};
+use oga_events::{EventFeed, event_summary_view};
 use oga_store::{Store, StoreError};
 use rusqlite::{Row, ToSql, params_from_iter};
 use serde::Deserialize;
@@ -318,7 +318,7 @@ struct PointerTaskContext {
 }
 
 fn event_pointer(event: &TaskEvent, context: &PointerTaskContext) -> EventPointer {
-    let view = event_view(event, context.provider);
+    let view = event_summary_view(event, context.provider);
     let kind = view.kind;
     let summary = if event.kind == "agent.system" {
         event

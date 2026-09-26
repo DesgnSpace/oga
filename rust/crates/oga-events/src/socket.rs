@@ -25,7 +25,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{EventFeed, event_view};
+use crate::{EventFeed, event_summary_view};
 
 pub const MAX_SOCK_PATH: usize = 103;
 pub const MAX_PENDING_BYTES: usize = 4 * 1024 * 1024;
@@ -472,7 +472,7 @@ fn load_task_contexts(
 }
 
 fn waited_event(event: &TaskEvent, provider: Provider) -> WaitedTaskEvent {
-    let view = event_view(event, provider);
+    let view = event_summary_view(event, provider);
     WaitedTaskEvent {
         id: event.id,
         task_id: event.task_id.clone(),
