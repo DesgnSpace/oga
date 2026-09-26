@@ -1,17 +1,28 @@
 # Task Status Dots
 
+One indicator, `TaskStatusDot`, and one mapping from task state to its look
+(`taskStatusLook`) are shared by the sidebar row, the task header, and the
+composer. No surface keeps its own status colors or shapes.
+
 ## Behavior
 
-- Completed tasks use green dots.
-- Failed tasks use red dots.
-- Tasks waiting for an answer use blue dots.
-- Tasks held on a dependency or scheduled retry use a static amber dashed ring.
-- Other blocked tasks keep their blocked status and do not become waiting.
-- Queued, running, answered, and cancelled tasks keep distinct status behavior.
+States that mean the same thing to the user share a look:
+
+- Waiting — queued, pending, preparing_checkout, removing_checkout, answered: a
+  static, dashed, muted ring. This is the look for any pending task, held or
+  not; the reason a held task is waiting (another task, a schedule, the
+  network) is carried by its label, not by a separate ring style.
+- Running: a filled dot that pulses; hollow once viewed. Same look in the task
+  list, the header, and the composer.
+- Needs input: a filled, solid accent dot — it wants you.
+- Problem — failed, blocked: a filled, solid red dot, including a task blocked
+  on another task; it reads as a problem, not as waiting.
+- Settled — completed, cancelled: green (completed) or muted (cancelled), same
+  treatment otherwise.
 - A filled dot marks an outcome that has not been opened.
-- An outlined dot marks an outcome that has been viewed.
-- Waiting rings stay amber, empty, and dashed in both read states.
-- Waiting rings have no animation.
+- An outlined (hollow) dot marks an outcome that has been viewed. The header
+  and composer always show the open task, so they always render the viewed
+  form.
 - Opening a task marks its current outcome viewed.
 - A later completion, failure, or input request starts unread again.
 - An outcome arriving while its task is open is treated as viewed.
@@ -45,4 +56,4 @@ The dot is decorative. Each task row includes a tooltip and text that names the 
 
 ## Proposed Release Text
 
-Task status dots now show which task outcomes are new. Amber dashed rings identify tasks waiting on another task or a scheduled retry, while blue marks a request for your input.
+Task status dots now show which task outcomes are new. The same dot now appears wherever a task's status shows — the task list, its header, and its reply box — so a running, waiting, or blocked task reads the same everywhere.
