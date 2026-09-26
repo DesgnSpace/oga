@@ -970,36 +970,23 @@ pub(crate) fn settle_task(
             live_events.map_or(0, |events| events.persisted_provider_events),
             live_events.is_some_and(|events| events.session_event_written),
         )?;
+        record_run_totals(tx, &task.id, usage, session_id, &now)?;
         let updated = tx.execute(
-            "UPDATE tasks SET state=?,output=?,error=?,question=?,completion_json=?,worker_json=NULL,session_id=COALESCE(?,session_id),cost_usd=CASE WHEN ? IS NULL THEN cost_usd ELSE COALESCE(cost_usd,0)+? END,cost_usd_estimated=CASE WHEN ? IS NULL THEN cost_usd_estimated ELSE (COALESCE(cost_usd_estimated,0) OR ?) END,turns=CASE WHEN ? IS NULL THEN turns ELSE COALESCE(turns,0)+? END,tokens_in=CASE WHEN ? IS NULL THEN tokens_in ELSE COALESCE(tokens_in,0)+? END,tokens_out=CASE WHEN ? IS NULL THEN tokens_out ELSE COALESCE(tokens_out,0)+? END,spend_at=?,updated_at=? WHERE id=? AND state='running' AND EXISTS (SELECT 1 FROM task_turns WHERE task_turns.id=? AND task_turns.task_id=tasks.id AND task_turns.status='running')",
+            "UPDATE tasks SET state=?,output=?,error=?,question=?,completion_json=?,worker_json=NULL WHERE id=? AND state='running' AND EXISTS (SELECT 1 FROM task_turns WHERE task_turns.id=? AND task_turns.task_id=tasks.id AND task_turns.status='running')",
             params![
                 worker.state.as_str(),
                 worker.output,
                 worker.error,
                 worker.question,
                 completion,
-                session_id,
-                usage.and_then(|usage| usage.cost_usd),
-                usage.and_then(|usage| usage.cost_usd),
-                usage.and_then(|usage| usage.cost_usd),
-                usage.is_some_and(|usage| usage.cost_usd_estimated),
-                usage.and_then(|usage| usage.turns.map(|value| value.round() as i64)),
-                usage.and_then(|usage| usage.turns.map(|value| value.round() as i64)),
-                usage.and_then(|usage| usage.tokens_in.map(|value| value.round() as i64)),
-                usage.and_then(|usage| usage.tokens_in.map(|value| value.round() as i64)),
-                usage.and_then(|usage| usage.tokens_out.map(|value| value.round() as i64)),
-                usage.and_then(|usage| usage.tokens_out.map(|value| value.round() as i64)),
-                now,
-                now,
                 task.id,
                 turn_id,
             ],
         )?;
+        // Cancel or force-complete settled the task while this run was ending;
+        // the run's record and spend stand, the state it was given stays.
         if updated != 1 {
-            return Err(StoreError::Refusal(format!(
-                "task is no longer running: {}",
-                task.id
-            )));
+            return Ok(());
         }
         let turn_status = turn_status(worker.state);
         tx.execute(
@@ -1036,6 +1023,52 @@ pub(crate) fn settle_task(
         LifecycleError::Refusal(format!("task disappeared after settlement: {}", task.id))
     })?;
     Ok(settled)
+}
+
+/// Adds a run's session and spend to its task.
+fn record_run_totals(
+    tx: &rusqlite::Transaction<'_>,
+    task_id: &str,
+    usage: Option<&Usage>,
+    session_id: Option<&str>,
+    now: &str,
+) -> Result<(), StoreError> {
+    let cost = usage.and_then(|usage| usage.cost_usd);
+    let count = |value: Option<f64>| value.map(|value| value.round() as i64);
+    tx.execute(
+        "UPDATE tasks SET session_id=COALESCE(?,session_id),cost_usd=CASE WHEN ? IS NULL THEN cost_usd ELSE COALESCE(cost_usd,0)+? END,cost_usd_estimated=CASE WHEN ? IS NULL THEN cost_usd_estimated ELSE (COALESCE(cost_usd_estimated,0) OR ?) END,turns=CASE WHEN ? IS NULL THEN turns ELSE COALESCE(turns,0)+? END,tokens_in=CASE WHEN ? IS NULL THEN tokens_in ELSE COALESCE(tokens_in,0)+? END,tokens_out=CASE WHEN ? IS NULL THEN tokens_out ELSE COALESCE(tokens_out,0)+? END,spend_at=?,updated_at=? WHERE id=?",
+        params![
+            session_id,
+            cost,
+            cost,
+            cost,
+            usage.is_some_and(|usage| usage.cost_usd_estimated),
+            usage.and_then(|usage| count(usage.turns)),
+            usage.and_then(|usage| count(usage.turns)),
+            usage.and_then(|usage| count(usage.tokens_in)),
+            usage.and_then(|usage| count(usage.tokens_in)),
+            usage.and_then(|usage| count(usage.tokens_out)),
+            usage.and_then(|usage| count(usage.tokens_out)),
+            now,
+            now,
+            task_id,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Ends the task's open turn when something other than its run settles it.
+pub(crate) fn close_running_turn(
+    tx: &rusqlite::Transaction<'_>,
+    task_id: &str,
+    state: TaskState,
+    now: &str,
+) -> Result<(), StoreError> {
+    tx.execute(
+        "UPDATE task_turns SET status=?,ended_at=? WHERE task_id=? AND status='running'",
+        params![turn_status(state), now, task_id],
+    )?;
+    Ok(())
 }
 
 fn has_invalid_routes(store: &Store, task_id: &str) -> Result<bool, LifecycleError> {

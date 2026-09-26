@@ -1928,3 +1928,105 @@ async fn a_queued_follow_up_starts_on_a_task_that_has_dependents() {
     }
     panic!("the queued follow-up never started");
 }
+
+/// Profile `one` becomes a worker that reports some work, then waits; stopped,
+/// it reports what it spent and exits.
+fn run_until_stopped(store: &Store, started: &Path) {
+    let current = store
+        .repositories()
+        .profiles()
+        .get("one")
+        .expect("profile lookup")
+        .expect("profile");
+    let mut stoppable = current.clone();
+    stoppable.command = Some(vec![
+        "sh".into(),
+        "-c".into(),
+        format!(
+            r#"trap 'printf "%s\n" "{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"stopped early\",\"session_id\":\"late-session\",\"total_cost_usd\":0.25}}"; exit 0' INT TERM
+printf '%s\n' '{{"type":"assistant","session_id":"late-session","message":{{"content":[{{"type":"text","text":"halfway through"}}]}}}}'
+touch '{}'
+sleep 30 >/dev/null 2>&1 &
+wait"#,
+            started.display()
+        ),
+    ]);
+    assert!(
+        store
+            .repositories()
+            .profiles()
+            .update_if_unchanged("one", &current, &stoppable, "2026-01-01T00:00:01.000Z")
+            .expect("update stoppable profile")
+    );
+}
+
+fn turn_statuses(store: &Store, task_id: &str) -> Vec<String> {
+    store
+        .with_connection(|connection| {
+            let mut statement = connection
+                .prepare("SELECT status FROM task_turns WHERE task_id=? ORDER BY ordinal")?;
+            let statuses = statement
+                .query_map([task_id], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            Ok(statuses)
+        })
+        .expect("turns")
+}
+
+#[tokio::test]
+async fn a_run_that_ends_after_its_task_was_cancelled_keeps_its_record_and_spend() {
+    let (directory, store, dispatcher) = service();
+    let started = directory.path().join("started");
+    run_until_stopped(&store, &started);
+    let task = dispatcher
+        .dispatch(oga_service::DispatchRequest::new(
+            "one",
+            "long work",
+            directory.path(),
+        ))
+        .await
+        .expect("dispatch")
+        .task;
+    for _ in 0..1_000 {
+        if started.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(started.exists(), "the worker never started");
+
+    let cancelled = cancel(&dispatcher, CancelRequest::new(&task.id))
+        .await
+        .expect("cancel");
+    assert_eq!(cancelled.state, TaskState::Cancelled);
+    assert_eq!(turn_statuses(&store, &task.id), ["cancelled"]);
+
+    let mut settled = dispatcher.task(&task.id).expect("task");
+    for _ in 0..1_000 {
+        if settled.cost_usd.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        settled = dispatcher.task(&task.id).expect("task");
+    }
+    assert_eq!(settled.state, TaskState::Cancelled, "{settled:?}");
+    assert_eq!(settled.cost_usd, Some(0.25), "the run's spend is kept");
+    assert_eq!(turn_statuses(&store, &task.id), ["cancelled"]);
+    let kinds: Vec<String> = store
+        .repositories()
+        .events()
+        .list(&task.id)
+        .expect("events")
+        .into_iter()
+        .map(|event| event.kind)
+        .collect();
+    assert!(
+        kinds.iter().any(|kind| kind == "agent.assistant"),
+        "the run's transcript is kept: {kinds:?}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|kind| *kind == "cancelled").count(),
+        1,
+        "{kinds:?}"
+    );
+}

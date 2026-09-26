@@ -4,7 +4,10 @@ use oga_domain::{CompletionCode, Task, TaskCompletion, TaskState};
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, dispatch::Dispatcher, lifecycle::now_iso, require_task,
+    ContinuationError, append_event_tx,
+    dispatch::Dispatcher,
+    lifecycle::{close_running_turn, now_iso},
+    require_task,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -99,6 +102,7 @@ pub async fn cancel(
                 request.task_id
             )));
         }
+        close_running_turn(tx, &request.task_id, state, &now)?;
         tx.execute(
             "DELETE FROM task_holds WHERE task_id=?",
             [request.task_id.as_str()],

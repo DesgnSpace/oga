@@ -4,7 +4,10 @@ use oga_domain::{CompletionCode, Task, TaskCompletion, TaskCompletionOverride, T
 use serde_json::json;
 
 use crate::{
-    ContinuationError, append_event_tx, dispatch::Dispatcher, lifecycle::now_iso, require_task,
+    ContinuationError, append_event_tx,
+    dispatch::Dispatcher,
+    lifecycle::{close_running_turn, now_iso},
+    require_task,
 };
 
 #[derive(Debug, Clone)]
@@ -135,6 +138,7 @@ fn write_completion(
                 task.id
             )));
         }
+        close_running_turn(tx, &task.id, TaskState::Completed, &now)?;
         append_event_tx(
             tx,
             &task.id,
