@@ -258,7 +258,8 @@ pub fn heal(
 ) -> Result<(usize, usize, Vec<RouteMove>), StoreError> {
     let rows = store.with_connection(|connection| {
         let mut statement = connection.prepare(
-            "SELECT id,learned_path,learned_symbol,source_digest FROM context_learned_routes WHERE cwd=?",
+            "SELECT id,learned_path,learned_symbol,source_digest,missing_since IS NOT NULL \
+             FROM context_learned_routes WHERE cwd=?",
         )?;
         Ok(statement
             .query_map([cwd.display().to_string()], |row| {
@@ -267,14 +268,16 @@ pub fn heal(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?)
     })?;
     let mut confirmed = 0;
-    let mut missing = 0;
+    let mut newly_missing = Vec::new();
+    let mut healed = Vec::new();
     let mut route_moves = Vec::new();
-    for (id, from_path, from_symbol, source_digest) in rows {
+    for (id, from_path, from_symbol, source_digest, was_missing) in rows {
         let path = moves
             .iter()
             .find(|(from, _)| from == &from_path)
@@ -290,25 +293,17 @@ pub fn heal(
             }
         };
         let Some((path, symbol, digest)) = resolved else {
-            missing += store.transaction(|transaction| {
-                Ok(transaction.execute(
-                    "UPDATE context_learned_routes SET missing_since=? \
-                     WHERE id=? AND missing_since IS NULL",
-                    params![now, id],
-                )?)
-            })?;
+            if !was_missing {
+                newly_missing.push(id);
+            }
             continue;
         };
-        store.transaction(|transaction| {
-            transaction.execute(
-                "UPDATE context_learned_routes SET learned_path=?,learned_symbol=?,\
-                 source_digest=?,missing_since=NULL WHERE id=?",
-                params![path, symbol, digest, id],
-            )?;
-            Ok(())
-        })?;
         confirmed += 1;
-        if path != from_path || symbol != from_symbol {
+        let moved = path != from_path || symbol != from_symbol;
+        if moved || digest != source_digest || was_missing {
+            healed.push((id, path.clone(), symbol.clone(), digest));
+        }
+        if moved {
             route_moves.push(RouteMove {
                 from_path,
                 from_symbol: (!from_symbol.is_empty()).then_some(from_symbol),
@@ -317,7 +312,26 @@ pub fn heal(
             });
         }
     }
-    Ok((confirmed, missing, route_moves))
+    if !healed.is_empty() || !newly_missing.is_empty() {
+        store.transaction(|transaction| {
+            let mut mark_missing = transaction.prepare(
+                "UPDATE context_learned_routes SET missing_since=? \
+                 WHERE id=? AND missing_since IS NULL",
+            )?;
+            for id in &newly_missing {
+                mark_missing.execute(params![now, id])?;
+            }
+            let mut confirm = transaction.prepare(
+                "UPDATE context_learned_routes SET learned_path=?,learned_symbol=?,\
+                 source_digest=?,missing_since=NULL WHERE id=?",
+            )?;
+            for (id, path, symbol, digest) in &healed {
+                confirm.execute(params![path, symbol, digest, id])?;
+            }
+            Ok(())
+        })?;
+    }
+    Ok((confirmed, newly_missing.len(), route_moves))
 }
 
 /// The terms of `question` this route claims to answer.

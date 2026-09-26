@@ -302,7 +302,13 @@ impl<'a> ContextIndex<'a> {
         }
         index_store::merge_files(self.store, cwd, &updates, &removed, &now)?;
         index_store::touch_files(self.store, cwd, &touched, &now)?;
-        let (confirmed, dropped, route_moves) = routes::heal(self.store, cwd, &moved, &now)?;
+        // Routes resolve against the index alone, so an unchanged index
+        // leaves every route where the last reconcile put it.
+        let (confirmed, dropped, route_moves) = if changed {
+            routes::heal(self.store, cwd, &moved, &now)?
+        } else {
+            (0, 0, Vec::new())
+        };
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
         if changed {
             index_store::save_index(
