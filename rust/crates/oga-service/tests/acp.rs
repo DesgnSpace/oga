@@ -1305,6 +1305,47 @@ async fn a_restart_picks_an_acp_conversation_back_up_instead_of_dropping_it() {
 }
 
 #[tokio::test]
+async fn waking_from_sleep_leaves_a_task_whose_agent_is_still_connecting() {
+    let slow = tempfile::tempdir().expect("temporary directory");
+    let agent = slow.path().join("slow-agent");
+    fs::write(
+        &agent,
+        format!(
+            "#!/bin/sh\nsleep 1.5\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_fake-acp-agent")
+        ),
+    )
+    .expect("slow agent");
+    fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).expect("executable");
+    let harness = harness_with("turn", agent.to_str().expect("agent path"));
+    let task = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "summarise the readme",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched")
+        .task;
+    for _ in 0..200 {
+        if harness.dispatcher.task(&task.id).expect("task").state == TaskState::Running {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    let report = harness
+        .dispatcher
+        .reconcile(ReconcileTrigger::Wake)
+        .expect("reconciled");
+
+    assert_eq!(report.touched(), 0, "{report:?}");
+    let task = harness.settle(&task.id).await;
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+}
+
+#[tokio::test]
 async fn a_restart_while_the_worker_waits_on_a_person_leaves_the_task_waiting() {
     let harness = harness("turn");
     let task = Task {

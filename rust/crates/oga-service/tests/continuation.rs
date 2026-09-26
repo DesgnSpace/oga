@@ -1675,25 +1675,8 @@ async fn asserted_completion_releases_the_tasks_waiting_on_it() {
 #[tokio::test]
 async fn handoff_keeps_dependency_hold_until_prerequisite_completes() {
     let (directory, store, dispatcher) = service();
-    let blocker_profile = store
-        .repositories()
-        .profiles()
-        .get("one")
-        .expect("profile lookup")
-        .expect("profile one");
-    let mut slow = blocker_profile.clone();
-    slow.command = Some(vec![
-        "sh".into(),
-        "-c".into(),
-        "sleep 0.05; printf 'blocker done\\nOGA_RESULT: completed\\n'".into(),
-    ]);
-    assert!(
-        store
-            .repositories()
-            .profiles()
-            .update_if_unchanged("one", &blocker_profile, &slow, "2026-01-01T00:00:01.000Z",)
-            .expect("update slow profile")
-    );
+    let gate = directory.path().join("gate");
+    hold_runs_until(&store, "one", &gate);
     let cwd = directory.path().to_path_buf();
     let blocker = dispatcher
         .dispatch(oga_service::DispatchRequest::new(
@@ -1745,6 +1728,7 @@ async fn handoff_keeps_dependency_hold_until_prerequisite_completes() {
         vec![blocker.id.clone()]
     );
 
+    fs::write(&gate, "").expect("open gate");
     assert_eq!(
         wait_for_settlement(&dispatcher, &blocker.id).await,
         TaskState::Completed
@@ -1756,4 +1740,191 @@ async fn handoff_keeps_dependency_hold_until_prerequisite_completes() {
     let completed = dispatcher.task(&dependent.id).expect("completed dependent");
     assert_eq!(completed.profile_id, "one");
     assert_eq!(completed.model, "model-one");
+}
+
+/// Runs on `profile_id` wait until `gate` exists, then complete.
+fn hold_runs_until(store: &Store, profile_id: &str, gate: &Path) {
+    let current = store
+        .repositories()
+        .profiles()
+        .get(profile_id)
+        .expect("profile lookup")
+        .expect("profile");
+    let mut gated = current.clone();
+    gated.command = Some(vec![
+        "sh".into(),
+        "-c".into(),
+        format!(
+            "while [ ! -e '{}' ]; do sleep 0.02; done; printf 'finished\\nOGA_RESULT: completed\\n'",
+            gate.display()
+        ),
+    ]);
+    assert!(
+        store
+            .repositories()
+            .profiles()
+            .update_if_unchanged(profile_id, &current, &gated, "2026-01-01T00:00:01.000Z")
+            .expect("update gated profile")
+    );
+}
+
+async fn dispatch_after(
+    dispatcher: &Dispatcher,
+    profile_id: &str,
+    cwd: &Path,
+    blocker: &str,
+) -> String {
+    dispatcher
+        .dispatch(
+            oga_service::DispatchRequest::new(profile_id, "dependent work", cwd)
+                .depends_on([blocker.to_owned()]),
+        )
+        .await
+        .expect("dispatch dependent")
+        .task
+        .id
+}
+
+#[tokio::test]
+async fn dependents_of_one_task_run_side_by_side() {
+    let (directory, store, dispatcher) = service();
+    let blocker_gate = directory.path().join("blocker-gate");
+    let gate = directory.path().join("gate");
+    hold_runs_until(&store, "two", &blocker_gate);
+    hold_runs_until(&store, "one", &gate);
+    let blocker = dispatcher
+        .dispatch(oga_service::DispatchRequest::new(
+            "two",
+            "blocker work",
+            directory.path(),
+        ))
+        .await
+        .expect("dispatch blocker")
+        .task;
+    let mut dependents = Vec::new();
+    for _ in 0..3 {
+        dependents.push(dispatch_after(&dispatcher, "one", directory.path(), &blocker.id).await);
+    }
+    fs::write(&blocker_gate, "").expect("open blocker gate");
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &blocker.id).await,
+        TaskState::Completed
+    );
+
+    for id in &dependents {
+        assert_eq!(
+            wait_for_state(&dispatcher, id, TaskState::Running).await,
+            TaskState::Running,
+            "every dependent runs before any of them finishes"
+        );
+    }
+    fs::write(&gate, "").expect("open gate");
+    for id in &dependents {
+        assert_eq!(
+            wait_for_settlement(&dispatcher, id).await,
+            TaskState::Completed
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_dependent_that_cannot_start_does_not_strand_its_siblings() {
+    let (directory, store, dispatcher) = service();
+    let gate = directory.path().join("gate");
+    hold_runs_until(&store, "one", &gate);
+    let blocker = dispatcher
+        .dispatch(oga_service::DispatchRequest::new(
+            "one",
+            "blocker work",
+            directory.path(),
+        ))
+        .await
+        .expect("dispatch blocker")
+        .task;
+    let refused = dispatch_after(&dispatcher, "two", directory.path(), &blocker.id).await;
+    let sibling = dispatch_after(&dispatcher, "one", directory.path(), &blocker.id).await;
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({
+                "profiles": {
+                    "one": { "modelEnabled": { "model-one": true } },
+                    "two": { "modelEnabled": { "model-two": false } },
+                }
+            })
+            .to_string(),
+            "2026-01-01T00:00:02.000Z",
+        )
+        .expect("switch model-two off");
+
+    fs::write(&gate, "").expect("open gate");
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &blocker.id).await,
+        TaskState::Completed
+    );
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &sibling).await,
+        TaskState::Completed
+    );
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &refused).await,
+        TaskState::Failed
+    );
+    let refused = dispatcher.task(&refused).expect("refused dependent");
+    assert!(
+        refused
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("model-two is not turned on")),
+        "{:?}",
+        refused.error
+    );
+}
+
+#[tokio::test]
+async fn a_queued_follow_up_starts_on_a_task_that_has_dependents() {
+    use oga_service::FollowUpQueue;
+    let (directory, store, dispatcher) = service();
+    let gate = directory.path().join("gate");
+    hold_runs_until(&store, "one", &gate);
+    let task = dispatcher
+        .dispatch(oga_service::DispatchRequest::new(
+            "one",
+            "first work",
+            directory.path(),
+        ))
+        .await
+        .expect("dispatch")
+        .task;
+    let dependent = dispatch_after(&dispatcher, "two", directory.path(), &task.id).await;
+    let queue = FollowUpQueue::new(store.clone());
+    let current = dispatcher.task(&task.id).expect("task").state;
+    queue
+        .queue(&task.id, current, "second instruction")
+        .expect("queue follow-up");
+
+    fs::write(&gate, "").expect("open gate");
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &dependent).await,
+        TaskState::Completed
+    );
+    for _ in 0..400 {
+        let started = store
+            .repositories()
+            .events()
+            .list(&task.id)
+            .expect("events")
+            .iter()
+            .any(|event| event.kind == "follow_up_started");
+        if started && queue.count(&task.id).unwrap_or(0) == 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the queued follow-up never started");
 }

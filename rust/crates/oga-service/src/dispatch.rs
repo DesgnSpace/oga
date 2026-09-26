@@ -494,12 +494,11 @@ impl Dispatcher {
     ) -> Result<DispatchResult, DispatchError> {
         let plan = self.plan(request).await?;
         let task_id = plan.task.id.clone();
-        let launched = plan.launch;
         let store = Arc::clone(&self.store);
-        let persisted = plan.clone();
-        tokio::task::spawn_blocking(move || persist_plan(&store, &persisted))
+        let plan = tokio::task::spawn_blocking(move || persist_plan(&store, plan))
             .await
             .map_err(|error| DispatchError::Refusal(format!("dispatch stopped: {error}")))??;
+        let launched = plan.launch;
         if let Some(preparation) = plan.checkout_preparation.clone() {
             self.prepare_checkout(plan, preparation);
         } else if launched {
@@ -624,7 +623,7 @@ impl Dispatcher {
         });
     }
 
-    /// Detach one run and the chain of dependents its ending releases.
+    /// Detach one run. The dependents its ending releases each get their own.
     fn launch_task(
         &self,
         task: Task,
@@ -637,7 +636,7 @@ impl Dispatcher {
         let task_updated_at = task.updated_at.clone();
         self.active.mark_starting(&task_id);
         tokio::spawn(async move {
-            let result = lifecycle::run_task_and_release_with_active(
+            let result = lifecycle::run_task_with_session_and_active(
                 dispatcher.store.clone(),
                 dispatcher.runner.clone(),
                 task,
@@ -653,6 +652,7 @@ impl Dispatcher {
             dispatcher.active.clear_starting(&task_id);
             match result {
                 Ok(outcome) => {
+                    dispatcher.launch_released_dependents(&outcome.task);
                     if !dispatcher.park_unattended_failure(&outcome.task).await {
                         dispatcher.drain_follow_ups(&outcome.task);
                     }
@@ -1059,6 +1059,11 @@ impl Dispatcher {
         if let Err(error) = lifecycle::restore_dependency_blocked_dependents(&self.store, blocker) {
             eprintln!("restoring dependents of {} failed: {error}", blocker.id);
         }
+        self.launch_released_dependents(blocker);
+    }
+
+    /// Launch every dependent the blocker's ending lets start, side by side.
+    fn launch_released_dependents(&self, blocker: &Task) {
         let released = match lifecycle::release_dependents(&self.store, blocker) {
             Ok(released) => released,
             Err(error) => {
@@ -1191,17 +1196,8 @@ impl Dispatcher {
         if dependencies.is_empty() {
             return Ok(DependencyPlan::ready());
         }
-        let all_settled = blockers.iter().all(|task| {
-            task.state == TaskState::Completed
-                || matches!(
-                    task.state,
-                    TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-                )
-        });
-        let all_completed = blockers
-            .iter()
-            .all(|task| task.state == TaskState::Completed);
-        if all_completed || (request.on_blocker_failure == OnBlockerFailure::Run && all_settled) {
+        let states = blockers.iter().map(|task| task.state).collect::<Vec<_>>();
+        if lifecycle::prerequisites_met(request.on_blocker_failure, &states) {
             return Ok(DependencyPlan::ready());
         }
         if blockers.iter().any(|task| {
@@ -1410,7 +1406,9 @@ fn validate_request(request: &DispatchRequest) -> Result<(), DispatchError> {
     Ok(())
 }
 
-fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError> {
+/// A prerequisite that finishes while this dependent is planned finds nothing to
+/// release, so a dependent whose prerequisites are already met is written queued.
+fn persist_plan(store: &Store, mut plan: DispatchPlan) -> Result<DispatchPlan, DispatchError> {
     let task = &plan.task;
     let scope = encode(&task.scope)?;
     let completion = task.completion.as_ref().map(encode).transpose()?;
@@ -1426,7 +1424,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
         .filter(|links| !links.is_empty())
         .map(encode)
         .transpose()?;
-    store.transaction(|tx| {
+    let released = store.transaction(|tx| {
         if let Some(joined_task_id) = &plan.joined_task_id {
             let archived_at = tx.query_row(
                 "SELECT archived_at FROM tasks WHERE id=?",
@@ -1439,6 +1437,8 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 )));
             }
         }
+        let released = waits_only_on_prerequisites(&plan) && prerequisites_already_met(tx, &plan)?;
+        let state = if released { TaskState::Queued } else { task.state };
         tx.execute(
             "INSERT INTO tasks(id,kind,profile_id,model,prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,can_delegate,timeout_ms,effort,tldr,title,session_id,shipped_prompt,completion_json,attempts_json,cost_usd,turns,archived_at,created_at,updated_at,selection_json,attachments_json,checkout_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
@@ -1453,7 +1453,7 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 task.worktree.as_ref().map(|worktree| worktree.path.as_str()),
                 task.worktree.as_ref().map(|worktree| worktree.branch.as_str()),
                 links,
-                task.state.as_str(),
+                state.as_str(),
                 task.output,
                 task.error,
                 task.question,
@@ -1488,8 +1488,8 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 params![task.id, blocker, task.created_at],
             )?;
         }
-        append_event_tx(tx, &task.id, "created", task.state, json!({}), &task.created_at, None)?;
-        if let Some(hold) = &plan.hold {
+        append_event_tx(tx, &task.id, "created", state, json!({}), &task.created_at, None)?;
+        if let Some(hold) = plan.hold.as_ref().filter(|_| !released) {
             let args = serde_json::to_string(&hold.args)
                 .map_err(|error| StoreError::Refusal(format!("invalid hold JSON: {error}")))?;
             tx.execute(
@@ -1530,9 +1530,46 @@ fn persist_plan(store: &Store, plan: &DispatchPlan) -> Result<(), DispatchError>
                 None,
             )?;
         }
-        Ok(())
+        Ok(released)
     })?;
-    Ok(())
+    if released {
+        plan.task.state = TaskState::Queued;
+        plan.hold = None;
+        plan.launch = true;
+    }
+    Ok(plan)
+}
+
+/// A pending task held only for its prerequisites, with no start time of its own.
+fn waits_only_on_prerequisites(plan: &DispatchPlan) -> bool {
+    plan.task.state == TaskState::Pending
+        && plan
+            .hold
+            .as_ref()
+            .is_some_and(|hold| hold.verb == HoldVerb::Delegate && hold.start_at.is_none())
+}
+
+fn prerequisites_already_met(
+    tx: &rusqlite::Transaction<'_>,
+    plan: &DispatchPlan,
+) -> Result<bool, StoreError> {
+    let policy = plan
+        .hold
+        .as_ref()
+        .and_then(|hold| hold.args.on_blocker_failure)
+        .unwrap_or(OnBlockerFailure::Hold);
+    let states = plan
+        .dependencies
+        .iter()
+        .map(|id| {
+            let state = tx.query_row("SELECT state FROM tasks WHERE id=?", [id], |row| {
+                row.get::<_, String>(0)
+            })?;
+            serde_json::from_str(&format!("\"{state}\""))
+                .map_err(|error| StoreError::Refusal(format!("invalid task state: {error}")))
+        })
+        .collect::<Result<Vec<TaskState>, StoreError>>()?;
+    Ok(lifecycle::prerequisites_met(policy, &states))
 }
 
 fn kind_string(kind: TaskKind) -> &'static str {

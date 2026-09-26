@@ -209,9 +209,7 @@ pub use holds::{
     HoldService, HoldSweep, HoldSweepReport, MAX_RECHECK, MIN_RECHECK, arm_hold, drop_hold,
     due_holds, get_hold, touch_hold,
 };
-pub use lifecycle::{
-    ActiveRuns, LifecycleError, RunOutcome, run_task, run_task_and_release, run_task_with_prompt,
-};
+pub use lifecycle::{ActiveRuns, LifecycleError, RunOutcome, run_task, run_task_with_prompt};
 pub use prompt::{
     WorkerOutcome, WorkerPromptInput, assemble_worker_message, classify_failure,
     interpret_worker_outcome, render_template,

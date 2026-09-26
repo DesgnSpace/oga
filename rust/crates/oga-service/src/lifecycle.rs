@@ -187,8 +187,9 @@ impl ActiveRuns {
 }
 
 impl crate::reconcile::WorkerRegistry for ActiveRuns {
+    /// A run still connecting reads `running` before its worker is registered.
     fn supervises(&self, task_id: &str) -> bool {
-        self.get(task_id).is_some()
+        self.get(task_id).is_some() || self.is_starting(task_id)
     }
 }
 
@@ -340,73 +341,7 @@ pub async fn run_task(
         attribution: crate::prompt::attribution_for_task(&task, profile.provider),
         ..WorkerPromptInput::default()
     };
-    run_task_and_release(store, runner, task, profile, prompt).await
-}
-
-/// Run one task and then drain any dependency tasks it releases.
-pub async fn run_task_and_release(
-    store: Arc<Store>,
-    runner: ProviderRunner,
-    task: Task,
-    profile: Profile,
-    prompt: WorkerPromptInput,
-) -> Result<RunOutcome, LifecycleError> {
-    run_task_and_release_with_active(store, runner, task, profile, prompt, RunOptions::default())
-        .await
-}
-
-/// Run one task, then drain the dependents its ending releases. The session id
-/// belongs to the first run only: a continuation resumes its own session, and
-/// every dependent that follows starts a fresh one.
-pub(crate) async fn run_task_and_release_with_active(
-    store: Arc<Store>,
-    runner: ProviderRunner,
-    task: Task,
-    profile: Profile,
-    prompt: WorkerPromptInput,
-    options: RunOptions,
-) -> Result<RunOutcome, LifecycleError> {
-    let RunOptions {
-        mut session_id,
-        active,
-        acp,
-    } = options;
-    let mut pending = vec![(task, profile, prompt)];
-    let mut last = None;
-    while let Some((task, profile, prompt)) = pending.pop() {
-        let outcome = run_task_with_session_and_active(
-            store.clone(),
-            runner.clone(),
-            task,
-            profile,
-            prompt,
-            RunOptions {
-                session_id: session_id.take(),
-                active: active.clone(),
-                acp: acp.clone(),
-            },
-        )
-        .await?;
-        let released = release_dependents(&store, &outcome.task)?;
-        for queued in released {
-            let Some(profile) = store.repositories().profiles().get(&queued.profile_id)? else {
-                block_queued_task(&store, &queued.id, "unknown profile for dependent task")?;
-                continue;
-            };
-            let provider = profile.provider;
-            pending.push((
-                queued.clone(),
-                profile,
-                WorkerPromptInput {
-                    task: queued.prompt.clone(),
-                    attribution: crate::prompt::attribution_for_task(&queued, provider),
-                    ..WorkerPromptInput::default()
-                },
-            ));
-        }
-        last = Some(outcome);
-    }
-    last.ok_or_else(|| LifecycleError::Refusal("no task was queued".into()))
+    run_task_with_prompt(store, runner, task, profile, prompt).await
 }
 
 /// Claim, execute, persist, and release a task's provider run.
@@ -1438,18 +1373,7 @@ pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, Li
             continue;
         };
         let states = dependency_states(store, &dependent.id)?;
-        let ready = if hold_policy == oga_domain::OnBlockerFailure::Run {
-            states.iter().all(|state| {
-                *state == TaskState::Completed
-                    || matches!(
-                        state,
-                        TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-                    )
-            })
-        } else {
-            states.iter().all(|state| *state == TaskState::Completed)
-        };
-        if !ready {
+        if !prerequisites_met(hold_policy, &states) {
             if is_blocking_end(blocker.state) && hold_policy == oga_domain::OnBlockerFailure::Hold {
                 block_dependent(store, &dependent, blocker, &hold_note)?;
             }
@@ -1464,6 +1388,21 @@ pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, Li
         released.push(queued);
     }
     Ok(released)
+}
+
+/// Whether a dependent whose prerequisites are in `states` can start.
+pub(crate) fn prerequisites_met(
+    policy: oga_domain::OnBlockerFailure,
+    states: &[TaskState],
+) -> bool {
+    states.iter().all(|state| {
+        *state == TaskState::Completed
+            || (policy == oga_domain::OnBlockerFailure::Run
+                && matches!(
+                    state,
+                    TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
+                ))
+    })
 }
 
 /// Revive the dependents an earlier ending dropped. A task that leaves a
