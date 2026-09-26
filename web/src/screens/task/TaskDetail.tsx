@@ -485,7 +485,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
             )}
             <div className="task-detail-content-main" ref={contentRef} onScroll={trackScroll}>
               {state.hasEarlier && (
-                <div ref={topSentinelRef} className="transcript-load-earlier" role="status">
+                <div ref={topSentinelRef} className={`transcript-load-earlier${state.loadingEarlier ? " is-loading" : ""}`} role="status">
                   {state.loadingEarlier && (
                     <>
                       <span className="transcript-load-earlier-spinner" />

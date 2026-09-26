@@ -1581,19 +1581,56 @@ async fn appearance_reads_the_default_font_until_one_is_saved() {
 
     let (status, shown) = appearance(&fixture, Method::GET, Value::Null).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(shown, json!({ "font": null }));
+    assert_eq!(
+        shown,
+        json!({ "font": null, "showTechnicalDetails": false })
+    );
 
     let (status, saved) = appearance(&fixture, Method::PUT, json!({ "font": "system" })).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(saved, json!({ "font": "system" }));
+    assert_eq!(
+        saved,
+        json!({ "font": "system", "showTechnicalDetails": false })
+    );
     let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
-    assert_eq!(shown, json!({ "font": "system" }));
+    assert_eq!(
+        shown,
+        json!({ "font": "system", "showTechnicalDetails": false })
+    );
 
     let (status, saved) = appearance(&fixture, Method::PUT, json!({ "font": null })).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(saved, json!({ "font": null }));
+    assert_eq!(
+        saved,
+        json!({ "font": null, "showTechnicalDetails": false })
+    );
     let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
-    assert_eq!(shown, json!({ "font": null }));
+    assert_eq!(
+        shown,
+        json!({ "font": null, "showTechnicalDetails": false })
+    );
+}
+
+#[tokio::test]
+async fn appearance_remembers_showing_technical_details() {
+    let fixture = Fixture::new();
+
+    let (status, saved) = appearance(
+        &fixture,
+        Method::PUT,
+        json!({ "font": "system", "showTechnicalDetails": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        saved,
+        json!({ "font": "system", "showTechnicalDetails": true })
+    );
+    let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(
+        shown,
+        json!({ "font": "system", "showTechnicalDetails": true })
+    );
 }
 
 #[tokio::test]
@@ -1609,7 +1646,10 @@ async fn appearance_keeps_a_font_this_build_does_not_offer() {
     assert_eq!(status, StatusCode::OK);
 
     let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
-    assert_eq!(shown, json!({ "font": "future-serif-2" }));
+    assert_eq!(
+        shown,
+        json!({ "font": "future-serif-2", "showTechnicalDetails": false })
+    );
 }
 
 #[tokio::test]
@@ -1623,7 +1663,10 @@ async fn appearance_refuses_a_malformed_font_and_keeps_the_saved_one() {
         assert!(refusal["error"].is_string(), "{refusal}");
     }
     let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
-    assert_eq!(shown, json!({ "font": "system" }));
+    assert_eq!(
+        shown,
+        json!({ "font": "system", "showTechnicalDetails": false })
+    );
 
     let (status, _) = appearance(&fixture, Method::PUT, json!({ "font": "a".repeat(64) })).await;
     assert_eq!(status, StatusCode::OK);
@@ -1646,7 +1689,10 @@ async fn appearance_reads_a_stored_value_that_no_longer_parses_as_the_default() 
 
     let (status, shown) = appearance(&fixture, Method::GET, Value::Null).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(shown, json!({ "font": null }));
+    assert_eq!(
+        shown,
+        json!({ "font": null, "showTechnicalDetails": false })
+    );
 }
 
 #[tokio::test]

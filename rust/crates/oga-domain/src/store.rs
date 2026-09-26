@@ -152,9 +152,12 @@ pub struct AdvisorSettings {
 }
 
 /// `font` is a font id from the web app's list; `None` means its default.
+/// `show_technical_details` covers only the events Oga writes, not the worker's.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
     #[serde(default)]
     pub font: Option<String>,
+    #[serde(default)]
+    pub show_technical_details: bool,
 }

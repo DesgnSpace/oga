@@ -3158,12 +3158,19 @@ h1 {
     cursor: pointer;
 }
 
+/* Idle, the sentinel is a hairline the scroll observer can still see, so the
+   brief starts at the top of the pane; it only takes room while loading. */
 .transcript-load-earlier {
     display: flex;
     align-items: center;
     justify-content: center;
+    height: 1px;
+    margin-bottom: -1px;
+}
+
+.transcript-load-earlier.is-loading {
     height: var(--space-5);
-    margin: 0 auto var(--space-3) 0;
+    margin-bottom: var(--space-3);
 }
 
 .transcript-load-earlier-spinner {

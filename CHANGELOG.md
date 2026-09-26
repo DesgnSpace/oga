@@ -13,6 +13,7 @@
 - A task's status dot now looks the same everywhere it shows — the task list, its header, and its reply box — so a running, waiting, or blocked task reads the same no matter where you're looking. A task blocked on another task now shows as blocked instead of looking like it's merely waiting.
 - A task's subagents now carry that same status dot, so you can tell at a glance which are still running, done, or hit a problem, without opening each one. A collapsed group of subagents shows how many are still running, and reads as done once none are.
 - You can choose the font Oga's interface uses in Settings → Appearance.
+- Your follow-ups, answers, and instructions in a task now show only what you wrote. To see the raw data behind them while troubleshooting, turn on Show technical details in Settings → Appearance.
 - You can replace Oga's default handoff instructions with your own.
 - A task's activity log now shows what the worker wrote in full, wrapped onto as many lines as it needs, instead of cutting it off after one line.
 - A task's activity log now keeps the worker's words in a full-width transcript and folds each run of tool calls into one readable line you can open.

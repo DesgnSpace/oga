@@ -455,11 +455,15 @@ pub fn advisor_settings(store: &Store) -> Result<AdvisorSettings, HttpError> {
 /// Global: the look belongs to the app, not to a project.
 pub async fn get_appearance(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
     let settings = run_blocking(move || appearance_settings(&state.store)).await?;
-    Ok(Json(json!({ "font": settings.font })))
+    Ok(Json(json!({
+        "font": settings.font,
+        "showTechnicalDetails": settings.show_technical_details,
+    })))
 }
 
-/// Saves the font id as given. The web app owns the list of fonts, so an id
-/// it does not know yet is kept, and only its shape is checked here.
+/// Saves the appearance as given, replacing what was stored. The web app owns
+/// the list of fonts, so a font id it does not know yet is kept, and only its
+/// shape is checked here.
 pub async fn put_appearance(
     State(state): State<HttpState>,
     body: Bytes,
