@@ -20,11 +20,15 @@ import {
   type TurnMarkerKind,
 } from "@/domain/trace";
 import { readStorage, writeStorage } from "@/state/storage";
+import { copyText } from "@/lib/identifiers";
+import { toast } from "@/state/toast";
 import { Modal } from "@/components/primitives/Modal";
 import { EmptyState } from "@/components/atoms/ListState";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import {
   DisclosureIcon,
+  ChevronIcon,
+  CopyIcon,
   FollowUpIcon,
   HandoffIcon,
   CloseIcon,
@@ -39,6 +43,7 @@ import { DiffHeader } from "@/components/DiffHeader";
 import { patchFromBlocks } from "@/lib/unified-patch";
 
 type ContentExpansion = Extract<EventExpansion, { type: "content" }>;
+const COPY_FEEDBACK_MS = 1_500;
 
 interface OpenFilePreview {
   path?: string;
@@ -397,6 +402,21 @@ export function EventExpansionView({
   onOpenPreview: (expansion: ContentExpansion, path: string | undefined, imageDataUrl?: string) => void;
 }) {
   const hasPrimaryExpansion = expansion.type !== "payload";
+  const humanText = ["skill", "prose", "detail", "report"].includes(expansion.type)
+    || (expansion.type === "content" && event.presentation?.type === "tool");
+  if (humanText) {
+    return (
+      <TextDetailCard event={event} expansion={expansion} rawResult={event.rawText}>
+        <ExpansionBody
+          expansion={expansion}
+          path={event.presentation?.path}
+          cwd={cwd}
+          failed={event.phase === "failed"}
+          onOpenPreview={onOpenPreview}
+        />
+      </TextDetailCard>
+    );
+  }
   return (
     <div className={`trace-expansion trace-expansion-${event.kind}`}>
       <ExpansionBody
@@ -409,6 +429,70 @@ export function EventExpansionView({
       {hasPrimaryExpansion && event.rawText !== undefined && (
         <RawEventDetails source={stripTransportMarkup(event.rawText)} />
       )}
+    </div>
+  );
+}
+
+function TextDetailCard({ event, expansion, rawResult, children }: { event: TaskEventView; expansion: EventExpansion; rawResult?: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(true);
+  const [atBottom, setAtBottom] = React.useState(false);
+  const [hasOverflow, setHasOverflow] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const copiedTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const text = "text" in expansion ? expansion.text : "";
+  const title = event.title.replace(/^mcp__oga(?:_\w+)?__(.+)$/i, "oga: $1").replace(/[_-]/g, " ");
+  React.useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  const copy = async () => {
+    try {
+      await copyText(text);
+      setCopied(true);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+    } catch {
+      toast.error("Couldn't copy the message");
+    }
+  };
+  React.useLayoutEffect(() => {
+    const element = contentRef.current;
+    if (element !== null) setHasOverflow(element.scrollHeight > element.clientHeight + 1);
+  }, [open, text]);
+  return (
+    <div className="trace-text-card">
+      <div className="trace-text-card-header">
+        <button className="trace-text-card-toggle" type="button" aria-expanded={open} onClick={() => {
+          if (!open) setAtBottom(false);
+          setOpen((value) => !value);
+        }}>
+          <span>Used {title}</span>
+          <span className={`trace-text-card-chevron${open ? " is-open" : ""}`} aria-hidden="true"><ChevronIcon size={14} /></span>
+        </button>
+        <button className="trace-text-card-copy" type="button" aria-label={copied ? "Copied message" : "Copy message"} title={copied ? "Copied" : "Copy message"} onClick={() => void copy()}><CopyIcon size={14} /></button>
+      </div>
+      {open && (
+        <div className="trace-text-card-content" ref={contentRef} onScroll={(scroll) => {
+          const element = scroll.currentTarget;
+          setAtBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 8);
+          setHasOverflow(element.scrollHeight > element.clientHeight + 1);
+        }}>
+          <div className="trace-text-card-field">
+            <span className="trace-text-card-label">Message:</span>
+            <div className="trace-text-card-value">{children}</div>
+          </div>
+          {rawResult !== undefined && (
+            <div className="trace-text-card-result">
+              <span className="trace-text-card-label">Result:</span>
+              <ReviewContent source={stripTransportMarkup(rawResult)} language="json" />
+            </div>
+          )}
+        </div>
+      )}
+      {open && hasOverflow && !atBottom && <button
+        className="trace-text-card-scroll-bottom"
+        type="button"
+        aria-label="Scroll to bottom"
+        onClick={() => contentRef.current?.scrollTo({ top: contentRef.current.scrollHeight, behavior: "smooth" })}
+      ><ChevronIcon size={14} /></button>}
     </div>
   );
 }

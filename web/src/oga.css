@@ -63,6 +63,7 @@
     /* The one reading column every main-pane screen shares: task transcript,
        composer, settings, and empty states all size to this. */
     --content-max: 50rem;
+    --trace-card-max-height: 24rem;
     --nav-item-height: 40px;
     --radius-sm: 4px;
     --radius: 6px;
@@ -3017,6 +3018,129 @@ h1 {
 .transcript-work-body {
     border: 0;
     padding-top: var(--space-3);
+}
+
+.transcript-work-body .trace-panel {
+    padding: 0;
+}
+
+.transcript-call-group-toggle {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: var(--text-base);
+    text-align: left;
+    cursor: pointer;
+}
+
+.transcript-call-group-toggle:hover,
+.transcript-call-group-toggle:focus-visible {
+    color: var(--color-text);
+}
+
+.transcript-call-group-chevron {
+    display: inline-flex;
+    flex: 0 0 auto;
+    transform: rotate(0deg);
+    transition: transform 0.15s ease;
+}
+
+.transcript-call-group-chevron.is-open {
+    transform: rotate(90deg);
+}
+
+.trace-text-card {
+    position: relative;
+    margin-block: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-elevated);
+}
+
+.trace-text-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.trace-text-card-toggle,
+.trace-text-card-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1);
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.trace-text-card-toggle:hover,
+.trace-text-card-copy:hover,
+.trace-text-card-toggle:focus-visible,
+.trace-text-card-copy:focus-visible {
+    color: var(--color-text);
+}
+
+.trace-text-card-chevron {
+    display: inline-flex;
+    transform: rotate(0deg);
+    transition: transform 0.15s ease;
+}
+
+.trace-text-card-chevron.is-open {
+    transform: rotate(90deg);
+}
+
+.trace-text-card-content {
+    position: relative;
+    max-height: var(--trace-card-max-height);
+    overflow: auto;
+    padding: var(--space-2) var(--space-1) var(--space-1);
+    color: var(--color-text);
+}
+
+.trace-text-card-field {
+    display: grid;
+    gap: var(--space-1);
+}
+
+.trace-text-card-label {
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+}
+
+.trace-text-card-value {
+    font-size: var(--text-base);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.trace-text-card-scroll-bottom {
+    position: absolute;
+    inset-block-end: var(--space-2);
+    inset-inline-start: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-5);
+    height: var(--space-5);
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: var(--color-elevated);
+    color: var(--color-text-muted);
+    transform: translateX(-50%) rotate(180deg);
+    cursor: pointer;
 }
 
 .transcript-load-earlier {

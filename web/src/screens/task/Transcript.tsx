@@ -173,6 +173,81 @@ function traceRowCount(row: TraceRow): number {
   return Math.max(1, row.children.reduce((total, child) => total + traceRowCount(child), 0));
 }
 
+type WorkEntry = { type: "message"; row: TraceRow } | { type: "calls"; rows: TraceRow[]; key: string };
+
+function workEntries(rows: TraceRow[]): WorkEntry[] {
+  const entries: WorkEntry[] = [];
+  for (const row of rows) {
+    if (row.style === "message") {
+      entries.push({
+        type: "message",
+        row: row.children.length > 0
+          ? { ...row, children: [], result: undefined, expansion: undefined, preview: undefined }
+          : row,
+      });
+      for (const child of row.children) appendCallEntry(entries, child);
+    } else {
+      appendCallEntry(entries, row);
+    }
+  }
+  return entries;
+}
+
+function appendCallEntry(entries: WorkEntry[], row: TraceRow): void {
+  const previous = entries[entries.length - 1];
+  if (previous?.type === "calls") previous.rows.push(row);
+  else entries.push({ type: "calls", rows: [row], key: row.nodeId ?? String(row.id) });
+}
+
+type CallKind = "command" | "file-read" | "file-edit" | "search" | "tool";
+
+function callKind(row: TraceRow): CallKind {
+  if (row.state === "running") {
+    if (row.event?.kind === "command") return "command";
+    return "tool";
+  }
+  if (row.event?.kind === "command") return "command";
+  if (row.event?.kind === "file") {
+    const verb = row.verb?.toLowerCase();
+    if (verb?.includes("read")) return "file-read";
+    if (verb?.includes("search") || verb?.includes("found")) return "search";
+    return "file-edit";
+  }
+  if (row.event?.kind === "tool") {
+    const verb = row.verb?.toLowerCase();
+    if (verb?.includes("read")) return "file-read";
+    if (verb?.includes("search") || verb?.includes("found")) return "search";
+    if (verb?.includes("edit") || verb?.includes("write")) return "file-edit";
+  }
+  return "tool";
+}
+
+function callGroupSummary(rows: TraceRow[]): string {
+  const counts = new Map<string, { kind: CallKind; count: number; running: boolean }>();
+  for (const row of rows) {
+    const kind = callKind(row);
+    const running = row.state === "running";
+    const key = `${kind}:${running}`;
+    const group = counts.get(key);
+    counts.set(key, { kind, count: (group?.count ?? 0) + 1, running });
+  }
+  const phrases = [...counts.values()].map(({ kind, count, running }, index) => {
+    const label = {
+      command: ["command", "commands", "Ran", "Running"],
+      "file-read": ["file", "files", "Read", "Reading"],
+      "file-edit": ["file", "files", "Edited", "Editing"],
+      search: ["the code", "the code", "Searched", "Searching"],
+      tool: ["tool", "tools", "Used", "Using"],
+    }[kind];
+    const quantity = kind === "search"
+      ? count === 1 ? label[0] : `${label[0]} ${count} times`
+      : count === 1 ? `a ${label[0]}` : `${count} ${label[1]}`;
+    const verb = running ? label[3] : label[2];
+    return `${index === 0 ? verb : verb.toLowerCase()} ${quantity}`;
+  });
+  return `${phrases.join(", ")}${[...counts.values()].some((group) => group.running) ? "…" : ""}`;
+}
+
 const TranscriptWork = React.memo(function TranscriptWork({
   segment,
   open,
@@ -199,6 +274,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
   if (rows.length === 0) return null;
   const summary = workSummary(segment, rows);
   const fullTitle = `${workLabel(segment)}${summary ? ` · ${summary}` : ""}`;
+  const entries = workEntries(rows);
 
   return (
     <div className="transcript-work">
@@ -219,19 +295,66 @@ const TranscriptWork = React.memo(function TranscriptWork({
       </button>
       {open && (
         <div className="transcript-work-body">
-          <TraceRows
-            rows={rows}
-            cwd={segment.cwd}
-            scrollRoot={scrollRoot}
-            live={segment.live}
-            expansionState={rowExpansion}
-            onExpansionChange={onRowExpansionChange}
-          />
+          {entries.map((entry) => entry.type === "message" ? (
+            <TraceRows rows={[entry.row]} cwd={segment.cwd} scrollRoot={scrollRoot} live={segment.live} key={`message:${entry.row.nodeId ?? entry.row.id}`} />
+          ) : (
+            <TranscriptCallGroup
+              key={`calls:${entry.key}`}
+              entry={entry}
+              segment={segment}
+              scrollRoot={scrollRoot}
+              rowExpansion={rowExpansion}
+              onRowExpansionChange={onRowExpansionChange}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 });
+
+function TranscriptCallGroup({
+  entry,
+  segment,
+  scrollRoot,
+  rowExpansion,
+  onRowExpansionChange,
+}: {
+  entry: Extract<WorkEntry, { type: "calls" }>;
+  segment: WorkSegment;
+  scrollRoot?: React.RefObject<HTMLElement | null>;
+  rowExpansion?: ReadonlyMap<string, boolean>;
+  onRowExpansionChange?: (key: string, expanded: boolean) => void;
+}) {
+  const key = `transcript-call-group:${segment.id}:${entry.key}`;
+  const [manualOpen, setManualOpen] = React.useState(false);
+  const expanded = rowExpansion?.get(key) ?? manualOpen;
+  const toggle = () => {
+    setManualOpen(!expanded);
+    onRowExpansionChange?.(key, !expanded);
+  };
+  return (
+    <div className="transcript-call-group">
+      <button
+        className="transcript-call-group-toggle"
+        type="button"
+        aria-expanded={expanded}
+        onClick={toggle}
+      >
+        {callGroupSummary(entry.rows)}
+        <span className={`transcript-call-group-chevron${expanded ? " is-open" : ""}`} aria-hidden="true"><ChevronIcon size={14} /></span>
+      </button>
+      {expanded && <TraceRows
+        rows={entry.rows}
+        cwd={segment.cwd}
+        scrollRoot={scrollRoot}
+        live={segment.live}
+        expansionState={rowExpansion}
+        onExpansionChange={onRowExpansionChange}
+      />}
+    </div>
+  );
+}
 
 type NonWorkTranscriptItem = Exclude<TranscriptItem, { type: "work" }>;
 

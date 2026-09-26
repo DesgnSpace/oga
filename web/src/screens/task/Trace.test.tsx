@@ -71,6 +71,31 @@ class TestResizeObserver implements ResizeObserver {
 }
 
 describe("TraceRows", () => {
+  it("shows written tool text in a collapsible card with its raw result", () => {
+    const event: TaskEventView = {
+      ...fileEvent(9),
+      kind: "tool",
+      title: "mcp__oga__resume",
+      presentation: { type: "tool" },
+      rawText: '{"result":{"message":"Continued"}}',
+    };
+    render(<TraceRows rows={[row({
+      target: "resume task",
+      event,
+      expansion: { type: "content", text: "Please continue from the saved brief.", language: "plain", hiddenLines: 0 },
+    })]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show preview" }));
+
+    expect(screen.getByText("Used oga: resume")).toBeTruthy();
+    expect(screen.getByText("Message:")).toBeTruthy();
+    expect(screen.getByText("Please continue from the saved brief.")).toBeTruthy();
+    expect(screen.getByText("Result:")).toBeTruthy();
+    expect(screen.getByText(/"message"/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Used oga: resume" }));
+    expect(screen.queryByText("Please continue from the saved brief.")).toBeNull();
+  });
+
   it("keeps a long trace bounded to the measured viewport", async () => {
     const rows = Array.from({ length: 1_000 }, (_, index) => row({ id: index + 1, target: `step ${index + 1}` }));
     const root = document.createElement("div");
