@@ -8,6 +8,9 @@ import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/dom
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
+import { copyText } from "@/lib/identifiers";
+import { toast } from "@/state/toast";
+import { WorktreeIcon } from "@/ui/icons";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
 import { taskOutcomeKey, taskOutcomeViews } from "@/state/task-outcome-views";
 import type { TaskTitleBarInfo } from "@/shell/TitleBar";
@@ -131,6 +134,30 @@ function taskDetailStatsSummary(task: NonNullable<TaskDetailState["task"]>, even
   return parts.join(" · ");
 }
 
+async function copyWorktreePath(path: string): Promise<void> {
+  try {
+    await copyText(path);
+    toast.success("Worktree path copied");
+  } catch {
+    toast.error("Couldn't copy the worktree path");
+  }
+}
+
+function WorktreeChip({ worktree, label }: { worktree: NonNullable<NonNullable<TaskDetailState["task"]>["worktree"]>; label?: string }) {
+  return (
+    <button
+      className="task-detail-fact task-detail-worktree"
+      type="button"
+      aria-label={`Copy worktree path: ${worktree.path}`}
+      title={`${worktree.path}\nClick to copy`}
+      onClick={() => void copyWorktreePath(worktree.path)}
+    >
+      <WorktreeIcon size={12} />
+      <span className="task-detail-model">{label ?? worktree.branch}</span>
+    </button>
+  );
+}
+
 // The title bar's secondary strip scrolls instead of wrapping the bar. Cost,
 // duration, and token stats live in the model chip's tooltip rather than as
 // their own elements, so the bar stays to one muted chip plus the menu.
@@ -147,6 +174,7 @@ function TaskDetailSecondary({
   const factTitle = `${task.model} · ${taskDetailStatsSummary(task, events)}`;
   return (
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
+      {task.worktree && <WorktreeChip worktree={task.worktree} label={task.worktreeLabel} />}
       <span className="task-detail-fact" title={factTitle}>
         <span className="task-detail-model">{task.model}</span>
         {effort && (

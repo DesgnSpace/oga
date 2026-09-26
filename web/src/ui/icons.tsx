@@ -299,6 +299,17 @@ export function TerminalIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function WorktreeIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <circle cx={5} cy={3.8} r={1.6} />
+      <circle cx={5} cy={12.2} r={1.6} />
+      <circle cx={11} cy={5.8} r={1.6} />
+      <path d="M5 5.4v5.2M11 7.4c0 2.4-2 3.2-4.6 3.9" />
+    </Svg>
+  );
+}
+
 export function ScopeIcon({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>

@@ -89,6 +89,18 @@ describe("trace rows", () => {
     expect(rows[0].target).toBe("src/main.rs");
   });
 
+  it("shows a fenced, line-numbered read result as one clean line", () => {
+    const readEvent: TaskEventView = {
+      ...event(1, "file", "Read"),
+      verb: "Read",
+      presentation: { type: "file", path: "/repo/web/src/state/sidebar-preferences.ts" },
+      result: "```typescript\n1\t// Sidebar filter/grouping/sort choices and collapsed group ids, persisted.\n2\texport {};\n```",
+    };
+    const rows = traceRows([readEvent], false);
+    expect(rows[0].target).toBe("web/src/state/sidebar-preferences.ts");
+    expect(rows[0].result).toBe("// Sidebar filter/grouping/sort choices and collapsed group ids, persisted.");
+  });
+
   it("does not invent a verb when the event has none", () => {
     const rows = traceRows([{ ...event(1, "tool", "Tool call"), detail: "whatever it did" }], false);
     expect(rows[0].verb).toBeUndefined();

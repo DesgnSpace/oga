@@ -711,7 +711,7 @@ function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
     style = "work";
     const presentation = event.presentation?.type === "command" ? event.presentation : undefined;
     const output = expansion?.type === "command" ? expansion.output : undefined;
-    preview = state !== "failed" ? (output !== undefined ? singleLine(output) : undefined) : undefined;
+    preview = state !== "failed" ? (output !== undefined ? previewLine(output) : undefined) : undefined;
     // The command the run actually issued, not the shell around it — the whole
     // line is one click away in the terminal below.
     const subject =
@@ -900,12 +900,24 @@ function eventText(event: TaskEventView): string | undefined {
   return text !== undefined && text.trim() !== "" ? text : undefined;
 }
 
-function singleLine(value: string): string | undefined {
-  const lines = value
+/**
+ * The one clean line a row's trailing summary shows: any wrapping code
+ * fence and its language tag stripped, any leading line number stripped,
+ * first non-empty line only. A tool's raw result routinely arrives as a
+ * fenced, line-numbered file dump; the row has room for one line, not that.
+ */
+function previewLine(text: string): string | undefined {
+  const unwrapped = unfenced(text.trim());
+  const firstLine = unwrapped
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
-  return lines.length === 1 ? lines[0] : undefined;
+    .map((entry) => entry.trim())
+    .find((entry) => entry !== "");
+  if (firstLine === undefined) return undefined;
+  const cleaned = firstLine
+    .replace(/^```[\w+-]*\s*/, "")
+    .replace(/^\d+[\t:]\s*/, "")
+    .trim();
+  return cleaned !== "" ? cleaned : undefined;
 }
 
 function workResult(event: TaskEventView, cwd: string, expansion: EventExpansion | undefined): string | undefined {
@@ -915,8 +927,10 @@ function workResult(event: TaskEventView, cwd: string, expansion: EventExpansion
   }
   if (event.kind === "command") return undefined;
   const outcome = event.result ?? event.presentation?.outcome;
-  if (outcome === undefined || defaultSuccess(outcome)) return undefined;
-  return relativePaths(outcome, cwd);
+  if (outcome === undefined) return undefined;
+  const cleaned = previewLine(outcome);
+  if (cleaned === undefined || defaultSuccess(cleaned)) return undefined;
+  return relativePaths(cleaned, cwd);
 }
 
 function defaultSuccess(value: string): boolean {

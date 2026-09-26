@@ -499,15 +499,7 @@ a {
 
 .title-bar {
     flex: 0 0 auto;
-    background: var(--color-sidebar);
-}
-
-/* Marks the boundary with the sidebar's own topbar (toggle, back, forward,
-   settings, usage, refresh) so that group reads as separate from the title,
-   rather than one long run of icons. Collapsed, the sidebar is gone and the
-   title bar draws those controls itself, so no divider is needed. */
-.task-sidebar:not(.task-sidebar-collapsed) + .app-main .title-bar {
-    border-left: 1px solid var(--color-border);
+    background: var(--color-bg);
 }
 
 .title-bar-row {
@@ -542,8 +534,8 @@ a {
     margin: 0 0 0 var(--space-2);
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: var(--text-heading);
-    font-weight: 600;
+    font-size: var(--text-base);
+    font-weight: 500;
     white-space: nowrap;
 }
 
@@ -830,6 +822,13 @@ a {
     border-radius: var(--radius);
     background: var(--color-elevated);
     box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+}
+
+/* With search collapsed the filter button sits at the sidebar's left edge,
+   so the popover opens rightward instead of past the window edge. */
+.sidebar-search-collapsed + .sidebar-filter .filter-popover {
+    right: auto;
+    left: 0;
 }
 
 .filter-popover-header {
@@ -2544,7 +2543,7 @@ h1 {
     gap: 4px;
     padding: 2px var(--space-2);
     border-radius: var(--radius);
-    background: var(--color-bg);
+    background: var(--color-sidebar);
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
@@ -2561,6 +2560,20 @@ h1 {
 
 .task-detail-effort {
     flex: 0 0 auto;
+}
+
+.task-detail-worktree {
+    align-items: center;
+    border: 0;
+    cursor: pointer;
+}
+
+.task-detail-worktree svg {
+    flex: 0 0 auto;
+}
+
+.task-detail-worktree:hover {
+    color: var(--color-text);
 }
 
 .task-detail-header-actions {
@@ -3104,7 +3117,8 @@ h1 {
 }
 
 .trace-target {
-    flex: 1;
+    flex: 0 1 auto;
+    max-width: 46ch;
     font-size: var(--text-base);
     font-weight: 400;
 }
@@ -3122,6 +3136,8 @@ h1 {
 }
 
 .trace-row-message .trace-target {
+    flex: 1;
+    max-width: none;
     overflow: visible;
     text-overflow: clip;
     white-space: pre-wrap;
@@ -3157,6 +3173,7 @@ h1 {
 
 .trace-preview,
 .trace-result {
+    flex: 1 1 auto;
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-base-mono);
