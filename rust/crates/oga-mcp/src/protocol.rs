@@ -22,7 +22,7 @@ const DELEGATE_DESCRIPTION: &str = concat!(
 
 const MODELS_DESCRIPTION: &str = concat!(
     "List the models this machine can send work to, and the routing rules (`love`) that pick one when delegate names none. ",
-    "Each row has the profile and model ids to pass to delegate, whether it is enabled or preferred, the effort levels it accepts, and quota used unless `usage` is false; `unavailable` says why a worker cannot start. ",
+    "Each row has the profile and model ids to pass to delegate, whether it is enabled or preferred, and the effort levels it accepts; `unavailable` says why a worker cannot start. `usage` holds each profile's quota use unless `usage` is false. ",
     "Only preferred, enabled models by default: widen with `onlyPreferred: false` or `onlyEnabled: false`.",
 );
 
