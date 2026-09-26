@@ -2032,8 +2032,8 @@ const CALLER_PROMPT_SURFACE: PromptSurface = {
   heading: "How briefs are written",
   helper: (
     <>
-      What your agent reads before it writes up work to hand off. Use {"{{default}}"} to keep Oga&apos;s own wording,
-      and {"{{project}}"} for the folder path.
+      Your instructions replace Oga&apos;s defaults. Leave them unchanged or clear the field to use the latest
+      default. Use {"{{project}}"} for the folder path.
     </>
   ),
   model: (state) => state.callerPrompts,

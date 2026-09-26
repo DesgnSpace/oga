@@ -6,8 +6,6 @@ routes:
       model: openai/gpt-5.6-luna
 caller:
   prompt: |
-    {{default}}
-
     The brief is where these rules land; the worker does not read this text.
     - Say what to hand back: a report opening with `## TL;DR`, outcomes not implementation (`Login works`, not `Added CSS to login page`), detail only when asked.
     - Name the checks it must run and say to paste real output. Say what counts as done.

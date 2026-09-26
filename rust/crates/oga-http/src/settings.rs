@@ -244,7 +244,8 @@ fn read_prompt(state: &HttpState, query: CwdQuery) -> Result<Json<Value>, HttpEr
 fn write_prompt(state: &HttpState, body: &Bytes) -> Result<Json<Value>, HttpError> {
     let body: PromptWrite = parse_json(body)?;
     let cwd = canonical_cwd(&body.cwd);
-    if let Some(path) = prompt_config(&state.store, &cwd)?.config_path {
+    let prompt = prompt_config(&state.store, &cwd)?;
+    if let Some(path) = prompt.config_path {
         return Err(HttpError::bad_request(format!(
             "These instructions come from {path}. Edit them there."
         )));
@@ -255,7 +256,9 @@ fn write_prompt(state: &HttpState, body: &Bytes) -> Result<Json<Value>, HttpErro
             "invalid prompt config at caller_prompt: must be at most 8000 characters".to_owned(),
         ));
     }
-    let stored = json!({ "written": body.written, "value": value });
+    let written = body.written && !value.is_empty() && value != prompt.inherited;
+    let stored =
+        json!({ "written": written, "value": if written { value } else { String::new() } });
     state.store.repositories().settings().put(
         &cwd,
         CALLER_PROMPTS_KEY,
@@ -809,7 +812,7 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
     let global = canonical_cwd(&global_cwd().display().to_string());
     let layers = load_config_layers(Some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let default_text = String::new();
+    let default_text = oga_config::DEFAULT_CALLER_PROMPT.to_owned();
     let own_layer = layers.project.as_ref();
     let read_file = |layer: Option<&ConfigLayer>| {
         oga_config::read_caller_prompt(layer)
@@ -862,7 +865,7 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
     })
 }
 
-/// The scope's prompt text with `{{default}}` and `{{project}}` filled in.
+/// The scope's prompt text with the removed token ignored and the project path filled in.
 pub fn caller_prompt(store: &Store, cwd: &str) -> Result<String, HttpError> {
     let cwd = canonical_cwd(cwd);
     let value = prompt_config(store, &cwd)?.value;

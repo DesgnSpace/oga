@@ -12,7 +12,8 @@ import type {
 import { clearCachedSettingsState } from "./state";
 import { SettingsPage } from "./index";
 
-const inheritedPrompt: PromptConfig = { cwd: "/tmp/project", scope: "global", written: false, value: "", inherited: "" };
+const defaultBriefRules = "The brief is all the worker gets: it can't see this conversation and guesses badly. Write it as a message to a teammate. Cover what done looks like and why it matters, what you already know (files, conventions, dead ends), the choices you've made, what must not change, how to check the work, and what to send back, including what it couldn't verify. One deliverable per task. Don't read files just to write the brief; if you'd need to, the task is too vague or too big. Use headings only when the work has several parts.";
+const inheritedPrompt: PromptConfig = { cwd: "/tmp/project", scope: "global", written: false, value: defaultBriefRules, inherited: defaultBriefRules };
 let callerPrompt = inheritedPrompt;
 let savedCallerPrompt: { cwd: string; written: boolean; value: string } | undefined;
 
@@ -525,5 +526,19 @@ describe("brief rules", () => {
 
     await waitFor(() => expect(savedCallerPrompt).toBeTruthy());
     expect(savedCallerPrompt).toMatchObject({ written: true, value: "{{default}} Name the entry file." });
+  });
+
+  it("leaves the default unset when the user clears the editor", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Brief rules" }));
+    const editor = await screen.findByLabelText("How briefs are written");
+    expect((editor as HTMLTextAreaElement).value).toBe(defaultBriefRules);
+    fireEvent.change(editor, { target: { value: "" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(savedCallerPrompt).toBeTruthy());
+    expect(savedCallerPrompt).toMatchObject({ written: false, value: "" });
   });
 });

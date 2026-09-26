@@ -107,7 +107,22 @@ async fn initialize_advertises_protocol_and_instructions() {
     assert!(instructions.contains("oga watch <taskId>"));
     assert!(instructions.contains("`query` locates code in a project"));
     assert!(instructions.contains("Every task response carries `next`"));
-    assert!(!instructions.contains("A brief is the only account of the work the worker gets."));
+    assert!(instructions.contains(oga_config::DEFAULT_CALLER_PROMPT));
+
+    let tools = server
+        .handle_value(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
+        .await
+        .expect("tools/list response");
+    let delegate = tools["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "delegate")
+        .expect("delegate tool");
+    let description = delegate["inputSchema"]["properties"]["prompt"]["description"]
+        .as_str()
+        .expect("prompt description");
+    assert!(description.contains(oga_config::DEFAULT_CALLER_PROMPT));
 }
 
 #[tokio::test]
@@ -127,7 +142,7 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
     let instructions = initialize["result"]["instructions"]
         .as_str()
         .expect("instructions");
-    assert!(!instructions.contains("A brief is the only account of the work the worker gets."));
+    assert!(!instructions.contains(oga_config::DEFAULT_CALLER_PROMPT));
     let project = std::fs::canonicalize(directory.path()).expect("canonical project path");
     assert!(instructions.ends_with(&format!(
         "Project root: {}. Always name the entry file.",
@@ -148,6 +163,7 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
         .as_str()
         .expect("prompt description");
     assert!(description.contains("It is sent as written"));
+    assert!(!description.contains("Headings and numbered steps"));
     assert!(description.contains("Always name the entry file."));
     assert!(description.contains("directory's memories"));
     assert!(description.contains("commit attribution"));
@@ -157,6 +173,7 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
         "Project root: {}. Always name the entry file.",
         project.display()
     )));
+    assert!(!description.contains(oga_config::DEFAULT_CALLER_PROMPT));
 }
 
 #[tokio::test]

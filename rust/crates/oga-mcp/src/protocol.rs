@@ -132,8 +132,8 @@ const DELETE_WORKTREE_DESCRIPTION: &str = concat!(
 );
 
 const PROMPT_DESCRIPTION: &str = concat!(
-    "The brief the worker runs, as markdown, 1 to 64000 characters. It is the only account of the work the worker gets, since it cannot see this conversation, so anything it needs to know has to be in it. ",
-    "It is sent as written: a one-line brief arrives as one line, a pasted bug report arrives as that report. Headings and numbered steps earn their length on work with several parts, and get in the way on work with one. ",
+    "The worker receives this prompt as its full account of the work, in markdown, 1 to 64000 characters. ",
+    "It is sent as written: a one-line brief arrives as one line, a pasted bug report arrives as that report. ",
     "Oga sends it with the directory's memories and, when enabled, its commit attribution; inspect `fields: [\"shippedPrompt\"]` returns the result."
 );
 

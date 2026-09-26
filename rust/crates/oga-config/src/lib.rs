@@ -29,8 +29,7 @@ const KIND_LIST_MESSAGE: &str = "must be a list of kinds of work: mechanical, co
 
 pub const MODEL_SETTINGS_KEY: &str = "models";
 pub const CALLER_PROMPTS_KEY: &str = "callerPrompts";
-pub const DEFAULT_CALLER_PROMPT: &str = "";
-/// The prompt guidance for callers writing a `delegate` brief.
+pub const DEFAULT_CALLER_PROMPT: &str = "The brief is all the worker gets: it can't see this conversation and guesses badly. Write it as a message to a teammate. Cover what done looks like and why it matters, what you already know (files, conventions, dead ends), the choices you've made, what must not change, how to check the work, and what to send back, including what it couldn't verify. One deliverable per task. Don't read files just to write the brief; if you'd need to, the task is too vague or too big. Use headings only when the work has several parts.";
 fn yaml_key(value: &serde_yaml::Value) -> Option<&str> {
     value.as_str()
 }
@@ -2387,12 +2386,12 @@ mod tests {
     fn caller_prompt_reads_custom_text_verbatim() {
         let project = layer(
             "/work/.oga.yaml",
-            "version: 1\ncaller:\n  prompt: |\n    {{default}}\n    Project rule: always name the entry file.\n",
+            "version: 1\ncaller:\n  prompt: |\n    Project rule: always name the entry file.\n",
         );
 
         assert_eq!(
             read_caller_prompt(Some(&project)).unwrap().as_deref(),
-            Some("{{default}}\nProject rule: always name the entry file.")
+            Some("Project rule: always name the entry file.")
         );
     }
 

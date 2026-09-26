@@ -1524,8 +1524,25 @@ async fn saved_brief_rules_are_returned_and_capped() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(fresh["value"], "");
-    assert_eq!(fresh["inherited"], "");
+    assert_eq!(fresh["value"], oga_config::DEFAULT_CALLER_PROMPT);
+    assert_eq!(fresh["inherited"], oga_config::DEFAULT_CALLER_PROMPT);
+
+    let (status, unchanged) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/caller-prompts",
+            Body::from(
+                json!({ "cwd": cwd, "written": true, "value": oga_config::DEFAULT_CALLER_PROMPT })
+                    .to_string(),
+            ),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unchanged["written"], false);
+    assert_eq!(unchanged["value"], oga_config::DEFAULT_CALLER_PROMPT);
 
     let (status, saved) = json_response(
         request(
@@ -1543,6 +1560,10 @@ async fn saved_brief_rules_are_returned_and_capped() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(saved["written"], true);
     assert_eq!(saved["value"], "{{default}}\n\nName the entry file.");
+    assert_eq!(
+        oga_http::settings::caller_prompt(&fixture.store, &cwd).unwrap(),
+        "\n\nName the entry file."
+    );
 
     let (status, refused) = json_response(
         request(

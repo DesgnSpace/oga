@@ -303,7 +303,9 @@ export function isPromptDirty(model: PromptsModel): boolean {
 }
 
 export function promptPayload(model: PromptsModel): PromptWrite {
-  return { cwd: model.cwd, written: model.written, value: model.text };
+  const value = model.text.trim();
+  const inherited = model.inherited.trim();
+  return { cwd: model.cwd, written: value.length > 0 && value !== inherited, value };
 }
 
 export function beginPromptLoad(model: PromptsModel): PromptsModel {
