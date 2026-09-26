@@ -1,7 +1,5 @@
-// Reusable modal overlay: overlay + dialog, Escape/outside-click/close-button
-// dismissal, a hand-rolled Tab focus trap, body scroll lock, and focus moved
-// in on open and restored on close. Mounts and unmounts with the caller's
-// state.
+// Modal dialog with Escape/outside-click dismissal, a Tab focus trap, body
+// scroll lock, and focus restored on close.
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { CloseIcon } from "@/ui/icons";
