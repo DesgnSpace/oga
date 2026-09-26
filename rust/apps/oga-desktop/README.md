@@ -10,8 +10,11 @@ From `rust/`, build the broker once and start the desktop shell:
 
 ```sh
 cargo build -p oga-cli
-cargo tauri dev --manifest-path apps/oga-desktop/Cargo.toml
+cd apps/oga-desktop && cargo tauri dev
 ```
+
+`make dev` from the repository root starts the desktop shell the same way,
+installing the `web/` dependencies first when they are missing.
 
 Set `OGA_BROKER_URL` to use another loopback port. Set `OGA_SERVER_PATH`
 to select an explicit Rust broker executable.

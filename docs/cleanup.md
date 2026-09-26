@@ -15,5 +15,5 @@ removes task activity; the task record remains. It also removes eligible task
 worktrees when they have no uncommitted changes. The branch remains in the
 repository.
 
-The app offers the same preview in **Settings → Storage**. Review the preview
+The app offers the same preview in **Settings → Task history**. Review the preview
 before deleting: cleanup is permanent. Quit Oga before using `--delete`.

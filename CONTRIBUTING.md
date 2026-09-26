@@ -7,8 +7,8 @@ definition; use its wording when a change touches how Oga describes itself.
 
 ```bash
 bun install
-bun test
-bunx tsc --noEmit
+cd web && bun install && bun test && bun run typecheck
+cd ../rust && cargo fmt --check && cargo test --workspace
 ```
 
 - `make dev` launches the desktop app for local development.
@@ -20,9 +20,11 @@ bunx tsc --noEmit
 
 ## Tests and types
 
-`bun test` must pass. `bunx tsc --noEmit` must be clean.
+`bun test` and `bun run typecheck` in `web/` must pass, and so must
+`make rust-fmt`, `make rust-lint`, and `make rust-test` from the repository
+root.
 
-The test suite exercises task lifecycle, event tracing, scope enforcement, the
+The Rust suite exercises task lifecycle, event tracing, scope enforcement, the
 event socket protocol, watch exit codes, and the public task view contract.
 
 ## Changelog

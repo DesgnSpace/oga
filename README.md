@@ -61,7 +61,7 @@ brew install --cask DesgnSpace/tap/oga
 **Build from source:**
 
 ```bash
-git clone https://github.com/yondifon/oga.git
+git clone https://github.com/DesgnSpace/oga.git
 cd oga
 bun install
 make install
@@ -79,10 +79,10 @@ curl http://127.0.0.1:7331/health
 
 ### After install
 
-**MCP client config:** The app's **Install MCP** button writes a global MCP
-entry for every installed client — Claude Code, Codex, OpenCode, and
-Antigravity — pointing at `http://127.0.0.1:7331/mcp`. Existing configs get a
-`.bak`.
+**MCP client config:** **Connect tools** in the app's **Settings →
+Connections** writes a global MCP entry for every installed client — Claude
+Code, Codex, OpenCode, and Antigravity — pointing at
+`http://127.0.0.1:7331/mcp`. Existing configs get a `.bak`.
 
 **First launch** detects which provider CLIs are installed and lets you add,
 edit, and enable profiles. No accounts are hardcoded. Each profile stores its
@@ -103,8 +103,8 @@ its own runtime, so every command below works with no Bun and no checkout.
 | `oga watch <task-id>...` | Wait for a task; prints one line when it settles. |
 | `oga inflight` | List the tasks still running, so you know what a restart interrupts. |
 | `oga tasks --query <text>` | Search active task history by title, summary, or prompt. |
-| `oga config [cwd]` | Print the effective config for a directory — profiles, models, routes, worker rules — and which file each setting came from. |
-| `oga love [worker/model]` | Show or set the model used for work that names no model. Add `--clear` to return to per-task selection or `--global` to apply the choice to every project. |
+| `oga config [cwd]` | Print the effective config for a directory — profiles, models, routes, brief rules — and which file each setting came from. |
+| `oga love [worker:model[:effort]]` | Show or set the model used for work that names no model. Add `--clear` to return to per-task selection or `--global` to apply the choice to every project. |
 | `oga version` | Print which build this is. |
 
 ## Set up workers
@@ -141,17 +141,17 @@ oga love
 To choose the default explicitly, use the worker ID and model ID:
 
 ```sh
-oga love opencode/openai/gpt-5.6-luna
+oga love opencode:openai/gpt-5.6-luna
 ```
 
 Use `oga love --clear` to let routing choose per task again. Add `--global` to
 any `love` command to read or write the user-wide setting instead of the current
-project's `.oga.toml`.
+project's `.oga.yaml`.
 
 ## Following a task
 
 A delegated task runs unattended. Following it should cost nothing while it
-works. Oga gives you three layers, from cheapest to richest:
+works. Oga gives you two layers, from cheapest to richest:
 
 **1. Background `oga watch <taskId>`** — the default. A backgrounded process
 that connects to the broker's unix event socket at `~/.oga/oga.sock` for
@@ -226,9 +226,9 @@ Every tool is available over MCP (`http://127.0.0.1:7331/mcp`) and the REST API.
   `sandbox-exec`. Scope is relative to the task's `cwd`; literal file paths stay
   literal, `dir/**` is recursive, `**` grants the whole tree.
 - **Event socket** (`rust/crates/oga-events`): Unix-domain socket at
-  `~/.oga/oga.sock`. Pushes task-event batches to local subscribers on the
-  NDJSON protocol (contract EC-001). `oga watch` consumes it for zero-poll
-  follow-along; the desktop app can consume it too.
+  `~/.oga/oga.sock`. Pushes task-event batches to local subscribers as
+  NDJSON. `oga watch` consumes it for zero-poll follow-along; the desktop app
+  can consume it too.
 - **Desktop app** (`rust/apps/oga-desktop`): Tauri shell over the React UI in
   `web/`, showing broker health, recent tasks with full event traces, and
   profile management. Ships the broker binary as a bundled sidecar.
@@ -239,7 +239,7 @@ Configuration resolves through three layers, highest first:
 
 1. `<project>/.oga.yaml` — the project's own file, resolved from the task's `cwd`
 2. `~/.oga.yaml` — your personal config
-3. Oga's built-in defaults — discovered accounts and the shipped worker rules
+3. Oga's built-in defaults — discovered accounts and the default brief rules
 
 A missing file at any layer is normal. A file that fails to parse fails the
 read that consulted it, naming the file. `oga config [cwd]` prints the
@@ -255,7 +255,7 @@ Route names describe the work: `mechanical`, `context`, `build`, `reasoning`,
 `general`. Each route has a provider/model `allow` list and optional
 `preference` and `min_quality`.
 
-Routes layer like everything else: a project file's `[routes]` table merges
+Routes layer like everything else: a project file's `routes` map merges
 over the user file's, per class. Scalar fields (`preference`, `min_quality`)
 override; an `allow` list the project writes replaces the user's whole list,
 because allow lists are written best-first and merging two would scramble their
@@ -263,7 +263,7 @@ meaning. A class neither file mentions stays unconstrained.
 
 ### Profiles
 
-A `[profiles.<id>]` table tunes one profile:
+A `profiles.<id>` entry tunes one profile:
 
 ```yaml
 profiles:
@@ -332,28 +332,28 @@ preferred model, `models` falls back to every enabled model. Derived capabilitie
 `reasoning`, `long-context`, `tool-use`, and `free`; a model entry's `capabilities`
 array replaces those derived tags.
 
-### Worker rules
+### Brief rules
 
-A project writes the rules its workers read in its own file:
+A project can set, in its own file, the rules a coding agent follows when it
+writes a brief:
 
 ```yaml
-worker:
+caller:
   prompt: |
-    1. Blocked means stop …
-    5. Open your final report with `## TL;DR` …
+    Name the entry file in every brief.
 ```
 
-The block ships verbatim under `## Worker rules` and is read again on every
-dispatch. While it is there it replaces whatever Settings → Prompts holds for
-that scope, and `prompt` is the only key `worker` takes — see
-[docs/worker-rules.md](docs/worker-rules.md).
+The file is read again on every dispatch. While it is there it replaces
+whatever Settings → Brief rules holds for that project, and `{{project}}` in
+the text becomes the project folder path.
 
 ## Releasing
 
 The Tauri packaging workflow builds unsigned macOS and Linux bundles and the
 updater artifacts consumed by the desktop app. Run a local package build from
-the Rust workspace with `cargo tauri build --no-sign`; CI uses the matrix in
-`rust/packaging/release.yml` for platform builds and broker smoke tests.
+the Rust workspace with `cargo tauri build --no-sign`;
+`rust/packaging/release.yml` holds the matrix for platform builds and broker
+smoke tests.
 
 ---
 
@@ -364,7 +364,6 @@ the Rust workspace with `cargo tauri build --no-sign`; CI uses the matrix in
 | [docs/oga.md](docs/oga.md) | Command line and task actions |
 | [docs/routing.md](docs/routing.md) | Selecting workers and models |
 | [docs/scope.md](docs/scope.md) | Files a task may read or change |
-| [docs/worker-rules.md](docs/worker-rules.md) | Project instructions for workers |
 | [docs/worktree.md](docs/worktree.md) | Separate checkouts and branches |
 | [docs/cleanup.md](docs/cleanup.md) | Removing old task activity and worktrees |
 

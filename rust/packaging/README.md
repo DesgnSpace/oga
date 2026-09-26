@@ -38,12 +38,14 @@ notarization, or uploads. Linux rows also run the portability gate described in
 
 For the complete signed macOS release flow, run `make publish fix` from the
 repository root. It bumps and commits the version, builds the universal app,
-notarizes and verifies the bundles, then creates the GitHub release.
+notarizes and verifies the bundles, uploads them with the updater manifest to
+`downloads.desgn.space`, updates the Homebrew cask, and pushes the release
+tag.
 
 ## Signed updates
 
 `tauri.conf.json` enables Tauri updater artifacts and points clients at the
-GitHub `latest.json` manifest. The committed public-key value is an explicit
+`latest.json` manifest on `downloads.desgn.space`. The committed public-key value is an explicit
 placeholder until the release owner selects the update key. No private key is
 stored in the repository.
 

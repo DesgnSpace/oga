@@ -53,4 +53,4 @@ Users can then install Oga with:
 brew install --cask DesgnSpace/tap/oga
 ```
 
-Each release regenerates `Casks/oga.rb`; copy the regenerated file to the tap repository after publishing.
+Each release regenerates `Casks/oga.rb` and pushes it to the tap repository.

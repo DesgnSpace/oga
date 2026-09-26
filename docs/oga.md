@@ -23,7 +23,7 @@ follow it, or operate without the app open.
 | `oga handoff <task-id>` | Move a task to another worker or model with `--worker`, `--model`, `--effort`. |
 | `oga complete <task-id>` | Mark a task complete. |
 | `oga cleanup` | Preview removable activity and worktrees. |
-| `oga config [cwd]` | Print resolved profiles, models, routes, and worker rules. |
+| `oga config [cwd]` | Print resolved profiles, models, routes, and brief rules. |
 | `oga version` | Print build information. |
 
 ## Finding code

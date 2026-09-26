@@ -77,7 +77,7 @@ private field, so nothing outside `acp_run` can talk to the session at all.
   a fresh run with `session/load` (or `session/resume`) plus a new
   `session/prompt` (`rust/crates/oga-acp/src/session.rs:473` `open_session`).
 
-So `oga steer <id> -m "..."` is really "queue a follow-up turn". The MCP
+So `steer` with an instruction is really "queue a follow-up turn". The MCP
 description — *"leaves an instruction for one still running"* — is accurate about
 the queueing and silent about the delay.
 
