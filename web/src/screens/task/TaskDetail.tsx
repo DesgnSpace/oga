@@ -306,6 +306,10 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     (id: number, expanded: boolean) => watched.controller.setWorkExpansion(id, expanded),
     [watched],
   );
+  const setRowExpansion = React.useCallback(
+    (key: string, expanded: boolean) => watched.controller.setRowExpansion(key, expanded),
+    [watched],
+  );
 
   const retry = React.useCallback(() => {
     void watched.controller.loadInitial().then(forceUpdate);
@@ -476,6 +480,8 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
                 scrollRoot={contentRef}
                 expansionState={viewState.workExpansion}
                 onExpansionChange={setWorkExpansion}
+                rowExpansionState={viewState.rowExpansion}
+                onRowExpansionChange={setRowExpansion}
               />
             </div>
           </>

@@ -1,5 +1,6 @@
 export {
   clearTaskDetailCacheForTests,
+  forgetArchivedTaskViews,
   TaskDetailController,
   taskDetailCacheStats,
   TASK_DETAIL_CACHE_MAX_BYTES,

@@ -179,12 +179,16 @@ const TranscriptWork = React.memo(function TranscriptWork({
   showThinking,
   onToggle,
   scrollRoot,
+  rowExpansion,
+  onRowExpansionChange,
 }: {
   segment: WorkSegment;
   open: boolean;
   showThinking: boolean;
   onToggle: (id: number, startsExpanded: boolean) => void;
   scrollRoot?: React.RefObject<HTMLElement | null>;
+  rowExpansion?: ReadonlyMap<string, boolean>;
+  onRowExpansionChange?: (key: string, expanded: boolean) => void;
 }) {
   const rows = React.useMemo(() => {
     const all = TraceVisibility.interleavedRows(segment.composition, segment.cwd, segment.live).filter(
@@ -215,7 +219,14 @@ const TranscriptWork = React.memo(function TranscriptWork({
       </button>
       {open && (
         <div className="transcript-work-body">
-          <TraceRows rows={rows} cwd={segment.cwd} scrollRoot={scrollRoot} live={segment.live} />
+          <TraceRows
+            rows={rows}
+            cwd={segment.cwd}
+            scrollRoot={scrollRoot}
+            live={segment.live}
+            expansionState={rowExpansion}
+            onExpansionChange={onRowExpansionChange}
+          />
         </div>
       )}
     </div>
@@ -266,6 +277,8 @@ export function Transcript({
   scrollRoot,
   expansionState,
   onExpansionChange,
+  rowExpansionState,
+  onRowExpansionChange,
 }: {
   items: TranscriptItem[];
   cwd?: string;
@@ -273,6 +286,8 @@ export function Transcript({
   scrollRoot?: React.RefObject<HTMLElement | null>;
   expansionState?: ReadonlyMap<number, boolean>;
   onExpansionChange?: (id: number, expanded: boolean) => void;
+  rowExpansionState?: ReadonlyMap<string, boolean>;
+  onRowExpansionChange?: (key: string, expanded: boolean) => void;
 }) {
   const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(
     () => new Map(expansionState),
@@ -297,6 +312,8 @@ export function Transcript({
             open={manualExpansion.get(item.segment.id) ?? item.segment.startsExpanded}
             onToggle={toggleWork}
             scrollRoot={scrollRoot}
+            rowExpansion={rowExpansionState}
+            onRowExpansionChange={onRowExpansionChange}
             key={itemKey(item)}
           />
         ) : (

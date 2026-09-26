@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { Transport } from "@/bridge/transport";
-import type { StreamStatus, Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
+import type { EventBatch, StreamStatus, Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
 import { INITIAL_EVENT_LIMIT } from "./state";
 
 function flush(): Promise<void> {
@@ -465,5 +465,99 @@ describe("delta and reconnect wiring", () => {
     await flush();
 
     expect(transport.invoke).toHaveBeenCalledWith("broker_unwatch_task", { taskId: "task" });
+  });
+});
+
+describe("per-task view state", () => {
+  function archivedBatch(taskId: string): EventBatch {
+    return {
+      cursor: 1,
+      streamFloor: 0,
+      stale: false,
+      pointers: [{ id: 1, cursor: 1, taskId, type: "archived", kind: "file", state: "completed", at: "2026-07-30T15:00:00Z", title: "Task", summary: "" }],
+    };
+  }
+
+  it("keeps a task's scroll position and expanded rows while it stays cached", async () => {
+    const watched = fakeTransport({
+      broker_watch_task: () => snapshot({ cursor: 5 }),
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(watched);
+
+    const first = watchTaskDetail("task");
+    await flush();
+    await flush();
+    first.controller.setScrollPosition(240, false);
+    first.controller.setWorkExpansion(3, true);
+    first.controller.setRowExpansion("call:0:first", true);
+    first.dispose();
+    await flush();
+
+    const reopened = watchTaskDetail("task");
+    expect(reopened.controller.viewState.scrollTop).toBe(240);
+    expect(reopened.controller.viewState.stickToEnd).toBe(false);
+    expect(reopened.controller.viewState.workExpansion.get(3)).toBe(true);
+    expect(reopened.controller.viewState.rowExpansion.get("call:0:first")).toBe(true);
+    reopened.dispose();
+  });
+
+  it("defaults a task to pinned at the bottom, unopened", async () => {
+    const watched = fakeTransport({
+      broker_watch_task: () => snapshot({ cursor: 5 }),
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(watched);
+
+    const { controller, dispose } = watchTaskDetail("task");
+    expect(controller.viewState).toEqual({ scrollTop: 0, stickToEnd: true, workExpansion: new Map(), rowExpansion: new Map() });
+    dispose();
+  });
+
+  it("forgets a task's view state once it is archived", async () => {
+    const watched = fakeTransport({
+      broker_watch_task: () => snapshot({ cursor: 5 }),
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail, forgetArchivedTaskViews } = await freshController(watched);
+
+    const first = watchTaskDetail("task");
+    await flush();
+    await flush();
+    first.controller.setScrollPosition(240, false);
+    first.controller.setRowExpansion("call:0:first", true);
+    first.dispose();
+    await flush();
+
+    forgetArchivedTaskViews(archivedBatch("task"));
+
+    const reopened = watchTaskDetail("task");
+    expect(reopened.controller.viewState).toEqual({ scrollTop: 0, stickToEnd: true, workExpansion: new Map(), rowExpansion: new Map() });
+    reopened.dispose();
+  });
+
+  it("leaves other tasks' view state alone when one is archived", async () => {
+    const watched = fakeTransport({
+      broker_watch_task: (args) => snapshot({ task: task({ id: args?.taskId as string }), cursor: 5 }),
+      broker_stream_status: () => ({ connected: true, cursor: 5, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail, forgetArchivedTaskViews } = await freshController(watched);
+
+    const kept = watchTaskDetail("keep");
+    await flush();
+    await flush();
+    kept.controller.setScrollPosition(100, false);
+    kept.dispose();
+    await flush();
+
+    forgetArchivedTaskViews(archivedBatch("other"));
+
+    const reopened = watchTaskDetail("keep");
+    expect(reopened.controller.viewState.scrollTop).toBe(100);
+    reopened.dispose();
   });
 });

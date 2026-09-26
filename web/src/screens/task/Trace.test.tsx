@@ -209,6 +209,24 @@ describe("TraceRows", () => {
     expect(screen.getByText("file contents")).toBeDefined();
   });
 
+  it("opens a row from a remembered expansion map without a click", () => {
+    const target = row({ id: 7, nodeId: "call:0:first", verb: "Read", target: "first.ts", event: fileEvent(7), expansion: { type: "content", text: "file contents", hiddenLines: 0, language: "plain" } });
+
+    render(<TraceRows rows={[target]} expansionState={new Map([["call:0:first", true]])} />);
+
+    expect(screen.getByText("file contents")).toBeDefined();
+  });
+
+  it("reports every toggle back through onExpansionChange, by row key", () => {
+    const target = row({ id: 7, nodeId: "call:0:first", verb: "Read", target: "first.ts", event: fileEvent(7), expansion: { type: "content", text: "file contents", hiddenLines: 0, language: "plain" } });
+    const changes: Array<[string, boolean]> = [];
+
+    render(<TraceRows rows={[target]} onExpansionChange={(key, expanded) => changes.push([key, expanded])} />);
+    fireEvent.click(screen.getByText("first.ts"));
+
+    expect(changes).toEqual([["call:0:first", true]]);
+  });
+
   it("renders an OpenCode todo payload as checklist items with raw details available", () => {
     const event: TaskEventView = {
       ...fileEvent(1),

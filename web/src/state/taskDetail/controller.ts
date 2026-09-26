@@ -2,7 +2,7 @@
 
 import { broker, streamStatus, unwatchTask, watchTask } from "@/bridge/client";
 import { onBrokerStatus, onTaskDelta } from "@/bridge/events";
-import type { StreamStatus, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
+import type { EventBatch, StreamStatus, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
 import { Store } from "../store";
 import {
   absorbPage,
@@ -17,11 +17,18 @@ import {
 } from "./state";
 
 const MAX_WORK_EXPANSIONS = 512;
+const MAX_ROW_EXPANSIONS = 512;
+
+function defaultViewState(): TaskDetailViewState {
+  return { scrollTop: 0, stickToEnd: true, workExpansion: new Map(), rowExpansion: new Map() };
+}
 
 export interface TaskDetailViewState {
   scrollTop: number;
   stickToEnd: boolean;
   workExpansion: ReadonlyMap<number, boolean>;
+  /** Individual trace rows and groups (keyed by their stable row key), open by hand within a work segment. */
+  rowExpansion: ReadonlyMap<string, boolean>;
 }
 
 interface SyncStart {
@@ -41,7 +48,7 @@ export class TaskDetailController {
   private resyncActivation = -1;
   private unsubscribeDelta: (() => void) | undefined;
   private unsubscribeStatus: (() => void) | undefined;
-  private view: TaskDetailViewState = { scrollTop: 0, stickToEnd: true, workExpansion: new Map() };
+  private view: TaskDetailViewState = defaultViewState();
 
   constructor(private readonly taskId: string) {
     this.store = new Store(defaultTaskDetailState());
@@ -76,6 +83,22 @@ export class TaskDetailController {
       next.delete(oldest);
     }
     this.view = { ...this.view, workExpansion: next };
+  }
+
+  setRowExpansion(key: string, expanded: boolean): void {
+    const next = new Map(this.view.rowExpansion);
+    next.set(key, expanded);
+    while (next.size > MAX_ROW_EXPANSIONS) {
+      const oldest = next.keys().next().value;
+      if (oldest === undefined) break;
+      next.delete(oldest);
+    }
+    this.view = { ...this.view, rowExpansion: next };
+  }
+
+  /** Drops the remembered scroll position and expansion, as when a task is archived. */
+  resetView(): void {
+    this.view = defaultViewState();
   }
 
   async loadInitial(): Promise<void> {
@@ -304,6 +327,7 @@ export class TaskDetailController {
     if (task === undefined) return 0;
     return 1_024 +
       this.view.workExpansion.size * 32 +
+      this.view.rowExpansion.size * 32 +
       task.prompt.length +
       task.output.length +
       this.events.reduce((total, event) => total + eventBytes(event), 0);
@@ -394,6 +418,25 @@ function removeRetained(entry: TaskDetailCacheEntry): void {
   retainedBytes -= entry.bytes;
   entry.bytes = 0;
   entry.retained = false;
+}
+
+/** Drops a task's remembered scroll position and expansion, e.g. once it's archived. */
+function forgetTaskDetailView(taskId: string): void {
+  const entry = taskDetailEntries.get(taskId);
+  if (entry === undefined) return;
+  entry.controller.resetView();
+  if (entry.references === 0) {
+    removeRetained(entry);
+    taskDetailEntries.delete(taskId);
+  }
+}
+
+/** Task view state does not need to survive archiving, so forget it as soon
+ * as the shell reports a task was archived, rather than waiting on the LRU. */
+export function forgetArchivedTaskViews(batch: EventBatch): void {
+  for (const pointer of batch.pointers) {
+    if (pointer.type === "archived") forgetTaskDetailView(pointer.taskId);
+  }
 }
 
 function retain(entry: TaskDetailCacheEntry): void {

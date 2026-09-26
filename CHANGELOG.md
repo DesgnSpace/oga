@@ -20,6 +20,7 @@
 - A task whose worker gives up after Oga blocks one of its steps, such as writing outside the task's folder, now asks you how to go on and names what it couldn't reach, instead of showing as done.
 - Workers can read their skills' files wherever those skills are installed.
 - When a worker needs to reach something outside its task, the task now asks you to allow or refuse it, and the worker carries on with your answer. You can also reply with what it should do instead.
+- A task remembers which rows and groups you expanded in its activity and where you scrolled, so switching away and back puts you right back where you left off. A task you left following new activity keeps following it.
 
 ## 0.2.2 - 2026-09-25
 

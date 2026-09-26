@@ -3,11 +3,12 @@
 
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SidebarController } from "@/state";
-import { onOpenTask } from "@/bridge/events";
+import { onEventBatch, onOpenTask } from "@/bridge/events";
 import { setTaskNotifications } from "@/bridge/client";
 import type { ConnectionState } from "@/state/sidebar-state";
 import { loadTaskNotifications } from "@/state/notification-preferences";
 import { readStorage, writeStorage } from "@/state/storage";
+import { forgetArchivedTaskViews } from "@/state/taskDetail";
 import { Sidebar } from "@/screens/sidebar";
 import { LoadingState } from "@/components/atoms/ListState";
 import { type Route, RouterProvider, handlesClick, routePath, useRouter } from "@/router";
@@ -311,6 +312,10 @@ function Shell() {
     if (!loadTaskNotifications()) void setTaskNotifications(false);
     return onOpenTask((id) => navigate({ kind: "task", id }));
   }, [navigate]);
+
+  // An archived task's remembered scroll position and expansion are of no
+  // further use, so drop them rather than let the cache carry them forever.
+  useEffect(() => onEventBatch(forgetArchivedTaskViews), []);
 
   const connection = useSyncExternalStore(
     sidebarController.subscribe.bind(sidebarController),

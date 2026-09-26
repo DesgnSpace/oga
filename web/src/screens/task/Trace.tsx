@@ -905,13 +905,17 @@ export function TraceRows({
   cwd,
   scrollRoot,
   live = false,
+  expansionState,
+  onExpansionChange,
 }: {
   rows: TraceRow[];
   cwd?: string;
   scrollRoot?: React.RefObject<HTMLElement | null>;
   live?: boolean;
+  expansionState?: ReadonlyMap<string, boolean>;
+  onExpansionChange?: (rowKey: string, expanded: boolean) => void;
 }) {
-  const [expanded, setExpanded] = React.useState<Map<string, boolean>>(new Map());
+  const [expanded, setExpanded] = React.useState<Map<string, boolean>>(() => new Map(expansionState));
   const [openPreview, setOpenPreview] = React.useState<OpenFilePreview | null>(null);
   const panelRef = React.useRef<HTMLElement>(null);
   const toggle = React.useCallback((rowKey: string, startsExpanded: boolean) => {
@@ -919,9 +923,10 @@ export function TraceRows({
       const next = new Map(current);
       const value = current.get(rowKey) ?? startsExpanded;
       next.set(rowKey, !value);
+      onExpansionChange?.(rowKey, !value);
       return next;
     });
-  }, []);
+  }, [onExpansionChange]);
   const { range, layout, getRowRef, onKeyDown, onFocusCapture } = useTraceVirtualization(rows, panelRef, scrollRoot);
   const openPreviewFile = React.useCallback(
     (expansion: ContentExpansion, filePath: string | undefined, imageDataUrl?: string) => {
