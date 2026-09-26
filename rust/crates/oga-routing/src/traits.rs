@@ -196,9 +196,8 @@ mod tests {
         for id in ["opus", "fable", "openai/sol", "gpt-5.6-sol", "kimi-k3"] {
             assert_eq!(traits_for(id).quality, 5, "{id}");
         }
-        // minimax-m3 is listed in the mid-tier names upstream but its own
-        // "mini" substring shadows that tier there too, so parity keeps both
-        // behaviors identical rather than fixing one side.
+        // minimax-m3 is listed in the mid-tier names, but its own "mini"
+        // substring matches the small tier first.
         for id in ["sonnet", "gpt-5.5-large"] {
             assert_eq!(traits_for(id).quality, 4, "{id}");
         }

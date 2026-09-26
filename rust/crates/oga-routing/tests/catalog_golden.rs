@@ -1,5 +1,4 @@
-//! Catalog-parsing and `/api/models` row goldens ported from the TypeScript
-//! behavioral suite.
+//! Catalog-parsing and `/api/models` row goldens.
 
 use std::collections::BTreeMap;
 

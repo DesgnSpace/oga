@@ -774,8 +774,9 @@ Usage: oga <command> [options]
 First run:
 
   1. oga serve &  — unless the Oga app is already running it.
-  2. Connect your coding agent to http://127.0.0.1:7331/mcp. The Oga app's
-     Install MCP button does this for every client it finds.
+  2. Connect your coding agent to http://127.0.0.1:7331/mcp. Connect tools,
+     in the Oga app's Settings → Connections, does this for every client it
+     finds.
   3. Ask your agent to delegate a task, then follow it:
      oga watch <task-id> &"#
 }

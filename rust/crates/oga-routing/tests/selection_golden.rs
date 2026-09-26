@@ -1,5 +1,5 @@
-//! Selection goldens ported from the TypeScript behavioral suite: what lands
-//! where for a given prompt, catalog, policy, and set of constraints.
+//! Selection goldens: what lands where for a given prompt, catalog, policy,
+//! and set of constraints.
 
 use std::collections::BTreeMap;
 
@@ -247,8 +247,9 @@ fn allow(provider: &str, model: &str) -> AllowedModel {
 #[test]
 fn one_account_routes_every_class_from_defaults_alone() {
     let workers = [profile("claude", Provider::Claude, "sonnet")];
-    // What `discover` builds for a claude profile: the configured model plus
-    // the CLI's aliases, one shared effort ladder, and no published prices.
+    // What a claude profile offers with no catalog to read: the configured
+    // model plus the CLI's aliases, one shared effort ladder, and no published
+    // prices.
     let mut catalog = vec![info(
         "sonnet",
         Provider::Claude,

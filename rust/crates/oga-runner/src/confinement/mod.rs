@@ -18,7 +18,7 @@ use thiserror::Error;
 /// The confinement implementation requested for a provider run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ConfinementMode {
-    /// Preserve migration parity and run the provider without OS confinement.
+    /// Run the provider without OS confinement.
     #[default]
     None,
     /// Use the macOS Seatbelt profile interpreter.

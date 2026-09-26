@@ -9,9 +9,8 @@ use oga_domain::{ModelCost, ModelInfo, ModelInfoSource, ModelQuery, ModelSetting
 use regex::Regex;
 use serde_json::Value;
 
-/// What `discover` builds for a claude profile before any CLI call: the
-/// configured model plus the CLI's aliases, sharing one session-level effort
-/// ladder.
+/// The claude CLI's aliases. With no catalog to read, a claude profile offers
+/// these beside its configured model, sharing one session-level effort ladder.
 pub const CLAUDE_ALIASES: [&str; 4] = ["sonnet", "opus", "haiku", "fable"];
 /// `claude --effort <level>` is a session flag, so the ladder is the same for
 /// every model the CLI accepts rather than published per model.
