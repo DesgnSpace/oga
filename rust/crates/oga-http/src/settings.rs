@@ -47,7 +47,7 @@ const CALLER_PROMPTS_KEY: &str = "callerPrompts";
 const CLEANUP_KEY: &str = "cleanup";
 const ADVISOR_KEY: &str = "advisor";
 const APPEARANCE_KEY: &str = "appearance";
-const MAX_FONT_ID: usize = 64;
+const MAX_FONT_ID_LEN: usize = 64;
 const MIN_CLEANUP_DAYS: u64 = 1;
 const MAX_CLEANUP_DAYS: u64 = 3_650;
 const MAX_WAIT_MINUTES: u64 = 24 * 60;
@@ -426,8 +426,7 @@ pub fn advisor_settings(store: &Store) -> Result<AdvisorSettings, HttpError> {
         .unwrap_or_default())
 }
 
-/// How the interface looks. Global, like the advisor: the look belongs to the
-/// app, not to a project.
+/// Global: the look belongs to the app, not to a project.
 pub async fn get_appearance(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
     let settings = appearance_settings(&state.store)?;
     Ok(Json(json!({ "font": settings.font })))
@@ -442,13 +441,13 @@ pub async fn put_appearance(
     let body: AppearanceSettings = parse_json(&body)?;
     if let Some(font) = &body.font {
         let well_formed = !font.is_empty()
-            && font.len() <= MAX_FONT_ID
+            && font.len() <= MAX_FONT_ID_LEN
             && font
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
         if !well_formed {
             return Err(HttpError::bad_request(format!(
-                "font must be 1 to {MAX_FONT_ID} lowercase letters, digits, or dashes"
+                "font must be 1 to {MAX_FONT_ID_LEN} lowercase letters, digits, or dashes"
             )));
         }
     }

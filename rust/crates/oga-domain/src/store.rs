@@ -151,8 +151,7 @@ pub struct AdvisorSettings {
     pub api_key: String,
 }
 
-/// How the interface looks, for every project alike. `font` names one of the
-/// fonts the web app offers; `None` leaves its default in place.
+/// `font` is a font id from the web app's list; `None` means its default.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
