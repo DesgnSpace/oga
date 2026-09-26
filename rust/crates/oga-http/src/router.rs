@@ -203,6 +203,10 @@ pub fn router(state: HttpState) -> Router {
             "/api/advisor",
             get(settings::get_advisor).put(settings::put_advisor),
         )
+        .route(
+            "/api/appearance",
+            get(settings::get_appearance).put(settings::put_appearance),
+        )
         .route("/api/cleanup/preview", get(settings::preview_cleanup))
         .route("/api/cleanup/run", post(settings::run_cleanup))
         .route(

@@ -18,9 +18,9 @@ use oga_config::{
     read_model_overrides, read_model_settings,
 };
 use oga_domain::{
-    AdvisorSettings, CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource,
-    ModelQuery as DomainModelQuery, ModelSettingsRow, Profile, ProfileUsage, Provider, UsageSource,
-    UsageWindow, UsageWindowKind, WaitSettings,
+    AdvisorSettings, AppearanceSettings, CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo,
+    ModelInfoSource, ModelQuery as DomainModelQuery, ModelSettingsRow, Profile, ProfileUsage,
+    Provider, UsageSource, UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{
@@ -46,6 +46,8 @@ const MODEL_SETTINGS_KEY: &str = "models";
 const CALLER_PROMPTS_KEY: &str = "callerPrompts";
 const CLEANUP_KEY: &str = "cleanup";
 const ADVISOR_KEY: &str = "advisor";
+const APPEARANCE_KEY: &str = "appearance";
+const MAX_FONT_ID: usize = 64;
 const MIN_CLEANUP_DAYS: u64 = 1;
 const MAX_CLEANUP_DAYS: u64 = 3_650;
 const MAX_WAIT_MINUTES: u64 = 24 * 60;
@@ -420,6 +422,52 @@ pub fn advisor_settings(store: &Store) -> Result<AdvisorSettings, HttpError> {
         .repositories()
         .settings()
         .get(&global_cwd().display().to_string(), ADVISOR_KEY)?
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default())
+}
+
+/// How the interface looks. Global, like the advisor: the look belongs to the
+/// app, not to a project.
+pub async fn get_appearance(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
+    let settings = appearance_settings(&state.store)?;
+    Ok(Json(json!({ "font": settings.font })))
+}
+
+/// Saves the font id as given. The web app owns the list of fonts, so an id
+/// it does not know yet is kept, and only its shape is checked here.
+pub async fn put_appearance(
+    State(state): State<HttpState>,
+    body: Bytes,
+) -> Result<Json<Value>, HttpError> {
+    let body: AppearanceSettings = parse_json(&body)?;
+    if let Some(font) = &body.font {
+        let well_formed = !font.is_empty()
+            && font.len() <= MAX_FONT_ID
+            && font
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+        if !well_formed {
+            return Err(HttpError::bad_request(format!(
+                "font must be 1 to {MAX_FONT_ID} lowercase letters, digits, or dashes"
+            )));
+        }
+    }
+    state.store.repositories().settings().put(
+        &global_cwd().display().to_string(),
+        APPEARANCE_KEY,
+        &serde_json::to_string(&body).unwrap(),
+        &now_iso(),
+    )?;
+    get_appearance(State(state)).await
+}
+
+/// The stored appearance, or the defaults when nothing was written or what
+/// was written no longer parses.
+pub fn appearance_settings(store: &Store) -> Result<AppearanceSettings, HttpError> {
+    Ok(store
+        .repositories()
+        .settings()
+        .get(&global_cwd().display().to_string(), APPEARANCE_KEY)?
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default())
 }

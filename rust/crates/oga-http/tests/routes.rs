@@ -1408,6 +1408,89 @@ async fn settings_routes() {
     );
 }
 
+async fn appearance(fixture: &Fixture, method: Method, body: Value) -> (StatusCode, Value) {
+    let body = if method == Method::GET {
+        Body::empty()
+    } else {
+        Body::from(body.to_string())
+    };
+    json_response(request(&fixture.router, method, "/api/appearance", body).await).await
+}
+
+#[tokio::test]
+async fn appearance_reads_the_default_font_until_one_is_saved() {
+    let fixture = Fixture::new();
+
+    let (status, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(shown, json!({ "font": null }));
+
+    let (status, saved) = appearance(&fixture, Method::PUT, json!({ "font": "system" })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved, json!({ "font": "system" }));
+    let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(shown, json!({ "font": "system" }));
+
+    let (status, saved) = appearance(&fixture, Method::PUT, json!({ "font": null })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved, json!({ "font": null }));
+    let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(shown, json!({ "font": null }));
+}
+
+#[tokio::test]
+async fn appearance_keeps_a_font_this_build_does_not_offer() {
+    let fixture = Fixture::new();
+
+    let (status, _) = appearance(
+        &fixture,
+        Method::PUT,
+        json!({ "font": "future-serif-2", "theme": "dusk" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(shown, json!({ "font": "future-serif-2" }));
+}
+
+#[tokio::test]
+async fn appearance_refuses_a_malformed_font_and_keeps_the_saved_one() {
+    let fixture = Fixture::new();
+    appearance(&fixture, Method::PUT, json!({ "font": "system" })).await;
+
+    for font in ["", "System", "font id", "../etc", &"a".repeat(65)] {
+        let (status, refusal) = appearance(&fixture, Method::PUT, json!({ "font": font })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{font:?}");
+        assert!(refusal["error"].is_string(), "{refusal}");
+    }
+    let (_, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(shown, json!({ "font": "system" }));
+
+    let (status, _) = appearance(&fixture, Method::PUT, json!({ "font": "a".repeat(64) })).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn appearance_reads_a_stored_value_that_no_longer_parses_as_the_default() {
+    let fixture = Fixture::new();
+    fixture
+        .store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::global_cwd().display().to_string(),
+            "appearance",
+            &json!({ "font": 42 }).to_string(),
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("garbage appearance");
+
+    let (status, shown) = appearance(&fixture, Method::GET, Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(shown, json!({ "font": null }));
+}
+
 #[tokio::test]
 async fn model_settings_reflect_yaml_enablement_overrides() {
     let fixture = Fixture::new();

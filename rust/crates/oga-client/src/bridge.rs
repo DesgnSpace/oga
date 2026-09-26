@@ -7,7 +7,8 @@
 //! the shell's job rather than the web view's.
 
 use oga_domain::{
-    AdvisorSettings, CleanupSettings, EventPointer, Task, TaskEventView, WaitSettings,
+    AdvisorSettings, AppearanceSettings, CleanupSettings, EventPointer, Task, TaskEventView,
+    WaitSettings,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -80,6 +81,10 @@ pub enum BrokerCall {
     Advisor,
     PutAdvisor {
         settings: AdvisorSettings,
+    },
+    Appearance,
+    PutAppearance {
+        settings: AppearanceSettings,
     },
     ArchiveTask {
         task_id: String,
@@ -305,6 +310,10 @@ mod native {
                 BrokerCall::PutWaiting { settings } => encode(self.put_waiting(&settings).await),
                 BrokerCall::Advisor => encode(self.advisor().await),
                 BrokerCall::PutAdvisor { settings } => encode(self.put_advisor(&settings).await),
+                BrokerCall::Appearance => encode(self.appearance().await),
+                BrokerCall::PutAppearance { settings } => {
+                    encode(self.put_appearance(&settings).await)
+                }
                 BrokerCall::ArchiveTask {
                     task_id,
                     archived,

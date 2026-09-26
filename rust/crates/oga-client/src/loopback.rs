@@ -661,6 +661,21 @@ impl LoopbackClient {
         .await
     }
 
+    pub async fn appearance(&self) -> Result<oga_domain::AppearanceSettings, ClientError> {
+        self.get_json(self.endpoint(&["api", "appearance"])).await
+    }
+
+    pub async fn put_appearance(
+        &self,
+        settings: &oga_domain::AppearanceSettings,
+    ) -> Result<oga_domain::AppearanceSettings, ClientError> {
+        self.put_json(
+            self.endpoint(&["api", "appearance"]),
+            serde_json::to_value(settings).map_err(ClientError::Encode)?,
+        )
+        .await
+    }
+
     pub async fn run_cleanup(&self) -> Result<oga_domain::CleanupResult, ClientError> {
         self.post_json(self.endpoint(&["api", "cleanup", "run"]), Value::Null)
             .await
