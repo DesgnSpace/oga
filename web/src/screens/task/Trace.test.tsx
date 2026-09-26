@@ -397,7 +397,7 @@ describe("TraceRows", () => {
     expect(code?.querySelector("strong")).toBeNull();
   });
 
-  it("does not parse file diffs as markdown", () => {
+  it("does not parse file diffs as markdown", async () => {
     const change: FileChange = {
       blocks: [[{ kind: "removed", text: "- **old**" }, { kind: "added", text: "+ new" }]],
     };
@@ -411,8 +411,8 @@ describe("TraceRows", () => {
     const { container } = render(<TraceRows rows={[diff]} />);
     fireEvent.click(screen.getByText("src/file.ts"));
 
+    await waitFor(() => expect(container.querySelector(".trace-diff .code-diff")).not.toBeNull());
     expect(container.querySelector(".trace-diff ul")).toBeNull();
-    expect(container.querySelector(".trace-diff .code-diff")).not.toBeNull();
   });
 
   it("leaves a plain worker note as the existing trace text", () => {
