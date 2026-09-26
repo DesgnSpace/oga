@@ -93,6 +93,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "code search by project token",
         run: migrate_v51_to_v52,
     },
+    Migration {
+        version: 53,
+        name: "task summary indexes",
+        run: migrate_v52_to_v53,
+    },
 ];
 
 /// The schema this binary can read.
@@ -122,7 +127,13 @@ pub fn create_fresh_schema(conn: &Connection) -> Result<(), StoreError> {
 }
 
 fn create_fresh_schema_inner(conn: &Connection) -> Result<(), StoreError> {
-    let schema = [BASE_SCHEMA, CONTEXT_INDEX, ROUTE_HINTS_TABLE].concat();
+    let schema = [
+        BASE_SCHEMA,
+        TASK_SUMMARY_INDEXES,
+        CONTEXT_INDEX,
+        ROUTE_HINTS_TABLE,
+    ]
+    .concat();
     exec(conn, &schema)?;
     let head = &MIGRATIONS[MIGRATIONS.len() - 1];
     conn.execute(
@@ -214,9 +225,6 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS tasks_profile_updated ON tasks(profile_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS tasks_worktree_path ON tasks(worktree_path, archived_at);
-    CREATE INDEX IF NOT EXISTS tasks_title_nocase ON tasks(title COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS tasks_tldr_nocase ON tasks(tldr COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS tasks_prompt_nocase ON tasks(prompt COLLATE NOCASE);
     CREATE TABLE IF NOT EXISTS task_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -862,6 +870,28 @@ pub fn migrate_v51_to_v52(conn: &Connection) -> Result<(), StoreError> {
         INSERT INTO schema_migrations(version, name) VALUES (52, 'code search by project token');
         COMMIT;"#,
         drop_context_index(conn)?
+    ))?;
+    Ok(())
+}
+
+/// Indexes for the small reads polled often: the active count by state, spend
+/// since a time, and projects by when a task last changed.
+const TASK_SUMMARY_INDEXES: &str = r#"
+    CREATE INDEX IF NOT EXISTS tasks_active_state ON tasks(archived_at, state);
+    CREATE INDEX IF NOT EXISTS tasks_spend_at ON tasks(spend_at);
+    CREATE INDEX IF NOT EXISTS tasks_project_seen ON tasks(COALESCE(origin_cwd, cwd), updated_at);"#;
+
+/// Task search matches `%words%`, which no index serves, so the case-folded
+/// search indexes only slowed writes.
+pub fn migrate_v52_to_v53(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        DROP INDEX IF EXISTS tasks_title_nocase;
+        DROP INDEX IF EXISTS tasks_tldr_nocase;
+        DROP INDEX IF EXISTS tasks_prompt_nocase;
+        {TASK_SUMMARY_INDEXES}
+        INSERT INTO schema_migrations(version, name) VALUES (53, 'task summary indexes');
+        COMMIT;"#
     ))?;
     Ok(())
 }

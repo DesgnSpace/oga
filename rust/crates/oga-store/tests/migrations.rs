@@ -70,8 +70,13 @@ const V47: &str = r#"BEGIN IMMEDIATE;
       VALUES('claude','Claude','claude','sonnet',1,'{}','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
+      cwd TEXT,
+      origin_cwd TEXT,
       state TEXT NOT NULL,
-      session_id TEXT
+      session_id TEXT,
+      spend_at TEXT,
+      archived_at TEXT,
+      updated_at TEXT
     );
     INSERT INTO tasks(id,state,session_id) VALUES('before-acp','completed','claude-session-1');
     INSERT INTO schema_migrations(version, name) VALUES (47, 'project-scoped code search');
