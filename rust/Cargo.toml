@@ -8,3 +8,7 @@ edition = "2024"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+[profile.release]
+# Drops the symbol table: 6 MB of the broker binary. Backtraces lose function names.
+strip = true
