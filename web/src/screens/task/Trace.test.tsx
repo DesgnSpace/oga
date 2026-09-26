@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setTransport, tauriTransport, type Transport } from "@/bridge/transport";
 import type { TaskEventView } from "@/bridge/types";
@@ -6,6 +7,13 @@ import type { FileChange } from "@/domain/changes";
 import type { TraceRow } from "@/domain/trace";
 import { expansionFromEvent } from "@/domain/trace";
 import { resolvePreviewPath, TraceRows } from "./Trace";
+
+// Whether a message row wraps or truncates is a stylesheet decision, not a markup one.
+const stylesheet = document.createElement("style");
+stylesheet.textContent = readFileSync(new URL("../../oga.css", import.meta.url), "utf8");
+
+beforeAll(() => document.head.append(stylesheet));
+afterAll(() => stylesheet.remove());
 
 afterEach(cleanup);
 
@@ -422,6 +430,20 @@ describe("TraceRows", () => {
     expect(target?.tagName).toBe("SPAN");
     expect(target?.textContent).toBe("plain note");
     expect(container.querySelector(".markdown-content")).toBeNull();
+  });
+
+  it("renders a long agent message in full, wrapped rather than truncated", () => {
+    const long = "This run touched /Users/malico/desgn/oga/rust/crates/oga-events/src/lib.rs ".repeat(6).trim();
+    const { container } = render(<TraceRows rows={[proseRow(long)]} />);
+    const target = container.querySelector(".trace-target");
+    if (target === null) throw new Error("expected a .trace-target row");
+
+    expect(target.textContent).toBe(long);
+    expect(target.textContent?.endsWith("…")).toBe(false);
+    const style = getComputedStyle(target);
+    expect(style.whiteSpace).toBe("pre-wrap");
+    expect(style.overflowWrap).toBe("anywhere");
+    expect(style.overflow).not.toBe("hidden");
   });
 
   it("does not render transport tags from a wrapped file result", () => {

@@ -2603,6 +2603,7 @@ h1 {
     gap: var(--space-4);
     min-width: 0;
     max-width: 100%;
+    white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
 }
@@ -3097,6 +3098,20 @@ h1 {
 .trace-target-technical {
     font-family: var(--font-mono);
     font-size: var(--text-base-mono);
+}
+
+/* The agent's own words are the row, not a preview of it — shown whole,
+   wrapping onto as many lines as it takes, with long unbroken runs like
+   paths and hashes breaking instead of stretching the row wider. */
+.trace-row-message .trace-row-main {
+    align-items: flex-start;
+}
+
+.trace-row-message .trace-target {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 @keyframes trace-running-shimmer {

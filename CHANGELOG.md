@@ -14,6 +14,7 @@
 - A task's subagents now carry that same status dot, so you can tell at a glance which are still running, done, or hit a problem, without opening each one. A collapsed group of subagents shows how many are still running, and reads as done once none are.
 - You can choose the font Oga's interface uses in Settings → Appearance.
 - You can replace Oga's default handoff instructions with your own.
+- A task's activity log now shows what the worker wrote in full, wrapped onto as many lines as it needs, instead of cutting it off after one line.
 
 - You can no longer set custom worker instructions. Workers receive your brief, project memories, and optional commit attribution; scope stays enforced by permissions, and your brief sets how they report back.
 - A task whose worker gives up after Oga blocks one of its steps, such as writing outside the task's folder, now asks you how to go on and names what it couldn't reach, instead of showing as done.
