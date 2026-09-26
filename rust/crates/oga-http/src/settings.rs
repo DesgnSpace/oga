@@ -912,7 +912,9 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
     })
 }
 
-/// The scope's prompt text with the removed token ignored and the project path filled in.
+/// The brief rules as the calling agent reads them, with `{{project}}` filled
+/// in. `{{default}}` renders as nothing so older saved rules do not leak it;
+/// every other `{{name}}` stays visible, so a typo reads as a typo.
 pub fn caller_prompt(store: &Store, cwd: &str) -> Result<String, HttpError> {
     let cwd = canonical_cwd(cwd);
     let value = prompt_config(store, &cwd)?.value;
