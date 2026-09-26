@@ -73,7 +73,7 @@ export function defaultSidebarState(): SidebarState {
     archiveFilter: "active",
     projectFilter: undefined,
     search: "",
-    grouping: "parent",
+    grouping: "status",
     sort: "priority",
     collapsed: EMPTY_COLLAPSED_GROUPS,
     sidebarCollapsed: false,

@@ -696,7 +696,13 @@ a {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) var(--gutter) var(--space-3);
+    padding: var(--space-2) var(--space-3) var(--space-1);
+}
+
+.sidebar-search-wrap {
+    display: flex;
+    min-width: 0;
+    flex: 1;
 }
 
 .sidebar-search {
@@ -725,6 +731,38 @@ a {
     flex: 0 0 auto;
     place-items: center;
     color: var(--color-text-muted);
+}
+
+/* Collapsed to an icon button beside the filter button; clicking or focusing
+   it (⌘K) expands the field back to its full width. */
+.sidebar-search-collapsed {
+    flex: 0 0 auto;
+    cursor: pointer;
+}
+
+.sidebar-search-collapsed .sidebar-search {
+    width: var(--control-height);
+    height: var(--control-height);
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+}
+
+.sidebar-search-collapsed .sidebar-search:hover {
+    background: var(--color-bg);
+}
+
+.sidebar-search-collapsed .search-field {
+    width: 100%;
+    justify-content: center;
+}
+
+.sidebar-search-collapsed .search-field input,
+.sidebar-search-collapsed .search-field-clear {
+    width: 0;
+    padding: 0;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .search-field input {
@@ -904,10 +942,10 @@ a {
 .sidebar-task {
     display: flex;
     width: 100%;
-    min-height: 36px;
-    align-items: flex-start;
+    min-height: 32px;
+    align-items: center;
     gap: var(--space-2);
-    padding: var(--space-1) var(--gutter);
+    padding: var(--space-1) var(--space-3);
     background: transparent;
     text-align: left;
     text-decoration: none;
@@ -916,10 +954,14 @@ a {
 /* Rows sit inset so hover and selection read as a rounded pill; the inner
    padding keeps their text on the same edge as the group headings. */
 .sidebar-task {
-    width: calc(100% - var(--space-4));
-    margin: 1px var(--space-2);
+    width: calc(100% - var(--space-2));
+    margin: 1px var(--space-1);
     padding: var(--space-2);
     border-radius: var(--radius);
+}
+
+.sidebar-task .task-dot {
+    margin-top: 0;
 }
 
 .sidebar-task-row {
@@ -948,15 +990,10 @@ a {
     pointer-events: auto;
 }
 
-.sidebar-task-row:hover .task-time,
-.sidebar-task-row:focus-within .task-time {
-    margin-right: var(--control-height);
-}
-
 .sidebar-group {
     min-height: 28px;
     align-items: center;
-    padding: var(--space-4) var(--gutter) var(--space-1);
+    padding: var(--space-5) var(--space-3) var(--space-1);
     color: var(--color-text-muted);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -1004,14 +1041,9 @@ a {
 }
 
 .group-title,
-.task-copy {
+.task-title {
     min-width: 0;
     flex: 1;
-}
-
-.group-title,
-.task-title,
-.task-subtitle {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1111,35 +1143,9 @@ a {
     border: 0;
 }
 
-.task-copy {
-    display: grid;
-    gap: 2px;
-}
-
-.task-line {
-    display: flex;
-    min-width: 0;
-    align-items: baseline;
-    gap: var(--space-2);
-}
-
 .task-title {
-    min-width: 0;
-    flex: 0 1 auto;
     color: var(--color-text);
     font-size: var(--text-base);
-}
-
-.task-time {
-    flex: 0 0 auto;
-    margin-left: auto;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-}
-
-.task-subtitle {
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
 }
 
 .sidebar-message {
@@ -3560,7 +3566,6 @@ select {
     -webkit-user-select: none;
 }
 
-.task-time,
 .task-metadata,
 .task-detail-fact,
 .changed-files-summary,

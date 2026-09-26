@@ -164,10 +164,11 @@ describe("the sidebar", () => {
     render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
 
     const row = await screen.findByText("waiting task");
-    const dot = row.closest("a")!.querySelector(".task-dot")!;
+    const link = row.closest("a")!;
+    const dot = link.querySelector(".task-dot")!;
     expect(dot.className).toContain("task-dot-look-waiting");
     expect(dot.getAttribute("title")).toBe("Waiting for another task");
-    expect(row.closest("a")!.textContent).toContain("Waiting for another task");
+    expect(link.textContent).toContain("Waiting for another task");
   });
 
   it("reads a task blocked on a dependency as a problem, not as waiting", async () => {
@@ -186,24 +187,26 @@ describe("the sidebar", () => {
     expect(dot.getAttribute("title")).toBe("Blocked");
   });
 
-  it("names the worker that ran the task in the subtitle", async () => {
+  it("names the worker that ran the task in the row's tooltip", async () => {
     setTransport(transport({ profiles: [{ id: "worker", label: "Night Shift" }] }));
     const controller = new SidebarController();
 
     render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
 
     await screen.findByText("second task");
-    expect(screen.getAllByText(/^Night Shift/)).toHaveLength(2);
+    const rows = screen.getAllByRole("option").map((option) => option.getAttribute("title"));
+    expect(rows.filter((title) => title?.startsWith("Night Shift"))).toHaveLength(2);
   });
 
-  it("omits the worker from the subtitle when it is not recorded", async () => {
+  it("omits the worker from the tooltip when it is not recorded", async () => {
     setTransport(transport({ profiles: [] }));
     const controller = new SidebarController();
 
     render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
 
     await screen.findByText("second task");
-    expect(screen.queryByText(/^Unknown worker/)).toBeNull();
+    const rows = screen.getAllByRole("option").map((option) => option.getAttribute("title"));
+    expect(rows.some((title) => title?.startsWith("Unknown worker"))).toBe(false);
   });
 
   it("rebuilds the projection when an outcome view changes", async () => {
@@ -344,7 +347,10 @@ describe("the sidebar", () => {
     try {
       const tasks = Array.from({ length: 40 }, (_, index) => task(`t${index}`, `task ${index}`));
       setTransport(transport({ tasks }));
-      render(<Sidebar sidebarController={new SidebarController()} onSelectTask={mock()} />);
+      // Ungrouped, so the row count below is exactly the task count, with no group header row mixed in.
+      const controller = new SidebarController();
+      controller.setGrouping("none");
+      render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
       await screen.findByText("task 0");
 
       const list = document.getElementById("task-list")!;

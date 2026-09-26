@@ -146,7 +146,7 @@ export interface VirtualList {
 }
 
 /** Must match `.sidebar-task` and `.sidebar-group` in style.css. */
-export const VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT = 44;
+export const VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT = 32;
 export const VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT = 480;
 export const VIRTUAL_LIST_DEFAULT_OVERSCAN = 4;
 

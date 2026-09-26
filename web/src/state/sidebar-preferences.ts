@@ -158,7 +158,7 @@ export function defaultSidebarPreferences(): SidebarPreferences {
   return {
     archiveFilter: "active",
     projectFilter: undefined,
-    grouping: "parent",
+    grouping: "status",
     sort: "priority",
     collapsed: EMPTY_COLLAPSED_GROUPS,
     sidebarCollapsed: false,

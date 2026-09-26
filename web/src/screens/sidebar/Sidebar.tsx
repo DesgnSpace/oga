@@ -71,7 +71,7 @@ import {
 } from "@/state/sidebar-projection";
 import { BackArrowIcon, FilterIcon, ForwardArrowIcon, RefreshIcon, SettingsIcon, SidebarIcon, UsageIcon } from "@/ui/icons";
 import { formatCost, taskDuration } from "@/lib/format";
-import { absoluteTime, relativeTime } from "@/ui/time";
+import { relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
 import { taskOutcomeViews } from "@/state/task-outcome-views";
@@ -204,6 +204,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
   );
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT);
   const [itemHeight, setItemHeight] = useState(VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT);
@@ -714,22 +715,34 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
       />
 
       <div className="sidebar-search-row">
-        <SearchField
-          className="sidebar-search"
-          inputRef={searchFieldRef}
-          value={sidebar.search}
-          onChange={handleSearch}
-          placeholder="Search tasks"
-          aria-label="Search tasks"
-          title="Search tasks (⌘K)"
-          data-task-search
-          onKeyDown={(event) => {
-            if (event.key === "ArrowDown" && taskIds.length > 0) {
-              event.preventDefault();
-              focusTask(taskIds[0]);
-            }
-         }}
-        />
+        <div
+          className={`sidebar-search-wrap${searchOpen || sidebar.search !== "" ? "" : " sidebar-search-collapsed"}`}
+          onFocus={() => setSearchOpen(true)}
+          onBlur={(event) => {
+            if (sidebar.search !== "") return;
+            const next = event.relatedTarget as Node | null;
+            if (next && event.currentTarget.contains(next)) return;
+            setSearchOpen(false);
+          }}
+          onClick={() => searchFieldRef.current?.focus()}
+        >
+          <SearchField
+            className="sidebar-search"
+            inputRef={searchFieldRef}
+            value={sidebar.search}
+            onChange={handleSearch}
+            placeholder="Search tasks"
+            aria-label="Search tasks"
+            title="Search tasks (⌘K)"
+            data-task-search
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" && taskIds.length > 0) {
+                event.preventDefault();
+                focusTask(taskIds[0]);
+              }
+            }}
+          />
+        </div>
 
         <div className="sidebar-filter">
           <button
@@ -973,6 +986,8 @@ function SidebarRowView({
   const status = taskStatusLabel(task);
   const viewLabel = outcomeViewed ? "Viewed" : "New update";
   const href = `/tasks/${task.id}`;
+  // The row shows only the title; account, project, cost, and timing surface on hover instead.
+  const tooltip = [subtitle, relativeTime(task.updatedAt)].filter((part) => part !== "").join(" · ");
   const className = [
     "sidebar-task",
     row.indented && "sidebar-task-indented",
@@ -992,6 +1007,7 @@ function SidebarRowView({
         tabIndex={focusedTaskId === task.id ? 0 : -1}
         aria-selected={isSelected}
         aria-current={isSelected ? "page" : undefined}
+        title={tooltip}
         onFocus={() => onFocusTask(task.id)}
         onClick={(event) => {
           if (!handlesClick(event)) return;
@@ -1004,13 +1020,7 @@ function SidebarRowView({
         <span className="visually-hidden">
           {`${status} · ${viewLabel}`}
         </span>
-        <span className="task-copy">
-          <span className="task-line">
-            <span className="task-title">{label}</span>
-            <span className="task-time" title={absoluteTime(task.updatedAt)}>{relativeTime(task.updatedAt)}</span>
-          </span>
-          <span className="task-subtitle" title={subtitle}>{subtitle}</span>
-        </span>
+        <span className="task-title">{label}</span>
       </a>
       <button
         className="icon-button sidebar-row-menu-button"

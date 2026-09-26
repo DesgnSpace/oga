@@ -199,7 +199,7 @@ describe("filters", () => {
     const state: SidebarState = {
       ...defaultSidebarState(),
       archiveFilter: "only",
-      grouping: "status",
+      grouping: "project",
       sort: "recent",
       projectFilter: "/work/oga",
     };
