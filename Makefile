@@ -88,12 +88,13 @@ bundle app-bundle:
 	mkdir -p $(DIST)
 	@test -d $(TAURI_APP) || { echo "Error: $(TAURI_APP) not found; run: make desktop-app"; exit 1; }
 	ditto $(TAURI_APP) $(APP)
-	install -m 755 $(BROKER_BINARY) $(APP)/Contents/Resources/oga-server
+	@# The stamped broker replaces the sidecar Tauri bundled, so the app carries one copy.
+	install -m 755 $(BROKER_BINARY) $(APP)/Contents/MacOS/oga-server
 	@if [ "$(HARDENED)" = "1" ]; then \
-		codesign --force --options runtime --timestamp --entitlements rust/apps/oga-desktop/entitlements.plist --sign "$(DEVELOPER_ID_APP)" "$(APP)/Contents/Resources/oga-server"; \
+		codesign --force --options runtime --timestamp --entitlements rust/apps/oga-desktop/entitlements.plist --sign "$(DEVELOPER_ID_APP)" "$(APP)/Contents/MacOS/oga-server"; \
 		codesign --force --options runtime --timestamp --entitlements rust/apps/oga-desktop/entitlements.plist --sign "$(DEVELOPER_ID_APP)" "$(APP)"; \
 	else \
-		codesign --force --entitlements rust/apps/oga-desktop/entitlements.plist --sign "$(DEVELOPER_ID_APP)" "$(APP)/Contents/Resources/oga-server"; \
+		codesign --force --entitlements rust/apps/oga-desktop/entitlements.plist --sign "$(DEVELOPER_ID_APP)" "$(APP)/Contents/MacOS/oga-server"; \
 		codesign --force --entitlements rust/apps/oga-desktop/entitlements.plist --sign "$(DEVELOPER_ID_APP)" "$(APP)"; \
 	fi
 
@@ -107,7 +108,7 @@ install: app-bundle
 	# The broker outlives the app it was spawned from, and the next launch finds
 	# port 7331 already answering /health — so it reports healthy while serving
 	# the previous build's contract. Retire it with the app.
-	pkill -f 'Contents/Resources/oga-server' || true
+	pkill -f 'Contents/(Resources|MacOS)/oga-server serve' || true
 	@listeners=$$(lsof -t -nP -iTCP:7331 -sTCP:LISTEN 2>/dev/null || true); \
 	if [ -n "$$listeners" ]; then kill $$listeners || true; fi
 	@if [ "$(CUTOVER_SKIP_BACKUP)" = "1" ]; then \
@@ -134,7 +135,7 @@ install: app-bundle
 	@# BINDIR overrides where the link lands, and a link directory missing from
 	@# PATH is a warning, never a failure.
 	mkdir -p $(BINDIR)
-	ln -sf "$(INSTALL_APP)/Contents/Resources/oga-server" $(BINDIR)/oga
+	ln -sf "$(INSTALL_APP)/Contents/MacOS/oga-server" $(BINDIR)/oga
 	@case ":$$PATH:" in \
 		*":$(BINDIR):"*) ;; \
 		*) echo "install: warning: $(BINDIR) is not on PATH; add it to your shell profile for the oga command" ;; \
@@ -160,7 +161,7 @@ install: app-bundle
 		if [ -z "$$health" ]; then \
 			echo "install: FAILED: the app was launched but no broker answered /health on port 7331 within 30s"; \
 			echo "install: open $(LOCAL_APP_NAME) from Applications and check whether the broker comes up"; \
-			pkill -f 'Contents/Resources/oga-server' || true; \
+			pkill -f 'Contents/(Resources|MacOS)/oga-server serve' || true; \
 			bash rust/packaging/cutover.sh restore --database "$(OGA_DB)" --backup "$(CUTOVER_BACKUP)"; \
 			exit 1; \
 		fi; \
@@ -170,7 +171,7 @@ install: app-bundle
 			echo "  /health answers: $$health"; \
 			echo "  just built:      $$built"; \
 			echo "install: a released Oga may have reopened and taken the port; quit it and run make install again"; \
-			pkill -f 'Contents/Resources/oga-server' || true; \
+			pkill -f 'Contents/(Resources|MacOS)/oga-server serve' || true; \
 			bash rust/packaging/cutover.sh restore --database "$(OGA_DB)" --backup "$(CUTOVER_BACKUP)"; \
 			exit 1; \
 		fi; \
