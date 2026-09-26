@@ -3,7 +3,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use agent_client_protocol_schema::{
@@ -262,6 +262,17 @@ pub struct Exit {
 /// The prompt turn and the child's lifetime are separate: [`Self::prompt`]
 /// returns when the agent answers, whether or not the process is still
 /// running, and [`Self::shutdown`] is what ends the process.
+/// How long each step of opening a session took.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OpeningTimes {
+    pub spawn: Duration,
+    /// `initialize`, with `authenticate` when the agent asks for it.
+    pub initialize: Duration,
+    /// `session/new`, `session/load`, or `session/resume`.
+    pub session: Duration,
+    pub configure: Duration,
+}
+
 pub struct AcpSession {
     connection: Connection,
     process: ProcessControl,
@@ -271,6 +282,7 @@ pub struct AcpSession {
     agent: InitializeResponse,
     updates: Mutex<Option<mpsc::UnboundedReceiver<SessionNotification>>>,
     prompt_timeout: Duration,
+    opening_times: OpeningTimes,
 }
 
 impl std::fmt::Debug for AcpSession {
@@ -294,6 +306,7 @@ impl AcpSession {
         config: AcpConfig,
     ) -> Result<Self, AcpError> {
         let cwd = launch.request.cwd.clone();
+        let started = Instant::now();
         let mut process = runner
             .spawn_duplex(launch.request.clone(), launch.scope.clone())
             .await
@@ -332,7 +345,19 @@ impl AcpSession {
             }));
         });
 
-        let opening = handshake(&connection, grants, &launch, &cwd, &config).await;
+        let mut opening_times = OpeningTimes {
+            spawn: started.elapsed(),
+            ..OpeningTimes::default()
+        };
+        let opening = handshake(
+            &connection,
+            grants,
+            &launch,
+            &cwd,
+            &config,
+            &mut opening_times,
+        )
+        .await;
         let (agent, session_id) = match opening {
             Ok(opened) => opened,
             Err(error) => {
@@ -352,7 +377,12 @@ impl AcpSession {
             agent,
             updates: Mutex::new(Some(updates_rx)),
             prompt_timeout: config.prompt_timeout,
+            opening_times,
         })
+    }
+
+    pub fn opening_times(&self) -> OpeningTimes {
+        self.opening_times
     }
 
     pub fn session_id(&self) -> &SessionId {
@@ -517,7 +547,9 @@ async fn handshake(
     launch: &Launch,
     cwd: &Path,
     config: &AcpConfig,
+    times: &mut OpeningTimes,
 ) -> Result<(InitializeResponse, SessionId), AcpError> {
+    let step = Instant::now();
     let agent: InitializeResponse = connection
         .request(
             AGENT_METHOD_NAMES.initialize,
@@ -561,9 +593,14 @@ async fn handshake(
     if let Some(method_id) = &launch.authentication {
         authenticate(connection, &agent, method_id, config).await?;
     }
+    times.initialize = step.elapsed();
 
+    let step = Instant::now();
     let (session_id, offered) = open_session(connection, launch, cwd, &agent, config).await?;
+    times.session = step.elapsed();
+    let step = Instant::now();
     configure(connection, &session_id, offered, &launch.settings, config).await?;
+    times.configure = step.elapsed();
     Ok((agent, session_id))
 }
 

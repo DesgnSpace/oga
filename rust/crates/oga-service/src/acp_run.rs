@@ -13,7 +13,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use oga_acp::{
@@ -279,9 +279,14 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
     // says so. None of that is this turn, so it is counted and dropped rather
     // than recorded.
     let mut replayed = 0usize;
+    let mut opened_after = None;
     if let Some(opened) = adapter.opened_with.as_deref() {
+        let waiting = Instant::now();
         match wait_for_update(&mut updates, opened, opening_bound).await {
-            Some(dropped) => replayed += dropped,
+            Some(dropped) => {
+                replayed += dropped;
+                opened_after = Some(waiting.elapsed());
+            }
             None => {
                 session.shutdown().await;
                 return open_failed(
@@ -298,7 +303,14 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         replayed += 1;
     }
     let steering = steering_for(turn.adapter, &session);
-    if let Err(error) = record_session(&turn, &acp_launch, &session, replayed, steering) {
+    if let Err(error) = record_session(
+        &turn,
+        &acp_launch,
+        &session,
+        replayed,
+        steering,
+        opened_after,
+    ) {
         session.shutdown().await;
         return Err(error);
     }
@@ -616,8 +628,19 @@ fn record_session(
     session: &AcpSession,
     replayed: usize,
     steering: Option<AcpSteering>,
+    opened_after: Option<Duration>,
 ) -> Result<(), LifecycleError> {
     let now = now_iso();
+    let times = session.opening_times();
+    let mut timings = json!({
+        "spawnMs": times.spawn.as_millis(),
+        "initializeMs": times.initialize.as_millis(),
+        "sessionMs": times.session.as_millis(),
+        "configureMs": times.configure.as_millis(),
+    });
+    if let Some(opened_after) = opened_after {
+        timings["openedMs"] = json!(opened_after.as_millis());
+    }
     let task = turn.task;
     let acp_session_id = session.session_id().0.to_string();
     let transport = TaskTransport {
@@ -673,6 +696,7 @@ fn record_session(
                 "pid": identity.pid,
                 "transport": Transport::Acp,
                 "agent": transport.agent,
+                "timings": timings,
             }),
             &now,
             Some(turn.turn_id),

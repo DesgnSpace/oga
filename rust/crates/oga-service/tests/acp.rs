@@ -3743,3 +3743,27 @@ async fn an_opencode_that_is_slow_to_report_its_version_once_still_runs_the_next
 
     assert_eq!(next.state, TaskState::Completed, "{next:?}");
 }
+
+#[tokio::test]
+async fn starting_a_worker_records_how_long_each_step_of_connecting_took() {
+    let harness = harness("turn");
+    let started = std::time::Instant::now();
+
+    let task = harness.run("summarise the readme").await;
+
+    let spent = started.elapsed().as_millis() as u64;
+    let spawned = harness
+        .events(&task.id)
+        .into_iter()
+        .find(|event| event.kind == "worker_spawned")
+        .expect("worker_spawned");
+    let timings = &spawned.payload["timings"];
+    let mut total = 0;
+    for stage in ["spawnMs", "initializeMs", "sessionMs", "configureMs"] {
+        let millis = timings[stage]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{stage} missing from {timings}"));
+        total += millis;
+    }
+    assert!(total <= spent, "{timings} took longer than the run's {spent} ms");
+}
