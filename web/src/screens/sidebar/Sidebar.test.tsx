@@ -101,9 +101,8 @@ describe("the sidebar", () => {
     act(() => taskOutcomeViews.markViewed(running));
 
     const dot = link.querySelector(".task-dot")!;
-    expect(dot.className).toContain("task-dot-running");
+    expect(dot.className).toContain("task-dot-look-running");
     expect(dot.className).toContain("task-dot-viewed");
-    expect(dot.className).not.toContain("task-dot-waiting");
   });
 
   it("does not mark a task viewed from selection alone", async () => {
@@ -119,7 +118,7 @@ describe("the sidebar", () => {
     expect(taskOutcomeViews.isViewed(task("two", "second task"))).toBe(false);
   });
 
-  it("shows a held task as an amber waiting ring with its reason", async () => {
+  it("shows a held task with the waiting look and its reason", async () => {
     const waiting = task("waiting", "waiting task", {
       state: "pending",
       hold: {
@@ -136,9 +135,25 @@ describe("the sidebar", () => {
 
     const row = await screen.findByText("waiting task");
     const dot = row.closest("a")!.querySelector(".task-dot")!;
-    expect(dot.className).toContain("task-dot-waiting");
+    expect(dot.className).toContain("task-dot-look-waiting");
     expect(dot.getAttribute("title")).toBe("Waiting for another task");
     expect(row.closest("a")!.textContent).toContain("Waiting for another task");
+  });
+
+  it("reads a task blocked on a dependency as a problem, not as waiting", async () => {
+    const blocked = task("blocked", "blocked task", {
+      state: "blocked",
+      completion: { blocked: true, code: "cancelled", dependencyBlocked: true },
+    });
+    setTransport(transport({ tasks: [blocked] }));
+    const controller = new SidebarController();
+
+    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+
+    const row = await screen.findByText("blocked task");
+    const dot = row.closest("a")!.querySelector(".task-dot")!;
+    expect(dot.className).toContain("task-dot-look-problem");
+    expect(dot.getAttribute("title")).toBe("Blocked");
   });
 
   it("names the worker that ran the task in the subtitle", async () => {
@@ -224,6 +239,7 @@ describe("the sidebar", () => {
 
     const row = await screen.findByText("second task");
     const link = row.closest("a");
+    expect(link!.querySelector(".task-dot")!.className).toContain("task-dot-look-running");
 
     act(() => {
       controller.update((state) => ({
@@ -237,6 +253,7 @@ describe("the sidebar", () => {
     const updated = await screen.findByText("updated task");
     expect(updated.closest("a")).toBe(link);
     expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(link!.querySelector(".task-dot")!.className).toContain("task-dot-look-settled");
   });
 
   it("keeps a newer stream status when the startup read returns late", async () => {

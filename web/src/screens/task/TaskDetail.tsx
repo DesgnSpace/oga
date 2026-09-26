@@ -3,6 +3,7 @@
 import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
+import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
@@ -411,14 +412,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
       showingChanges,
       onToggleChanges: () => setShowingChanges((value) => !value),
       terminalCommand,
-      status: (
-        <span
-          className={`task-dot task-dot-${task.state}`}
-          role="img"
-          aria-label={statusLabel}
-          title={statusLabel}
-        />
-      ),
+      status: <TaskStatusDot state={task.state} label={statusLabel} />,
       secondary: <TaskDetailSecondary task={task} events={events} onChanged={refreshDetail} />,
     });
     return () => onHeader(undefined);

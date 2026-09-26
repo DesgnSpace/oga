@@ -3,8 +3,9 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import type { Task, TaskEventView, TaskScope } from "@/bridge/types";
+import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { CheckIcon, ChevronIcon, PlusIcon, ReturnIcon } from "@/ui/icons";
-import { effortDisplay } from "./format";
+import { effortDisplay, taskStatusLabel } from "./format";
 import { TaskMetadata } from "./TaskMetadata";
 
 const MENU_MARGIN = 8;
@@ -184,7 +185,6 @@ export function ConversationComposer({
       : "This run can change files."
     : undefined;
   const effort = effortDisplay(task);
-  const running = task.state === "running";
   const branch = task.worktree?.branch ?? task.branch;
 
   // Resetting height first makes scrollHeight reflect only the content, so it shrinks back too.
@@ -318,7 +318,7 @@ export function ConversationComposer({
               </span>
             )}
           </span>
-          {running && <span className="composer-run-spinner" role="img" aria-label="Running" title="Running" />}
+          <TaskStatusDot state={task.state} label={taskStatusLabel(task)} />
         </div>
       </div>
       <p className="composer-note">

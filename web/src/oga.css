@@ -1019,60 +1019,33 @@ a {
     font-size: var(--text-sm);
 }
 
-/* State colour and fill are paired with the accessible status text in each row. */
+/* One look per state, shared by the sidebar row, task header, and composer — see TaskStatusDot and docs/task-status-dots.md. */
 .task-dot {
     --task-dot-color: var(--color-text-muted);
     width: 8px;
     height: 8px;
     flex: 0 0 8px;
     margin-top: 5px;
-    border: 1.5px solid var(--color-text-muted);
+    border: 1.5px solid var(--task-dot-color);
     border-radius: 50%;
     background: transparent;
 }
 
-.task-dot-queued {
-    border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+.task-dot-look-waiting {
+    --task-dot-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+    border-color: transparent;
+    background: repeating-conic-gradient(var(--task-dot-color) 0 30deg, transparent 30deg 60deg);
+    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
+    mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
 }
 
-.task-dot-preparing_checkout,
-.task-dot-removing_checkout {
-    border-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
-}
-
-.task-dot-pending {
-    border-color: var(--color-warning);
-}
-
-.task-dot-completed {
-    border-color: var(--color-success);
-}
-
-.task-dot-failed {
-    border-color: var(--color-danger);
-    background: var(--color-danger);
-}
-
-.task-dot-blocked {
-    border-color: var(--color-warning);
-}
-
-.task-dot-needs_input {
-    border-color: var(--color-accent);
-    background: var(--color-accent);
-}
-
-.task-dot-answered {
-    border-color: var(--color-accent);
-}
-
-.task-dot-cancelled {
-    background: var(--color-text-muted);
-}
-
-.task-dot-running {
-    background: var(--color-text-muted);
+.task-dot-look-running {
+    background: var(--task-dot-color);
     animation: task-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.task-dot-look-running.task-dot-viewed {
+    background: transparent;
 }
 
 @keyframes task-dot-pulse {
@@ -1086,69 +1059,41 @@ a {
     }
 }
 
-.task-sidebar .task-dot-tone-success {
-    --task-dot-color: var(--color-success);
-    border-color: var(--task-dot-color);
+@media (prefers-reduced-motion: reduce) {
+    .task-dot-look-running {
+        animation: none;
+    }
 }
 
-.task-sidebar .task-dot-tone-danger {
-    --task-dot-color: var(--color-danger);
-    border-color: var(--task-dot-color);
-}
-
-.task-sidebar .task-dot-tone-info {
-    --task-dot-color: var(--color-info);
-    border-color: var(--task-dot-color);
-}
-
-.task-sidebar .task-dot-tone-warning {
-    --task-dot-color: var(--color-warning);
-    border-color: var(--task-dot-color);
-}
-
-.task-sidebar .task-dot-tone-muted {
-    --task-dot-color: var(--color-text-muted);
-    border-color: var(--task-dot-color);
-}
-
-.task-sidebar .task-dot-queued {
-    --task-dot-color: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
-    border-color: transparent;
-    background: repeating-conic-gradient(var(--task-dot-color) 0 30deg, transparent 30deg 60deg);
-    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
-    mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
-}
-
-.task-sidebar .task-dot-answered {
+.task-dot-look-needs_input {
     --task-dot-color: var(--color-accent);
-    border-color: var(--color-accent);
-}
-
-.task-sidebar .task-dot-cancelled {
-    opacity: 0.65;
-}
-
-.task-sidebar .task-dot-unread {
     background: var(--task-dot-color);
 }
 
-.task-sidebar .task-dot-viewed {
+.task-dot-look-needs_input.task-dot-viewed {
     background: transparent;
 }
 
-.task-sidebar .task-dot-waiting {
-    --task-dot-color: var(--color-warning);
-    border-color: transparent;
-    background: repeating-conic-gradient(var(--task-dot-color) 0 30deg, transparent 30deg 60deg);
-    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
-    mask: radial-gradient(circle, transparent calc(50% - 1.5px), #000 calc(50% - 1.5px));
-    animation: none;
+.task-dot-look-problem {
+    --task-dot-color: var(--color-danger);
+    background: var(--task-dot-color);
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .task-sidebar .task-dot-running {
-        animation: none;
-    }
+.task-dot-look-problem.task-dot-viewed {
+    background: transparent;
+}
+
+.task-dot-look-settled {
+    --task-dot-color: var(--color-success);
+    background: var(--task-dot-color);
+}
+
+.task-dot-look-settled.task-dot-viewed {
+    background: transparent;
+}
+
+.task-dot-look-settled.task-dot-cancelled {
+    --task-dot-color: var(--color-text-muted);
 }
 
 .visually-hidden {
@@ -2331,28 +2276,6 @@ h1 {
     color: var(--color-text);
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.composer-run-spinner {
-    width: 11px;
-    height: 11px;
-    flex: 0 0 auto;
-    border: 1.5px solid color-mix(in srgb, var(--color-text-muted) 35%, transparent);
-    border-top-color: var(--color-accent);
-    border-radius: 50%;
-    animation: composer-run-spin 0.8s linear infinite;
-}
-
-@keyframes composer-run-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .composer-run-spinner {
-        animation: none;
-    }
 }
 
 /* Shares the toolbar's inset, and keeps its line when empty so the input and

@@ -1,10 +1,10 @@
-import type { TaskState, TaskSummary } from "@/bridge/types";
+import type { TaskSummary } from "@/bridge/types";
 import { readStorage, writeStorage } from "./storage";
 
 const TASK_OUTCOME_VIEWS_KEY = "taskOutcomeViews";
 export const MAX_TASK_OUTCOME_VIEWS = 512;
 
-type TaskOutcomeSource = Pick<TaskSummary, "id" | "state" | "question" | "error" | "completion" | "hold">;
+type TaskOutcomeSource = Pick<TaskSummary, "id" | "state" | "question" | "error" | "completion">;
 
 interface StoredTaskOutcomeView {
   outcome: string;
@@ -15,8 +15,6 @@ interface StoredTaskOutcomeView {
 interface SerializedTaskOutcomeView extends StoredTaskOutcomeView {
   id: string;
 }
-
-export type TaskDotTone = "success" | "danger" | "info" | "warning" | "muted";
 
 export function taskOutcomeKey(task: TaskOutcomeSource): string {
   switch (task.state) {
@@ -34,32 +32,6 @@ export function taskOutcomeKey(task: TaskOutcomeSource): string {
     default:
       return task.state;
   }
-}
-
-export function taskDotTone(state: TaskState): TaskDotTone {
-  switch (state) {
-    case "completed":
-      return "success";
-    case "failed":
-      return "danger";
-    case "needs_input":
-      return "info";
-    case "pending":
-    case "blocked":
-      return "warning";
-    case "queued":
-    case "preparing_checkout":
-    case "removing_checkout":
-    case "running":
-    case "answered":
-    case "cancelled":
-      return "muted";
-  }
-}
-
-export function isTaskWaiting(task: TaskOutcomeSource): boolean {
-  if (task.state === "pending") return task.hold !== undefined;
-  return task.state === "blocked" && task.completion?.dependencyBlocked === true;
 }
 
 function isSerializedTaskOutcomeView(value: unknown): value is SerializedTaskOutcomeView { // oxlint-disable-line anti-slop/no-unknown-parameters -- localStorage JSON is untrusted input

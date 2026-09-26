@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { TaskHoldView, TaskState, TaskSummary } from "@/bridge/types";
-import { isTaskWaiting, MAX_TASK_OUTCOME_VIEWS, TaskOutcomeViewStore, taskDotTone } from "./task-outcome-views";
+import type { TaskState, TaskSummary } from "@/bridge/types";
+import { MAX_TASK_OUTCOME_VIEWS, TaskOutcomeViewStore } from "./task-outcome-views";
 
 function task(id: string, state: TaskState, extra: Partial<TaskSummary> = {}): TaskSummary {
   return {
@@ -73,8 +73,6 @@ describe("task outcome views", () => {
 
     expect(store.isViewed(running)).toBe(true);
     expect(store.isOrderingUnread(running)).toBe(true);
-    expect(isTaskWaiting(running)).toBe(false);
-    expect(taskDotTone(running.state)).toBe("muted");
   });
 
   it("keeps read state separate through waiting, input, and settled outcomes", () => {
@@ -95,21 +93,15 @@ describe("task outcome views", () => {
     store.markViewed(running);
     store.observeTasks([waiting]);
     expect(store.isViewed(waiting)).toBe(false);
-    expect(isTaskWaiting(waiting)).toBe(true);
-    expect(taskDotTone(waiting.state)).toBe("warning");
 
     store.observeTasks([needsInput]);
     expect(store.isViewed(needsInput)).toBe(false);
-    expect(isTaskWaiting(needsInput)).toBe(false);
-    expect(taskDotTone(needsInput.state)).toBe("info");
 
     store.observeTasks([completed]);
     expect(store.isViewed(completed)).toBe(false);
-    expect(taskDotTone(completed.state)).toBe("success");
 
     store.observeTasks([failed]);
     expect(store.isViewed(failed)).toBe(false);
-    expect(taskDotTone(failed.state)).toBe("danger");
   });
 
   it("keeps rapid task switches isolated", () => {
@@ -143,35 +135,6 @@ describe("task outcome views", () => {
     expect(saved).toHaveLength(MAX_TASK_OUTCOME_VIEWS);
   });
 
-  it("assigns semantic tones without collapsing task states", () => {
-    expect(taskDotTone("completed")).toBe("success");
-    expect(taskDotTone("failed")).toBe("danger");
-    expect(taskDotTone("needs_input")).toBe("info");
-    expect(taskDotTone("pending")).toBe("warning");
-    expect(taskDotTone("blocked")).toBe("warning");
-    expect(taskDotTone("running")).toBe("muted");
-    expect(taskDotTone("queued")).toBe("muted");
-    expect(taskDotTone("cancelled")).toBe("muted");
-  });
-
-  it("marks only held or dependency-blocked tasks as waiting", () => {
-    const hold: TaskHoldView = {
-      kind: "dependency",
-      waitingOn: "blocker",
-      note: "Waiting for another task",
-      expiresAt: "2026-09-09T10:00:00Z",
-    };
-
-    expect(isTaskWaiting(task("held", "pending", { hold }))).toBe(true);
-    expect(isTaskWaiting(task("pending", "pending"))).toBe(false);
-    expect(isTaskWaiting(task("dependency", "blocked", {
-      completion: { blocked: true, code: "cancelled", dependencyBlocked: true },
-    }))).toBe(true);
-    expect(isTaskWaiting(task("worker-error", "blocked", {
-      completion: { blocked: true, code: "worker_error" },
-    }))).toBe(false);
-    expect(isTaskWaiting(task("question", "needs_input", { hold }))).toBe(false);
-  });
 });
 
 describe("task outcome ordering", () => {
