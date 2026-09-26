@@ -72,10 +72,13 @@ Descriptions use `--color-text-muted` and stop at `65ch`.
 ### Content column
 
 - The content area scrolls on its own and sits on `--color-bg`.
-- One centred column, `.page-column`: at most `--content-max` (1000px) of
+- One centred column, `.page-column`: at most `--content-max` (800px) of
   content, with `--space-7` side padding, `--space-8` above the title, and
   `--space-8` below the last section.
 - Below 800px: `--space-5` sides, `--space-6` top, `--space-7` bottom.
+- `--content-max` is the one reading column every main-pane screen shares:
+  settings, empty states, and the task screen's transcript, messages, and
+  composer all size to it, so their left and right edges line up.
 
 ### Page header — `PageHeader`
 

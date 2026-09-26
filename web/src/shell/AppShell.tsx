@@ -134,7 +134,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
   if (sidebar.loadState === "error" && !hasTasks) {
     return (
       <>
-        <h1 id="page-title">Your workspace</h1>
+        <h1 id="page-title" className="page-title">Your workspace</h1>
         <p className="app-description">Couldn&apos;t load your workspace.</p>
         <button className="text-button" type="button" onClick={() => sidebarController.refresh()}>
           Try again
@@ -146,7 +146,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
   if (sidebar.loadState === "ready" && !hasConnectedAi) {
     return (
       <div className="app-first-run-card">
-        <h1 id="page-title">Connect your AI to start delegating</h1>
+        <h1 id="page-title" className="page-title">Connect your AI to start delegating</h1>
         <p className="app-description">Choose an AI account for the work you want to hand off.</p>
         <button className="settings-button settings-button-primary" type="button" onClick={() => onOpenSettings("workers")}>
           Connect your AI
@@ -158,7 +158,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
   if (hasTasks) {
     return (
       <>
-        <h1 id="page-title">Your workspace</h1>
+        <h1 id="page-title" className="page-title">Your workspace</h1>
         <p className="app-description">Choose a task from the sidebar.</p>
       </>
     );
@@ -166,7 +166,7 @@ function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarControll
 
   return (
     <>
-      <h1 id="page-title">Get your first task running</h1>
+      <h1 id="page-title" className="page-title">Get your first task running</h1>
       <ol className="app-first-run-steps">
         <li>
           Add a worker in{" "}
@@ -206,7 +206,7 @@ function NotFoundScreen({ onBack }: { onBack: () => void }) {
   return (
     <>
       <p className="eyebrow">Workspace</p>
-      <h1 id="page-title">Page not found</h1>
+      <h1 id="page-title" className="page-title">Page not found</h1>
       <a
         className="home-link"
         href="/"

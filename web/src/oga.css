@@ -38,9 +38,9 @@
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --gutter: var(--space-4);
-    --measure: 78ch;
-    --measure-log: 88ch;
-    --content-max: 62.5rem;
+    /* The one reading column every main-pane screen shares: task transcript,
+       composer, settings, and empty states all size to this. */
+    --content-max: 50rem;
     --nav-item-height: 40px;
     --radius-sm: 4px;
     --radius: 6px;
@@ -1246,12 +1246,13 @@ a {
 }
 
 .app-content {
-    width: min(100% - 64px, 720px);
+    width: 100%;
+    max-width: calc(var(--content-max) + var(--space-7) * 2);
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     margin: 0 auto;
-    padding: 72px 0;
+    padding: var(--space-8) var(--space-7);
 }
 
 /* The task view fills its pane and manages its own scrolling: the activity
@@ -1286,7 +1287,7 @@ h1 {
 
 .app-description {
     max-width: 65ch;
-    margin: var(--space-4) 0 0;
+    margin: var(--space-2) 0 0;
     color: var(--color-text-muted);
 }
 
@@ -1296,7 +1297,7 @@ h1 {
     gap: var(--space-3);
     padding: var(--space-5);
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: var(--color-surface);
 }
 
@@ -1315,7 +1316,7 @@ h1 {
 .app-first-run-steps {
     max-width: 65ch;
     margin: var(--space-4) 0 0;
-    padding-left: 1.25em;
+    padding-left: var(--space-5);
     color: var(--color-text-muted);
 }
 
@@ -1377,7 +1378,7 @@ h1 {
 .task-detail-primary > .task-controls,
 .detail-refresh-error,
 .transcript-load-earlier {
-    width: min(100%, var(--measure-log));
+    width: min(100%, var(--content-max));
     margin-inline: auto;
 }
 
@@ -2173,7 +2174,7 @@ h1 {
     width: 100%;
     min-height: 44px;
     max-height: 160px;
-    padding: 12px 44px 12px 18px;
+    padding: 12px 44px 12px var(--space-4);
     resize: none;
     border: 0;
     background: transparent;
@@ -2234,7 +2235,7 @@ h1 {
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    padding: 0 18px;
+    padding: 0 var(--space-4);
     color: var(--color-text-muted);
     font-size: var(--text-sm);
 }
@@ -2672,7 +2673,7 @@ h1 {
 }
 
 .markdown-content li + li {
-    margin-top: 6px;
+    margin-top: var(--space-2);
 }
 
 .markdown-content blockquote {
@@ -2687,7 +2688,7 @@ h1 {
     font-size: var(--text-base-mono);
     background: var(--color-elevated);
     padding: 1px 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 .markdown-content a {
@@ -2795,13 +2796,13 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    width: min(100%, var(--measure-log));
+    width: min(100%, var(--content-max));
     margin-inline: auto;
 }
 
 .detail-response,
 .detail-empty-response {
-    width: min(100%, var(--measure));
+    width: min(100%, var(--content-max));
     margin-inline: 0 auto;
 }
 
@@ -2828,7 +2829,7 @@ h1 {
 }
 
 .transcript-bubble {
-    width: min(100%, var(--measure));
+    width: min(100%, var(--content-max));
     max-width: 100%;
     padding: 0;
     background: transparent;
