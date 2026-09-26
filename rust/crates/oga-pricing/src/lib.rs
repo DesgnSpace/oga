@@ -4,7 +4,7 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
-        OnceLock,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -271,7 +271,7 @@ struct CachedCatalogue {
     /// `None` for a copy loaded from disk, whose age is unknown and which is
     /// therefore always due for a refresh.
     fetched_at: Option<Instant>,
-    catalogue: PricingCatalogue,
+    catalogue: Arc<PricingCatalogue>,
 }
 
 impl CachedCatalogue {
@@ -316,7 +316,7 @@ async fn fetch_catalogue_raw() -> Option<String> {
 
 static REFRESH_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
-async fn store_in_memory(catalogue: PricingCatalogue, fetched_at: Option<Instant>) {
+async fn store_in_memory(catalogue: Arc<PricingCatalogue>, fetched_at: Option<Instant>) {
     let mut guard = memory_cache().lock().await;
     *guard = Some(CachedCatalogue {
         fetched_at,
@@ -332,7 +332,7 @@ async fn refresh_from_network() {
     }
     if let Some(raw) = fetch_catalogue_raw().await {
         write_disk_cache(&disk_cache_path(), &raw).await;
-        store_in_memory(parse_catalogue(&raw), Some(Instant::now())).await;
+        store_in_memory(Arc::new(parse_catalogue(&raw)), Some(Instant::now())).await;
     }
     REFRESH_IN_FLIGHT.store(false, Ordering::Release);
 }
@@ -343,7 +343,7 @@ async fn refresh_from_network() {
 /// however old — is served the same way. Only the very first run with no
 /// disk cache waits on the network. Never called on a per-event hot path;
 /// only when a run settles with token counts but no reported amount.
-pub async fn catalogue() -> Option<PricingCatalogue> {
+pub async fn catalogue() -> Option<Arc<PricingCatalogue>> {
     {
         let guard = memory_cache().lock().await;
         if let Some(cached) = guard.as_ref() {
@@ -354,7 +354,7 @@ pub async fn catalogue() -> Option<PricingCatalogue> {
         }
     }
     if let Some(raw) = read_disk_cache(&disk_cache_path()).await {
-        let parsed = parse_catalogue(&raw);
+        let parsed = Arc::new(parse_catalogue(&raw));
         store_in_memory(parsed.clone(), None).await;
         tokio::spawn(refresh_from_network());
         return Some(parsed);

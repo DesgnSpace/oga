@@ -1,6 +1,6 @@
 //! Optional advisor that chooses a connected worker from a task brief.
 
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -98,6 +98,15 @@ impl std::fmt::Display for NoAdvice {
     }
 }
 
+/// One client for every advisor call, so its connection pool is reused.
+/// `None` when the TLS client could not be built.
+fn client() -> Option<&'static reqwest::Client> {
+    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| reqwest::Client::builder().timeout(TIMEOUT).build().ok())
+        .as_ref()
+}
+
 /// The advisor key is sent only in the authorization header.
 pub struct Advisor {
     endpoint: String,
@@ -133,11 +142,8 @@ impl Advisor {
                 NoAdvice::Unreachable
             }
         };
-        let client = reqwest::Client::builder()
-            .timeout(TIMEOUT)
-            .build()
-            .map_err(|_| NoAdvice::Unreachable)?;
-        let response = client
+        let response = client()
+            .ok_or(NoAdvice::Unreachable)?
             .post(&self.endpoint)
             .bearer_auth(&self.api_key)
             .json(&request_body(state, destinations))

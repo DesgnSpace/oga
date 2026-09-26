@@ -292,7 +292,7 @@ async fn take_advice(
     route: ModelRoute,
 ) -> (ModelRoute, Result<AdvisedRoute, String>) {
     let catalogue = oga_pricing::catalogue().await;
-    let destinations = describe_destinations(world, catalogue.as_ref());
+    let destinations = describe_destinations(world, catalogue.as_deref());
     let brief = advisor_brief(input, route.task_class);
     match advisor.choose(&brief, &destinations).await {
         Ok(choice) => {
