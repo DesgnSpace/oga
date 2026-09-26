@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
 import { resetFeedsForTests } from "@/bridge/events";
-import { STATUS_EVENT, type StreamStatus, type TaskSummary } from "@/bridge/types";
+import { EVENT_BATCH_EVENT, STATUS_EVENT, type EventBatch, type StreamStatus, type TaskSummary } from "@/bridge/types";
 import { SidebarController } from "@/state/sidebar-state";
 import { resetTaskOutcomeViewsForTests, taskOutcomeViews } from "@/state/task-outcome-views";
 import * as sidebarProjection from "@/state/sidebar-projection";
@@ -254,6 +254,39 @@ describe("the sidebar", () => {
     expect(updated.closest("a")).toBe(link);
     expect(screen.getAllByRole("option")).toHaveLength(2);
     expect(link!.querySelector(".task-dot")!.className).toContain("task-dot-look-settled");
+  });
+
+  it("lists each new task as it starts, including two started back to back", async () => {
+    const tasks = [task("one", "first task")];
+    let batchListener: ((batch: EventBatch) => void) | undefined;
+    resetFeedsForTests();
+    setTransport({
+      ...transport(),
+      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+        const call = (args?.call as { call: string } | undefined)?.call;
+        if (call !== "summary") return transport().invoke(command, args);
+        return { profiles: [], tasks: [...tasks], tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as T;
+      },
+      listen: (event, handle) => {
+        if (event === EVENT_BATCH_EVENT) batchListener = handle as (batch: EventBatch) => void;
+      },
+    });
+    render(<Sidebar sidebarController={new SidebarController()} />);
+    await screen.findByText("first task");
+
+    const start = (id: string, preview: string, cursor: number) => {
+      tasks.unshift(task(id, preview, { state: "queued" }));
+      act(() => batchListener?.({
+        cursor,
+        streamFloor: 0,
+        stale: false,
+        pointers: [{ id: cursor, cursor, taskId: id, type: "created", kind: "lifecycle", state: "queued", at: new Date().toISOString(), title: "", summary: "" }],
+      }));
+    };
+    start("two", "second task", 1);
+    await screen.findByText("second task");
+    start("three", "third task", 2);
+    await screen.findByText("third task");
   });
 
   it("keeps a newer stream status when the startup read returns late", async () => {

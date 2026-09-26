@@ -58,6 +58,8 @@ export interface SidebarState {
   error: string | undefined;
   eventCursor: number;
   lastReread: number | undefined;
+  /** Tasks the list was reread for once; one still missing after that is filtered out. */
+  soughtTaskIds: ReadonlySet<string>;
 }
 
 export function defaultSidebarState(): SidebarState {
@@ -83,6 +85,7 @@ export function defaultSidebarState(): SidebarState {
     error: undefined,
     eventCursor: 0,
     lastReread: undefined,
+    soughtTaskIds: new Set(),
   };
 }
 
@@ -327,7 +330,11 @@ function applyPointer(state: SidebarState, pointer: EventPointer): [SidebarState
   const hasGap = pointer.cursor > state.eventCursor + 1;
   const eventCursor = Math.max(state.eventCursor, pointer.cursor);
   const index = state.tasks.findIndex((task) => task.id === pointer.taskId);
-  if (index === -1) return rereadIfDue({ ...state, eventCursor });
+  if (index === -1) {
+    if (state.soughtTaskIds.has(pointer.taskId)) return rereadIfDue({ ...state, eventCursor });
+    const soughtTaskIds = new Set(state.soughtTaskIds).add(pointer.taskId);
+    return [{ ...state, eventCursor, soughtTaskIds, lastReread: Date.now() }, "refresh"];
+  }
   if (hasGap) return [{ ...state, eventCursor }, "refresh"];
 
   const task = state.tasks[index];
