@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { Transport } from "@/bridge/transport";
 import type { StreamStatus, Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
+import { INITIAL_EVENT_LIMIT } from "./state";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -280,6 +281,31 @@ describe("watch lifecycle", () => {
     reopened.dispose();
   });
 
+  it("reopens a task too long for the cache with its newest activity", async () => {
+    const events = Array.from({ length: 1_200 }, (_, index) => ({ ...event(index + 1), rawText: "x".repeat(5_000) }));
+    const watched = fakeTransport({
+      broker_watch_task: () => snapshot({ events, cursor: events.length }),
+      broker_stream_status: () => ({ connected: true, cursor: events.length, streamFloor: 0, stale: false }) as StreamStatus,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(watched);
+
+    const first = watchTaskDetail("task");
+    await flush();
+    await flush();
+    first.dispose();
+    await flush();
+    await flush();
+
+    const reopened = watchTaskDetail("task");
+    const held = reopened.controller.withEvents((current) => current.map((item) => item.id));
+    const hasEarlier = reopened.controller.snapshot.hasEarlier;
+    reopened.dispose();
+    expect(held).toHaveLength(INITIAL_EVENT_LIMIT);
+    expect(held[held.length - 1]).toBe(1_200);
+    expect(hasEarlier).toBe(true);
+  });
+
   it("bounds retained payload bytes as well as retained task count", async () => {
     const largeEvents = Array.from({ length: 300 }, (_, index) => ({
       ...event(index + 1),
@@ -302,7 +328,7 @@ describe("watch lifecycle", () => {
     large.dispose();
     await flush();
     await flush();
-    expect(taskDetailCacheStats().bytes).toBe(0);
+    expect(taskDetailCacheStats().bytes).toBeLessThanOrEqual(TASK_DETAIL_CACHE_MAX_BYTES);
 
     for (let index = 0; index < TASK_DETAIL_CACHE_MAX_ENTRIES + 3; index += 1) {
       const item = watchTaskDetail(`small-${index}`);

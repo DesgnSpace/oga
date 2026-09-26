@@ -298,16 +298,24 @@ export class TaskDetailController {
     return returning;
   }
 
+  /** An estimate from the lengths of the text held, so sizing a long task stays cheap. */
   cacheBytes(): number {
     const task = this.store.snapshot.task;
     if (task === undefined) return 0;
-    const encoder = new TextEncoder();
-    const bytes = (value: unknown): number => encoder.encode(JSON.stringify(value) ?? "").byteLength;
     return 1_024 +
       this.view.workExpansion.size * 32 +
-      this.events.length * 64 +
-      bytes(task) +
-      this.events.reduce((total, event) => total + bytes(event), 0);
+      task.prompt.length +
+      task.output.length +
+      this.events.reduce((total, event) => total + eventBytes(event), 0);
+  }
+
+  /** Drops all but the newest events, leaving the rest to "load earlier" as on a fresh open. */
+  keepNewest(count: number): void {
+    if (this.events.length <= count) return;
+    this.events = this.events.slice(-count);
+    const oldestId = this.events[0].id;
+    this.store.update((state) => ({ ...state, oldestId, hasEarlier: true, revision: state.revision + 1 }));
+    this.view = { ...this.view, scrollTop: 0, stickToEnd: true };
   }
 
   private canApply(activation: number): boolean {
@@ -319,6 +327,17 @@ export class TaskDetailController {
     this.commandChain = next.catch(() => undefined);
     return next;
   }
+}
+
+function eventBytes(event: TaskEventView): number {
+  const presentation = event.presentation;
+  return 256 + // ids, times, and the short fields
+    (event.rawText?.length ?? 0) +
+    (event.detail?.length ?? 0) +
+    (event.result?.length ?? 0) +
+    (presentation?.text?.length ?? 0) +
+    (presentation?.change?.length ?? 0) +
+    (presentation?.command?.length ?? 0);
 }
 
 export interface WatchedTaskDetail {
@@ -380,7 +399,11 @@ function removeRetained(entry: TaskDetailCacheEntry): void {
 function retain(entry: TaskDetailCacheEntry): void {
   if (entry.references !== 0 || taskDetailEntries.get(entry.taskId) !== entry) return;
   removeRetained(entry);
-  const bytes = entry.controller.cacheBytes();
+  let bytes = entry.controller.cacheBytes();
+  if (bytes > TASK_DETAIL_CACHE_MAX_BYTES) {
+    entry.controller.keepNewest(INITIAL_EVENT_LIMIT);
+    bytes = entry.controller.cacheBytes();
+  }
   if (bytes === 0 || bytes > TASK_DETAIL_CACHE_MAX_BYTES) {
     taskDetailEntries.delete(entry.taskId);
     return;
