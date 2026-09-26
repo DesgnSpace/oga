@@ -1013,6 +1013,15 @@ fn append_state_query(url: &mut Url, query: &StateQuery, summary: bool) {
         url.query_pairs_mut()
             .append_pair("limit", &limit.to_string());
     }
+    if let Some(state) = query.state {
+        url.query_pairs_mut().append_pair("state", state.as_str());
+    }
+    if let Some(since) = &query.created_since {
+        url.query_pairs_mut().append_pair("createdSince", since);
+    }
+    if let Some(prefix) = &query.id_prefix {
+        url.query_pairs_mut().append_pair("idPrefix", prefix);
+    }
 }
 
 fn append_event_query(url: &mut Url, query: &TaskEventsQuery) {

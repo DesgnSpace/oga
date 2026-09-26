@@ -30,6 +30,11 @@ pub struct StateQuery {
     pub limit: Option<u64>,
     #[serde(rename = "skipSummaryAggregates")]
     pub skip_summary_aggregates: Option<String>,
+    pub state: Option<String>,
+    #[serde(rename = "createdSince")]
+    pub created_since: Option<String>,
+    #[serde(rename = "idPrefix")]
+    pub id_prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -56,10 +61,9 @@ pub async fn get_state(
         let compact = query.compact.as_deref() == Some("1");
         let skip_summary_aggregates =
             summary && query.skip_summary_aggregates.as_deref() == Some("1");
-        let archived = archived_filter(query.archived.as_deref());
         let limit = query.limit.unwrap_or(50).clamp(1, 2_000);
         let profiles = public_profiles(&store)?;
-        let (tasks, tasks_has_more) = list_tasks(&store, archived, summary, limit)?;
+        let (tasks, tasks_has_more) = list_tasks(&store, &query, summary, limit)?;
         let memory_projects = if skip_summary_aggregates {
             Vec::new()
         } else {
@@ -486,23 +490,41 @@ fn public_profiles(store: &Store) -> Result<Vec<ProfileView>, HttpError> {
 
 fn list_tasks(
     store: &Store,
-    archived: ArchivedFilter,
+    query: &StateQuery,
     summary: bool,
     limit: u64,
 ) -> Result<(Value, bool), HttpError> {
-    let archive_clause = match archived {
-        ArchivedFilter::Active => "archived_at IS NULL",
-        ArchivedFilter::Only => "archived_at IS NOT NULL",
-        ArchivedFilter::Include => "1 = 1",
-    };
+    let mut clauses = vec!["kind='delegated'"];
+    let mut values = Vec::new();
+    match archived_filter(query.archived.as_deref()) {
+        ArchivedFilter::Active => clauses.push("archived_at IS NULL"),
+        ArchivedFilter::Only => clauses.push("archived_at IS NOT NULL"),
+        ArchivedFilter::Include => {}
+    }
+    if let Some(state) = &query.state {
+        serde_json::from_value::<TaskState>(Value::String(state.clone()))
+            .map_err(|_| HttpError::bad_request(format!("unknown task state: {state}")))?;
+        clauses.push("state=?");
+        values.push(state.clone());
+    }
+    if let Some(since) = &query.created_since {
+        clauses.push("created_at>=?");
+        values.push(since.clone());
+    }
+    // A range rather than LIKE, so the lookup stays on the primary key.
+    if let Some(prefix) = &query.id_prefix {
+        clauses.push("id>=? AND id<?");
+        values.extend([prefix.clone(), format!("{prefix}{}", char::MAX)]);
+    }
     let row_limit = if summary { limit + 1 } else { 200 };
     store.with_connection(|connection| {
         let sql = format!(
-            "SELECT {TASK_COLUMNS} FROM tasks WHERE kind='delegated' AND {archive_clause} ORDER BY updated_at DESC,id DESC LIMIT ?"
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE {} ORDER BY updated_at DESC,id DESC LIMIT {row_limit}",
+            clauses.join(" AND ")
         );
         let mut statement = connection.prepare(&sql)?;
         let rows = statement
-            .query_map([row_limit], task_from_row)?
+            .query_map(rusqlite::params_from_iter(&values), task_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         let mut tasks = rows;
         attach_task_read_fields(connection, &mut tasks)?;

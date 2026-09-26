@@ -48,6 +48,11 @@ pub struct StateQuery {
     pub limit: Option<u64>,
     #[serde(rename = "skipSummaryAggregates")]
     pub skip_summary_aggregates: bool,
+    pub state: Option<TaskState>,
+    #[serde(rename = "createdSince")]
+    pub created_since: Option<String>,
+    #[serde(rename = "idPrefix")]
+    pub id_prefix: Option<String>,
 }
 
 impl StateQuery {
@@ -68,6 +73,23 @@ impl StateQuery {
 
     pub fn skip_summary_aggregates(mut self, skip: bool) -> Self {
         self.skip_summary_aggregates = skip;
+        self
+    }
+
+    pub fn state(mut self, state: TaskState) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// Only tasks created at or after this ISO instant.
+    pub fn created_since(mut self, since: impl Into<String>) -> Self {
+        self.created_since = Some(since.into());
+        self
+    }
+
+    /// Only tasks whose id starts with this text.
+    pub fn id_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.id_prefix = Some(prefix.into());
         self
     }
 }

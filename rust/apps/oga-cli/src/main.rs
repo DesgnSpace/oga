@@ -887,30 +887,23 @@ fn cli_parse_task_state(value: &str) -> CliResult<TaskState> {
         .map_err(|_| CliError::new(format!("unknown task state: {value}")))
 }
 
-async fn all_task_summaries(client: &LoopbackClient) -> CliResult<Vec<TaskSummary>> {
-    Ok(client
-        .get_summary(
-            &StateQuery::default()
-                .archived(ArchivedFilter::Include)
-                .compact(true)
-                .limit(2_000),
-        )
-        .await?
-        .tasks)
+fn task_title(task: &Task) -> &str {
+    title_or_untitled(task.title.as_deref(), task.tldr.as_deref())
 }
 
-fn task_title(task: &TaskSummary) -> &str {
-    task.title
-        .as_deref()
-        .or(task.tldr.as_deref())
-        .unwrap_or("Untitled task")
+fn summary_title(task: &TaskSummary) -> &str {
+    title_or_untitled(task.title.as_deref(), task.tldr.as_deref())
+}
+
+fn title_or_untitled<'a>(title: Option<&'a str>, tldr: Option<&'a str>) -> &'a str {
+    title.or(tldr).unwrap_or("Untitled task")
 }
 
 fn short_task_row(task: &TaskSummary) -> Value {
     json!({
         "id": &task.id[..task.id.len().min(8)],
         "state": state_name(task.state),
-        "title": task_title(task),
+        "title": summary_title(task),
         "cwd": Path::new(&task.cwd).file_name().and_then(|name| name.to_str()).unwrap_or(&task.cwd),
         "durationMs": task.duration_ms,
     })
@@ -1144,13 +1137,20 @@ async fn run_tasks(args: &[String]) -> CliResult<i32> {
             })
             .collect()
     } else {
-        all_task_summaries(&client)
-            .await?
-            .into_iter()
-            .filter(|task| options.archived == task.archived_at.is_some())
-            .filter(|task| options.state.is_none_or(|state| task.state == state))
-            .filter(|task| options.state.is_some() || task.created_at >= since)
-            .collect()
+        let mut query = StateQuery::default()
+            .archived(if options.archived {
+                ArchivedFilter::Only
+            } else {
+                ArchivedFilter::Active
+            })
+            .compact(true)
+            .skip_summary_aggregates(true)
+            .limit(options.limit.unwrap_or(2_000));
+        query = match options.state {
+            Some(state) => query.state(state),
+            None => query.created_since(since),
+        };
+        client.get_summary(&query).await?.tasks
     };
     if let Some(limit) = options.limit {
         tasks.truncate(limit as usize);
@@ -1164,7 +1164,7 @@ async fn run_tasks(args: &[String]) -> CliResult<i32> {
                 "{} {} {} {}",
                 &task.id[..task.id.len().min(8)],
                 state_name(task.state),
-                task_title(&task),
+                summary_title(&task),
                 Path::new(&task.cwd)
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -1175,21 +1175,31 @@ async fn run_tasks(args: &[String]) -> CliResult<i32> {
     Ok(0)
 }
 
-async fn resolve_task(client: &LoopbackClient, id: &str) -> CliResult<TaskSummary> {
-    let tasks = all_task_summaries(client).await?;
-    let matches = tasks
-        .iter()
-        .filter(|task| task.id == id || task.id.starts_with(id))
-        .collect::<Vec<_>>();
+/// Takes a full task id or any unambiguous prefix of one.
+async fn resolve_task(client: &LoopbackClient, id: &str) -> CliResult<Task> {
+    match client.get_task(id).await {
+        Err(error) if error.status().is_some_and(|status| status.as_u16() == 404) => {}
+        found => return Ok(found?),
+    }
+    let matches = client
+        .get_summary(
+            &StateQuery::default()
+                .archived(ArchivedFilter::Include)
+                .compact(true)
+                .skip_summary_aggregates(true)
+                .id_prefix(id)
+                .limit(10),
+        )
+        .await?
+        .tasks;
     match matches.as_slice() {
-        [task] => Ok((*task).clone()),
+        [task] => Ok(client.get_task(&task.id).await?),
         [] => Err(CliError::new(format!("unknown task: {id}"))),
         _ => Err(CliError::new(format!(
             "ambiguous task id '{id}': {}",
             matches
                 .iter()
-                .map(|task| &task.id)
-                .cloned()
+                .map(|task| task.id.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         ))),
@@ -1207,8 +1217,7 @@ async fn run_inspect(args: &[String]) -> CliResult<i32> {
     }
     let client = broker_client()?;
     let task = resolve_task(&client, id).await?;
-    let value = serde_json::to_value(client.get_task(&task.id).await?)?;
-    print_json(&value)?;
+    print_json(&serde_json::to_value(task)?)?;
     Ok(0)
 }
 
