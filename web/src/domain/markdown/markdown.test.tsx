@@ -320,7 +320,7 @@ describe("MarkdownContent renderer", () => {
     expect(html("1. a\n2. b")).toContain("<li>");
     expect(html("> hello\n> world")).toContain("<blockquote>");
     const codeHtml = html("```rust\nfn main(){}\n```");
-    expect(codeHtml).toContain('class="review-content review-language-rust"');
+    expect(codeHtml).toContain("review-content review-language-rust");
     expect(codeHtml).toContain('<pre data-language="rust">');
   });
   it("inline code, bold, italic, link inside blocks", () => {

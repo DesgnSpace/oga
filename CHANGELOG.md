@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Copy any message or code block with one click, and selected text copies itself.
 - A task's menu now sits right beside its title, with the task's details, the thinking toggle, and actions like archive all in one place.
 - Rounded corners now match across the app. Cards, panels, the reply box, buttons, menus, and list rows share one set of shapes, and corners inside a card follow its edge.
 - Files and images attached when a task is handed off now show beside its request. Images open larger when you click them, and other files open in their usual app.

@@ -19,6 +19,26 @@ describe("Transcript", () => {
     expect(container.querySelectorAll("li")).toHaveLength(1);
   });
 
+  it("copies only the code from a fenced block in a response", async () => {
+    const originalClipboard = navigator.clipboard;
+    const writes: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (value: string) => { writes.push(value); } },
+    });
+    try {
+      render(<Transcript items={[{
+        type: "response",
+        block: { id: 1, text: "Run this:\n\n```go\nfmt.Println(\"ready\")\n```", error: false },
+      }]} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      await waitFor(() => expect(writes).toEqual(['fmt.Println("ready")']));
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+    }
+  });
+
   function work(id: number, startsExpanded: boolean): TranscriptItem {
     const event: TaskEventView = {
       id,

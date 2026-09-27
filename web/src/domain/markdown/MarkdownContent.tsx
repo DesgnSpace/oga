@@ -1,4 +1,5 @@
 import * as React from "react";
+import { CopyButton } from "@/components/atoms/CopyButton";
 import { SyntaxCode } from "@/components/SyntaxCode";
 import {
   languageFromFence,
@@ -124,12 +125,13 @@ function renderBlock(
     case "codeBlock": {
       const raw = block.language ?? "";
       const language = languageFromFence(raw);
-      const className = `review-content review-language-${language}`;
+      const className = `review-content review-language-${language} markdown-code copy-host`;
       return (
         <div key={index} className={className}>
           <pre data-language={language}>
             <SyntaxCode source={block.code} language={language} />
           </pre>
+          <CopyButton text={block.code} label="code" />
         </div>
       );
     }

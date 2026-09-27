@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useShowTechnicalDetails } from "@/appearance";
+import { CopyButton } from "@/components/atoms/CopyButton";
 import { InlineMarkdown, MarkdownContent } from "@/domain/markdown";
 import { compositionHasThinking, type ActivityComposition } from "@/domain/activity";
 import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
@@ -75,7 +76,8 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble }: { bubb
 
   return (
     <div className="transcript-row transcript-row-user">
-      <div className="transcript-bubble transcript-card">
+      <div className="transcript-bubble transcript-card copy-host">
+        <CopyButton text={full} label="instruction" />
         {bubble.kind !== undefined && <TurnMarker kind={bubble.kind} icon={BUBBLE_MARKER_ICONS[bubble.kind]} />}
         <div
           ref={previewRef}
@@ -121,7 +123,8 @@ const TranscriptResponse = React.memo(function TranscriptResponse({ block, quest
   }
   if (question) {
     return (
-      <div className={className}>
+      <div className={`${className} copy-host`}>
+        <CopyButton text={block.text} label="question" />
         <p className="detail-response-label detail-response-label-question">Waiting for your answer</p>
         <MarkdownContent source={block.text} />
       </div>
@@ -129,7 +132,8 @@ const TranscriptResponse = React.memo(function TranscriptResponse({ block, quest
   }
   if (block.error) {
     return (
-      <div className={className}>
+      <div className={`${className} copy-host`}>
+        <CopyButton text={block.text} label="error" />
         {marker}
         <p className="detail-response-label">{block.awaitingDecision ? "Waiting on your decision" : "The task failed"}</p>
         <ReviewContent source={block.text} language="plain" />
@@ -137,7 +141,8 @@ const TranscriptResponse = React.memo(function TranscriptResponse({ block, quest
     );
   }
   return (
-    <div className={className}>
+    <div className={`${className} copy-host`}>
+      <CopyButton text={block.text} label="response" />
       {marker}
       <MarkdownContent source={block.text} />
     </div>

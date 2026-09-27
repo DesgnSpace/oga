@@ -21,15 +21,13 @@ import {
   type TurnMarkerKind,
 } from "@/domain/trace";
 import { readStorage, writeStorage } from "@/state/storage";
-import { copyText } from "@/lib/identifiers";
-import { toast } from "@/state/toast";
+import { CopyButton } from "@/components/atoms/CopyButton";
 import { Modal } from "@/components/primitives/Modal";
 import { EmptyState } from "@/components/atoms/ListState";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import {
   DisclosureIcon,
   ChevronIcon,
-  CopyIcon,
   FollowUpIcon,
   HandoffIcon,
   CloseIcon,
@@ -44,7 +42,6 @@ import { DiffHeader } from "@/components/DiffHeader";
 import { patchFromBlocks } from "@/lib/unified-patch";
 
 type ContentExpansion = Extract<EventExpansion, { type: "content" }>;
-const COPY_FEEDBACK_MS = 1_500;
 
 interface OpenFilePreview {
   path?: string;
@@ -441,28 +438,16 @@ function TextDetailCard({ event, expansion, rawResult, children }: { event: Task
   const [open, setOpen] = React.useState(true);
   const [atBottom, setAtBottom] = React.useState(false);
   const [hasOverflow, setHasOverflow] = React.useState(false);
-  const [copied, setCopied] = React.useState(false);
   const contentRef = React.useRef<HTMLDivElement>(null);
-  const copiedTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const text = "text" in expansion ? expansion.text : "";
   const title = event.title.replace(/^mcp__oga(?:_\w+)?__(.+)$/i, "oga: $1").replace(/[_-]/g, " ");
-  React.useEffect(() => () => clearTimeout(copiedTimer.current), []);
-  const copy = async () => {
-    try {
-      await copyText(text);
-      setCopied(true);
-      clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
-    } catch {
-      toast.error("Couldn't copy the message");
-    }
-  };
   React.useLayoutEffect(() => {
     const element = contentRef.current;
     if (element !== null) setHasOverflow(element.scrollHeight > element.clientHeight + 1);
   }, [open, text]);
   return (
-    <div className="trace-text-card">
+    <div className="trace-text-card copy-host">
+      <CopyButton text={text} label="message" />
       <div className="trace-text-card-header">
         <button className="trace-text-card-toggle" type="button" aria-expanded={open} onClick={() => {
           if (!open) setAtBottom(false);
@@ -471,7 +456,6 @@ function TextDetailCard({ event, expansion, rawResult, children }: { event: Task
           <span>Used {title}</span>
           <span className={`trace-text-card-chevron${open ? " is-open" : ""}`} aria-hidden="true"><ChevronIcon size={14} /></span>
         </button>
-        <button className="trace-text-card-copy" type="button" aria-label={copied ? "Copied message" : "Copy message"} title={copied ? "Copied" : "Copy message"} onClick={() => void copy()}><CopyIcon size={14} /></button>
       </div>
       {open && (
         <div className="trace-text-card-content" ref={contentRef} onScroll={(scroll) => {

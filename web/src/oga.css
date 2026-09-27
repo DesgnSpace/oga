@@ -3065,6 +3065,78 @@ h1 {
     transform: rotate(90deg);
 }
 
+.copy-host {
+    position: relative;
+}
+
+.copy-button {
+    position: absolute;
+    inset-block-start: var(--space-2);
+    inset-inline-end: var(--space-2);
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    padding: var(--space-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-elevated);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.copy-host:hover > .copy-button,
+.copy-button:focus-visible,
+.copy-button[data-copied] {
+    opacity: 1;
+}
+
+.copy-button:hover,
+.copy-button:focus-visible {
+    color: var(--color-text);
+}
+
+.detail-response > .markdown-content > :first-child:not(.markdown-code),
+.transcript-bubble-preview > .markdown-content > :first-child:not(.markdown-code),
+.detail-response-label,
+.copy-host > .transcript-turn-marker {
+    padding-inline-end: var(--space-7);
+}
+
+.detail-response > .markdown-content > .markdown-code:first-child,
+.transcript-bubble-preview > .markdown-content > .markdown-code:first-child {
+    margin-block-start: var(--space-7);
+}
+
+.detail-response > :is(.detail-response-label, .transcript-turn-marker) + .markdown-content > .markdown-code:first-child {
+    margin-block-start: var(--space-5);
+}
+
+.markdown-code pre {
+    padding-inline-end: var(--space-7);
+}
+
+@media (any-pointer: coarse) {
+    .copy-button {
+        width: var(--space-7);
+        height: var(--space-7);
+        opacity: 1;
+    }
+
+    .detail-response > .markdown-content > .markdown-code:first-child,
+    .transcript-bubble-preview > .markdown-content > .markdown-code:first-child {
+        margin-block-start: var(--space-8);
+    }
+
+    .detail-response > :is(.detail-response-label, .transcript-turn-marker) + .markdown-content > .markdown-code:first-child {
+        margin-block-start: var(--space-5);
+    }
+}
+
 .trace-text-card {
     position: relative;
     margin-block: var(--space-2);
@@ -3079,10 +3151,10 @@ h1 {
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
+    padding-inline-end: var(--space-7);
 }
 
-.trace-text-card-toggle,
-.trace-text-card-copy {
+.trace-text-card-toggle {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
@@ -3095,9 +3167,7 @@ h1 {
 }
 
 .trace-text-card-toggle:hover,
-.trace-text-card-copy:hover,
-.trace-text-card-toggle:focus-visible,
-.trace-text-card-copy:focus-visible {
+.trace-text-card-toggle:focus-visible {
     color: var(--color-text);
 }
 
