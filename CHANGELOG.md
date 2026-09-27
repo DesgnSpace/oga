@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rounded corners now match across the app. Cards, panels, the reply box, buttons, menus, and list rows share one set of shapes, and corners inside a card follow its edge.
 - Oga is ready as soon as it opens or restarts, instead of keeping the app and your agents waiting several seconds while your terminal setup loads.
 - Tasks waiting on the same task now all start together when it finishes. One that can't start no longer leaves the others stuck waiting, and replies you queued on a finished task are sent.
 - A long-running task stays smooth to watch and scroll, and a new task shows up in the task list as soon as it starts.
