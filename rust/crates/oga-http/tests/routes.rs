@@ -263,7 +263,7 @@ async fn read_routes() {
         json!({
             "status": "ok",
             "version": VERSION,
-            "mcpContractVersion": 32,
+            "mcpContractVersion": 33,
             "build": "dev",
             "stale": false
         })
@@ -1117,6 +1117,124 @@ async fn task_routes() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(invalid_hook["error"], "hook payload must be an object");
+}
+
+async fn dispatch_over_http(app: &Router, cwd: &str, prompt: &str, depends_on: &[&str]) -> String {
+    let (status, task) = json_response(
+        request(
+            app,
+            Method::POST,
+            "/api/tasks",
+            Body::from(
+                json!({
+                    "profile": "gated",
+                    "model": "fake",
+                    "prompt": prompt,
+                    "cwd": cwd,
+                    "tldr": prompt,
+                    "dependsOn": depends_on,
+                })
+                .to_string(),
+            ),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{task}");
+    task["id"].as_str().expect("task id").to_owned()
+}
+
+#[tokio::test]
+async fn edit_changes_a_waiting_task_and_refuses_a_cycle() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let gate = directory.path().join("gate");
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    store
+        .repositories()
+        .profiles()
+        .insert(
+            &Profile {
+                id: "gated".into(),
+                label: "Gated".into(),
+                provider: Provider::Claude,
+                default_model: "fake".into(),
+                enabled: true,
+                env: BTreeMap::new(),
+                capabilities: vec![],
+                command: Some(vec![
+                    "sh".into(),
+                    "-c".into(),
+                    format!(
+                        "while [ ! -e '{}' ]; do sleep 0.02; done; printf 'finished\\nOGA_RESULT: completed\\n'",
+                        gate.display()
+                    ),
+                ]),
+            },
+            "2026-01-01T00:00:00.000Z",
+        )
+        .expect("profile");
+    switch_on(&store, "gated", "fake");
+    let dispatcher = Arc::new(Dispatcher::new(store.clone(), ProviderRunner::default()));
+    let app = router(HttpState::new(store.clone()).with_dispatcher(dispatcher.clone()));
+    let cwd = directory.path().display().to_string();
+
+    let blocker = dispatch_over_http(&app, &cwd, "build the parser", &[]).await;
+    let other = dispatch_over_http(&app, &cwd, "build the lexer", &[]).await;
+    let dependent = dispatch_over_http(&app, &cwd, "wire the parser in", &[&blocker]).await;
+    let follower = dispatch_over_http(&app, &cwd, "document it", &[&dependent]).await;
+
+    let (status, edited) = json_response(
+        request(
+            &app,
+            Method::POST,
+            &format!("/api/tasks/{dependent}/edit"),
+            Body::from(
+                json!({ "instruction": "keep the old entry point", "addDependsOn": [other] })
+                    .to_string(),
+            ),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{edited}");
+    assert_eq!(edited["id"], dependent.as_str());
+    assert_eq!(edited["state"], "pending");
+    let task = dispatcher.task(&dependent).expect("edited task");
+    assert!(task.prompt.contains("keep the old entry point"));
+    let mut waits_on =
+        oga_service::dependencies::dependency_ids(&store, &dependent).expect("prerequisites");
+    waits_on.sort();
+    let mut expected = [blocker.clone(), other.clone()];
+    expected.sort();
+    assert_eq!(waits_on, expected);
+
+    let (status, refused) = json_response(
+        request(
+            &app,
+            Method::POST,
+            &format!("/api/tasks/{dependent}/edit"),
+            Body::from(json!({ "addDependsOn": [follower] }).to_string()),
+        )
+        .await,
+    )
+    .await;
+    assert!(status.is_client_error(), "{status}: {refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("dependency cycle")),
+        "{refused}"
+    );
+
+    std::fs::write(&gate, "").expect("open the gate");
+    for id in [&blocker, &other, &dependent, &follower] {
+        for _ in 0..500 {
+            if dispatcher.task(id).expect("task").state.settled() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 }
 
 #[tokio::test]

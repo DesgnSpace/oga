@@ -186,6 +186,7 @@ Every tool is available over MCP (`http://127.0.0.1:7331/mcp`) and the REST API.
 | `resume` | Retry a failed, cancelled, or blocked task on the same session. |
 | `steer` | Send an instruction to work that is still active. |
 | `handoff` | Move a dead task to a different profile, keeping the same task ID. |
+| `edit` | Change a task that has not started — its prerequisites, settings, or brief — or requeue one cancelled before it started. |
 | `cancel` | Stop a task and its worker process tree. |
 | `complete` | Assert completion when work demonstrably landed but the worker never attested it. |
 | `archive` | Soft-hide old tasks without deleting history. |

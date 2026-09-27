@@ -4512,7 +4512,7 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
                 (None, Some(context)) => Some(context.into()),
             }
         }
-        "steered" => tree_value(payload, &["instruction"]),
+        "steered" | "instruction_added" => tree_value(payload, &["instruction"]),
         "steer_accepted" | "follow_up_queued" | "follow_up_started" | "resumed" => {
             let instruction = tree_value(payload, &["instruction"]).or_else(|| {
                 (event_type == "resumed")
@@ -4893,6 +4893,9 @@ fn lifecycle_title(event_type: &str) -> String {
         "network_retry_exhausted" => "Network retries exhausted",
         "effort_mismatch" => "Effort mismatch",
         "steered" => "Instruction sent",
+        "instruction_added" => "Instruction added",
+        "edited" => "Changed before starting",
+        "requeued" => "Back in line",
         "permission_asked" => "Waiting for your go-ahead",
         "steer_accepted" => "Instruction accepted",
         "steer_rejected" => "Instruction rejected",

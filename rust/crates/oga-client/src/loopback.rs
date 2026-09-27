@@ -17,11 +17,12 @@ use url::Url;
 
 use crate::{
     AgentRemoved, AgentStopped, BrokerState, BrokerSummaryState, CompletionRequest, ConsumerInbox,
-    DispatchRequest, EventFrame, EventHead, EventStreamOptions, EventStreamQuery, HandoffRequest,
-    MemoryList, MemoryWrite, ModelSettingsSnapshot, ModelSettingsUpdate, ProfileCreate,
-    ProfilePatch, ProjectList, PromptConfig, PromptWrite, QueryInitRequest, QueryInitResponse,
-    QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview, RoutingPreviewRequest, StateQuery,
-    SteerRequest, TaskActionResponse, TaskEventPage, TaskEventsQuery, TurnsResponse, UsageResponse,
+    DispatchRequest, EditRequest, EventFrame, EventHead, EventStreamOptions, EventStreamQuery,
+    HandoffRequest, MemoryList, MemoryWrite, ModelSettingsSnapshot, ModelSettingsUpdate,
+    ProfileCreate, ProfilePatch, ProjectList, PromptConfig, PromptWrite, QueryInitRequest,
+    QueryInitResponse, QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview,
+    RoutingPreviewRequest, StateQuery, SteerRequest, TaskActionResponse, TaskEventPage,
+    TaskEventsQuery, TurnsResponse, UsageResponse,
 };
 
 #[derive(Debug, Error)]
@@ -487,6 +488,18 @@ impl LoopbackClient {
     ) -> Result<TaskActionResponse, ClientError> {
         self.post_json(
             self.endpoint(&["api", "tasks", task_id, "handoff"]),
+            serde_json::to_value(request).map_err(ClientError::Encode)?,
+        )
+        .await
+    }
+
+    pub async fn edit_task(
+        &self,
+        task_id: &str,
+        request: &EditRequest,
+    ) -> Result<TaskActionResponse, ClientError> {
+        self.post_json(
+            self.endpoint(&["api", "tasks", task_id, "edit"]),
             serde_json::to_value(request).map_err(ClientError::Encode)?,
         )
         .await
@@ -1658,6 +1671,10 @@ mod tests {
             .handoff_task("task", &HandoffRequest::default())
             .await
             .expect("handoff");
+        client
+            .edit_task("task", &EditRequest::default())
+            .await
+            .expect("edit");
         client
             .remove_worktree("task", true)
             .await

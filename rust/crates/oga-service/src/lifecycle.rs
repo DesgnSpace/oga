@@ -1425,17 +1425,19 @@ pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, Li
         if dependent.state != TaskState::Pending {
             continue;
         }
-        let Some((hold_policy, hold_note)) = dependency_hold(store, &dependent.id)? else {
+        let Some((hold_policy, hold_note, hold_updated_at)) =
+            dependency_hold(store, &dependent.id)?
+        else {
             continue;
         };
-        let states = dependency_states(store, &dependent.id)?;
-        if !prerequisites_met(hold_policy, &states) {
-            if is_blocking_end(blocker.state) && hold_policy == oga_domain::OnBlockerFailure::Hold {
+        let prerequisites = dependency_states(store, &dependent.id)?;
+        if !dependencies::prerequisites_met(hold_policy, &prerequisites) {
+            if dependencies::DependencyBlocker::of(blocker).stops_dependents(hold_policy) {
                 block_dependent(store, &dependent, blocker, &hold_note)?;
             }
             continue;
         }
-        if !claim_dependency_hold(store, &dependent.id, &hold_note)? {
+        if !claim_dependency_hold(store, &dependent.id, &hold_note, &hold_updated_at)? {
             continue;
         }
         let Some(queued) = queue_held_task(store, &dependent.id, &hold_note)? else {
@@ -1444,21 +1446,6 @@ pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, Li
         released.push(queued);
     }
     Ok(released)
-}
-
-/// Whether a dependent whose prerequisites are in `states` can start.
-pub(crate) fn prerequisites_met(
-    policy: oga_domain::OnBlockerFailure,
-    states: &[TaskState],
-) -> bool {
-    states.iter().all(|state| {
-        *state == TaskState::Completed
-            || (policy == oga_domain::OnBlockerFailure::Run
-                && matches!(
-                    state,
-                    TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-                ))
-    })
 }
 
 /// Revive the dependents an earlier ending dropped. A task that leaves a
@@ -1476,7 +1463,7 @@ pub fn restore_dependency_blocked_dependents(
                 continue;
             }
             queue.push_back(dependent.id.clone());
-            if !is_blocking_end(dependent.state) {
+            if !dependencies::is_blocking_end(dependent.state) {
                 continue;
             }
             let dependency_blocked = dependent
@@ -1491,14 +1478,17 @@ pub fn restore_dependency_blocked_dependents(
                 .into_iter()
                 .filter(|task| task.state != TaskState::Completed)
                 .collect::<Vec<_>>();
-            if waiting_on.iter().any(|task| is_blocking_end(task.state)) {
+            if waiting_on
+                .iter()
+                .any(|task| dependencies::is_blocking_end(task.state))
+            {
                 continue;
             }
             let now = now_iso();
             let hold = dependencies::dependency_hold(
                 &dependent.id,
                 &waiting_on,
-                oga_domain::OnBlockerFailure::Hold,
+                dependencies::blocker_policy(store, &dependent.id)?,
                 None,
                 &now,
             );
@@ -1508,15 +1498,17 @@ pub fn restore_dependency_blocked_dependents(
     Ok(())
 }
 
+/// The waiting task's policy, note, and the version of the hold they were read
+/// from, so a release never claims a hold an edit has since replaced.
 fn dependency_hold(
     store: &Store,
     task_id: &str,
-) -> Result<Option<(oga_domain::OnBlockerFailure, String)>, LifecycleError> {
+) -> Result<Option<(oga_domain::OnBlockerFailure, String, String)>, LifecycleError> {
     store
         .with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT args_json,note FROM task_holds WHERE task_id=?",
+                    "SELECT args_json,note,updated_at FROM task_holds WHERE task_id=?",
                     [task_id],
                     |row| {
                         let args: HoldArgs = serde_json::from_str(&row.get::<_, String>(0)?)
@@ -1527,6 +1519,7 @@ fn dependency_hold(
                             args.on_blocker_failure
                                 .unwrap_or(oga_domain::OnBlockerFailure::Hold),
                             row.get(1)?,
+                            row.get(2)?,
                         ))
                     },
                 )
@@ -1536,17 +1529,25 @@ fn dependency_hold(
         .map_err(LifecycleError::from)
 }
 
-fn dependency_states(store: &Store, task_id: &str) -> Result<Vec<TaskState>, LifecycleError> {
+fn dependency_states(
+    store: &Store,
+    task_id: &str,
+) -> Result<Vec<dependencies::DependencyBlocker>, LifecycleError> {
     store
         .with_connection(|connection| {
             let mut statement = connection.prepare(
-                "SELECT tasks.state FROM task_dependencies JOIN tasks ON tasks.id=task_dependencies.blocker_id WHERE task_dependencies.task_id=? ORDER BY task_dependencies.created_at, task_dependencies.rowid",
+                "SELECT tasks.id,tasks.state,tasks.shipped_prompt IS NOT NULL FROM task_dependencies JOIN tasks ON tasks.id=task_dependencies.blocker_id WHERE task_dependencies.task_id=? ORDER BY task_dependencies.created_at, task_dependencies.rowid",
             )?;
             statement
                 .query_map([task_id], |row| {
-                    let state: String = row.get(0)?;
-                    serde_json::from_str(&format!("\"{state}\""))
-                        .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))
+                    let state: String = row.get(1)?;
+                    Ok(dependencies::DependencyBlocker {
+                        id: row.get(0)?,
+                        state: serde_json::from_str(&format!("\"{state}\"")).map_err(
+                            |error| rusqlite::Error::InvalidParameterName(error.to_string()),
+                        )?,
+                        started: row.get(2)?,
+                    })
                 })?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(StoreError::from)
@@ -1554,11 +1555,19 @@ fn dependency_states(store: &Store, task_id: &str) -> Result<Vec<TaskState>, Lif
         .map_err(LifecycleError::from)
 }
 
-fn claim_dependency_hold(store: &Store, task_id: &str, note: &str) -> Result<bool, LifecycleError> {
+fn claim_dependency_hold(
+    store: &Store,
+    task_id: &str,
+    note: &str,
+    updated_at: &str,
+) -> Result<bool, LifecycleError> {
     let now = now_iso();
     store
         .transaction(|tx| {
-            let removed = tx.execute("DELETE FROM task_holds WHERE task_id=?", [task_id])?;
+            let removed = tx.execute(
+                "DELETE FROM task_holds WHERE task_id=? AND updated_at=?",
+                params![task_id, updated_at],
+            )?;
             if removed != 1 {
                 return Ok(false);
             }
@@ -1684,13 +1693,6 @@ pub(crate) fn block_queued_task(
         Ok(())
     })?;
     Ok(())
-}
-
-fn is_blocking_end(state: TaskState) -> bool {
-    matches!(
-        state,
-        TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-    )
 }
 
 /// Best-effort fallback for a detached launch that fails before it can claim a

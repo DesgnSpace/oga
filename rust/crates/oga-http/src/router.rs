@@ -152,6 +152,7 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/api/tasks/{id}/steer", post(tasks::steer))
         .route("/api/tasks/{id}/handoff", post(tasks::handoff))
+        .route("/api/tasks/{id}/edit", post(tasks::edit))
         .route("/api/tasks/{id}/worktree", delete(tasks::remove_worktree))
         .route("/api/tasks/{id}/complete", post(tasks::complete))
         .route("/api/hooks/{id}", post(hooks::append))

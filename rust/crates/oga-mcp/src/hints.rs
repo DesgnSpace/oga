@@ -97,8 +97,31 @@ pub fn resume_refusal(task: &Task) -> Option<(String, Vec<Value>)> {
     ))
 }
 
+/// The refusal for a steer on a task that has not started, pointing at edit.
+pub fn steer_refusal(task: &Task) -> Option<(String, Vec<Value>)> {
+    if task.state != TaskState::Pending || !never_started(task) {
+        return None;
+    }
+    Some((
+        format!(
+            "only a running task takes an instruction; this one is pending: {}",
+            task.id
+        ),
+        vec![hint(
+            "edit",
+            "instruction: adds it to the brief the worker starts from",
+        )],
+    ))
+}
+
 fn started(task: &Task, hints: &mut Vec<Value>) {
     if task.state == TaskState::Pending {
+        if never_started(task) {
+            hints.push(hint(
+                "edit",
+                "changes what it waits on or how it will run, or adds an instruction to its brief, before it starts",
+            ));
+        }
         if task
             .hold
             .as_ref()
@@ -175,6 +198,21 @@ fn settled(task: &Task, hints: &mut Vec<Value>, branch_gone: bool) {
                         },
                     ));
                 }
+            } else if never_started(task) {
+                hints.push(hint(
+                    "edit",
+                    if task.state == TaskState::Cancelled {
+                        "requeue: true puts it back to waiting on its prerequisites; it starts once they are done"
+                    } else {
+                        "changes what it waits on; it goes back to waiting once nothing in the way failed"
+                    },
+                ));
+                if !branch_gone {
+                    hints.push(hint(
+                        "resume",
+                        "starts it now without waiting on its prerequisites",
+                    ));
+                }
             } else if !branch_gone {
                 hints.push(hint(
                     "resume",
@@ -242,6 +280,11 @@ fn watch(task: &Task, hints: &mut Vec<Value>) {
     ));
 }
 
+/// No worker has picked it up, so its brief and wait can still change.
+fn never_started(task: &Task) -> bool {
+    task.shipped_prompt.is_none()
+}
+
 /// The checkout path, when the task ran in one and it is still on disk.
 fn checkout(task: &Task) -> Option<&str> {
     task.worktree
@@ -276,6 +319,7 @@ mod tests {
         Task {
             id: "task-1".into(),
             state,
+            shipped_prompt: Some("work".into()),
             ..Task::default()
         }
     }
