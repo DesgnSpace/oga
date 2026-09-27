@@ -98,6 +98,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "task summary indexes",
         run: migrate_v52_to_v53,
     },
+    Migration {
+        version: 54,
+        name: "task blocker policy",
+        run: migrate_v53_to_v54,
+    },
 ];
 
 /// The schema this binary can read.
@@ -219,7 +224,8 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
        checkout_state TEXT CHECK(checkout_state IS NULL OR checkout_state IN (
         'queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'
        )),
-       transport_json TEXT CHECK(transport_json IS NULL OR json_valid(transport_json))
+       transport_json TEXT CHECK(transport_json IS NULL OR json_valid(transport_json)),
+       on_blocker_failure TEXT CHECK(on_blocker_failure IS NULL OR on_blocker_failure IN ('hold','run'))
     );
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
@@ -891,6 +897,28 @@ pub fn migrate_v52_to_v53(conn: &Connection) -> Result<(), StoreError> {
         DROP INDEX IF EXISTS tasks_prompt_nocase;
         {TASK_SUMMARY_INDEXES}
         INSERT INTO schema_migrations(version, name) VALUES (53, 'task summary indexes');
+        COMMIT;"#
+    ))?;
+    Ok(())
+}
+
+/// The blocker policy outlives the task's wait, so a task put back to waiting keeps it.
+pub fn migrate_v53_to_v54(conn: &Connection) -> Result<(), StoreError> {
+    let column = if has_column(conn, "tasks", "on_blocker_failure")? {
+        ""
+    } else {
+        "ALTER TABLE tasks ADD COLUMN on_blocker_failure TEXT CHECK(on_blocker_failure IS NULL OR on_blocker_failure IN ('hold','run'));"
+    };
+    let carried = if has_table(conn, "task_holds")? {
+        "UPDATE tasks SET on_blocker_failure='run' WHERE id IN (SELECT task_id FROM task_holds WHERE json_extract(args_json,'$.onBlockerFailure')='run');"
+    } else {
+        ""
+    };
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        {column}
+        {carried}
+        INSERT INTO schema_migrations(version, name) VALUES (54, 'task blocker policy');
         COMMIT;"#
     ))?;
     Ok(())

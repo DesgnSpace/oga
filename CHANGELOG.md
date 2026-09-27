@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Rounded corners now match across the app. Cards, panels, the reply box, buttons, menus, and list rows share one set of shapes, and corners inside a card follow its edge.
+- Files and images attached when a task is handed off now show beside its request. Images open larger when you click them, and other files open in their usual app.
 - Oga is ready as soon as it opens or restarts, instead of keeping the app and your agents waiting several seconds while your terminal setup loads.
 - Tasks waiting on the same task now all start together when it finishes. One that can't start no longer leaves the others stuck waiting, and replies you queued on a finished task are sent.
 - A long-running task stays smooth to watch and scroll, and a new task shows up in the task list as soon as it starts.
@@ -18,6 +20,8 @@
 - A task's activity log now shows what the worker wrote in full, wrapped onto as many lines as it needs, instead of cutting it off after one line.
 - A task's activity log now keeps the worker's words in a full-width transcript and folds each run of tool calls into one readable line you can open.
 - A task you've opened stays marked as viewed in the task list, instead of showing a new update again on its own. It shows a new update only when something new happens on it.
+- You can change a task that is waiting to start — what it waits for, which worker or model runs it, or an extra instruction for it — without cancelling it or starting over. A task you cancelled before it started can go back in line and wait its turn again.
+- Cancelling a task before it started no longer sets off the tasks waiting on it; they wait until it's back in line.
 
 - You can no longer set custom worker instructions. Workers receive your brief, project memories, and optional commit attribution; scope stays enforced by permissions, and your brief sets how they report back.
 - A task whose worker gives up after Oga blocks one of its steps, such as writing outside the task's folder, now asks you how to go on and names what it couldn't reach, instead of showing as done.

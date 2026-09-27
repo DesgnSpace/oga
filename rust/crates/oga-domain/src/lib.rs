@@ -46,5 +46,5 @@ pub use task::{
     TaskListQuery, TaskMatch, TaskScope, TaskState, TaskSummary, TaskTransport, TaskWorker,
     TaskWorktree, Transport, TransportPreference, TransportReason, WorktreeDeleteBatchResult,
     WorktreeDeleteEntry, WorktreeDeleteResult, WorktreeDeleteSkipped, WorktreeOption,
-    WorktreeRequest,
+    WorktreeRequest, image_mime,
 };

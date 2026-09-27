@@ -365,10 +365,13 @@ impl<C: Clock> HoldSweep<C> {
         }
         if hold.verb == HoldVerb::Delegate {
             let blockers = dependencies::unsettled_blockers(&self.store, &task.id)?;
+            let policy = hold
+                .args
+                .on_blocker_failure
+                .unwrap_or(oga_domain::OnBlockerFailure::Hold);
             if let Some(blocker) = blockers
                 .iter()
-                .find(|blocker| is_blocking_end(blocker.state))
-                && hold.args.on_blocker_failure != Some(oga_domain::OnBlockerFailure::Run)
+                .find(|blocker| blocker.stops_dependents(policy))
             {
                 let reason = format!(
                     "prerequisite {} ended {}; {}",
@@ -388,7 +391,7 @@ impl<C: Clock> HoldSweep<C> {
             }
             if blockers
                 .iter()
-                .any(|blocker| !is_blocking_end(blocker.state))
+                .any(|blocker| !dependencies::is_blocking_end(blocker.state))
             {
                 touch_hold(
                     &self.store,
@@ -419,8 +422,6 @@ enum HoldAction {
 }
 
 pub fn arm_hold(store: &Store, hold: &TaskHold) -> Result<(), StoreError> {
-    let args = serde_json::to_string(&hold.args)
-        .map_err(|error| StoreError::Refusal(format!("invalid hold JSON: {error}")))?;
     store.transaction(|tx| {
         let changed = tx.execute(
             "UPDATE tasks SET state='pending',updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending','completed')",
@@ -432,38 +433,48 @@ pub fn arm_hold(store: &Store, hold: &TaskHold) -> Result<(), StoreError> {
                 hold.task_id
             )));
         }
-        tx.execute(
-            "INSERT INTO task_holds(task_id,verb,args_json,start_at,await_profile,await_model,next_check_at,expires_at,probe_count,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET verb=excluded.verb,args_json=excluded.args_json,start_at=excluded.start_at,await_profile=excluded.await_profile,await_model=excluded.await_model,next_check_at=excluded.next_check_at,expires_at=excluded.expires_at,probe_count=excluded.probe_count,note=excluded.note,updated_at=excluded.updated_at",
-            params![
-                hold.task_id,
-                hold_verb(hold.verb),
-                args,
-                hold.start_at,
-                hold.await_profile,
-                hold.await_model,
-                hold.next_check_at,
-                hold.expires_at,
-                hold.probe_count,
-                hold.note,
-                hold.created_at,
-                hold.updated_at,
-            ],
-        )?;
-        append_event(
-            tx,
-            &hold.task_id,
-            "hold_armed",
-            TaskState::Pending,
-            &json!({
-                "note": hold.note,
-                "wait": wait_kind(hold),
-                "resumesAt": hold.start_at.as_deref().unwrap_or(&hold.next_check_at),
-            }),
-            &hold.updated_at,
-            None,
-        )?;
-        Ok(())
+        insert_hold(tx, hold)
     })
+}
+
+/// The task row is the caller's to move to `pending`.
+pub(crate) fn insert_hold(
+    tx: &rusqlite::Transaction<'_>,
+    hold: &TaskHold,
+) -> Result<(), StoreError> {
+    let args = serde_json::to_string(&hold.args)
+        .map_err(|error| StoreError::Refusal(format!("invalid hold JSON: {error}")))?;
+    tx.execute(
+        "INSERT INTO task_holds(task_id,verb,args_json,start_at,await_profile,await_model,next_check_at,expires_at,probe_count,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET verb=excluded.verb,args_json=excluded.args_json,start_at=excluded.start_at,await_profile=excluded.await_profile,await_model=excluded.await_model,next_check_at=excluded.next_check_at,expires_at=excluded.expires_at,probe_count=excluded.probe_count,note=excluded.note,updated_at=excluded.updated_at",
+        params![
+            hold.task_id,
+            hold_verb(hold.verb),
+            args,
+            hold.start_at,
+            hold.await_profile,
+            hold.await_model,
+            hold.next_check_at,
+            hold.expires_at,
+            hold.probe_count,
+            hold.note,
+            hold.created_at,
+            hold.updated_at,
+        ],
+    )?;
+    append_event(
+        tx,
+        &hold.task_id,
+        "hold_armed",
+        TaskState::Pending,
+        &json!({
+            "note": hold.note,
+            "wait": wait_kind(hold),
+            "resumesAt": hold.start_at.as_deref().unwrap_or(&hold.next_check_at),
+        }),
+        &hold.updated_at,
+        None,
+    )?;
+    Ok(())
 }
 
 pub fn get_hold(store: &Store, task_id: &str) -> Result<Option<TaskHold>, StoreError> {
@@ -526,8 +537,8 @@ pub fn drop_hold(
 fn release_hold(store: &Store, hold: &TaskHold, now: &str) -> Result<bool, StoreError> {
     store.transaction(|tx| {
         let changed = tx.execute(
-            "DELETE FROM task_holds WHERE task_id=? AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND state='pending')",
-            params![hold.task_id, hold.task_id],
+            "DELETE FROM task_holds WHERE task_id=? AND updated_at=? AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND state='pending')",
+            params![hold.task_id, hold.updated_at, hold.task_id],
         )?;
         if changed != 1 {
             return Ok(false);
@@ -687,13 +698,6 @@ fn hold_verb(verb: HoldVerb) -> &'static str {
         HoldVerb::Resume => "resume",
         HoldVerb::Delegate => "delegate",
     }
-}
-
-fn is_blocking_end(state: TaskState) -> bool {
-    matches!(
-        state,
-        TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-    )
 }
 
 fn next_check(now: SystemTime, retry_at: Option<&str>) -> String {

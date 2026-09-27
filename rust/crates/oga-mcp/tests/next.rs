@@ -148,6 +148,7 @@ fn task(id: &str, state: TaskState) -> Task {
         prompt: "work".into(),
         cwd: "/project".into(),
         state,
+        shipped_prompt: (state != TaskState::Pending).then(|| "work".into()),
         created_at: "2026-09-05T00:00:00.000Z".into(),
         updated_at: "2026-09-05T00:00:00.000Z".into(),
         ..Task::default()

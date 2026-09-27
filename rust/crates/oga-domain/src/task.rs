@@ -564,6 +564,38 @@ impl Task {
             _ => self.session_id.as_deref(),
         }
     }
+
+    /// A relative attachment reads from the directory the task was delegated
+    /// from: for a worktree task, the project rather than the checkout.
+    pub fn attachment_path(&self, index: usize) -> Option<std::path::PathBuf> {
+        let path = std::path::Path::new(self.attachments.get(index)?);
+        let base = self
+            .worktree
+            .as_ref()
+            .map_or(self.cwd.as_str(), |worktree| worktree.origin_cwd.as_str());
+        Some(std::path::Path::new(base).join(path))
+    }
+}
+
+/// The image type `bytes` hold, read from their signature, not a file name.
+pub fn image_mime(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else if bytes.starts_with(b"BM") {
+        Some("image/bmp")
+    } else if bytes.iter().copied().take(512).any(|byte| byte == b'<')
+        && std::str::from_utf8(bytes).is_ok_and(|text| text.contains("<svg"))
+    {
+        Some("image/svg+xml")
+    } else {
+        None
+    }
 }
 
 /// A task list row: enough to recognise and route on, never the prompt body.

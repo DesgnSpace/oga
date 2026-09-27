@@ -44,7 +44,7 @@ function itemKey(item: TranscriptItem): string {
   }
 }
 
-const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: { bubble: Bubble; cwd?: string }) {
+const TranscriptBubble = React.memo(function TranscriptBubble({ bubble }: { bubble: Bubble }) {
   const full = bubble.text;
   const previewRef = React.useRef<HTMLDivElement>(null);
   const [hasMore, setHasMore] = React.useState<boolean>();
@@ -95,7 +95,7 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble, cwd }: {
           </button>
         )}
         {showTechnicalDetails && bubble.rawText !== undefined && <RawEventDetails source={stripTransportMarkup(bubble.rawText)} />}
-        <AttachmentsRow paths={bubble.attachments} cwd={cwd} />
+        {bubble.attachments && <AttachmentsRow taskId={bubble.attachments.taskId} paths={bubble.attachments.paths} />}
       </div>
     </div>
   );
@@ -373,7 +373,8 @@ function sameNonWorkItem(left: NonWorkTranscriptItem, right: NonWorkTranscriptIt
       a.at === b.at &&
       a.kind === b.kind &&
       a.rawText === b.rawText &&
-      a.attachments?.join("\0") === b.attachments?.join("\0")
+      a.attachments?.taskId === b.attachments?.taskId &&
+      a.attachments?.paths.join("\0") === b.attachments?.paths.join("\0")
     );
   }
   if (right.type === "bubble" || left.type !== right.type) return false;
@@ -386,20 +387,19 @@ function sameNonWorkItem(left: NonWorkTranscriptItem, right: NonWorkTranscriptIt
   );
 }
 
-const TranscriptRow = React.memo(function TranscriptRow({ item, cwd }: { item: NonWorkTranscriptItem; cwd?: string }) {
+const TranscriptRow = React.memo(function TranscriptRow({ item }: { item: NonWorkTranscriptItem }) {
   switch (item.type) {
     case "bubble":
-      return <TranscriptBubble bubble={item.bubble} cwd={cwd} />;
+      return <TranscriptBubble bubble={item.bubble} />;
     case "response":
       return <TranscriptResponse block={item.block} question={false} />;
     case "question":
       return <TranscriptResponse block={item.block} question={true} />;
   }
-}, (left, right) => left.cwd === right.cwd && sameNonWorkItem(left.item, right.item));
+}, (left, right) => sameNonWorkItem(left.item, right.item));
 
 export function Transcript({
   items,
-  cwd,
   showThinking = false,
   scrollRoot,
   expansionState,
@@ -408,7 +408,6 @@ export function Transcript({
   onRowExpansionChange,
 }: {
   items: TranscriptItem[];
-  cwd?: string;
   showThinking?: boolean;
   scrollRoot?: React.RefObject<HTMLElement | null>;
   expansionState?: ReadonlyMap<number, boolean>;
@@ -444,7 +443,7 @@ export function Transcript({
             key={itemKey(item)}
           />
         ) : (
-          <TranscriptRow item={item} cwd={cwd} key={itemKey(item)} />
+          <TranscriptRow item={item} key={itemKey(item)} />
         )
       ))}
     </div>

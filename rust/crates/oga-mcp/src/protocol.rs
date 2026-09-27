@@ -10,7 +10,7 @@ pub const EARLIEST_PROTOCOL_VERSION: &str = "2025-06-18";
 const MCP_INSTRUCTIONS: &str = concat!(
     "Oga runs agent work on external provider accounts. The loop: `query` locates code in a project, `tasks` finds work already delegated so a second task is not opened on it, `delegate` starts new work, `inspect` reads what a task produced.\n",
     "Nothing waits for a task to finish: `oga watch <taskId>` prints a line when one settles, then `inspect` reads it.\n",
-    "By state: `reply` answers needs_input, `steer` redirects a running task, `resume` continues a stopped one, `handoff` moves one to another model or account, `cancel` stops it, `archive` hides it. Every task response carries `next`: the calls that fit its state.\n",
+    "By state: `reply` answers needs_input, `steer` redirects a running task, `edit` changes one not yet started or requeues a cancelled one, `resume` continues a stopped one, `handoff` moves one to another model or account, `cancel` stops it, `archive` hides it. Every task response carries `next`: the calls that fit its state.\n",
     "Delegation sends the prompt, the directory's memories, and whatever the worker reads on disk to an external provider account. Confirm that destination and data scope with the user before the first delegate in a project, and when a task would widen it.",
 );
 
@@ -72,8 +72,14 @@ const HANDOFF_DESCRIPTION: &str = concat!(
     "A wait on the old account is dropped; a wait on a prerequisite or a start time survives.",
 );
 
+const EDIT_DESCRIPTION: &str = concat!(
+    "Change a task that has not started, keeping its id: its prerequisites, settings, or brief. What waits on it is untouched. ",
+    "`requeue: true` puts one cancelled before it started back to waiting.",
+);
+
 const CANCEL_DESCRIPTION: &str = concat!(
     "Stop a task and kill its worker. `reason` is stored as its error and shown to the user; the task can still be inspected, resumed, handed off, or archived. ",
+    "Cancelled before it started, it never starts what waits on it; to reorder, edit instead. ",
     "A completed or failed task is refused. Takes an array of ids, each reported separately.",
 );
 
@@ -856,6 +862,96 @@ fn shared_tools() -> Vec<Value> {
         "handoff",
         HANDOFF_DESCRIPTION,
         object_schema(handoff, &["taskId"]),
+    ));
+
+    let mut edit = Map::from_iter([
+        (
+            "taskId".into(),
+            described(json!({ "type": "string" }), "Task that has not started."),
+        ),
+        (
+            "dependsOn".into(),
+            described(
+                json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 16 }),
+                "Replaces all prerequisites.",
+            ),
+        ),
+        (
+            "addDependsOn".into(),
+            described(
+                json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 16 }),
+                "Also wait on these.",
+            ),
+        ),
+        (
+            "removeDependsOn".into(),
+            described(
+                json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 16 }),
+                "Stop waiting on these.",
+            ),
+        ),
+        (
+            "onBlockerFailure".into(),
+            described(
+                json!({ "type": "string", "enum": ["hold", "run"] }),
+                "As in delegate.",
+            ),
+        ),
+        (
+            "parent".into(),
+            described(
+                json!({ "type": "string", "minLength": 1 }),
+                "Parent task id.",
+            ),
+        ),
+        (
+            "timeoutMs".into(),
+            described(
+                json!({ "type": "integer", "minimum": 1, "maximum": 86400000 }),
+                "Wall-clock limit in milliseconds.",
+            ),
+        ),
+        (
+            "effort".into(),
+            described(
+                json!({ "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] }),
+                "Effort for its run.",
+            ),
+        ),
+        (
+            "profile".into(),
+            described(
+                json!({ "type": "string", "minLength": 1 }),
+                "Profile to run on; its default model unless model is given.",
+            ),
+        ),
+        (
+            "model".into(),
+            described(
+                json!({ "type": "string", "minLength": 1, "maxLength": 200 }),
+                "Model to run on.",
+            ),
+        ),
+        (
+            "instruction".into(),
+            described(
+                json!({ "type": "string", "minLength": 1, "maxLength": 64000 }),
+                "Appended to its brief.",
+            ),
+        ),
+        (
+            "requeue".into(),
+            described(
+                json!({ "type": "boolean", "default": false }),
+                "Put a task cancelled before it started back to waiting.",
+            ),
+        ),
+    ]);
+    field_property(&mut edit);
+    tools.push(tool(
+        "edit",
+        EDIT_DESCRIPTION,
+        object_schema(edit, &["taskId"]),
     ));
 
     let mut cancel = Map::from_iter([

@@ -44,7 +44,7 @@ fn open_external_link<R: tauri::Runtime>(
 #[derive(Debug, serde::Serialize)]
 struct ImagePreview {
     bytes: Vec<u8>,
-    mime: &'static str,
+    mime: String,
 }
 
 #[tauri::command]
@@ -56,40 +56,64 @@ fn read_image_preview(path: String) -> Result<ImagePreview, String> {
         }
         _ => format!("Image preview unavailable: file is unreadable ({error})."),
     })?;
-    let mime = image_mime(&bytes).ok_or_else(|| {
+    let mime = oga_domain::image_mime(&bytes).ok_or_else(|| {
         "Image preview unavailable: unsupported image type or invalid image data.".to_string()
     })?;
-    Ok(ImagePreview { bytes, mime })
+    Ok(ImagePreview {
+        bytes,
+        mime: mime.to_owned(),
+    })
 }
 
+/// Read through the broker, which serves only the files attached to the task.
 #[tauri::command]
-fn open_attachment<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    path: String,
-) -> Result<(), String> {
-    app.opener()
-        .open_path(path, None::<&str>)
-        .map_err(|error| format!("Could not open the file: {error}"))
+async fn read_task_attachment(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    index: usize,
+) -> Result<ImagePreview, String> {
+    let (bytes, mime) = state
+        .client
+        .get_task_attachment(&task_id, index)
+        .await
+        .map_err(|error| {
+            if error.status().is_some_and(|status| status.as_u16() == 404) {
+                "Image preview unavailable: file not found.".to_string()
+            } else {
+                "Image preview unavailable: file is unreadable.".to_string()
+            }
+        })?;
+    if !mime.starts_with("image/") {
+        return Err(
+            "Image preview unavailable: unsupported image type or invalid image data.".to_string(),
+        );
+    }
+    Ok(ImagePreview {
+        bytes: bytes.to_vec(),
+        mime,
+    })
 }
 
-fn image_mime(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("image/png")
-    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        Some("image/jpeg")
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        Some("image/webp")
-    } else if bytes.starts_with(b"BM") {
-        Some("image/bmp")
-    } else if bytes.iter().copied().take(512).any(|byte| byte == b'<')
-        && std::str::from_utf8(bytes).is_ok_and(|text| text.contains("<svg"))
-    {
-        Some("image/svg+xml")
-    } else {
-        None
-    }
+/// The web view names the attachment by its place in the task's list, never
+/// by path, so it cannot open arbitrary files.
+#[tauri::command]
+async fn open_attachment<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    index: usize,
+) -> Result<(), String> {
+    let task = state
+        .client
+        .get_task(&task_id)
+        .await
+        .map_err(|_| "Could not open the file: the task is unavailable.".to_string())?;
+    let path = task
+        .attachment_path(index)
+        .ok_or_else(|| "Could not open the file: it is not attached to this task.".to_string())?;
+    app.opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|error| format!("Could not open the file: {error}"))
 }
 
 #[derive(Clone)]
@@ -199,6 +223,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             bridge::broker_watch_task,
             bridge::broker_unwatch_task,
             read_image_preview,
+            read_task_attachment,
             open_attachment,
             notifications::set_task_notifications,
             commands::set_menu_item_enabled,

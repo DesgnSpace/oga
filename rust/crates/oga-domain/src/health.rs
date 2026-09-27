@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// The one build identity: `/health` serves it, `oga version` prints it,
 /// the event-socket hello carries it, and install verification compares them.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const MCP_CONTRACT_VERSION: u32 = 32;
+pub const MCP_CONTRACT_VERSION: u32 = 33;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

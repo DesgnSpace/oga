@@ -184,7 +184,7 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect::<Vec<_>>();
 
-    assert_eq!(names.len(), 15);
+    assert_eq!(names.len(), 16);
     for name in [
         "delegate",
         "models",
@@ -197,6 +197,7 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
         "resume",
         "steer",
         "handoff",
+        "edit",
         "cancel",
         "complete",
         "archive",

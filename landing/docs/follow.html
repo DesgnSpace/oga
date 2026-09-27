@@ -120,6 +120,14 @@ oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code
 oga handoff &lt;task-id&gt; --model opus</code></pre>
         <p>It keeps its id, its request, and its place in line. A task waiting on other work, or on a start time you set, keeps waiting — it just runs somewhere else when its turn comes.</p>
 
+        <h2 id="change-waiting">Change work that hasn't started<a class="heading-anchor" href="#change-waiting" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>Work waiting on other work can be changed before it starts, keeping its id and everything lined up behind it. When something more urgent comes in, make the waiting work wait for it too, or add an instruction it should follow once it runs:</p>
+        <pre><code>oga edit &lt;task-id&gt; --add-dep &lt;urgent-task-id&gt;
+oga edit &lt;task-id&gt; -m "push the branch when you're done"</code></pre>
+        <p>Nothing waiting on the task you change starts or stops because of it. If you cancelled work before it started, put it back in line and it waits for what it was waiting for before:</p>
+        <pre><code>oga edit &lt;task-id&gt; --requeue</code></pre>
+        <p>Cancelling work before it started never sets off the work waiting on it — even work you asked to run when something before it fails. That work waits until you put the cancelled task back in line or change what it waits on.</p>
+
         <div class="docs-callout">
           <p>Search <code>oga tasks --query "feature, file, or command"</code> before you start something new. If it finds related work, pick that task back up instead of running two against each other.</p>
         </div>
@@ -138,6 +146,7 @@ oga handoff &lt;task-id&gt; --model opus</code></pre>
           <li><a href="#tell-it">Tell it something</a></li>
           <li><a href="#pick-up">Pick it back up</a></li>
           <li><a href="#move">Move it to another worker</a></li>
+          <li><a href="#change-waiting">Change work that hasn't started</a></li>
         </ul>
       </aside>
     </div>
