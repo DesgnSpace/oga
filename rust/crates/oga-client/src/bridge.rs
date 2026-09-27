@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    CompletionRequest, HandoffRequest, ModelSettingsUpdate, ProfileCreate, ProfilePatch,
-    PromptWrite, ReplyRequest, ResumeRequest, StateQuery, SteerRequest, TaskEventsQuery,
+    CompletionRequest, EditRequest, HandoffRequest, ModelSettingsUpdate, ProfileCreate,
+    ProfilePatch, PromptWrite, ReplyRequest, ResumeRequest, StateQuery, SteerRequest,
+    TaskEventsQuery,
 };
 
 /// One read or write the web view asks the shell to make.
@@ -114,6 +115,10 @@ pub enum BrokerCall {
     HandoffTask {
         task_id: String,
         request: HandoffRequest,
+    },
+    EditTask {
+        task_id: String,
+        request: EditRequest,
     },
     CompleteTask {
         task_id: String,
@@ -343,6 +348,9 @@ mod native {
                 }
                 BrokerCall::HandoffTask { task_id, request } => {
                     encode(self.handoff_task(&task_id, &request).await)
+                }
+                BrokerCall::EditTask { task_id, request } => {
+                    encode(self.edit_task(&task_id, &request).await)
                 }
                 BrokerCall::CompleteTask { task_id, request } => {
                     encode(self.complete_task(&task_id, &request).await)
@@ -746,6 +754,33 @@ mod tests {
 
         let encoded = serde_json::to_value(&call).expect("encode call");
         assert_eq!(encoded["call"], "resumeTask");
+        assert_eq!(
+            serde_json::from_value::<BrokerCall>(encoded).expect("decode call"),
+            call
+        );
+    }
+
+    #[test]
+    fn edit_calls_send_the_broker_field_names() {
+        let call = BrokerCall::EditTask {
+            task_id: "task".to_owned(),
+            request: EditRequest {
+                add_depends_on: vec!["blocker".to_owned()],
+                on_blocker_failure: Some(oga_domain::OnBlockerFailure::Run),
+                timeout_ms: Some(60_000),
+                ..EditRequest::default()
+            },
+        };
+        let encoded = serde_json::to_value(&call).expect("encode call");
+        assert_eq!(encoded["call"], "editTask");
+        assert_eq!(
+            encoded["request"],
+            serde_json::json!({
+                "addDependsOn": ["blocker"],
+                "onBlockerFailure": "run",
+                "timeoutMs": 60_000,
+            })
+        );
         assert_eq!(
             serde_json::from_value::<BrokerCall>(encoded).expect("decode call"),
             call

@@ -497,7 +497,6 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
               <Transcript
                 key={taskId}
                 items={transcriptItems}
-                cwd={task.cwd}
                 showThinking={showThinking}
                 scrollRoot={contentRef}
                 expansionState={viewState.workExpansion}

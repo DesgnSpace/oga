@@ -560,6 +560,35 @@ pub struct HandoffRequest {
     pub scope: Option<TaskScope>,
 }
 
+/// Changes to a task that has not started. `depends_on` replaces every
+/// prerequisite; `add_depends_on` and `remove_depends_on` apply on top of it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct EditRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depends_on: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub add_depends_on: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub remove_depends_on: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_blocker_failure: Option<oga_domain::OnBlockerFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub requeue: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CompletionRequest {

@@ -19,8 +19,9 @@ use oga_domain::{
 use oga_http::{HttpState, settings::ModelQuery as SettingsModelQuery};
 use oga_routing::{ModelNameMatch, ambiguous_message, not_enabled_message, resolve_model_name};
 use oga_service::{
-    ArchiveRequest, CancelRequest, CompletionAssertion, DispatchRequest, FollowUpQueue,
-    HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest, WorktreeRemoveRequest,
+    ArchiveRequest, CancelRequest, CompletionAssertion, DispatchRequest, EditRequest,
+    FollowUpQueue, HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest,
+    WorktreeRemoveRequest,
 };
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
@@ -250,6 +251,7 @@ impl McpServer {
             "resume" => self.resume(&args).await?,
             "steer" => self.steer(&args).await?,
             "handoff" => self.handoff(&args).await?,
+            "edit" => self.edit(&args).await?,
             "cancel" => self.cancel(&args).await?,
             "complete" => self.complete(&args).await?,
             "archive" => self.archive(&args).await?,
@@ -694,6 +696,14 @@ impl McpServer {
 
     async fn steer(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
         let task_id = required_string(args, "taskId")?;
+        let current = self
+            .state
+            .dispatcher
+            .task(&task_id)
+            .map_err(McpError::from)?;
+        if let Some((message, next)) = hints::steer_refusal(&current) {
+            return Err(McpError::Refused { message, next });
+        }
         let mut request = SteerRequest::new(task_id);
         if let Some(value) = optional_string(args, "instruction") {
             request = request.instruction(value);
@@ -743,6 +753,38 @@ impl McpServer {
         self.started_response(
             task,
             fields(args.get("fields"))?.unwrap_or_else(|| vec!["routing".into()]),
+            hints::Move::Started,
+        )
+    }
+
+    async fn edit(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
+        let mut request = EditRequest::new(required_string(args, "taskId")?);
+        if args.get("dependsOn").is_some() {
+            request.depends_on = Some(string_array(args.get("dependsOn"), "dependsOn")?);
+        }
+        request.add_depends_on = string_array(args.get("addDependsOn"), "addDependsOn")?;
+        request.remove_depends_on = string_array(args.get("removeDependsOn"), "removeDependsOn")?;
+        request.on_blocker_failure = match optional_string(args, "onBlockerFailure").as_deref() {
+            Some("run") => Some(OnBlockerFailure::Run),
+            Some("hold") => Some(OnBlockerFailure::Hold),
+            None => None,
+            Some(value) => {
+                return Err(McpError::InvalidParams(format!(
+                    "onBlockerFailure must be hold or run, got {value}"
+                )));
+            }
+        };
+        request.parent_task_id = optional_string(args, "parent");
+        request.timeout_ms = optional_u64(args, "timeoutMs")?;
+        request.effort = optional_string(args, "effort");
+        request.profile_id = optional_string(args, "profile");
+        request.model = optional_string(args, "model");
+        request.instruction = optional_string(args, "instruction");
+        request.requeue = optional_bool(args, "requeue").unwrap_or(false);
+        let task = self.state.dispatcher.edit(request).await?;
+        self.started_response(
+            task,
+            fields(args.get("fields"))?.unwrap_or_default(),
             hints::Move::Started,
         )
     }

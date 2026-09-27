@@ -11,8 +11,8 @@ use axum::{
 };
 use oga_domain::{OnBlockerFailure, Task, TaskKind, TaskScope, WorktreeOption};
 use oga_service::{
-    ArchiveRequest, CompletionAssertion, DispatchRequest, FollowUpQueue, HandoffRequest,
-    ReplyRequest, ResumeRequest, SteerRequest, WorktreeRemoveRequest,
+    ArchiveRequest, CompletionAssertion, DispatchRequest, EditRequest, FollowUpQueue,
+    HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest, WorktreeRemoveRequest,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -94,6 +94,25 @@ struct HandoffBody {
     model: Option<String>,
     effort: Option<String>,
     scope: Option<TaskScope>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct EditBody {
+    depends_on: Option<Vec<String>>,
+    #[serde(default)]
+    add_depends_on: Vec<String>,
+    #[serde(default)]
+    remove_depends_on: Vec<String>,
+    on_blocker_failure: Option<OnBlockerFailure>,
+    parent: Option<String>,
+    timeout_ms: Option<u64>,
+    effort: Option<String>,
+    profile: Option<String>,
+    model: Option<String>,
+    instruction: Option<String>,
+    #[serde(default)]
+    requeue: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -509,6 +528,48 @@ pub async fn handoff(
         request = request.scope(scope);
     }
     let task = state.dispatcher.handoff(request).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(started_task(&state, &task, true)?),
+    ))
+}
+
+pub async fn edit(
+    State(state): State<HttpState>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, HttpError> {
+    let body: EditBody = parse_json(&body)?;
+    if let Some(profile) = &body.profile
+        && profile.is_empty()
+    {
+        return Err(HttpError::bad_request("profile must not be empty"));
+    }
+    if let Some(model) = &body.model
+        && (model.is_empty() || model.chars().count() > 200)
+    {
+        return Err(HttpError::bad_request(
+            "model must be between 1 and 200 characters",
+        ));
+    }
+    if let Some(effort) = &body.effort {
+        validate_effort(effort)?;
+    }
+    let request = EditRequest {
+        task_id: id,
+        depends_on: body.depends_on,
+        add_depends_on: body.add_depends_on,
+        remove_depends_on: body.remove_depends_on,
+        on_blocker_failure: body.on_blocker_failure,
+        parent_task_id: body.parent,
+        timeout_ms: body.timeout_ms,
+        effort: body.effort,
+        profile_id: body.profile,
+        model: body.model,
+        instruction: body.instruction,
+        requeue: body.requeue,
+    };
+    let task = state.dispatcher.edit(request).await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(started_task(&state, &task, true)?),

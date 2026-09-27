@@ -160,8 +160,12 @@ export function readImagePreview(path: string): Promise<BridgeResult<ImagePrevie
   return command<ImagePreview>("read_image_preview", { path });
 }
 
-export function openAttachment(path: string): Promise<BridgeResult<void>> {
-  return command<void>("open_attachment", { path });
+export function readTaskAttachment(taskId: string, index: number): Promise<BridgeResult<ImagePreview>> {
+  return command<ImagePreview>("read_task_attachment", { taskId, index });
+}
+
+export function openAttachment(taskId: string, index: number): Promise<BridgeResult<void>> {
+  return command<void>("open_attachment", { taskId, index });
 }
 
 export function setTaskNotifications(enabled: boolean): Promise<BridgeResult<void>> {

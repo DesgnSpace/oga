@@ -139,6 +139,10 @@ pub fn router(state: HttpState) -> Router {
             post(state::mark_task_viewed).delete(state::unmark_task_viewed),
         )
         .route("/api/tasks/{id}/turns", get(state::get_task_turns))
+        .route(
+            "/api/tasks/{id}/attachments/{index}",
+            get(state::get_task_attachment),
+        )
         .route("/api/tasks/{id}/events", get(state::get_task_events))
         .route("/api/tasks/{id}/diff", get(state::get_task_diff))
         .route("/api/tasks/{id}/branches", get(state::get_task_branches))
@@ -152,6 +156,7 @@ pub fn router(state: HttpState) -> Router {
         )
         .route("/api/tasks/{id}/steer", post(tasks::steer))
         .route("/api/tasks/{id}/handoff", post(tasks::handoff))
+        .route("/api/tasks/{id}/edit", post(tasks::edit))
         .route("/api/tasks/{id}/worktree", delete(tasks::remove_worktree))
         .route("/api/tasks/{id}/complete", post(tasks::complete))
         .route("/api/hooks/{id}", post(hooks::append))
