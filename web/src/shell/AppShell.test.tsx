@@ -1,7 +1,10 @@
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { resetFeedsForTests } from "@/bridge/events";
 import { setTransport, type Transport } from "@/bridge/transport";
+import { EVENT_BATCH_EVENT, type EventBatch, type TaskState } from "@/bridge/types";
+import { resetTaskOutcomeViewsForTests } from "@/state/task-outcome-views";
 import { AppShell } from "./AppShell";
 
 function summaryTask(id: string, preview: string) {
@@ -153,5 +156,76 @@ describe("the app shell", () => {
     } finally {
       globalThis.requestAnimationFrame = originalRaf;
     }
+  });
+
+  it("keeps a finished task read after opening it, until it finishes again", async () => {
+    const finishedAt = "2026-08-31T10:05:00Z";
+    const finished = (updatedAt: string) => ({ state: "completed", updatedAt, completion: { blocked: false, code: "completed" } });
+    const idle = summaryTask("idle", "idle task");
+    let listed = [idle, summaryTask("finishing", "finishing task")];
+    const opened = { ...fullTask("finishing", "prompt for finishing"), ...finished(finishedAt) };
+    let listReads = 0;
+    const listeners = new Map<string, (payload: EventBatch) => void>();
+    const liveTransport: Transport = {
+      invoke: async (command, args) => {
+        // SAFETY: broker_call requests always carry a typed call object.
+        const call = args?.call as { call: string; taskId?: string; query?: { archived?: string } } | undefined;
+        if (call?.call === "summary") {
+          // The task screen reads the summary too, for worker profiles; only the list's reads filter by archive.
+          if (call.query?.archived !== undefined) listReads += 1;
+          // SAFETY: this fixture returns the summary response shape expected by SidebarController.
+          return { profiles: [], tasks: listed, tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as never;
+        }
+        if (command === "broker_watch_task" && args?.taskId === "finishing") {
+          // SAFETY: this fixture returns the broker_watch_task response shape expected by TaskDetail.
+          return { task: opened, events: [], cursor: 1, hasEarlier: false } as never;
+        }
+        if (call?.call === "task" && call.taskId === "finishing") {
+          // SAFETY: `opened` is a full task, the shape a task call returns.
+          return opened as never;
+        }
+        return transport.invoke(command, args);
+      },
+      // SAFETY: the only feed this test drives is the event batch feed.
+      listen: (event, handle) => listeners.set(event, handle as (payload: EventBatch) => void),
+    };
+    const deliver = (cursor: number, state: TaskState, at: string) => act(() =>
+      listeners.get(EVENT_BATCH_EVENT)!({ cursor, streamFloor: 0, stale: false, pointers: [
+        { id: cursor, cursor, taskId: "finishing", type: state, kind: "lifecycle", state, at, title: "", summary: "" },
+      ] }));
+    const reread = async (tasks: typeof listed) => {
+      listed = tasks;
+      const before = listReads;
+      act(() => listeners.get(EVENT_BATCH_EVENT)!({ cursor: 0, streamFloor: 0, stale: true, pointers: [] }));
+      await waitFor(() => expect(listReads).toBe(before + 1));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    };
+    const finishingRow = () => screen.getByText("finishing task").closest("a")!;
+
+    resetFeedsForTests();
+    resetTaskOutcomeViewsForTests();
+    setTransport(liveTransport);
+    window.history.replaceState(null, "", "/");
+    render(<AppShell />);
+    await screen.findByText("finishing task");
+
+    deliver(1, "completed", finishedAt);
+    await waitFor(() => expect(finishingRow().textContent).toContain("New update"));
+
+    finishingRow().click();
+    await waitFor(() => expect(screen.getAllByText(/prompt for finishing/).length).toBeGreaterThan(0));
+    screen.getByText("idle task").closest("a")!.click();
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/idle"));
+    expect(finishingRow().textContent).toContain("Viewed");
+
+    await reread([idle, { ...summaryTask("finishing", "finishing task"), ...finished(finishedAt) }]);
+    expect(finishingRow().textContent).toContain("Viewed");
+
+    const againAt = "2026-08-31T10:09:00Z";
+    deliver(2, "running", "2026-08-31T10:07:00Z");
+    deliver(3, "completed", againAt);
+    await waitFor(() => expect(finishingRow().textContent).toContain("New update"));
+    await reread([idle, { ...summaryTask("finishing", "finishing task"), ...finished(againAt) }]);
+    expect(finishingRow().textContent).toContain("New update");
   });
 });

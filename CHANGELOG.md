@@ -19,6 +19,7 @@
 - You can replace Oga's default handoff instructions with your own.
 - A task's activity log now shows what the worker wrote in full, wrapped onto as many lines as it needs, instead of cutting it off after one line.
 - A task's activity log now keeps the worker's words in a full-width transcript and folds each run of tool calls into one readable line you can open.
+- A task you've opened stays marked as viewed in the task list, instead of showing a new update again on its own. It shows a new update only when something new happens on it.
 - You can change a task that is waiting to start — what it waits for, which worker or model runs it, or an extra instruction for it — without cancelling it or starting over. A task you cancelled before it started can go back in line and wait its turn again.
 - Cancelling a task before it started no longer sets off the tasks waiting on it; they wait until it's back in line.
 

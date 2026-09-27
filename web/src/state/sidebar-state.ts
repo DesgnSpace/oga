@@ -36,9 +36,15 @@ export type LoadState = "idle" | "loading" | "ready" | "error";
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 export type EventAction = "none" | "refresh";
 
+/** A live update carries a task's new state but not its question, error, or
+ * completion, so a row it moves to another state is stale until the next reread. */
+export interface SidebarTask extends TaskSummary {
+  staleOutcome?: true;
+}
+
 export interface SidebarState {
   profiles: ProfileView[];
-  tasks: TaskSummary[];
+  tasks: SidebarTask[];
   tasksHasMore: boolean;
   loadedPages: number;
   isLoadingMore: boolean;
@@ -158,7 +164,7 @@ export function applySummary(state: SidebarState, summary: BrokerSummaryState): 
  * belongs on the list; keep those, appended after what the page did return.
  * A task the page had room for and left out no longer matches the filter, so
  * it goes. */
-function mergeTasks(existing: TaskSummary[], page: TaskSummary[], truncated: boolean): TaskSummary[] {
+function mergeTasks(existing: SidebarTask[], page: TaskSummary[], truncated: boolean): SidebarTask[] {
   const tail = page[page.length - 1]?.updatedAt;
   if (!truncated || tail === undefined) return page;
   const onPage = new Set(page.map((task) => task.id));
@@ -359,6 +365,7 @@ function applyPointer(state: SidebarState, pointer: EventPointer): [SidebarState
     updatedAt: pointer.at,
     archivedAt,
   };
+  if (pointer.state !== task.state) tasks[index].staleOutcome = true;
   return [{ ...state, eventCursor, tasks }, "none"];
 }
 
