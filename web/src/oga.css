@@ -3241,7 +3241,7 @@ h1 {
 .trace-verb {
     color: var(--color-text);
     font-size: var(--text-base);
-    font-weight: 400;
+    font-weight: 450;
 }
 
 .trace-row-turn-boundary {
@@ -3273,7 +3273,7 @@ h1 {
     flex: 0 1 auto;
     max-width: 46ch;
     font-size: var(--text-base);
-    font-weight: 400;
+    font-weight: 450;
 }
 
 .trace-target-technical {
@@ -3655,6 +3655,9 @@ h1 {
 body {
     font-family: var(--font-sans);
     font-size: var(--text-base);
+    /* Plex's 400 reads thin once text is greyscale-smoothed below; 450 is
+       Plex's own "Text" weight, made for body copy at small sizes. */
+    font-weight: 450;
     line-height: 1.35;
     /* WebKit on macOS draws text with thicker subpixel strokes on some layers
        and thinner greyscale strokes on others (scrolling panes), so the same
@@ -3662,6 +3665,12 @@ body {
        keeps it one weight, as native Mac apps draw it. */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+
+/* Browsers compute bold as "bolder", which jumps from 450 to 700. */
+b,
+strong {
+    font-weight: 600;
 }
 
 button,
@@ -4734,7 +4743,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     color: var(--color-text);
     font: inherit;
     font-size: var(--text-base);
-    font-weight: 400;
+    font-weight: 450;
     white-space: nowrap;
     cursor: pointer;
 }
