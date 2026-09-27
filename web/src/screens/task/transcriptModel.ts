@@ -23,7 +23,7 @@ export interface Bubble {
   at: string;
   kind?: BubbleKind;
   rawText?: string;
-  attachments?: string[];
+  attachments?: { taskId: string; paths: string[] };
 }
 
 export interface WorkSegment {
@@ -75,7 +75,7 @@ export function activityIsSettled(state: TaskState): boolean {
 export function buildTranscript(task: Task, events: TaskEventView[], cache = new WorkSegmentCache()): TranscriptItem[] {
   cache.begin(events);
   const items: TranscriptItem[] = [
-    { type: "bubble", bubble: { id: REQUEST_ID, text: task.prompt, at: task.createdAt, attachments: task.attachments } },
+    { type: "bubble", bubble: { id: REQUEST_ID, text: task.prompt, at: task.createdAt, attachments: task.attachments && { taskId: task.id, paths: task.attachments } } },
   ];
 
   let remaining = events;

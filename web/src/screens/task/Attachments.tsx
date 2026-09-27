@@ -1,10 +1,9 @@
 // File and image attachments beside a request.
 
 import * as React from "react";
-import { openAttachment, readImagePreview } from "@/bridge";
+import { openAttachment, readTaskAttachment } from "@/bridge";
 import { Modal } from "@/components/primitives/Modal";
 import { AttachmentIcon, ExclamationIcon } from "@/ui/icons";
-import { resolvePreviewPath } from "./Trace";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
 
@@ -18,12 +17,19 @@ function fileName(path: string): string {
   return normalized.slice(normalized.lastIndexOf("/") + 1) || path;
 }
 
-function useDiskImage(path: string) {
+/** Names one attachment by its place in the task's list; the broker resolves the file. */
+interface AttachmentRef {
+  taskId: string;
+  index: number;
+  path: string;
+}
+
+function useAttachmentImage({ taskId, index }: AttachmentRef) {
   const [src, setSrc] = React.useState<string>();
   const [error, setError] = React.useState<string>();
   React.useEffect(() => {
     let active = true;
-    void readImagePreview(path).then((result) => {
+    void readTaskAttachment(taskId, index).then((result) => {
       if (!active) return;
       if (!result.ok) {
         setError(result.error.message);
@@ -39,20 +45,22 @@ function useDiskImage(path: string) {
     return () => {
       active = false;
     };
-  }, [path]);
+  }, [taskId, index]);
   return { src, error };
 }
 
-function AttachmentImage({ path }: { path: string }) {
+function AttachmentImage({ attachment }: { attachment: AttachmentRef }) {
+  const { path } = attachment;
+  const titleId = React.useId();
   const [open, setOpen] = React.useState(false);
-  const { src, error } = useDiskImage(path);
+  const { src, error } = useAttachmentImage(attachment);
   return (
     <>
       <button type="button" className="attachment-chip attachment-chip-image" aria-label={fileName(path)} title={error ? "Couldn't load preview" : fileName(path)} onClick={() => setOpen(true)}>
         {src ? <img src={src} alt={fileName(path)} /> : error ? <ExclamationIcon size={16} /> : <span className="attachment-chip-status" aria-hidden="true" />}
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} labelledBy="attachment-preview-title" className="modal-dialog-file-preview">
-        <h2 id="attachment-preview-title" className="trace-file-preview-modal-title">
+      <Modal open={open} onClose={() => setOpen(false)} labelledBy={titleId} className="modal-dialog-file-preview">
+        <h2 id={titleId} className="trace-file-preview-modal-title">
           {fileName(path)}
         </h2>
         {error ? (
@@ -67,13 +75,13 @@ function AttachmentImage({ path }: { path: string }) {
   );
 }
 
-function AttachmentFile({ path }: { path: string }) {
+function AttachmentFile({ attachment: { taskId, index, path } }: { attachment: AttachmentRef }) {
   return (
     <button
       type="button"
       className="attachment-chip attachment-chip-file"
       title={path}
-      onClick={() => void openAttachment(path)}
+      onClick={() => void openAttachment(taskId, index)}
     >
       <AttachmentIcon size={14} />
       <span className="attachment-chip-name">{fileName(path)}</span>
@@ -81,17 +89,17 @@ function AttachmentFile({ path }: { path: string }) {
   );
 }
 
-/** What the worker got alongside the prompt, next to the request that sent it. */
-export function AttachmentsRow({ paths, cwd }: { paths: string[] | undefined; cwd?: string }) {
+/** The files the delegating caller attached for whoever follows the task. */
+export function AttachmentsRow({ taskId, paths }: { taskId: string; paths: string[] | undefined }) {
   if (!paths || paths.length === 0) return null;
   return (
     <div className="attachments-row" aria-label={paths.length === 1 ? "1 file attached" : `${paths.length} files attached`}>
       {paths.map((path, index) => {
-        const resolved = resolvePreviewPath(path, cwd);
+        const attachment = { taskId, index, path };
         return isImagePath(path) ? (
-          <AttachmentImage path={resolved} key={`${index}:${path}`} />
+          <AttachmentImage attachment={attachment} key={`${index}:${path}`} />
         ) : (
-          <AttachmentFile path={resolved} key={`${index}:${path}`} />
+          <AttachmentFile attachment={attachment} key={`${index}:${path}`} />
         );
       })}
     </div>

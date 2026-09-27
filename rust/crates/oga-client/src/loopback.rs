@@ -241,6 +241,21 @@ impl LoopbackClient {
             .await
     }
 
+    pub async fn get_task_attachment(
+        &self,
+        task_id: &str,
+        index: usize,
+    ) -> Result<(Bytes, String), ClientError> {
+        let url = self.endpoint(&["api", "tasks", task_id, "attachments", &index.to_string()]);
+        let (headers, bytes) = self.exchange(Method::GET, url, None, None).await?;
+        let mime = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_owned();
+        Ok((bytes, mime))
+    }
+
     pub async fn get_task_turns(&self, task_id: &str) -> Result<Vec<TaskTurn>, ClientError> {
         let response: TurnsResponse = self
             .get_json(self.endpoint(&["api", "tasks", task_id, "turns"]))
@@ -911,6 +926,17 @@ impl LoopbackClient {
         body: Option<Value>,
         accept: Option<&str>,
     ) -> Result<Bytes, ClientError> {
+        let (_, bytes) = self.exchange(method, url, body, accept).await?;
+        Ok(bytes)
+    }
+
+    async fn exchange(
+        &self,
+        method: Method,
+        url: Url,
+        body: Option<Value>,
+        accept: Option<&str>,
+    ) -> Result<(header::HeaderMap, Bytes), ClientError> {
         let method_name = method.as_str().to_owned();
         let mut request = self
             .http
@@ -931,6 +957,7 @@ impl LoopbackClient {
                 source,
             })?;
         let status = response.status();
+        let headers = response.headers().clone();
         let bytes = response
             .bytes()
             .await
@@ -947,7 +974,7 @@ impl LoopbackClient {
                 message: error_message(&bytes, status),
             });
         }
-        Ok(bytes)
+        Ok((headers, bytes))
     }
 
     async fn send_stream_request(&self, url: Url) -> Result<reqwest::Response, ClientError> {

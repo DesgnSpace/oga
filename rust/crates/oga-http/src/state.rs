@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 use axum::{
     Json,
     extract::{Path as AxumPath, Query, State},
+    http::header,
     response::IntoResponse,
 };
 use oga_domain::{
@@ -20,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::router::{HttpError, HttpState};
 
-const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json";
+const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json,attachments_json";
 
 #[derive(Debug, Deserialize, Default)]
 pub struct StateQuery {
@@ -126,6 +127,50 @@ pub async fn get_task_turns(
     })
     .await?;
     Ok(Json(json!({ "turns": turns })))
+}
+
+const MAX_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
+
+/// The request names an attachment by its place in the task's list, never by
+/// path, so only files the delegating caller attached can be read.
+pub async fn get_task_attachment(
+    State(state): State<HttpState>,
+    AxumPath((id, index)): AxumPath<(String, usize)>,
+) -> Result<impl IntoResponse, HttpError> {
+    let task = read_delegated_task(&state, id).await?;
+    let path = task
+        .attachment_path(index)
+        .ok_or_else(|| HttpError::not_found("unknown attachment"))?;
+    let bytes = tokio::task::spawn_blocking(move || read_attachment(&path))
+        .await
+        .map_err(|error| HttpError::internal(error.to_string()))??;
+    let mime = oga_domain::image_mime(&bytes).unwrap_or("application/octet-stream");
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            // An attached SVG opened straight from the broker must not run
+            // script on its origin.
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            ),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        bytes,
+    ))
+}
+
+fn read_attachment(path: &Path) -> Result<Vec<u8>, HttpError> {
+    let unavailable = || HttpError::not_found("attachment is no longer on disk");
+    let metadata = std::fs::metadata(path).map_err(|_| unavailable())?;
+    if !metadata.is_file() {
+        return Err(unavailable());
+    }
+    if metadata.len() > MAX_ATTACHMENT_BYTES {
+        return Err(HttpError::bad_request("attachment is too large to show"));
+    }
+    std::fs::read(path).map_err(|_| unavailable())
 }
 
 async fn read_delegated_task(state: &HttpState, id: String) -> Result<Task, HttpError> {
@@ -588,9 +633,10 @@ fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Res
     Ok(task)
 }
 
-/// `TASK_COLUMNS` with output, shipped prompt, attempts, and transport read as
-/// empty; `{prompt}` becomes the prompt's opening or an empty string.
-const LIST_COLUMNS: &str = "id,kind,profile_id,model,{prompt},NULL,cwd,branch,origin_cwd,worktree_path,worktree_branch,NULL,state,'',error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,NULL,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,NULL";
+/// `TASK_COLUMNS` with output, shipped prompt, attempts, transport, and
+/// attachments read as empty; `{prompt}` becomes the prompt's opening or an
+/// empty string.
+const LIST_COLUMNS: &str = "id,kind,profile_id,model,{prompt},NULL,cwd,branch,origin_cwd,worktree_path,worktree_branch,NULL,state,'',error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,NULL,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,NULL,NULL";
 
 /// Tasks for a list view, read through `LIST_COLUMNS`.
 pub fn list_task_rows(
@@ -820,6 +866,11 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
             .map(|value| decode_json(&value, 37))
             .transpose()?,
         completion,
+        attachments: row
+            .get::<_, Option<String>>(38)?
+            .map(|value| decode_json(&value, 38))
+            .transpose()?
+            .unwrap_or_default(),
         attempts,
         cost_usd: row.get(30)?,
         cost_usd_estimated: row.get::<_, Option<i64>>(31)?.unwrap_or(0) != 0,
