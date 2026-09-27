@@ -17,6 +17,8 @@
 - You can replace Oga's default handoff instructions with your own.
 - A task's activity log now shows what the worker wrote in full, wrapped onto as many lines as it needs, instead of cutting it off after one line.
 - A task's activity log now keeps the worker's words in a full-width transcript and folds each run of tool calls into one readable line you can open.
+- You can change a task that is waiting to start — what it waits for, which worker or model runs it, or an extra instruction for it — without cancelling it or starting over. A task you cancelled before it started can go back in line and wait its turn again.
+- Cancelling a task before it started no longer sets off the tasks waiting on it; they wait until it's back in line.
 
 - You can no longer set custom worker instructions. Workers receive your brief, project memories, and optional commit attribution; scope stays enforced by permissions, and your brief sets how they report back.
 - A task whose worker gives up after Oga blocks one of its steps, such as writing outside the task's folder, now asks you how to go on and names what it couldn't reach, instead of showing as done.

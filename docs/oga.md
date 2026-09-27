@@ -21,6 +21,7 @@ follow it, or operate without the app open.
 | `oga cancel <task-id>...` | Stop a task. |
 | `oga resume <task-id>` | Continue a task, optionally with `-m` or `--start-at`. |
 | `oga handoff <task-id>` | Move a task to another worker or model with `--worker`, `--model`, `--effort`. |
+| `oga edit <task-id>` | Change a task that hasn't started: what it waits on, its worker or model, or add an instruction with `-m`. `--requeue` puts one cancelled before it started back in line. |
 | `oga complete <task-id>` | Mark a task complete. |
 | `oga cleanup` | Preview removable activity and worktrees. |
 | `oga config [cwd]` | Print resolved profiles, models, routes, and brief rules. |
@@ -128,6 +129,12 @@ cancelled, or blocked work with `oga resume`; use `-m` when the next run needs
 an instruction. Move a task to a different account or model with
 `oga handoff <task-id> --worker <name>`; it keeps its id, request, and place in
 line, and one still waiting on other work or on a start time keeps waiting.
+Change a task that hasn't started with `oga edit`: `--add-dep` makes it wait
+for new work first, `--remove-dep` stops it waiting, and `-m` adds an
+instruction to the request its worker will start from. Nothing waiting on the
+edited task starts or stops because of it. Cancelling a task before it started
+never starts the work waiting on it, even work set to run after failures; that
+work waits blocked until the task is back in line with `oga edit --requeue`.
 Archive hides a record without deleting it. `cleanup` is the
 only command that permanently removes task activity.
 
