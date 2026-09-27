@@ -9,7 +9,7 @@ use std::{
 
 use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_client::{
-    CompletionRequest, DispatchRequest, EventFrame, EventStreamQuery, HandoffRequest,
+    CompletionRequest, DispatchRequest, EditRequest, EventFrame, EventStreamQuery, HandoffRequest,
     LoopbackClient, QueryInitRequest, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
@@ -21,8 +21,8 @@ use oga_context::{ContextIndex, LearnRouteProposal};
 use oga_domain::{
     ArchivedFilter, BatchFrame, BatchTask, CleanupPlan, CleanupResult, CleanupSettings, EventKind,
     HelloPayload, InFlightTask, MCP_CONTRACT_VERSION, ModelInfo, ModelInfoSource, ModelQuery,
-    Profile, Provider, Task, TaskEvent, TaskListQuery, TaskState, TaskSummary, TaskWorktree,
-    VERSION, WorkKind, WorktreeOption,
+    OnBlockerFailure, Profile, Provider, Task, TaskEvent, TaskListQuery, TaskState, TaskSummary,
+    TaskWorktree, VERSION, WorkKind, WorktreeOption,
 };
 use oga_events::{EventSocketOptions, SocketError, event_socket_path, start_event_socket};
 use oga_http::HttpState;
@@ -155,6 +155,7 @@ async fn run(args: Vec<String>) -> CliResult<i32> {
         "cancel" => run_cancel(&args[1..]).await,
         "resume" => run_resume(&args[1..]).await,
         "handoff" => run_handoff(&args[1..]).await,
+        "edit" => run_edit(&args[1..]).await,
         "complete" => run_complete(&args[1..]).await,
         "cleanup" => run_cleanup(&args[1..]).await,
         "config" => run_config(&args[1..]).await,
@@ -771,6 +772,15 @@ Usage: oga <command> [options]
   handoff <task-id>    Move a task to another worker or model, keeping its id,
                        request, and place in line. Add --worker, --model, or
                        --effort. Works before it starts and while it runs.
+  edit <task-id>       Change a task that hasn't started: what it waits on,
+                       its worker or model, or add an instruction.
+                       --depends-on ID replaces what it waits on (repeat it;
+                       --depends-on none clears), --add-dep and --remove-dep
+                       change one at a time, --on-blocker-failure hold|run
+                       says what happens if one fails. Also --worker, --model,
+                       --effort, --parent, --timeout 2h, and -m to add an
+                       instruction. --requeue puts a cancelled one back to
+                       waiting.
   complete <task-id>   Mark a task complete.
   cleanup              Free the disk that old finished work is holding. Shows
                        what would go and deletes nothing until you say so.
@@ -792,7 +802,7 @@ First run:
 
 fn unknown_command_message(command: &str) -> String {
     format!(
-        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, handoff, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
+        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, handoff, edit, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
     )
 }
 
@@ -1471,6 +1481,115 @@ async fn run_handoff(args: &[String]) -> CliResult<i32> {
         );
         if waiting {
             println!("It still waits its turn before it starts.");
+        }
+    }
+    Ok(0)
+}
+
+#[derive(Debug, Clone, Default)]
+struct EditCliOptions {
+    json: bool,
+    request: EditRequest,
+}
+
+fn parse_edit_args(args: &[String]) -> CliResult<(EditCliOptions, Vec<String>)> {
+    let mut options = EditCliOptions::default();
+    let request = &mut options.request;
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        let (flag, inline) = match arg.split_once('=') {
+            Some((flag, value)) if flag.starts_with("--") => (flag, Some(value.to_owned())),
+            _ => (arg, None),
+        };
+        let mut take = || match &inline {
+            Some(value) => Ok(value.clone()),
+            None => {
+                index += 1;
+                args.get(index)
+                    .cloned()
+                    .ok_or_else(|| CliError::new(format!("{flag} needs a value")))
+            }
+        };
+        match flag {
+            "--json" => options.json = true,
+            "--requeue" => request.requeue = true,
+            "--depends-on" => {
+                let id = take()?;
+                let ids = request.depends_on.get_or_insert_with(Vec::new);
+                if id != "none" {
+                    ids.push(id);
+                }
+            }
+            "--add-dep" => request.add_depends_on.push(take()?),
+            "--remove-dep" => request.remove_depends_on.push(take()?),
+            "--on-blocker-failure" => {
+                request.on_blocker_failure = Some(match take()?.as_str() {
+                    "hold" => OnBlockerFailure::Hold,
+                    "run" => OnBlockerFailure::Run,
+                    value => {
+                        return Err(CliError::new(format!(
+                            "--on-blocker-failure takes hold or run, not '{value}'"
+                        )));
+                    }
+                });
+            }
+            "--parent" => request.parent = Some(take()?),
+            "--timeout" => {
+                let millis = parse_duration(&take()?)?.as_millis();
+                request.timeout_ms = Some(u64::try_from(millis).unwrap_or(u64::MAX));
+            }
+            "--effort" => request.effort = Some(take()?),
+            "--worker" => request.profile = Some(take()?),
+            "--model" => request.model = Some(take()?),
+            "-m" | "--message" => request.instruction = Some(take()?),
+            value if value.starts_with('-') => {
+                return Err(CliError::new(format!("unknown option: {value}")));
+            }
+            value => values.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    Ok((options, values))
+}
+
+async fn run_edit(args: &[String]) -> CliResult<i32> {
+    let (options, values) = parse_edit_args(args)?;
+    let id = values.first().ok_or_else(|| {
+        CliError::new(
+            "usage: oga edit <task-id> [--depends-on id] [--add-dep id] [--remove-dep id] [--on-blocker-failure hold|run] [--worker name] [--model name] [--effort high] [--parent id] [--timeout 2h] [-m instruction] [--requeue]",
+        )
+    })?;
+    if values.len() != 1 {
+        return Err(CliError::new("edit takes one task id"));
+    }
+    let client = broker_client()?;
+    let task = resolve_task(&client, id).await?;
+    let response = client.edit_task(&task.id, &options.request).await?;
+    let worker = response.profile_id.as_deref().unwrap_or(&task.profile_id);
+    let model = response.model.as_deref().unwrap_or(&task.model);
+    if options.json {
+        print_json(&json!({
+            "id": response.id,
+            "state": response.state,
+            "title": task_title(&task),
+            "profileId": worker,
+            "model": model,
+            "action": "edited",
+        }))?;
+    } else {
+        println!(
+            "Changed {} {} on {worker} with {model}",
+            response.id,
+            task_title(&task)
+        );
+        match response.state {
+            TaskState::Queued => println!("It starts as soon as a worker is free."),
+            TaskState::Blocked => println!(
+                "It stays blocked until the task it waits on is resumed or put back in line."
+            ),
+            _ => println!("It starts once what it waits for is done."),
         }
     }
     Ok(0)
@@ -4046,6 +4165,46 @@ mod tests {
 
         assert!(parse_handoff_args(&["--worker".into()]).is_err());
         assert!(parse_handoff_args(&["--nope".into()]).is_err());
+    }
+
+    #[test]
+    fn parses_edit_options_and_the_task_id() {
+        let args: Vec<String> = [
+            "--depends-on",
+            "tsk_a",
+            "--depends-on=tsk_b",
+            "--add-dep",
+            "tsk_c",
+            "--remove-dep=tsk_d",
+            "--on-blocker-failure",
+            "run",
+            "--worker=codex",
+            "--timeout",
+            "2h",
+            "-m",
+            "also update the docs",
+            "--requeue",
+            "tsk_1",
+        ]
+        .map(String::from)
+        .into();
+        let (options, values) = parse_edit_args(&args).unwrap();
+        let request = options.request;
+        assert_eq!(request.depends_on.unwrap(), ["tsk_a", "tsk_b"]);
+        assert_eq!(request.add_depends_on, ["tsk_c"]);
+        assert_eq!(request.remove_depends_on, ["tsk_d"]);
+        assert_eq!(request.on_blocker_failure, Some(OnBlockerFailure::Run));
+        assert_eq!(request.profile.as_deref(), Some("codex"));
+        assert_eq!(request.timeout_ms, Some(7_200_000));
+        assert_eq!(request.instruction.as_deref(), Some("also update the docs"));
+        assert!(request.requeue);
+        assert_eq!(values, ["tsk_1"]);
+
+        let (cleared, _) = parse_edit_args(&["--depends-on".into(), "none".into()]).unwrap();
+        assert_eq!(cleared.request.depends_on, Some(Vec::new()));
+        assert!(parse_edit_args(&["--on-blocker-failure=wait".into()]).is_err());
+        assert!(parse_edit_args(&["--add-dep".into()]).is_err());
+        assert!(parse_edit_args(&["--nope".into()]).is_err());
     }
 
     #[test]
