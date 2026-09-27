@@ -17,10 +17,11 @@ import type {
 } from "@/bridge/types";
 import { MenuPanel, type MenuAction } from "@/components/menu/Menu";
 import { Modal } from "@/components/primitives/Modal";
-import { ArchiveIcon, CancelIcon, CheckIcon, MoreIcon, RestoreIcon } from "@/ui/icons";
+import { ArchiveIcon, CancelIcon, CheckIcon, ChevronIcon, RestoreIcon } from "@/ui/icons";
 import { MarkdownContent } from "@/domain/markdown";
 import { ComposerRequest, ConversationComposer, isResume, routingForState } from "./Composer";
 import { isExplainedWait, nextTryLabel } from "./format";
+import { TaskMetadata } from "./TaskMetadata";
 import { taskToastName } from "@/lib/toast-subject";
 import { toast } from "@/state/toast";
 
@@ -388,10 +389,24 @@ interface HeaderMenuPlacement {
   maxHeight: number;
 }
 
-/** The header's ellipsis menu: cancel, archive, mark completed. */
-export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: () => void }) {
+/**
+ * The menu beside the task title: the task's details, the transcript's
+ * thinking toggle, and the task's own actions (move, stop, archive, complete).
+ */
+export function TaskHeaderActions({
+  task,
+  events,
+  thinkingToggle,
+  onChanged,
+}: {
+  task: Task;
+  events: TaskEventView[];
+  thinkingToggle?: { active: boolean; onToggle: () => void };
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [showDetails, setShowDetails] = React.useState(false);
   const [confirmingCancel, setConfirmingCancel] = React.useState(false);
   const [confirmingArchiveBranch, setConfirmingArchiveBranch] = React.useState(false);
   const [handoffOpen, setHandoffOpen] = React.useState(false);
@@ -406,7 +421,10 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
   const canDeleteBranch = !archived && branch !== undefined;
 
   React.useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen) {
+      setShowDetails(false);
+      return;
+    }
     const closeOnPointer = (event: PointerEvent) => {
       // SAFETY: pointer events always target a Node in the DOM tree.
       const target = event.target as Node | null;
@@ -414,7 +432,9 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
       setMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key !== "Escape") return;
+      if (showDetails) setShowDetails(false);
+      else setMenuOpen(false);
     };
     document.addEventListener("pointerdown", closeOnPointer);
     document.addEventListener("keydown", closeOnEscape);
@@ -422,7 +442,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
       document.removeEventListener("pointerdown", closeOnPointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [menuOpen]);
+  }, [menuOpen, showDetails]);
 
   // The menu portals to the body: the title bar clips its own row to
   // truncate the stats at narrow widths, and that clipping would clip an
@@ -442,7 +462,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
       const viewportHeight = window.innerHeight;
       const left = Math.max(
         HEADER_MENU_MARGIN,
-        Math.min(triggerRect.right - width, viewportWidth - width - HEADER_MENU_MARGIN),
+        Math.min(triggerRect.left, viewportWidth - width - HEADER_MENU_MARGIN),
       );
       const below = triggerRect.bottom + HEADER_MENU_MARGIN;
       let next: HeaderMenuPlacement;
@@ -468,7 +488,7 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
       window.removeEventListener("resize", update);
       document.removeEventListener("scroll", update, true);
     };
-  }, [menuOpen]);
+  }, [menuOpen, showDetails]);
 
   const run = async (
     action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
@@ -495,6 +515,27 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
   };
 
   const sections: MenuAction[][] = [
+    [
+      {
+        key: "details",
+        label: "Details",
+        opensView: true,
+        onSelect: () => setShowDetails(true),
+      },
+      ...(thinkingToggle
+        ? [
+            {
+              key: "thinking",
+              label: "Show thinking",
+              checked: thinkingToggle.active,
+              onSelect: () => {
+                setMenuOpen(false);
+                thinkingToggle.onToggle();
+              },
+            },
+          ]
+        : []),
+    ],
     handoffable
       ? [
           {
@@ -573,10 +614,11 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
           type="button"
           aria-label="More actions"
           title="More actions"
+          aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((value) => !value)}
         >
-          <MoreIcon />
+          <ChevronIcon size={12} className="task-action-menu-chevron" />
         </button>
       </div>
       {menuOpen && globalThis.document !== undefined &&
@@ -590,7 +632,11 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
                 : { visibility: "hidden" }
             }
           >
-            <MenuPanel sections={sections} onClose={() => setMenuOpen(false)} />
+            {showDetails ? (
+              <TaskDetailsView task={task} events={events} onBack={() => setShowDetails(false)} />
+            ) : (
+              <MenuPanel sections={sections} onClose={() => setMenuOpen(false)} />
+            )}
           </div>,
           document.body,
         )}
@@ -623,6 +669,46 @@ export function TaskHeaderActions({ task, onChanged }: { task: Task; onChanged: 
           onChanged();
         }}
       />
+    </div>
+  );
+}
+
+/** The model's published context window. Absent when the catalog names none. */
+function useContextWindow(task: Task): number | undefined {
+  const [contextWindow, setContextWindow] = React.useState<number | undefined>(undefined);
+  React.useEffect(() => {
+    let disposed = false;
+    setContextWindow(undefined);
+    void broker
+      .modelSettings(task.worktree?.originCwd ?? task.cwd)
+      .then((result) => {
+        if (disposed || !result.ok) return;
+        const window = result.value.workers
+          .find((worker) => worker.id === task.profileId)
+          ?.models.find((model) => model.id === task.model)?.contextWindow;
+        setContextWindow(window);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [task.worktree?.originCwd, task.cwd, task.profileId, task.model]);
+  return contextWindow;
+}
+
+/** The header menu's details view: the task's metadata, with a row back to the menu. */
+function TaskDetailsView({ task, events, onBack }: { task: Task; events: TaskEventView[]; onBack: () => void }) {
+  const contextWindow = useContextWindow(task);
+  const backRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => backRef.current?.focus(), []);
+  return (
+    <div className="menu-panel task-menu-details-panel" role="menu">
+      <button ref={backRef} type="button" role="menuitem" className="menu-item task-menu-back" onClick={onBack}>
+        <ChevronIcon size={12} className="task-menu-back-icon" />
+        <span className="menu-item-label">Details</span>
+      </button>
+      <div className="task-menu-details">
+        <TaskMetadata task={task} events={events} contextWindow={contextWindow} />
+      </div>
     </div>
   );
 }
@@ -842,14 +928,12 @@ export function TaskControls({
   task,
   events,
   onChanged,
-  thinkingToggle,
   focusRequest,
   onFocusRequestConsumed,
 }: {
   task: Task;
   events: TaskEventView[];
   onChanged: () => void;
-  thinkingToggle?: { active: boolean; onToggle: () => void };
   focusRequest?: { taskId: string; nonce: number };
   onFocusRequestConsumed: (nonce: number) => void;
 }) {
@@ -863,26 +947,6 @@ export function TaskControls({
       onFocusRequestConsumed(focusRequest.nonce);
     }
   }, [focusRequest, onFocusRequestConsumed, routing.type, task.id]);
-  // The model's published window, read once per worker and model. Absent when
-  // the catalog names none — the footer then shows no context read at all.
-  const [contextWindow, setContextWindow] = React.useState<number | undefined>(undefined);
-  React.useEffect(() => {
-    let disposed = false;
-    setContextWindow(undefined);
-    void broker
-      .modelSettings(task.worktree?.originCwd ?? task.cwd)
-      .then((result) => {
-        if (disposed || !result.ok) return;
-        const window = result.value.workers
-          .find((worker) => worker.id === task.profileId)
-          ?.models.find((model) => model.id === task.model)?.contextWindow;
-        setContextWindow(window);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [task.worktree?.originCwd, task.cwd, task.profileId, task.model]);
-
   React.useEffect(() => {
     if (pinnedQuestion !== undefined) pinnedQuestionRef.current?.scrollIntoView({ block: "nearest" });
   }, [pinnedQuestion]);
@@ -1005,10 +1069,7 @@ export function TaskControls({
           queued={queued}
           onSend={handleSend}
           onRemoveQueued={removeQueued}
-          thinkingToggle={thinkingToggle}
           task={task}
-          events={events}
-          contextWindow={contextWindow}
           focusRequest={focusRequest?.taskId === task.id ? focusRequest : undefined}
           onFocusRequestConsumed={onFocusRequestConsumed}
         />

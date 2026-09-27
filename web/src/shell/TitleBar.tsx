@@ -13,6 +13,8 @@ export interface TaskTitleBarInfo {
   showingChanges: boolean;
   onToggleChanges: () => void;
   status: ReactNode;
+  /** The task's menu, shown right after the title. */
+  menu: ReactNode;
   secondary: ReactNode;
   /** Shell command that continues this task's session elsewhere. Absent when the task holds no resumable session. */
   terminalCommand?: string;
@@ -119,6 +121,7 @@ export function TitleBar({
           <h1 id={task ? "page-title" : undefined} className="title-bar-title" title={title || undefined}>
             {title}
           </h1>
+          {task?.menu}
         </span>
         <span className="title-bar-drag" data-tauri-drag-region />
         {task && (

@@ -86,7 +86,7 @@ describe("the handoff dialog", () => {
       listen: () => {},
     });
 
-    render(<TaskHeaderActions task={task} onChanged={() => {}} />);
+    render(<TaskHeaderActions task={task} events={[]} onChanged={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     fireEvent.click(await screen.findByText("Move to another worker"));
 

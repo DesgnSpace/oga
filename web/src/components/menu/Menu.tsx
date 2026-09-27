@@ -1,6 +1,7 @@
 // Shared compact menu panel.
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { CheckIcon, ChevronIcon } from "@/ui/icons";
 
 export interface MenuAction {
   key: string;
@@ -9,6 +10,10 @@ export interface MenuAction {
   onSelect: () => void;
   destructive?: boolean;
   disabled?: boolean;
+  /** Makes the item a checkbox, with a check in the icon slot while on. */
+  checked?: boolean;
+  /** Marks an item that opens a further view, with a trailing chevron. */
+  opensView?: boolean;
 }
 
 export interface MenuPanelProps {
@@ -100,7 +105,8 @@ export function MenuPanel({ sections, prompt, className, onClose }: MenuPanelPro
             <button
               key={item.key}
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+              aria-checked={item.checked}
               className={`menu-item${item.destructive ? " menu-item-destructive" : ""}`}
               disabled={item.disabled}
               tabIndex={item.key === focusedKey && !item.disabled ? 0 : -1}
@@ -111,12 +117,13 @@ export function MenuPanel({ sections, prompt, className, onClose }: MenuPanelPro
               onFocus={() => setFocusedKey(item.key)}
               onClick={item.onSelect}
             >
-              {item.icon && (
+              {(item.icon || item.checked !== undefined) && (
                 <span className="menu-item-icon" aria-hidden="true">
-                  {item.icon}
+                  {item.checked ? <CheckIcon size={12} /> : item.icon}
                 </span>
               )}
               <span className="menu-item-label">{item.label}</span>
+              {item.opensView && <ChevronIcon size={12} className="menu-item-chevron" />}
             </button>
           ))}
         </div>

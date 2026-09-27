@@ -188,7 +188,6 @@ function TaskDetailSecondary({
         )}
       </span>
       <span className="title-bar-secondary-spacer" />
-      <TaskHeaderActions task={task} onChanged={onChanged} />
       <WaitNotice task={task} onChanged={onChanged} />
     </div>
   );
@@ -441,10 +440,18 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
       onToggleChanges: () => setShowingChanges((value) => !value),
       terminalCommand,
       status: <TaskStatusDot state={task.state} label={statusLabel} />,
+      menu: (
+        <TaskHeaderActions
+          task={task}
+          events={events}
+          thinkingToggle={hasThinking ? { active: showThinking, onToggle: toggleThinking } : undefined}
+          onChanged={refreshDetail}
+        />
+      ),
       secondary: <TaskDetailSecondary task={task} workerLabel={profile?.label} events={events} onChanged={refreshDetail} />,
     });
     return () => onHeader(undefined);
-  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, terminalCommand, profile, onHeader]);
+  }, [task, reportedChanges, showingChanges, events, eventRevision, state.loading, state.error, terminalCommand, profile, onHeader, hasThinking, showThinking, toggleThinking]);
 
   React.useEffect(() => {
     const listener = () => refreshDetail();
@@ -512,7 +519,6 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
             task={task}
             events={events}
             onChanged={refreshDetail}
-            thinkingToggle={hasThinking ? { active: showThinking, onToggle: toggleThinking } : undefined}
             focusRequest={focusRequest}
             onFocusRequestConsumed={onFocusRequestConsumed}
           />

@@ -1,21 +1,21 @@
 /* Every row puts the label on the left and the value flush right, so values
    line up whether or not the row can be copied. The copy icon sits just
    before the value rather than after it, so it never pushes the value in. */
-.composer-menu-details .task-metadata-label {
+.task-menu-details .task-metadata-label {
     flex: 0 0 auto;
 }
 
-.composer-menu-details .task-metadata-value {
+.task-menu-details .task-metadata-value {
     order: 2;
     flex: 0 1 auto;
     text-align: right;
 }
 
-.composer-menu-details .task-metadata-static .task-metadata-value {
+.task-menu-details .task-metadata-static .task-metadata-value {
     margin-left: auto;
 }
 
-.composer-menu-details .task-metadata-copy {
+.task-menu-details .task-metadata-copy {
     order: 1;
     margin-left: auto;
 }
@@ -556,7 +556,7 @@ a {
 }
 
 .title-bar-title {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     margin: 0 0 0 var(--space-2);
     overflow: hidden;
@@ -650,10 +650,6 @@ a {
 
 .title-bar-row .title-bar-secondary-row .title-bar-secondary-spacer {
     display: none;
-}
-
-.title-bar-secondary-row > .task-detail-header-actions {
-    flex: 0 0 auto;
 }
 
 .task-sidebar {
@@ -2286,23 +2282,6 @@ h1 {
     margin-left: auto;
 }
 
-.composer-menu-anchor {
-    position: relative;
-    display: inline-flex;
-}
-
-.composer-menu-trigger {
-    width: 22px;
-    height: 22px;
-    min-height: 0;
-    color: var(--color-text-muted);
-}
-
-.composer-menu-trigger:hover,
-.composer-menu-trigger[aria-expanded="true"] {
-    color: var(--color-text);
-}
-
 .composer-scope-picker {
     display: inline-flex;
     align-items: center;
@@ -2346,23 +2325,17 @@ h1 {
     background: var(--color-bg);
 }
 
-/* The composer's `+` popover: same panel chrome as .menu-panel, portaled to
-   the body since the composer's own container clips anything positioned
-   outside its box. */
-.composer-menu {
-    position: fixed;
-    z-index: var(--z-menu);
+/* The header menu's details view, swapped in for the menu's own items. */
+.task-menu-details-panel {
     width: 240px;
-    max-width: calc(100vw - 16px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    max-width: 100%;
 }
 
-.composer-menu-back {
+.task-menu-back {
     color: var(--color-text-muted);
 }
 
-.composer-menu-back-icon {
+.task-menu-back-icon {
     transform: rotate(180deg);
 }
 
@@ -2371,12 +2344,12 @@ h1 {
     color: var(--color-text-muted);
 }
 
-.composer-menu-details {
+.task-menu-details {
     display: flex;
     flex-direction: column;
 }
 
-.composer-menu-details .task-metadata {
+.task-menu-details .task-metadata {
     flex-direction: column;
     align-items: stretch;
     flex-wrap: nowrap;
@@ -2384,8 +2357,8 @@ h1 {
     padding: 4px 0 0;
 }
 
-.composer-menu-details .task-metadata-item,
-.composer-menu-details .task-metadata-static {
+.task-menu-details .task-metadata-item,
+.task-menu-details .task-metadata-static {
     width: 100%;
     max-width: 100%;
     padding: 5px 6px;
@@ -2399,16 +2372,16 @@ h1 {
    value-right layout: the label stays its own width, the value grows to
    fill the rest and ellipsis-truncates, and the copy icon (when present)
    sits right after it. */
-.composer-menu-details .task-metadata-label {
+.task-menu-details .task-metadata-label {
     flex: 0 0 auto;
 }
 
-.composer-menu-details .task-metadata-value {
+.task-menu-details .task-metadata-value {
     flex: 1 1 auto;
     text-align: right;
 }
 
-.composer-menu-details .task-metadata-copy {
+.task-menu-details .task-metadata-copy {
     margin-left: 4px;
 }
 
@@ -2597,6 +2570,20 @@ h1 {
     flex: 0 0 auto;
     align-items: center;
     gap: var(--space-2);
+    margin-left: var(--space-1);
+}
+
+.task-action-menu-trigger {
+    color: var(--color-text-muted);
+}
+
+.task-action-menu-trigger:hover,
+.task-action-menu-trigger[aria-expanded="true"] {
+    color: var(--color-text);
+}
+
+.task-action-menu-chevron {
+    transform: rotate(90deg);
 }
 
 
