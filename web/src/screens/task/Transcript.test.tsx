@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, mock } from "bun:test";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { applyTechnicalDetails } from "@/appearance";
-import type { TaskEventView } from "@/bridge/types";
+import { setTransport, tauriTransport } from "@/bridge/transport";
+import type { Task, TaskEventView } from "@/bridge/types";
 import { ActivityStory, type ActivityComposition } from "@/domain/activity";
 import { Transcript } from "./Transcript";
-import type { TranscriptItem } from "./transcriptModel";
+import { buildTranscript, type TranscriptItem } from "./transcriptModel";
 
 afterEach(cleanup);
 
@@ -261,5 +262,62 @@ describe("Transcript technical details", () => {
     act(() => applyTechnicalDetails(true));
 
     expect(screen.getByText("Show technical details")).toBeTruthy();
+  });
+});
+
+describe("Transcript attachments", () => {
+  afterEach(() => setTransport(tauriTransport));
+
+  const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const delegated: Task = {
+    id: "task-1",
+    profileId: "claude",
+    model: "sonnet",
+    prompt: "Restyle the button.",
+    cwd: "/repo",
+    state: "running",
+    createdAt: "2026-07-30T15:00:00Z",
+    updatedAt: "2026-07-30T15:00:00Z",
+    output: "",
+    scope: { read: [], write: [] },
+    canDelegate: false,
+    attachments: ["/repo/.design-refs/button.png", "specs/button.md"],
+  };
+
+  it("shows attached images as thumbnails that open larger, and other files as links", async () => {
+    const invoke = mock(async (command: string) =>
+      command === "read_task_attachment" ? { bytes: PNG, mime: "image/png" } : undefined,
+    );
+    setTransport({ invoke: invoke as never, listen: mock() });
+
+    render(<Transcript items={buildTranscript(delegated, [])} />);
+
+    expect(screen.getByLabelText("2 files attached")).toBeTruthy();
+    const thumbnail = await screen.findByRole("img", { name: "button.png" });
+    expect(thumbnail.getAttribute("src")).toStartWith("data:image/png;base64,");
+    expect(invoke).toHaveBeenCalledWith("read_task_attachment", { taskId: "task-1", index: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "button.png" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.querySelector("img.trace-file-preview-modal-image")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "button.md" }));
+    expect(invoke).toHaveBeenCalledWith("open_attachment", { taskId: "task-1", index: 1 });
+  });
+
+  it("says when an attached image can no longer be read", async () => {
+    setTransport({
+      invoke: mock(async () => {
+        throw { message: "Image preview unavailable: file not found." };
+      }) as never,
+      listen: mock(),
+    });
+
+    render(<Transcript items={buildTranscript({ ...delegated, attachments: ["/gone/button.png"] }, [])} />);
+
+    const chip = screen.getByRole("button", { name: "button.png" });
+    await waitFor(() => expect(chip.getAttribute("title")).toBe("Couldn't load preview"));
+    fireEvent.click(chip);
+    expect((await screen.findByRole("alert")).textContent).toBe("Image preview unavailable: file not found.");
   });
 });
