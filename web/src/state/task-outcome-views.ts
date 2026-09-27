@@ -1,10 +1,10 @@
-import type { TaskSummary } from "@/bridge/types";
+import type { SidebarTask } from "./sidebar-state";
 import { readStorage, writeStorage } from "./storage";
 
 const TASK_OUTCOME_VIEWS_KEY = "taskOutcomeViews";
 export const MAX_TASK_OUTCOME_VIEWS = 512;
 
-type TaskOutcomeSource = Pick<TaskSummary, "id" | "state" | "question" | "error" | "completion">;
+type TaskOutcomeSource = Pick<SidebarTask, "id" | "state" | "question" | "error" | "completion" | "staleOutcome">;
 
 interface StoredTaskOutcomeView {
   outcome: string;
@@ -32,6 +32,14 @@ export function taskOutcomeKey(task: TaskOutcomeSource): string {
     default:
       return task.state;
   }
+}
+
+/** A stale row's question, error, and completion belong to an earlier state,
+ * so only its state is matched. */
+function showsOutcome(task: TaskOutcomeSource, outcome: string | undefined): boolean {
+  if (outcome === undefined) return false;
+  if (!task.staleOutcome) return outcome === taskOutcomeKey(task);
+  return outcome === task.state || outcome.startsWith(`[${JSON.stringify(task.state)},`);
 }
 
 function isSerializedTaskOutcomeView(value: unknown): value is SerializedTaskOutcomeView { // oxlint-disable-line anti-slop/no-unknown-parameters -- localStorage JSON is untrusted input
@@ -105,8 +113,7 @@ export class TaskOutcomeViewStore {
    * pointer. Genuinely new unread outcomes still order first immediately.
    */
   isOrderingUnread(task: TaskOutcomeSource): boolean {
-    const outcome = taskOutcomeKey(task);
-    if (this.pinnedTaskId === task.id && this.pinnedOutcome === outcome) return true;
+    if (this.pinnedTaskId === task.id && showsOutcome(task, this.pinnedOutcome)) return true;
     if (task.id === this.activeTaskId) {
       if (this.activeNeedsDecision) return !this.storedViewed(task);
       return false;
@@ -114,10 +121,11 @@ export class TaskOutcomeViewStore {
     return !this.isViewed(task);
   }
 
+  /** A stale row cannot say which outcome it shows, so the open task's own view marks it viewed. */
   observeTasks(tasks: readonly TaskOutcomeSource[]): void {
     let changed = false;
     for (const task of tasks) {
-      if (this.observe(task, this.activeTaskId === task.id)) changed = true;
+      if (this.observe(task, this.activeTaskId === task.id && !task.staleOutcome)) changed = true;
     }
     if (changed) this.commit();
   }
@@ -157,26 +165,22 @@ export class TaskOutcomeViewStore {
 
   private storedViewed(task: TaskOutcomeSource): boolean {
     const entry = this.entries.get(task.id);
-    return entry?.outcome === taskOutcomeKey(task) && entry.viewed;
+    return entry !== undefined && entry.viewed && showsOutcome(task, entry.outcome);
   }
 
   private observe(task: TaskOutcomeSource, viewed: boolean): boolean {
-    const outcome = taskOutcomeKey(task);
     const current = this.entries.get(task.id);
+    const shown = current !== undefined && showsOutcome(task, current.outcome);
+    const outcome = shown ? current.outcome : taskOutcomeKey(task);
     if (task.id === this.activeTaskId && viewed && this.activeNeedsDecision) {
-      const wasUnread = current?.outcome !== outcome || !current.viewed;
-      if (wasUnread) {
+      if (!shown || !current.viewed) {
         this.pinnedTaskId = task.id;
         this.pinnedOutcome = outcome;
       }
       this.activeNeedsDecision = false;
     }
-    if (current?.outcome === outcome && (!viewed || current.viewed)) return false;
-    this.entries.set(task.id, {
-      outcome,
-      viewed: current?.outcome === outcome ? current.viewed || viewed : viewed,
-      touchedAt: Date.now(),
-    });
+    if (shown && (!viewed || current.viewed)) return false;
+    this.entries.set(task.id, { outcome, viewed, touchedAt: Date.now() });
     return true;
   }
 
