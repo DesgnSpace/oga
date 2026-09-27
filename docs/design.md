@@ -32,10 +32,18 @@ and renumbering them would move every screen. Where a reference calls for
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--radius-sm` | 4px | Key caps |
-| `--radius` | 6px | Inputs, selects |
-| `--radius-md` | 8px | Rail pills, the rail search field |
-| `--radius-lg` | 12px | Cards, messages, the settings dialog, buttons |
+| `--radius-chip` | 4px | Inline code, key caps, small tags, checkboxes |
+| `--radius-control` | 8px | Buttons, icon buttons, inputs, selects, pickers |
+| `--radius-row` | 8px | List rows and their hover and selection fill, inset blocks |
+| `--radius-panel` | 12px | Cards, the transcript card, the changes panel, the reply box, menus, popovers, toasts |
+| `--radius-window` | 20px | Dialogs |
+| `--radius-full` | 999px | Capsules: scrollbars, switch tracks, bars |
+
+Nested corners stay concentric: an element inside a rounded surface takes
+the outer radius minus the gap between them, never more than the outer
+radius. A menu (12px) with 4px padding gives its rows 8px; a popover with
+8px padding gives them `calc(var(--radius-panel) - var(--space-2))`. Once the
+gap reaches the outer radius, the inner element keeps its own token.
 
 ## Type
 
@@ -56,13 +64,13 @@ Descriptions use `--color-text-muted` and stop at `65ch`.
 - Its own full-height panel on `--color-sidebar`, with a hairline to its
   right. It is 16rem wide.
 - `--space-5` (24px) padding on every side.
-- Search field at the top, 32px tall, `--radius-md`.
+- Search field at the top, 32px tall, `--radius-control`.
 - Items sit in groups under a small muted label (`--text-md`, 600). Groups are
   `--space-5` apart, and items in a group are `--space-1` apart.
 - Each item is an icon and a label, `--nav-item-height` (40px) tall, with
   `--space-3` inside padding and `--space-3` between icon and label. Icons
   come from `web/src/ui/icons.tsx`.
-- The selected item is a pill: `--color-selection` background, `--radius-md`.
+- The selected item is a pill: `--color-selection` background, `--radius-row`.
 - Two shared edges: every box (search field, pills) starts at the rail
   padding, and every piece of text or icon (title, group labels, search icon,
   item icons) starts `--space-3` inside it.
@@ -101,7 +109,7 @@ Descriptions use `--color-text-muted` and stop at `65ch`.
 
 ### Card — `Card`
 
-- `--radius-lg`, a 1px `--color-border` border, `--color-surface` background.
+- `--radius-panel`, a 1px `--color-border` border, `--color-surface` background.
 - Holds rows. Anything else in a card (a status line, an empty state) takes
   the same padding as a row.
 
@@ -122,5 +130,5 @@ Descriptions use `--color-text-muted` and stop at `65ch`.
 ## Dialogs
 
 The settings dialog keeps `--space-7` clear on every side of the window
-(`--space-4` below 800px), uses `--radius-lg`, and places its close button
+(`--space-4` below 800px), uses `--radius-window`, and places its close button
 `--space-5` from the corner.

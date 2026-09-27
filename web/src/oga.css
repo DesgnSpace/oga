@@ -65,10 +65,14 @@
     --content-max: 50rem;
     --trace-card-max-height: 24rem;
     --nav-item-height: 40px;
-    --radius-sm: 4px;
-    --radius: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
+    /* A rounded element inside another takes the outer radius minus the gap
+       between them, so corners stay concentric (docs/design.md, Radii). */
+    --radius-chip: 4px;
+    --radius-control: 8px;
+    --radius-row: 8px;
+    --radius-panel: 12px;
+    --radius-window: 20px;
+    --radius-full: 999px;
     --control-height: 28px;
     --topbar-height: 40px;
     --control-height-small: 24px;
@@ -202,7 +206,7 @@ a {
 
 *::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: transparent;
     background-clip: content-box;
     transition: background-color 250ms ease;
@@ -301,7 +305,7 @@ a {
     box-sizing: border-box;
     padding: var(--space-3);
     border: 1px solid var(--color-border);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--color-elevated);
     box-shadow: 0 4px 12px color-mix(in srgb, #000 14%, transparent);
     color: var(--color-text);
@@ -380,7 +384,7 @@ a {
     overflow: auto;
     margin: var(--space-2) 0 0;
     padding: var(--space-2);
-    border-radius: 6px;
+    border-radius: var(--radius-row);
     background: color-mix(in srgb, var(--color-text) 6%, transparent);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -406,7 +410,7 @@ a {
     width: var(--control-height-small);
     height: var(--control-height-small);
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-muted);
     font: inherit;
@@ -431,7 +435,7 @@ a {
     z-index: 10;
     padding: var(--space-1) var(--space-2);
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: color-mix(in srgb, var(--color-text) 7%, var(--color-surface));
     color: var(--color-text-muted);
     font-size: var(--text-sm);
@@ -447,7 +451,7 @@ a {
     transform: translateY(-100%);
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: 4px;
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     box-shadow: 0 2px 8px color-mix(in srgb, #000 14%, transparent);
     pointer-events: auto;
@@ -492,7 +496,7 @@ a {
 #app-recovery button {
     padding: var(--space-2) var(--space-4);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     color: inherit;
     font: inherit;
@@ -740,7 +744,7 @@ a {
     gap: var(--space-1);
     padding: 0 var(--space-1) 0 var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--color-bg);
 }
 
@@ -842,7 +846,7 @@ a {
     overscroll-behavior: contain;
     padding: var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: var(--color-elevated);
     box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
 }
@@ -891,7 +895,7 @@ a {
     align-items: center;
     gap: var(--space-2);
     padding: 5px var(--space-1);
-    border-radius: 4px;
+    border-radius: calc(var(--radius-panel) - var(--space-2));
     font-size: var(--text-base);
     cursor: pointer;
 }
@@ -933,7 +937,7 @@ a {
     width: var(--control-height);
     height: var(--control-height);
     place-items: center;
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-muted);
     font-size: var(--text-lg);
@@ -991,7 +995,7 @@ a {
     width: calc(100% - var(--space-2));
     margin: 1px var(--space-1);
     padding: var(--space-2);
-    border-radius: var(--radius);
+    border-radius: var(--radius-row);
 }
 
 .sidebar-task .task-dot {
@@ -1247,7 +1251,7 @@ a {
     margin: var(--space-2) auto;
     padding: var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     color: var(--color-accent);
     font-size: var(--text-md);
@@ -1319,7 +1323,7 @@ h1 {
     gap: var(--space-3);
     padding: var(--space-5);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
 }
 
@@ -1376,7 +1380,7 @@ h1 {
     max-height: 100%;
     flex-direction: column;
     overflow: hidden;
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
 }
 
 .task-detail-content-main {
@@ -1431,7 +1435,7 @@ h1 {
 .task-action {
     padding: 6px 10px;
     border: 1px solid var(--color-border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     color: inherit;
     font: inherit;
@@ -1468,7 +1472,7 @@ h1 {
     min-width: 190px;
     padding: 4px;
     border: 1px solid var(--color-border);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: var(--color-elevated);
     box-shadow: 0 4px 16px color-mix(in srgb, #000 16%, transparent);
 }
@@ -1492,13 +1496,12 @@ h1 {
 
 .menu-item {
     display: flex;
-    width: calc(100% - 4px);
+    width: 100%;
     align-items: center;
     gap: 8px;
     padding: 3px 6px;
-    margin-inline: 2px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-row);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -1606,7 +1609,7 @@ h1 {
     overflow: hidden;
     overscroll-behavior: contain;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
 }
 
@@ -1618,14 +1621,14 @@ h1 {
     left: -6px;
     width: 12px;
     cursor: ew-resize;
-    border-radius: var(--radius);
+    border-radius: var(--radius-full);
 }
 
 .changed-files-resize-handle::before {
     position: absolute;
     inset: 0 3px;
     content: "";
-    border-radius: var(--radius);
+    border-radius: var(--radius-full);
 }
 
 .changed-files-resize-handle:hover,
@@ -1823,7 +1826,7 @@ h1 {
     padding: var(--space-2);
     overflow: auto;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
     box-shadow: 0 4px 16px color-mix(in srgb, #000 16%, transparent);
 }
@@ -1848,12 +1851,17 @@ h1 {
     width: 100%;
     padding: 3px var(--space-1);
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-row);
     background: transparent;
     color: inherit;
     font: inherit;
     text-align: left;
     cursor: pointer;
+}
+
+.changed-files-tree-popover-panel .changed-files-tree-dir,
+.changed-files-tree-popover-panel .changed-files-tree-file {
+    border-radius: calc(var(--radius-panel) - var(--space-2));
 }
 
 .changed-files-tree-dir:hover,
@@ -1896,7 +1904,7 @@ h1 {
     justify-content: center;
     width: 14px;
     height: 14px;
-    border-radius: 3px;
+    border-radius: var(--radius-chip);
     background: var(--color-bg);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
@@ -1993,6 +2001,7 @@ h1 {
     gap: var(--space-1);
     padding: 0 var(--space-2);
     border: 0;
+    border-radius: var(--radius-row);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -2160,7 +2169,7 @@ h1 {
 .pinned-question {
     padding: var(--space-3);
     border: 1px solid var(--color-accent);
-    border-radius: 10px;
+    border-radius: var(--radius-panel);
     background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
@@ -2184,7 +2193,7 @@ h1 {
     align-items: center;
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: 22px;
+    border-radius: var(--radius-panel);
     background: var(--color-elevated);
 }
 
@@ -2224,7 +2233,7 @@ h1 {
 .composer-send {
     position: absolute;
     top: 50%;
-    right: 6px;
+    right: var(--space-1);
     display: flex;
     width: 28px;
     height: 28px;
@@ -2233,7 +2242,7 @@ h1 {
     justify-content: center;
     transform: translateY(-50%);
     border: 0;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-muted);
     cursor: pointer;
@@ -2321,7 +2330,7 @@ h1 {
 .composer-send-now {
     padding: 2px 8px;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -2365,7 +2374,6 @@ h1 {
 .composer-menu-details {
     display: flex;
     flex-direction: column;
-    padding: 2px;
 }
 
 .composer-menu-details .task-metadata {
@@ -2381,7 +2389,7 @@ h1 {
     width: 100%;
     max-width: 100%;
     padding: 5px 6px;
-    border-radius: 6px;
+    border-radius: var(--radius-row);
 }
 
 /* `justify-content: space-between` centers the value between the label and
@@ -2456,7 +2464,7 @@ h1 {
 .task-metadata-chip {
     padding: 1px var(--space-1);
     min-height: 24px;
-    border-radius: 4px;
+    border-radius: var(--radius-chip);
 }
 
 .task-metadata-chip:hover,
@@ -2549,7 +2557,7 @@ h1 {
     align-items: baseline;
     gap: 4px;
     padding: 2px var(--space-2);
-    border-radius: var(--radius);
+    border-radius: var(--radius-chip);
     background: var(--color-sidebar);
     color: var(--color-text-muted);
     font-family: var(--font-mono);
@@ -2709,7 +2717,7 @@ h1 {
     font-size: var(--text-base-mono);
     background: var(--color-elevated);
     padding: 1px 4px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-chip);
 }
 
 .markdown-content a {
@@ -2744,7 +2752,7 @@ h1 {
     height: var(--task-box);
     margin: 0 var(--space-2) 0 0;
     border: 1px solid var(--color-text-muted);
-    border-radius: 3px;
+    border-radius: var(--radius-chip);
     background: var(--color-surface);
     vertical-align: baseline;
 }
@@ -2869,7 +2877,7 @@ h1 {
     --transcript-card-bg: color-mix(in srgb, var(--color-text) 2.5%, var(--color-bg));
     padding: var(--space-3) var(--space-4);
     border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-panel);
     background: var(--transcript-card-bg);
 }
 
@@ -2936,7 +2944,7 @@ h1 {
     gap: var(--space-1);
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: var(--color-hover);
     color: var(--color-text-muted);
     cursor: pointer;
@@ -3075,7 +3083,7 @@ h1 {
     margin-block: var(--space-2);
     padding: var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-panel);
     background: var(--color-elevated);
 }
 
@@ -3374,7 +3382,7 @@ h1 {
 .trace-expansion {
     margin: var(--space-2) 0 var(--space-3);
     padding: var(--space-3);
-    border-radius: 6px;
+    border-radius: var(--radius-row);
 }
 
 .trace-expansion-command {
@@ -3388,7 +3396,7 @@ h1 {
     padding: var(--space-3);
     overflow: hidden;
     border: 1px solid var(--color-border);
-    border-radius: 8px;
+    border-radius: var(--radius-panel);
     background: var(--color-elevated);
     color: var(--color-text);
 }
@@ -3495,7 +3503,7 @@ h1 {
     display: block;
     max-width: 100%;
     max-height: 360px;
-    border-radius: 6px;
+    border-radius: var(--radius-row);
     border: 1px solid var(--color-border);
     object-fit: contain;
 }
@@ -3516,7 +3524,7 @@ h1 {
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--space-3);
-    border-radius: 6px;
+    border-radius: var(--radius-row);
 }
 
 .trace-file-preview-modal-title {
@@ -3684,7 +3692,7 @@ button,
 select,
 input:not([type="checkbox"]):not([type="radio"]),
 textarea {
-    border-radius: 6px;
+    border-radius: var(--radius-control);
 }
 
 button:focus:not(:focus-visible),
@@ -3732,18 +3740,15 @@ select {
     width: var(--control-height);
     height: var(--control-height);
     min-height: var(--control-height);
-    border-radius: 6px;
 }
 
 .menu-panel {
-    border-radius: 8px;
     padding: 4px;
 }
 
 .menu-item {
     min-height: var(--control-height-small);
     padding-block: 3px;
-    border-radius: 4px;
 }
 
 .sidebar-topbar,
@@ -3842,7 +3847,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     flex-direction: column;
     width: 100%;
     max-height: 100%;
-    border-radius: var(--radius);
+    border-radius: var(--radius-window);
     background: var(--color-elevated);
     box-shadow: 0 16px 48px color-mix(in srgb, #000 20%, transparent);
     contain: layout paint;
@@ -3890,7 +3895,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .modal-dialog-settings {
     width: min(100%, 68rem);
     height: min(100%, 48rem);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-window);
 }
 
 .modal-dialog-settings > .modal-close {
@@ -3962,7 +3967,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .usage-tab {
     border: 0;
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-muted);
     font: inherit;
@@ -3989,7 +3994,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .usage-period-option {
     border: 0;
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-muted);
     font: inherit;
@@ -4027,7 +4032,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     margin: 0;
     padding: var(--space-2) var(--space-3);
     background: var(--color-sidebar);
-    border-radius: var(--radius);
+    border-radius: var(--radius-panel);
     min-width: 0;
 }
 
@@ -4248,7 +4253,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .usage-bar-track {
     background: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
-    border-radius: var(--radius);
+    border-radius: var(--radius-full);
     height: 8px;
 }
 
@@ -4256,7 +4261,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     display: block;
     height: 100%;
     background: var(--color-accent);
-    border-radius: var(--radius);
+    border-radius: var(--radius-full);
 }
 
 .usage-bar-value {
@@ -4293,7 +4298,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     color: var(--color-text);
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     padding: 2px var(--space-1);
 }
 
@@ -4335,7 +4340,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     white-space: nowrap;
 }
 
-.usage-skeleton { height: 24rem; background: var(--color-sidebar); border-radius: var(--radius); }
+.usage-skeleton { height: 24rem; background: var(--color-sidebar); border-radius: var(--radius-panel); }
 
 @media (max-width: 700px) {
     .usage-page { padding: var(--space-4); }
@@ -4392,7 +4397,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: var(--control-height);
     padding: var(--space-2) var(--space-3);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
@@ -4491,7 +4496,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     padding: 0;
     overflow: hidden;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
     list-style: none;
 }
@@ -4604,7 +4609,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: var(--space-6);
     padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) * 2 + var(--space-4));
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-control);
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
@@ -4656,7 +4661,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     gap: var(--space-3);
     padding: 0 var(--space-3);
     border: 0;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-row);
     background: transparent;
     color: var(--color-text);
     font: inherit;
@@ -4738,7 +4743,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     gap: var(--space-1);
     padding: var(--space-2) var(--space-4);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-control);
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
@@ -4804,7 +4809,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     padding: 0 var(--space-2);
     border: 1px solid var(--color-border);
     border-bottom-width: 2px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-chip);
     background: var(--color-bg);
     font: inherit;
     font-size: var(--text-md);
@@ -4843,7 +4848,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 }
 
 .settings-worker-row-main:focus-visible::after {
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-panel);
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
 }
@@ -4904,7 +4909,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-skeleton-block {
     display: block;
-    border-radius: var(--radius);
+    border-radius: var(--radius-chip);
     background: var(--color-border);
 }
 
@@ -5019,7 +5024,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: var(--control-height);
     padding: var(--space-2) var(--space-3);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     color: var(--color-text);
     font: inherit;
@@ -5082,7 +5087,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: var(--control-height);
     padding: 0 var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     color: var(--color-text);
 }
@@ -5103,7 +5108,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     margin-top: var(--space-4);
     padding: var(--space-4) var(--space-5);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
 }
 
@@ -5192,7 +5197,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     width: 100%;
     height: 100%;
     border: 1px solid var(--color-text-muted);
-    border-radius: calc(var(--radius) * 2);
+    border-radius: var(--radius-full);
     background: var(--color-bg);
     transition: background-color 0.15s ease;
 }
@@ -5352,7 +5357,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: var(--control-height);
     padding: 0 var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: var(--color-surface);
     color: var(--color-text);
     font: inherit;
@@ -5492,7 +5497,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     min-height: var(--control-height);
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-control);
     background: var(--color-bg);
     color: var(--color-text);
     font: inherit;
