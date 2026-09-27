@@ -5,7 +5,7 @@ export function IconGallery() {
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Icons — 16 and 24</h1>
       <p style={{ opacity: 0.6, marginBottom: 20, fontSize: 13 }}>
-        Outline 1.5 on 16-unit grid, round caps/joins, currentColor, 12×14 centred.
+        Phosphor Light on a 256-unit grid, filled outline paths, currentColor.
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
         {iconRegistry.map(({ name, Component }) => (
