@@ -19,6 +19,44 @@ pub const MAX_DEPENDENCY_DEPTH: usize = 64;
 pub struct DependencyBlocker {
     pub id: String,
     pub state: TaskState,
+    /// Whether a worker ever picked it up.
+    pub started: bool,
+}
+
+impl DependencyBlocker {
+    pub fn of(task: &Task) -> Self {
+        Self {
+            id: task.id.clone(),
+            state: task.state,
+            started: task.shipped_prompt.is_some(),
+        }
+    }
+
+    /// Cancelled before any worker picked it up. `run` never counts this as a
+    /// failure, so a cancel made to reorder work cannot start its dependents.
+    pub fn withdrawn(&self) -> bool {
+        self.state == TaskState::Cancelled && !self.started
+    }
+
+    pub fn stops_dependents(&self, policy: OnBlockerFailure) -> bool {
+        is_blocking_end(self.state) && (policy == OnBlockerFailure::Hold || self.withdrawn())
+    }
+}
+
+pub fn prerequisites_met(policy: OnBlockerFailure, blockers: &[DependencyBlocker]) -> bool {
+    blockers.iter().all(|blocker| {
+        blocker.state == TaskState::Completed
+            || (policy == OnBlockerFailure::Run
+                && is_blocking_end(blocker.state)
+                && !blocker.withdrawn())
+    })
+}
+
+pub(crate) fn is_blocking_end(state: TaskState) -> bool {
+    matches!(
+        state,
+        TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
+    )
 }
 
 pub fn add_dependencies(
@@ -71,6 +109,62 @@ pub fn add_dependencies(
     })
 }
 
+/// Refuses a set that would close a cycle.
+pub fn replace_dependencies(
+    tx: &rusqlite::Transaction<'_>,
+    task_id: &str,
+    blocker_ids: &[String],
+    created_at: &str,
+) -> Result<(), StoreError> {
+    tx.execute("DELETE FROM task_dependencies WHERE task_id=?", [task_id])?;
+    for blocker in blocker_ids {
+        let exists: Option<i64> = tx
+            .query_row("SELECT 1 FROM tasks WHERE id=?", [blocker], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        if exists.is_none() {
+            return Err(StoreError::Refusal(format!(
+                "unknown prerequisite task: {blocker}"
+            )));
+        }
+    }
+    if let Some(cycle) = dependency_cycle(tx, task_id, blocker_ids)? {
+        return Err(StoreError::Refusal(format!(
+            "dependency cycle: {}",
+            cycle.join(" -> ")
+        )));
+    }
+    for blocker in blocker_ids {
+        tx.execute(
+            "INSERT INTO task_dependencies(task_id,blocker_id,created_at) VALUES(?,?,?)",
+            params![task_id, blocker, created_at],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn blocker_policy(store: &Store, task_id: &str) -> Result<OnBlockerFailure, StoreError> {
+    let policy = store.with_connection(|connection| {
+        Ok(connection
+            .query_row(
+                "SELECT on_blocker_failure FROM tasks WHERE id=?",
+                [task_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    })?;
+    Ok(match policy.as_deref() {
+        Some("run") => OnBlockerFailure::Run,
+        _ => OnBlockerFailure::Hold,
+    })
+}
+
+pub fn dependency_ids(store: &Store, task_id: &str) -> Result<Vec<String>, StoreError> {
+    edge_ids(store, task_id, false)
+}
+
 pub fn dependency_closure(
     store: &Store,
     seed_ids: &[String],
@@ -120,7 +214,7 @@ pub fn unsettled_blockers(
 ) -> Result<Vec<DependencyBlocker>, StoreError> {
     store.with_connection(|connection| {
         let mut statement = connection.prepare(
-            "SELECT tasks.id,tasks.state FROM task_dependencies JOIN tasks ON tasks.id=task_dependencies.blocker_id WHERE task_dependencies.task_id=? AND tasks.state != 'completed' ORDER BY task_dependencies.created_at,task_dependencies.rowid",
+            "SELECT tasks.id,tasks.state,tasks.shipped_prompt IS NOT NULL FROM task_dependencies JOIN tasks ON tasks.id=task_dependencies.blocker_id WHERE task_dependencies.task_id=? AND tasks.state != 'completed' ORDER BY task_dependencies.created_at,task_dependencies.rowid",
         )?;
         Ok(statement
             .query_map([task_id], |row| {
@@ -130,6 +224,7 @@ pub fn unsettled_blockers(
                 Ok(DependencyBlocker {
                     id: row.get(0)?,
                     state,
+                    started: row.get(2)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?)

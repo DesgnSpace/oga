@@ -32,6 +32,8 @@ use crate::{
     authorization,
     cancel::{self, CancelRequest},
     complete::{self, CompletionAssertion},
+    dependencies::{self, DependencyBlocker, MAX_PREREQUISITES},
+    edit::{self, EditRequest},
     handoff::{self, HandoffRequest},
     holds::{HoldSweep, HoldSweepReport},
     lifecycle::{self, ActiveRuns, RunOptions},
@@ -44,7 +46,6 @@ use crate::{
     waiting,
 };
 
-const MAX_PREREQUISITES: usize = 16;
 const DEPENDENCY_EXPIRY_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 /// 15 min fallback when a provider gives no reset time.
 const RATE_LIMIT_DEFAULT_DELAY_MS: i64 = 15 * 60 * 1_000;
@@ -188,6 +189,7 @@ pub struct DispatchPlan {
     pub task_selection: Option<oga_domain::TaskSelection>,
     pub caller_id: Option<String>,
     pub dependencies: Vec<String>,
+    pub on_blocker_failure: OnBlockerFailure,
     pub hold: Option<oga_domain::TaskHold>,
     pub launch: bool,
     pub checkout_preparation: Option<PlannedWorktree>,
@@ -262,6 +264,10 @@ impl Dispatcher {
 
     pub async fn handoff(&self, request: HandoffRequest) -> Result<Task, ContinuationError> {
         handoff::handoff(self, request).await
+    }
+
+    pub async fn edit(&self, request: EditRequest) -> Result<Task, ContinuationError> {
+        edit::edit(self, request).await
     }
 
     pub async fn cancel(&self, request: CancelRequest) -> Result<Task, ContinuationError> {
@@ -480,6 +486,7 @@ impl Dispatcher {
             task_selection,
             caller_id: request.caller_id,
             dependencies: request.depends_on,
+            on_blocker_failure: request.on_blocker_failure,
             hold,
             launch: checkout_ready_state.is_none() && state == TaskState::Queued,
             checkout_preparation,
@@ -1073,23 +1080,27 @@ impl Dispatcher {
             }
         };
         for queued in released {
-            let profile = self.store.repositories().profiles().get(&queued.profile_id);
-            match profile {
-                Ok(Some(profile)) => {
-                    let prompt = WorkerPromptInput {
-                        task: queued.prompt.clone(),
-                        attribution: prompt::attribution_for_task(&queued, profile.provider),
-                        ..WorkerPromptInput::default()
-                    };
-                    self.launch_task(queued, profile, prompt, None);
-                }
-                _ => {
-                    let _ = lifecycle::block_queued_task(
-                        &self.store,
-                        &queued.id,
-                        "unknown profile for dependent task",
-                    );
-                }
+            self.launch_waiting(queued);
+        }
+    }
+
+    /// Start a queued task that never ran, from its brief as it now reads.
+    pub(crate) fn launch_waiting(&self, queued: Task) {
+        match self.store.repositories().profiles().get(&queued.profile_id) {
+            Ok(Some(profile)) => {
+                let prompt = WorkerPromptInput {
+                    task: queued.prompt.clone(),
+                    attribution: prompt::attribution_for_task(&queued, profile.provider),
+                    ..WorkerPromptInput::default()
+                };
+                self.launch_task(queued, profile, prompt, None);
+            }
+            _ => {
+                let _ = lifecycle::block_queued_task(
+                    &self.store,
+                    &queued.id,
+                    "unknown profile for dependent task",
+                );
             }
         }
     }
@@ -1197,25 +1208,17 @@ impl Dispatcher {
         if dependencies.is_empty() {
             return Ok(DependencyPlan::ready());
         }
-        let states = blockers.iter().map(|task| task.state).collect::<Vec<_>>();
-        if lifecycle::prerequisites_met(request.on_blocker_failure, &states) {
+        let prerequisites = blockers
+            .iter()
+            .map(DependencyBlocker::of)
+            .collect::<Vec<_>>();
+        if dependencies::prerequisites_met(request.on_blocker_failure, &prerequisites) {
             return Ok(DependencyPlan::ready());
         }
-        if blockers.iter().any(|task| {
-            matches!(
-                task.state,
-                TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-            )
-        }) {
-            let blocker = blockers
-                .iter()
-                .find(|task| {
-                    matches!(
-                        task.state,
-                        TaskState::Failed | TaskState::Cancelled | TaskState::Blocked
-                    )
-                })
-                .expect("a blocker was found");
+        if let Some(blocker) = blockers
+            .iter()
+            .find(|task| DependencyBlocker::of(task).stops_dependents(request.on_blocker_failure))
+        {
             let reason = format!(
                 "did not start: {} ended {}",
                 blocker.title.as_deref().unwrap_or(&blocker.id),
@@ -1489,6 +1492,12 @@ fn persist_plan(store: &Store, mut plan: DispatchPlan) -> Result<DispatchPlan, D
                 params![task.id, blocker, task.created_at],
             )?;
         }
+        if plan.on_blocker_failure == OnBlockerFailure::Run {
+            tx.execute(
+                "UPDATE tasks SET on_blocker_failure='run' WHERE id=?",
+                [task.id.as_str()],
+            )?;
+        }
         append_event(tx, &task.id, "created", state, &json!({}), &task.created_at, None)?;
         if let Some(hold) = plan.hold.as_ref().filter(|_| !released) {
             let args = serde_json::to_string(&hold.args)
@@ -1554,23 +1563,25 @@ fn prerequisites_already_met(
     tx: &rusqlite::Transaction<'_>,
     plan: &DispatchPlan,
 ) -> Result<bool, StoreError> {
-    let policy = plan
-        .hold
-        .as_ref()
-        .and_then(|hold| hold.args.on_blocker_failure)
-        .unwrap_or(OnBlockerFailure::Hold);
-    let states = plan
+    let policy = plan.on_blocker_failure;
+    let prerequisites = plan
         .dependencies
         .iter()
         .map(|id| {
-            let state = tx.query_row("SELECT state FROM tasks WHERE id=?", [id], |row| {
-                row.get::<_, String>(0)
-            })?;
-            serde_json::from_str(&format!("\"{state}\""))
-                .map_err(|error| StoreError::Refusal(format!("invalid task state: {error}")))
+            let (state, started) = tx.query_row(
+                "SELECT state,shipped_prompt IS NOT NULL FROM tasks WHERE id=?",
+                [id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
+            )?;
+            Ok(DependencyBlocker {
+                id: id.clone(),
+                state: serde_json::from_str(&format!("\"{state}\""))
+                    .map_err(|error| StoreError::Refusal(format!("invalid task state: {error}")))?,
+                started,
+            })
         })
-        .collect::<Result<Vec<TaskState>, StoreError>>()?;
-    Ok(lifecycle::prerequisites_met(policy, &states))
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    Ok(dependencies::prerequisites_met(policy, &prerequisites))
 }
 
 fn kind_string(kind: TaskKind) -> &'static str {

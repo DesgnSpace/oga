@@ -14,6 +14,7 @@ pub mod complete;
 pub mod deliveries;
 pub mod dependencies;
 pub mod dispatch;
+pub mod edit;
 pub mod follow_ups;
 pub mod handoff;
 pub mod handoff_brief;
@@ -179,6 +180,7 @@ pub use dispatch::{
     DelegateRequest, DispatchError, DispatchPlan, DispatchRequest, DispatchResult, Dispatcher,
     TaskService,
 };
+pub use edit::{EditRequest, edit};
 pub use follow_ups::{
     FollowUpFeed, FollowUpQueue, FollowUpService, QueuedFollowUp, clear_follow_ups,
     count_follow_ups, feed_follow_up, list_follow_ups, queue_follow_up, remove_follow_up_at,
