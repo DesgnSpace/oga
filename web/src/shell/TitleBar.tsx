@@ -10,6 +10,7 @@ export const TERMINAL_RESUME_LABEL = "Continue in terminal";
 export interface TaskTitleBarInfo {
   title: string;
   diffAdded: number;
+  diffRemoved: number;
   showingChanges: boolean;
   onToggleChanges: () => void;
   status: ReactNode;
@@ -126,16 +127,16 @@ export function TitleBar({
         <span className="title-bar-drag" data-tauri-drag-region />
         {task && (
           <div className="title-bar-actions">
-            {task.diffAdded > 0 && (
-              <span className="title-bar-diff" title={`${task.diffAdded} lines added`}>
-                {`+${task.diffAdded}`}
-                <span className="visually-hidden"> lines added</span>
-              </span>
-            )}
-            {task.diffAdded > 0 && <span className="title-bar-stat-separator" aria-hidden="true">·</span>}
             <span className="title-bar-meta" data-tauri-drag-region={undefined}>
               {task.secondary}
             </span>
+            {(task.diffAdded > 0 || task.diffRemoved > 0) && (
+              <span className="title-bar-diff" title={`${task.diffAdded} lines added, ${task.diffRemoved} removed`}>
+                <span className="diff-stat-added" aria-hidden="true">{`+${task.diffAdded}`}</span>
+                <span className="diff-stat-removed" aria-hidden="true">{`-${task.diffRemoved}`}</span>
+                <span className="visually-hidden">{`${task.diffAdded} lines added, ${task.diffRemoved} removed`}</span>
+              </span>
+            )}
             <button
               className={`icon-button${task.showingChanges ? " icon-button-active" : ""}`}
               type="button"
