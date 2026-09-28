@@ -10,7 +10,7 @@ use std::{
 use chrono::{Local, SecondsFormat, TimeZone, Utc};
 use oga_client::{
     CompletionRequest, DispatchRequest, EditRequest, EventFrame, EventStreamQuery, HandoffRequest,
-    LoopbackClient, QueryInitRequest, QueryRequest, ResumeRequest, StateQuery,
+    InstructRequest, LoopbackClient, QueryInitRequest, QueryRequest, ResumeRequest, StateQuery,
 };
 use oga_config::{
     CALLER_PROMPTS_KEY, LoveDestination, ResolvedProfiles, canonical_cwd, global_cwd,
@@ -156,6 +156,7 @@ async fn run(args: Vec<String>) -> CliResult<i32> {
         "resume" => run_resume(&args[1..]).await,
         "handoff" => run_handoff(&args[1..]).await,
         "edit" => run_edit(&args[1..]).await,
+        "instruct" => run_instruct(&args[1..]).await,
         "complete" => run_complete(&args[1..]).await,
         "cleanup" => run_cleanup(&args[1..]).await,
         "config" => run_config(&args[1..]).await,
@@ -781,6 +782,13 @@ Usage: oga <command> [options]
                        --effort, --parent, --timeout 2h, and -m to add an
                        instruction. --requeue puts a cancelled one back to
                        waiting.
+  instruct <task-id>... -m "<instruction>"
+                       Tell one or more tasks the same thing, whatever state
+                       each is in. One not started gets it in its brief, a
+                       running one gets it mid-run or right after, and a
+                       stopped one keeps it for its next resume. Add --now to
+                       start a stopped one with it. Prints what happened to
+                       each task.
   complete <task-id>   Mark a task complete.
   cleanup              Free the disk that old finished work is holding. Shows
                        what would go and deletes nothing until you say so.
@@ -802,7 +810,7 @@ First run:
 
 fn unknown_command_message(command: &str) -> String {
     format!(
-        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, handoff, edit, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
+        "unknown command '{command}'\nCommands: serve, watch, tail, query, relearn, love, inflight, delegate, tasks, inspect, archive, restore, cancel, resume, handoff, edit, instruct, complete, cleanup, config, version, help. Run 'oga help' for what each one does."
     )
 }
 
@@ -1593,6 +1601,74 @@ async fn run_edit(args: &[String]) -> CliResult<i32> {
         }
     }
     Ok(0)
+}
+
+const INSTRUCT_USAGE: &str =
+    "usage: oga instruct <task-id>... -m \"<instruction>\" [--now] [--json]";
+
+async fn run_instruct(args: &[String]) -> CliResult<i32> {
+    let mut instruction = None;
+    let mut now = false;
+    let mut json_output = false;
+    let mut ids = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "-m" | "--message" => {
+                index += 1;
+                instruction = Some(
+                    args.get(index)
+                        .cloned()
+                        .ok_or_else(|| CliError::new("-m needs a value"))?,
+                );
+            }
+            "--now" => now = true,
+            "--json" => json_output = true,
+            value if value.starts_with("--message=") => {
+                instruction = Some(value.trim_start_matches("--message=").to_owned());
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::new(format!("unknown option: {value}")));
+            }
+            value => ids.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    let instruction = instruction
+        .filter(|instruction| !instruction.trim().is_empty())
+        .ok_or_else(|| CliError::new(INSTRUCT_USAGE))?;
+    if ids.is_empty() {
+        return Err(CliError::new(INSTRUCT_USAGE));
+    }
+    let client = broker_client()?;
+    let mut tasks = Vec::with_capacity(ids.len());
+    for id in &ids {
+        tasks.push(resolve_task(&client, id).await?);
+    }
+    let response = client
+        .instruct_tasks(&InstructRequest {
+            task_ids: tasks.iter().map(|task| task.id.clone()).collect(),
+            instruction,
+            now,
+        })
+        .await?;
+    let refused = response
+        .results
+        .iter()
+        .any(|result| result.outcome == "refused");
+    if json_output {
+        print_json(&serde_json::to_value(&response)?)?;
+    } else {
+        for (result, task) in response.results.iter().zip(&tasks) {
+            let title = task_title(task);
+            match (&result.error, &result.note) {
+                (Some(error), _) => println!("Refused {} {title}: {error}", result.id),
+                (None, Some(note)) => println!("{} {title}: {note}", result.id),
+                (None, None) => println!("{} {title}: {}", result.id, result.outcome),
+            }
+        }
+    }
+    Ok(if refused { 1 } else { 0 })
 }
 
 async fn run_complete(args: &[String]) -> CliResult<i32> {

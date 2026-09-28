@@ -10,8 +10,10 @@ use crate::{
     dependencies::{self, DependencyBlocker, MAX_PREREQUISITES},
     dispatch::Dispatcher,
     holds,
+    instruct::instruct_call,
     lifecycle::{self, now_iso},
-    require_existing_worktree, require_profile, require_task, validate_model, waiting,
+    require_existing_worktree, require_profile, require_task, saved_instructions, validate_model,
+    waiting,
 };
 
 const ADDED_INSTRUCTION_HEADING: &str = "## Added before this task started";
@@ -139,9 +141,12 @@ pub async fn edit(
         .as_deref()
         .map(str::trim)
         .filter(|instruction| !instruction.is_empty());
-    let prompt = match instruction {
-        Some(instruction) => format!(
-            "{}\n\n{ADDED_INSTRUCTION_HEADING}\n\n{instruction}",
+    // A task cancelled before it started keeps what was saved on it in its brief.
+    let saved = saved_instructions::waiting(store, &old.id)?;
+    let added = saved_instructions::with_saved(instruction.map(str::to_owned), &saved);
+    let prompt = match &added {
+        Some(added) => format!(
+            "{}\n\n{ADDED_INSTRUCTION_HEADING}\n\n{added}",
             old.prompt.trim_end()
         ),
         None => old.prompt.clone(),
@@ -208,6 +213,7 @@ pub async fn edit(
             )));
         }
         dependencies::replace_dependencies(tx, &old.id, &prerequisite_ids, &now)?;
+        saved_instructions::mark_sent(tx, &old.id, state, saved.len(), &now)?;
         tx.execute("DELETE FROM task_holds WHERE task_id=?", [old.id.as_str()])?;
         if requeued {
             append_event(
@@ -278,8 +284,9 @@ fn require_editable(task: &Task, request: &EditRequest) -> Result<(), Continuati
     }
     if task.shipped_prompt.is_some() {
         return Err(ContinuationError::Refusal(format!(
-            "task {} has already run, so its brief and wait are fixed; steer it while it runs, or resume it with an instruction",
-            task.id
+            "task {} has already run, so its brief and wait are fixed; to give it an instruction in any state, call {}",
+            task.id,
+            instruct_call(&task.id, request.instruction.as_deref())
         )));
     }
     match task.state {
@@ -293,15 +300,17 @@ fn require_editable(task: &Task, request: &EditRequest) -> Result<(), Continuati
         }
         TaskState::Queued | TaskState::PreparingCheckout => {
             return Err(ContinuationError::Refusal(format!(
-                "task {} is starting now, so it can no longer be edited; steer it once it runs",
-                task.id
+                "task {} is starting now, so it can no longer be edited; to give it an instruction, call {}",
+                task.id,
+                instruct_call(&task.id, request.instruction.as_deref())
             )));
         }
         state => {
             return Err(ContinuationError::Refusal(format!(
-                "only a task that has not started can be edited; this one is {}: {}",
+                "only a task that has not started can be edited; this one is {}: {}. To give it an instruction, call {}",
                 state.as_str(),
-                task.id
+                task.id,
+                instruct_call(&task.id, request.instruction.as_deref())
             )));
         }
     }

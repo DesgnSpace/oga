@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::{
     ContinuationError, acp_run::Delivered, dispatch::Dispatcher, follow_ups::queue_follow_up,
-    lifecycle::now_iso, require_task, validate_model,
+    instruct::instruct_call, lifecycle::now_iso, require_task, validate_model,
 };
 
 /// Why no instruction travels with a model change, whether or not the run
@@ -99,21 +99,14 @@ pub async fn steer(
         )));
     }
     if task.state != TaskState::Running {
-        record_rejection(
-            dispatcher,
-            &task,
-            instruction.as_deref(),
-            &format!(
-                "only a running task takes an instruction; this one is {}. Resume it instead: {}",
-                task.state.as_str(),
-                task.id
-            ),
-        )?;
-        return Err(ContinuationError::Refusal(format!(
-            "only a running task takes an instruction; this one is {}. Resume it instead: {}",
+        let reason = format!(
+            "only a running task can be steered; this one is {}: {}. To give it an instruction in any state, call {}",
             task.state.as_str(),
-            task.id
-        )));
+            task.id,
+            instruct_call(&task.id, instruction.as_deref())
+        );
+        record_rejection(dispatcher, &task, instruction.as_deref(), &reason)?;
+        return Err(ContinuationError::Refusal(reason));
     }
     let state = control_state(dispatcher, &task);
     let Some(instruction) = instruction else {

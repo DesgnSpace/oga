@@ -11,7 +11,7 @@ use crate::{
     handoff_brief::{FreshSessionCause, HandoffBriefOptions, handoff_brief},
     holds::{HOLD_EXPIRY, HoldSweep},
     lifecycle::now_iso,
-    require_existing_worktree, require_profile, require_task, resume_prompt,
+    require_existing_worktree, require_profile, require_task, resume_prompt, saved_instructions,
     schedule::{StartAt, parse_start_at},
     validate_model, waiting,
 };
@@ -94,12 +94,14 @@ pub async fn resume(
         .map(str::trim)
         .filter(|instruction| !instruction.is_empty())
         .map(str::to_owned);
-    if old.state == TaskState::Completed && instruction.is_none() {
+    let saved = saved_instructions::waiting(dispatcher.store(), &old.id)?;
+    if old.state == TaskState::Completed && instruction.is_none() && saved.is_empty() {
         return Err(ContinuationError::Refusal(format!(
-            "task cannot be resumed without an instruction: {}",
-            old.id
+            "a completed task resumes only with an instruction; pass one, as in resume {}",
+            json!({"taskId": old.id, "instruction": "<instruction>"})
         )));
     }
+    let instruction = saved_instructions::with_saved(instruction, &saved);
     let mut recreated_worktree = false;
     if let Some(worktree) = &old.worktree {
         if !std::path::Path::new(&worktree.path).join(".git").exists() {
@@ -160,7 +162,12 @@ pub async fn resume(
                 dropped.join(" and ")
             )));
         }
-        return hold_until(dispatcher, &old, instruction, start_at);
+        let held = hold_until(dispatcher, &old, instruction, start_at)?;
+        dispatcher.store().transaction(|tx| {
+            saved_instructions::mark_sent(tx, &old.id, held.state, saved.len(), &now_iso())?;
+            Ok(())
+        })?;
+        return Ok(held);
     }
     let now = now_iso();
     let attempts = close_attempt(&old, &now, false);
@@ -244,6 +251,7 @@ pub async fn resume(
         if let Some(instruction) = &instruction {
             resumed_payload["instruction"] = json!(instruction);
         }
+        saved_instructions::mark_sent(tx, &old.id, TaskState::Queued, saved.len(), &now)?;
         append_event(
             tx,
             &old.id,

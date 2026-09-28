@@ -539,6 +539,35 @@ impl ReplyRequest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructRequest {
+    pub task_ids: Vec<String>,
+    pub instruction: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub now: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct InstructResponse {
+    pub results: Vec<InstructResult>,
+}
+
+/// One task's answer: `outcome` is appended, delivered, queued, saved,
+/// resumed, or refused, and a refusal carries `error`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructResult {
+    pub id: String,
+    pub outcome: String,
+    #[serde(default)]
+    pub state: Option<TaskState>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SteerRequest {
     #[serde(skip_serializing_if = "Option::is_none")]

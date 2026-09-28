@@ -317,7 +317,7 @@ async fn cancelling_a_task_without_a_checkout_never_mentions_one() {
 }
 
 #[tokio::test]
-async fn resuming_a_running_task_is_refused_and_points_at_steer() {
+async fn resuming_a_running_task_is_refused_and_points_at_instruct() {
     let (_directory, server) = test_server();
     let running = task("task-running", TaskState::Running);
     insert(&server, &running);
@@ -339,7 +339,11 @@ async fn resuming_a_running_task_is_refused_and_points_at_steer() {
     );
     let next = body["next"].as_array().expect("next");
     assert_eq!(next.len(), 1);
-    assert_eq!(next[0]["tool"], json!("steer"));
+    assert_eq!(next[0]["tool"], json!("instruct"));
+    assert_eq!(
+        next[0]["arguments"],
+        json!({ "taskId": [running.id], "instruction": "look at the other file too" })
+    );
 }
 
 #[tokio::test]

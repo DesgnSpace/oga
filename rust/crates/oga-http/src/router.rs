@@ -155,6 +155,7 @@ pub fn router(state: HttpState) -> Router {
             delete(tasks::remove_follow_up),
         )
         .route("/api/tasks/{id}/steer", post(tasks::steer))
+        .route("/api/tasks/instruct", post(tasks::instruct))
         .route("/api/tasks/{id}/handoff", post(tasks::handoff))
         .route("/api/tasks/{id}/edit", post(tasks::edit))
         .route("/api/tasks/{id}/worktree", delete(tasks::remove_worktree))

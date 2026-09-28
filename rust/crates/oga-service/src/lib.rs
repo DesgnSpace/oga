@@ -19,11 +19,13 @@ pub mod follow_ups;
 pub mod handoff;
 pub mod handoff_brief;
 pub mod holds;
+pub mod instruct;
 pub mod lifecycle;
 pub mod prompt;
 pub mod reconcile;
 pub mod reply;
 pub mod resume;
+pub mod saved_instructions;
 pub mod schedule;
 pub mod steer;
 pub mod transport;
@@ -195,6 +197,7 @@ pub use holds::{
     HoldService, HoldSweep, HoldSweepReport, MAX_RECHECK, MIN_RECHECK, arm_hold, drop_hold,
     due_holds, get_hold, touch_hold,
 };
+pub use instruct::{InstructOutcome, InstructRequest, Instructed, instruct};
 pub use lifecycle::{ActiveRuns, LifecycleError, RunOutcome, run_task, run_task_with_prompt};
 pub use prompt::{
     WorkerOutcome, WorkerPromptInput, assemble_worker_message, classify_failure,

@@ -3150,6 +3150,7 @@ fn oga_tool_title(operation: &str, input: Option<&Map<String, Value>>) -> String
         "reply" => "Answer question".into(),
         "resume" => "Continue task".into(),
         "steer" => "Guide task".into(),
+        "instruct" => "Instruct tasks".into(),
         "handoff" => "Move task".into(),
         "cancel" => "Stop task".into(),
         "complete" => "Confirm task complete".into(),
@@ -3185,6 +3186,7 @@ fn oga_tool_verb(operation: &str, input: Option<&Map<String, Value>>, complete: 
         "reply" => completed("Answered", "Answering"),
         "resume" => completed("Continued", "Continuing"),
         "steer" => completed("Guided", "Guiding"),
+        "instruct" => completed("Instructed", "Instructing"),
         "handoff" => completed("Moved", "Moving"),
         "cancel" => completed("Stopped", "Stopping"),
         "complete" => completed("Confirmed", "Confirming"),
@@ -3233,8 +3235,8 @@ fn oga_subject(operation: &str, input: Option<&Map<String, Value>>) -> Option<St
         "models" => string_value(input, &["query", "profile", "provider"])
             .or_else(|| Some("available models".into())),
         "worktree-remove" => string_value(input, &["project"]).or_else(|| task_id_subject(input)),
-        "inspect" | "reply" | "resume" | "steer" | "handoff" | "cancel" | "complete"
-        | "archive" => task_id_subject(input),
+        "inspect" | "reply" | "resume" | "steer" | "instruct" | "handoff" | "cancel"
+        | "complete" | "archive" => task_id_subject(input),
         _ => ["query", "pattern", "description", "name", "path", "project"]
             .into_iter()
             .find_map(|key| string_value(input, &[key])),
@@ -4157,6 +4159,13 @@ fn oga_result_summary(operation: &str, output: &str) -> Option<String> {
         "reply" => Some("Answer sent".into()),
         "resume" => Some("Task continued".into()),
         "steer" => Some("Instruction sent".into()),
+        "instruct" => {
+            let results = value.get("results").and_then(Value::as_array)?;
+            Some(match results.len() {
+                1 => "Instruction sent".into(),
+                count => format!("Instruction sent to {count} tasks"),
+            })
+        }
         "handoff" => Some("Task moved".into()),
         "cancel" => action_result_summary(&value, "Task stopped", "tasks", "task"),
         "complete" => Some("Task marked complete".into()),
@@ -4512,7 +4521,15 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
                 (None, Some(context)) => Some(context.into()),
             }
         }
-        "steered" | "instruction_added" => tree_value(payload, &["instruction"]),
+        "steered" | "instruction_added" | "instruction_saved" => {
+            tree_value(payload, &["instruction"])
+        }
+        "saved_instructions_sent" | "saved_instructions_dropped" => {
+            number_u64(payload.get("count")).map(|count| match count {
+                1 => "1 saved instruction".to_owned(),
+                count => format!("{count} saved instructions"),
+            })
+        }
         "steer_accepted" | "follow_up_queued" | "follow_up_started" | "resumed" => {
             let instruction = tree_value(payload, &["instruction"]).or_else(|| {
                 (event_type == "resumed")
@@ -4894,6 +4911,9 @@ fn lifecycle_title(event_type: &str) -> String {
         "effort_mismatch" => "Effort mismatch",
         "steered" => "Instruction sent",
         "instruction_added" => "Instruction added",
+        "instruction_saved" => "Saved for the next run",
+        "saved_instructions_sent" => "Saved instructions sent",
+        "saved_instructions_dropped" => "Saved instructions removed",
         "edited" => "Changed before starting",
         "requeued" => "Back in line",
         "permission_asked" => "Waiting for your go-ahead",

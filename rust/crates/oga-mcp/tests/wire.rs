@@ -184,7 +184,7 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
         .map(|tool| tool["name"].as_str().expect("tool name"))
         .collect::<Vec<_>>();
 
-    assert_eq!(names.len(), 16);
+    assert_eq!(names.len(), 17);
     for name in [
         "delegate",
         "models",
@@ -196,6 +196,7 @@ async fn tools_list_exposes_the_complete_mcp_surface() {
         "reply",
         "resume",
         "steer",
+        "instruct",
         "handoff",
         "edit",
         "cancel",
@@ -317,7 +318,7 @@ async fn advertised_text_stays_within_budget() {
     )
     .await;
     let size = tools["result"]["tools"].to_string().len();
-    assert!(size <= 28_000, "{size} chars");
+    assert!(size <= 29_000, "{size} chars");
 }
 
 #[tokio::test]

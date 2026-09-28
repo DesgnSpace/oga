@@ -11,8 +11,9 @@ use axum::{
 };
 use oga_domain::{OnBlockerFailure, Task, TaskKind, TaskScope, WorktreeOption};
 use oga_service::{
-    ArchiveRequest, CompletionAssertion, DispatchRequest, EditRequest, FollowUpQueue,
-    HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest, WorktreeRemoveRequest,
+    ArchiveRequest, CompletionAssertion, ContinuationError, DispatchRequest, EditRequest,
+    FollowUpQueue, HandoffRequest, InstructRequest, ReplyRequest, ResumeRequest, SteerRequest,
+    WorktreeRemoveRequest,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -85,6 +86,15 @@ struct ReplyBody {
 pub(crate) struct SteerBody {
     instruction: Option<String>,
     model: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct InstructBody {
+    task_ids: Vec<String>,
+    instruction: String,
+    #[serde(default)]
+    now: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -366,6 +376,7 @@ pub async fn resume(
                 current.state,
                 "removed on request",
             )?;
+            oga_service::saved_instructions::clear(&state.store, &id, current.state)?;
             started_task(&state, &state.dispatcher.task(&id)?, false)
         })
         .await?;
@@ -532,6 +543,42 @@ pub async fn handoff(
         StatusCode::ACCEPTED,
         Json(started_task(&state, &task, true)?),
     ))
+}
+
+/// A refusal never stops the tasks after it.
+pub async fn instruct(
+    State(state): State<HttpState>,
+    body: Bytes,
+) -> Result<impl IntoResponse, HttpError> {
+    let body: InstructBody = parse_json(&body)?;
+    if body.task_ids.is_empty() {
+        return Err(HttpError::bad_request(
+            "taskIds must name at least one task",
+        ));
+    }
+    if body.instruction.trim().is_empty() {
+        return Err(HttpError::bad_request("instruction is required"));
+    }
+    let mut results = Vec::with_capacity(body.task_ids.len());
+    for id in body.task_ids {
+        let mut request = InstructRequest::new(&id, &body.instruction);
+        if body.now {
+            request = request.now();
+        }
+        results.push(match state.dispatcher.instruct(request).await {
+            Ok(outcome) => json!({
+                "id": id,
+                "outcome": outcome.instructed,
+                "state": outcome.task.state,
+                "note": outcome.instructed.note(),
+            }),
+            Err(ContinuationError::Refusal(reason)) => {
+                json!({ "id": id, "outcome": "refused", "error": reason })
+            }
+            Err(error) => json!({ "id": id, "outcome": "refused", "error": error.to_string() }),
+        });
+    }
+    Ok(Json(json!({ "results": results })))
 }
 
 pub async fn edit(

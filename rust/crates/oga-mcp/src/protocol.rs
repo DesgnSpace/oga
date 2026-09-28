@@ -10,7 +10,7 @@ pub const EARLIEST_PROTOCOL_VERSION: &str = "2025-06-18";
 const MCP_INSTRUCTIONS: &str = concat!(
     "Oga runs agent work on external provider accounts. The loop: `query` locates code in a project, `tasks` finds work already delegated so a second task is not opened on it, `delegate` starts new work, `inspect` reads what a task produced.\n",
     "Nothing waits for a task to finish: `oga watch <taskId>` prints a line when one settles, then `inspect` reads it.\n",
-    "By state: `reply` answers needs_input, `steer` redirects a running task, `edit` changes one not yet started or requeues a cancelled one, `resume` continues a stopped one, `handoff` moves one to another model or account, `cancel` stops it, `archive` hides it. Every task response carries `next`: the calls that fit its state.\n",
+    "`instruct` tells one or more tasks something in any state. By state: `reply` answers needs_input, `steer` redirects a running task, `edit` changes one not yet started or requeues a cancelled one, `resume` continues a stopped one, `handoff` moves one to another model or account, `cancel` stops it, `archive` hides it. Every task response carries `next`: the calls that fit its state.\n",
     "Delegation sends the prompt, the directory's memories, and whatever the worker reads on disk to an external provider account. Confirm that destination and data scope with the user before the first delegate in a project, and when a task would widen it.",
 );
 
@@ -57,13 +57,18 @@ const REPLY_DESCRIPTION: &str = concat!(
 
 const RESUME_DESCRIPTION: &str = concat!(
     "Continue a stopped task (failed, cancelled, blocked, completed, or waiting to start) in its existing session, keeping its id and everything the worker read. ",
-    "Without an instruction it retries; a completed task needs one. It unarchives the task and recreates a removed worktree checkout. ",
+    "Without an instruction it retries; a completed task needs one unless instruct saved one. It unarchives the task and recreates a removed worktree checkout. ",
     "Refused for accounts running a custom command, which keep no session.",
 );
 
 const STEER_DESCRIPTION: &str = concat!(
     "Leave an instruction for a running task without stopping it. ",
     "A worker that takes input mid-run has it within seconds; otherwise it runs as a follow-up turn once the current run finishes clean. The answer says which.",
+);
+
+const INSTRUCT_DESCRIPTION: &str = concat!(
+    "Give one or more tasks the same instruction in any state. Per task `outcome`: `appended` to an unstarted brief, `delivered` mid-run, `queued` after the current run, ",
+    "`saved` on a stopped task for its next resume, `resumed` with `now: true`, or `refused` with `next` naming the call that works.",
 );
 
 const HANDOFF_DESCRIPTION: &str = concat!(
@@ -785,7 +790,7 @@ fn shared_tools() -> Vec<Value> {
             "queue".into(),
             described(
                 json!({ "type": "string", "enum": ["add", "clear"] }),
-                "\"add\" queues the instruction to run after the current run finishes clean (only instruction allowed); \"clear\" drops the queue.",
+                "\"add\" queues the instruction to run after the current run finishes clean (only instruction allowed); \"clear\" drops the queue and saved instructions.",
             ),
         ),
     ]);
@@ -824,6 +829,38 @@ fn shared_tools() -> Vec<Value> {
         "steer",
         STEER_DESCRIPTION,
         object_schema(steer, &["taskId"]),
+    ));
+
+    let instruct = Map::from_iter([
+        (
+            "taskId".into(),
+            described(
+                json!({ "anyOf": [
+                    { "type": "string" },
+                    { "type": "array", "minItems": 1, "items": { "type": "string" } }
+                ]}),
+                "Oga task id, or an array of ids.",
+            ),
+        ),
+        (
+            "instruction".into(),
+            described(
+                json!({ "type": "string", "minLength": 1, "maxLength": 64000 }),
+                "What to tell each task.",
+            ),
+        ),
+        (
+            "now".into(),
+            described(
+                json!({ "type": "boolean", "default": false }),
+                "Start a stopped task with it now instead of saving it.",
+            ),
+        ),
+    ]);
+    tools.push(tool(
+        "instruct",
+        INSTRUCT_DESCRIPTION,
+        object_schema(instruct, &["taskId", "instruction"]),
     ));
 
     let mut handoff = Map::from_iter([

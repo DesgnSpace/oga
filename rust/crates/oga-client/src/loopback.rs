@@ -18,11 +18,11 @@ use url::Url;
 use crate::{
     AgentRemoved, AgentStopped, BrokerState, BrokerSummaryState, CompletionRequest, ConsumerInbox,
     DispatchRequest, EditRequest, EventFrame, EventHead, EventStreamOptions, EventStreamQuery,
-    HandoffRequest, MemoryList, MemoryWrite, ModelSettingsSnapshot, ModelSettingsUpdate,
-    ProfileCreate, ProfilePatch, ProjectList, PromptConfig, PromptWrite, QueryInitRequest,
-    QueryInitResponse, QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview,
-    RoutingPreviewRequest, StateQuery, SteerRequest, TaskActionResponse, TaskEventPage,
-    TaskEventsQuery, TurnsResponse, UsageResponse,
+    HandoffRequest, InstructRequest, InstructResponse, MemoryList, MemoryWrite,
+    ModelSettingsSnapshot, ModelSettingsUpdate, ProfileCreate, ProfilePatch, ProjectList,
+    PromptConfig, PromptWrite, QueryInitRequest, QueryInitResponse, QueryRequest, ReplyRequest,
+    ResumeRequest, RoutingPreview, RoutingPreviewRequest, StateQuery, SteerRequest,
+    TaskActionResponse, TaskEventPage, TaskEventsQuery, TurnsResponse, UsageResponse,
 };
 
 #[derive(Debug, Error)]
@@ -479,6 +479,17 @@ impl LoopbackClient {
     ) -> Result<TaskActionResponse, ClientError> {
         self.post_json(
             self.endpoint(&["api", "tasks", task_id, "steer"]),
+            serde_json::to_value(request).map_err(ClientError::Encode)?,
+        )
+        .await
+    }
+
+    pub async fn instruct_tasks(
+        &self,
+        request: &InstructRequest,
+    ) -> Result<InstructResponse, ClientError> {
+        self.post_json(
+            self.endpoint(&["api", "tasks", "instruct"]),
             serde_json::to_value(request).map_err(ClientError::Encode)?,
         )
         .await

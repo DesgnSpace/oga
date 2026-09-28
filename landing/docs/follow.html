@@ -115,6 +115,11 @@ oga resume &lt;task-id&gt; -m "tests count as in scope - keep going there"</code
         <p>When you need a completed task to do more, give it a new instruction:</p>
         <pre><code>oga resume &lt;task-id&gt; -m "move the status dot to the end of the title"</code></pre>
 
+        <h2 id="tell-all">Tell several tasks the same thing<a class="heading-anchor" href="#tell-all" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
+        <p>When a rule applies to a whole chain of work, give it to every task at once, whatever each one is doing:</p>
+        <pre><code>oga instruct &lt;task-id&gt; &lt;task-id&gt; &lt;task-id&gt; -m "merge origin/main before each push"</code></pre>
+        <p>Work that hasn't started gets it in its request. Running work gets it the same way as above. Finished or stopped work keeps it and follows it the next time you pick it up; add <code>--now</code> to pick it up straight away. You see what happened for each task, and any task that couldn't take it says what to do instead.</p>
+
         <h2 id="move">Move it to another worker<a class="heading-anchor" href="#move" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p>When the account behind a task is out of usage, or the work belongs on a stronger model, move it without losing the task:</p>
         <pre><code>oga handoff &lt;task-id&gt; --worker claude
