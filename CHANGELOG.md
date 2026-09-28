@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Buttons and pickers now line up in tighter rows across tasks, changed files, and settings.
 - A task's header now names the project it runs in, and shows lines added and removed right beside the changed files button.
 - Copy any message or code block with one click, and selected text copies itself.
 - A task's menu now sits right beside its title, with the task's details, the thinking toggle, and actions like archive all in one place.
