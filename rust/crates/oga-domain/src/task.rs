@@ -230,6 +230,9 @@ pub enum CompletionCode {
     RateLimit,
     Network,
     WorkerError,
+    /// The worker ended its run while work it started, such as a background
+    /// command or subagent, was still going.
+    Unfinished,
     /// Runs recorded before a clean exit counted as done. Nothing produces it
     /// any more; it stays so those stored completions still load.
     Unverified,

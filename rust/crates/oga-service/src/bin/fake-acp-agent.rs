@@ -744,6 +744,60 @@ fn prompt(
             }
             chunk(&session, "OGA_RESULT: completed");
         }
+        // Shapes recorded from claude-agent-acp 0.76.0: a command sent to the
+        // background, then a turn that ends while it still runs. `background`
+        // finishes once asked to wait; `background-stuck` never does.
+        turns if turns.starts_with("background") => {
+            if prompts_logged(log_path) == 1 {
+                update(
+                    &session,
+                    json!({
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "toolu_suite",
+                        "title": "go test -race ./... 2>&1 | tail -40",
+                        "kind": "execute",
+                    }),
+                );
+                update(
+                    &session,
+                    json!({
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "toolu_suite",
+                        "_meta": {"claudeCode": {
+                            "toolName": "Bash",
+                            "toolResponse": {"stdout": "", "stderr": "", "interrupted": false, "backgroundTaskId": "bs6wh4a63"},
+                        }},
+                    }),
+                );
+            }
+            if turns == "background" && prompts_logged(log_path) > 1 {
+                chunk(&session, "The suite passed: 212 tests, no races.");
+            } else {
+                chunk(
+                    &session,
+                    "No output yet, because it's piped through `tail`. Waiting for the finish notification.",
+                );
+            }
+        }
+        "usage-limit" => {
+            update(
+                &session,
+                json!({
+                    "sessionUpdate": "usage_update",
+                    "used": 72_276,
+                    "size": 1_000_000,
+                    "_meta": {"_claude/rateLimit": {
+                        "status": "rejected",
+                        "resetsAt": 1_790_616_000,
+                        "rateLimitType": "five_hour",
+                    }},
+                }),
+            );
+            chunk(
+                &session,
+                "You've hit your session limit \u{b7} resets 6:20pm (Africa/Douala)",
+            );
+        }
         "recovery" => {
             for attempt in 1..=3 {
                 recovery_update(

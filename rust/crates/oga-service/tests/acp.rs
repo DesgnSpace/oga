@@ -502,6 +502,105 @@ async fn a_provider_that_gave_up_on_a_usage_limit_settles_as_rate_limited() {
     );
 }
 
+fn prompt_texts(harness: &Harness) -> Vec<String> {
+    harness
+        .received("session/prompt")
+        .iter()
+        .map(|prompt| {
+            prompt["prompt"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_worker_that_ends_its_turn_on_background_work_is_asked_to_wait_and_finishes() {
+    let harness = harness("background");
+
+    let task = harness.run("run the suite and fix what fails").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(task.output, "The suite passed: 212 tests, no races.");
+    let prompts = prompt_texts(&harness);
+    assert_eq!(
+        prompts.len(),
+        2,
+        "one wait, in the same session: {prompts:?}"
+    );
+    assert!(
+        prompts[1].contains("Wait for it to finish"),
+        "{}",
+        prompts[1]
+    );
+    assert_eq!(harness.received("session/new").len(), 1);
+    let waits: Vec<_> = harness
+        .events(&task.id)
+        .into_iter()
+        .filter(|event| event.kind == "background_wait")
+        .collect();
+    assert_eq!(waits.len(), 1);
+    assert!(
+        waits[0].payload["said"]
+            .as_str()
+            .is_some_and(|said| said.ends_with("Waiting for the finish notification.")),
+        "{:?}",
+        waits[0].payload
+    );
+}
+
+#[tokio::test]
+async fn a_worker_that_keeps_leaving_background_work_running_settles_unfinished() {
+    let harness = harness("background-stuck");
+
+    let task = harness.run("run the suite and push").await;
+
+    assert_eq!(
+        task.state,
+        TaskState::Blocked,
+        "never completed while its work still runs: {task:?}"
+    );
+    let completion = task.completion.as_ref().expect("a completion");
+    assert_eq!(completion.code, CompletionCode::Unfinished);
+    let reason = completion.reason.as_deref().expect("a reason");
+    assert!(
+        reason.contains("Waiting for the finish notification.") && reason.contains("Resume"),
+        "{reason}"
+    );
+    assert_eq!(prompt_texts(&harness).len(), 3, "the run and two waits");
+
+    resume(&harness.dispatcher, ResumeRequest::new(&task.id))
+        .await
+        .expect("an unfinished task resumes");
+}
+
+/// Recorded from claude-agent-acp: the account's limit turned the agent away
+/// mid-run, and it ended the turn on the limit notice as its final words.
+#[tokio::test]
+async fn a_claude_worker_turned_away_by_its_usage_limit_waits_for_the_reset() {
+    let harness = harness("usage-limit");
+
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new(
+            "work",
+            "research providers",
+            &harness.cwd,
+        ))
+        .await
+        .expect("dispatched");
+    let task = harness.settle(&dispatched.task.id).await;
+
+    assert_eq!(task.state, TaskState::Pending, "{task:?}");
+    let completion = task.completion.as_ref().expect("a completion");
+    assert_eq!(completion.code, CompletionCode::RateLimit);
+    assert_eq!(
+        completion.resets_at.as_deref(),
+        Some("2026-09-28T17:20:00.000Z")
+    );
+}
+
 #[tokio::test]
 async fn a_follow_up_resumes_the_same_acp_conversation() {
     let harness = harness("turn");
@@ -3765,5 +3864,8 @@ async fn starting_a_worker_records_how_long_each_step_of_connecting_took() {
             .unwrap_or_else(|| panic!("{stage} missing from {timings}"));
         total += millis;
     }
-    assert!(total <= spent, "{timings} took longer than the run's {spent} ms");
+    assert!(
+        total <= spent,
+        "{timings} took longer than the run's {spent} ms"
+    );
 }
