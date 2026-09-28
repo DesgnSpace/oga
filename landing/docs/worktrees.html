@@ -104,6 +104,7 @@
           <li><strong>The copy</strong> sits in <code>~/.oga/worktrees/</code>, outside your project, so it never turns up in a search of your repository.</li>
           <li><strong>The branch</strong> is named after the work, under <code>oga/</code>, and is created the moment the work starts.</li>
           <li><strong>It starts</strong> from wherever your repository is right now, unless something else is named.</li>
+          <li><strong>Work that waits on other work</strong> gets its copy only when it starts. Name the branch the earlier work commits to, and the next copy starts from its newest commits, even ones pushed from somewhere else. That lets each branch in a chain build on the one before it.</li>
         </ul>
         <p>Everything else — the files it may touch, what it knows about the project, who does the work — stays tied to your original repository, so this is approved exactly like any other work on that project.</p>
 

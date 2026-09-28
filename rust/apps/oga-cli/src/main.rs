@@ -2622,6 +2622,8 @@ fn cleanup_worktrees(store: &Store, cutoff: &str) -> CliResult<Vec<CleanupWorktr
                             path: row.get::<_, String>(2)?,
                             branch: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                             links,
+                            from: None,
+                            base: None,
                         },
                     })
                 })?

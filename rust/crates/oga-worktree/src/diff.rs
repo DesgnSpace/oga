@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use oga_domain::{Task, TaskDiff, TaskDiffBasis, TaskDiffFile, TaskDiffFileStatus};
+use oga_domain::{Task, TaskDiff, TaskDiffBasis, TaskDiffFile, TaskDiffFileStatus, TaskWorktree};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
@@ -40,6 +40,14 @@ async fn diff_within(
 ) -> Result<TaskDiff, WorktreeError> {
     let cwd = PathBuf::from(&task.cwd);
     let worktree = task.worktree.as_ref();
+    if worktree.is_some_and(TaskWorktree::deferred) {
+        return Ok(TaskDiff {
+            basis: TaskDiffBasis::Branch,
+            base: None,
+            files: Vec::new(),
+            truncated: false,
+        });
+    }
     let scoped = match worktree {
         Some(worktree) => {
             require_worktree_paths(worktree)?;

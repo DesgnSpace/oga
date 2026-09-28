@@ -282,6 +282,8 @@ async fn cancelling_a_worktree_task_offers_the_checkout_it_left_behind() {
         path: path.clone(),
         branch: "oga/thing".into(),
         links: None,
+        from: None,
+        base: None,
     });
     insert(&server, &running);
 
@@ -356,6 +358,8 @@ async fn a_completed_worktree_task_reads_as_a_branch_to_ship() {
         path: path.clone(),
         branch: "oga/ship-it".into(),
         links: None,
+        from: None,
+        base: None,
     });
     insert(&server, &completed);
 
@@ -388,6 +392,8 @@ async fn an_archived_task_with_an_unavailable_repository_never_offers_resume() {
         path: checkout.display().to_string(),
         branch: "oga/gone".into(),
         links: None,
+        from: None,
+        base: None,
     });
     insert(&server, &archived);
 

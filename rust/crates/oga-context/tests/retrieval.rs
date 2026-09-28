@@ -447,6 +447,8 @@ fn a_route_taught_in_a_checkout_answers_from_the_checkout() {
             path: checkout.path().display().to_string(),
             branch: "oga/retrieval".into(),
             links: None,
+            from: None,
+            base: None,
         }),
         ..project.task()
     };

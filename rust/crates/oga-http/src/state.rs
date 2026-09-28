@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::router::{HttpError, HttpState};
 
-const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json,attachments_json";
+const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json,attachments_json,worktree_from,worktree_base";
 
 #[derive(Debug, Deserialize, Default)]
 pub struct StateQuery {
@@ -636,7 +636,7 @@ fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Res
 /// `TASK_COLUMNS` with output, shipped prompt, attempts, transport, and
 /// attachments read as empty; `{prompt}` becomes the prompt's opening or an
 /// empty string.
-const LIST_COLUMNS: &str = "id,kind,profile_id,model,{prompt},NULL,cwd,branch,origin_cwd,worktree_path,worktree_branch,NULL,state,'',error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,NULL,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,NULL,NULL";
+const LIST_COLUMNS: &str = "id,kind,profile_id,model,{prompt},NULL,cwd,branch,origin_cwd,worktree_path,worktree_branch,NULL,state,'',error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,NULL,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,NULL,NULL,worktree_from,worktree_base";
 
 /// Tasks for a list view, read through `LIST_COLUMNS`.
 pub fn list_task_rows(
@@ -829,6 +829,8 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
                 .get::<_, Option<String>>(11)?
                 .map(|value| decode_json(&value, 11))
                 .transpose()?,
+            from: row.get(39)?,
+            base: row.get(40)?,
         }),
         _ => None,
     };

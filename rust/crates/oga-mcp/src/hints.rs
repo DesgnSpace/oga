@@ -334,6 +334,8 @@ mod tests {
             path: path.clone(),
             branch: "oga/thing".into(),
             links: None,
+            from: None,
+            base: None,
         });
         let hints = next(&cancelled, Move::Settled { branch_gone: false });
         let tools = hints

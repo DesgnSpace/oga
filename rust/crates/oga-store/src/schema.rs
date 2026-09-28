@@ -103,6 +103,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "task blocker policy",
         run: migrate_v53_to_v54,
     },
+    Migration {
+        version: 55,
+        name: "task checkout base",
+        run: migrate_v54_to_v55,
+    },
 ];
 
 /// The schema this binary can read.
@@ -225,7 +230,9 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
         'queued','preparing_checkout','removing_checkout','pending','running','needs_input','answered','blocked','completed','failed','cancelled'
        )),
        transport_json TEXT CHECK(transport_json IS NULL OR json_valid(transport_json)),
-       on_blocker_failure TEXT CHECK(on_blocker_failure IS NULL OR on_blocker_failure IN ('hold','run'))
+       on_blocker_failure TEXT CHECK(on_blocker_failure IS NULL OR on_blocker_failure IN ('hold','run')),
+       worktree_from TEXT,
+       worktree_base TEXT
     );
     CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_task_id);
     CREATE INDEX IF NOT EXISTS tasks_updated_at ON tasks(updated_at DESC, id DESC);
@@ -919,6 +926,23 @@ pub fn migrate_v53_to_v54(conn: &Connection) -> Result<(), StoreError> {
         {column}
         {carried}
         INSERT INTO schema_migrations(version, name) VALUES (54, 'task blocker policy');
+        COMMIT;"#
+    ))?;
+    Ok(())
+}
+
+/// What a task's checkout was asked to start from, and the commit it did.
+pub fn migrate_v54_to_v55(conn: &Connection) -> Result<(), StoreError> {
+    let mut columns = String::new();
+    for column in ["worktree_from", "worktree_base"] {
+        if !has_column(conn, "tasks", column)? {
+            columns.push_str(&format!("ALTER TABLE tasks ADD COLUMN {column} TEXT;"));
+        }
+    }
+    conn.execute_batch(&format!(
+        r#"BEGIN IMMEDIATE;
+        {columns}
+        INSERT INTO schema_migrations(version, name) VALUES (55, 'task checkout base');
         COMMIT;"#
     ))?;
     Ok(())

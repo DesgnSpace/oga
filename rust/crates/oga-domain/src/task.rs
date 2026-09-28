@@ -416,6 +416,21 @@ pub struct TaskWorktree {
     /// Absent when nothing was seeded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Vec<String>>,
+    /// Commit, branch or tag the checkout was asked to start from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// Commit the checkout started from. Absent until it is known: a task
+    /// waiting on prerequisites resolves `from` when it is released.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
+impl TaskWorktree {
+    /// Whether the checkout is made when the task is released rather than
+    /// when it was delegated, and has not been made yet.
+    pub fn deferred(&self) -> bool {
+        self.from.is_some() && self.base.is_none()
+    }
 }
 
 /// Every worktree choice a caller can make in one value. `true` is shorthand
@@ -430,7 +445,8 @@ pub enum WorktreeOption {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeRequest {
-    /// Commit, branch or tag the checkout starts from; defaults to HEAD.
+    /// Commit, branch or tag the checkout starts from; defaults to HEAD. A
+    /// task with prerequisites may name the branch one of them will create.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     /// Branch the work lands on; defaults to `oga/<slug-of-title>`.

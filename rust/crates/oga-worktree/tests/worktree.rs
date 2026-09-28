@@ -8,8 +8,9 @@ use oga_domain::{
 };
 use oga_worktree::{
     WorktreeError, WorktreeJoinCode, active_checkout_tasks, branch_exists, branch_recreatable,
-    create_task_worktree_at, joined_worktree_of, recreate_task_worktree, remove_task_branch,
-    remove_task_branch_safely, remove_task_worktree, require_worktree_paths,
+    create_task_worktree_at, joined_worktree_of, plan_released_checkout,
+    plan_task_worktree_on_release_at, prepare_task_worktree, recreate_task_worktree,
+    remove_task_branch, remove_task_branch_safely, remove_task_worktree, require_worktree_paths,
     unsettled_checkout_writers, validate_join_request, worktree_has_uncommitted_work,
     worktree_request,
 };
@@ -474,6 +475,8 @@ async fn branch_removal_reports_repository_inspection_failure() {
         path: temp.path().join("checkout").display().to_string(),
         branch: "oga/missing".into(),
         links: None,
+        from: None,
+        base: None,
     };
     let error = remove_task_branch_safely(&worktree)
         .await
@@ -502,6 +505,8 @@ fn join_and_active_writer_helpers_preserve_task_rules() {
         path: "/tmp/worktree".into(),
         branch: "task/owner".into(),
         links: None,
+        from: None,
+        base: None,
     };
     let owner = Task {
         id: "owner".into(),
@@ -539,6 +544,8 @@ fn joining_requires_a_live_checkout() {
             path: "/tmp/missing-oga-worktree".into(),
             branch: "task/owner".into(),
             links: None,
+            from: None,
+            base: None,
         }),
         ..Task::default()
     };
@@ -642,6 +649,108 @@ async fn a_task_in_the_callers_checkout_diffs_only_what_it_could_write() {
             .collect::<Vec<_>>(),
         vec!["web/inside.txt"]
     );
+}
+
+#[tokio::test]
+async fn a_released_checkout_starts_from_the_pushed_tip_when_the_local_branch_lags() {
+    let (temp, repo) = repository();
+    let remote = temp.path().join("remote.git");
+    git(
+        temp.path(),
+        &[
+            "init",
+            "-q",
+            "--bare",
+            "-b",
+            "main",
+            remote.to_str().unwrap(),
+        ],
+    );
+    git(
+        &repo,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    git(&repo, &["switch", "-q", "-c", "launch/l1"]);
+    commit(&repo, "l1 here");
+    git(&repo, &["push", "-q", "-u", "origin", "launch/l1"]);
+    git(&repo, &["switch", "-q", "main"]);
+    let elsewhere = temp.path().join("elsewhere");
+    git(
+        temp.path(),
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "launch/l1",
+            remote.to_str().unwrap(),
+            elsewhere.to_str().unwrap(),
+        ],
+    );
+    commit(&elsewhere, "l1 pushed from elsewhere");
+    git(&elsewhere, &["push", "-q", "origin", "launch/l1"]);
+    let pushed = head(&elsewhere);
+    assert_ne!(head_of(&repo, "launch/l1"), pushed);
+
+    let request = WorktreeRequest {
+        from: Some("launch/l1".into()),
+        branch: Some("launch/l2".into()),
+        ..WorktreeRequest::default()
+    };
+    let deferred = plan_task_worktree_on_release_at(
+        &temp.path().join("worktrees"),
+        &repo,
+        "task-id",
+        &request,
+        None,
+        &["launch/l1".into()],
+    )
+    .await
+    .expect("deferred checkout planned");
+    assert!(deferred.worktree.deferred());
+    let planned = plan_released_checkout(&deferred.worktree, true)
+        .await
+        .expect("base resolved");
+    prepare_task_worktree(&planned)
+        .await
+        .expect("checkout made");
+
+    assert_eq!(
+        planned.created.worktree.base.as_deref(),
+        Some(pushed.as_str())
+    );
+    assert_eq!(head(&planned.created.cwd), pushed);
+}
+
+fn commit(cwd: &Path, message: &str) {
+    git(
+        cwd,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            message,
+        ],
+    );
+}
+
+fn head_of(cwd: &Path, revision: &str) -> String {
+    String::from_utf8(
+        Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(["rev-parse", revision])
+            .output()
+            .expect("git is installed")
+            .stdout,
+    )
+    .expect("git output")
+    .trim()
+    .to_owned()
 }
 
 fn head(cwd: &Path) -> String {
