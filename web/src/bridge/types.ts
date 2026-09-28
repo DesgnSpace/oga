@@ -50,7 +50,8 @@ export type CompletionCode =
   | "billing"
   | "rate_limit"
   | "network"
-  | "worker_error";
+  | "worker_error"
+  | "unfinished";
 
 export interface TaskScope {
   read: string[];

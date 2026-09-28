@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Work that waits on other work now starts from what that work left behind. Its branch is made when it starts, so a chain of branches builds on each one before it, however long.
+- A task no longer shows as done when its worker stopped while work it started, like a test run, was still going. Oga asks the worker to wait for it, and if it still stops early, the task shows as unfinished so you can resume it. A Claude task that hits its usage limit now waits for the limit to reset instead of showing as done.
+
 - Buttons and pickers now line up in tighter rows across tasks, changed files, and settings.
 - A task's header now names the project it runs in, and shows lines added and removed right beside the changed files button.
 - Copy any message or code block with one click, and selected text copies itself.

@@ -52,12 +52,17 @@ pub struct WorkerOutcome {
 const RELEARN_SECTION: &str = r#"## Before you finish
 When the work is done and before your final answer, run `oga relearn` once with every file you found or changed that a later search should land on: `oga relearn '[{"hints":["<words someone would search>"],"path":"<file>","symbol":"<optional symbol>"}]'`."#;
 
+/// Oga settles a run when the worker ends its turn, and whatever the worker
+/// left running in the background ends with it.
+const BACKGROUND_SECTION: &str = "## Background work\nDon't end your turn while background commands or subagents you started are still running; wait for them.";
+
 /// Assemble the brief with its project memories and optional attribution.
 pub fn assemble_worker_message(input: &WorkerPromptInput) -> String {
     let mut sections = vec![input.task.clone()];
     if !input.memories.is_empty() {
         sections.push(memories_section(&input.memories));
     }
+    sections.push(BACKGROUND_SECTION.to_owned());
     sections.push(RELEARN_SECTION.to_owned());
     if let Some(attribution) = &input.attribution {
         sections.push(format!(
@@ -365,6 +370,9 @@ pub fn interpret_worker_outcome(
             },
         };
     }
+    if let Some(pending) = pending_work(&output) {
+        return unfinished(output, exit, &pending);
+    }
     if !output.trim().is_empty() {
         return WorkerOutcome {
             state: TaskState::Completed,
@@ -443,6 +451,113 @@ fn prose_question(output: &str) -> Option<String> {
         .find(|line| line.ends_with('?'))
         .map(|line| line.trim().to_owned())
         .filter(|line| !line.is_empty())
+}
+
+const PENDING_PHRASES: [&str; 20] = [
+    "waiting for",
+    "waiting on",
+    "i'll wait",
+    "i will wait",
+    "still coming",
+    "still running",
+    "still in progress",
+    "still finishing",
+    "still working",
+    "when it finishes",
+    "once it finishes",
+    "when they finish",
+    "once they finish",
+    "when it's done",
+    "once it's done",
+    "when it completes",
+    "once it completes",
+    "no output yet",
+    "report back",
+    "pick it up when",
+];
+
+/// A sentence naming any of these waits on someone else, or is about work
+/// that isn't the worker's, which a finished run may well report.
+const OTHERS_WORK: [&str; 13] = [
+    "you",
+    "your",
+    "user",
+    "ci",
+    "checks",
+    "pipeline",
+    "deploy",
+    "deployment",
+    "review",
+    "reviewer",
+    "approval",
+    "merge",
+    "another",
+];
+
+/// Only the last two sentences of the last paragraph count, and never quoted
+/// text, so a finished report that mentions waiting elsewhere stays finished.
+fn pending_work(output: &str) -> Option<String> {
+    let paragraph = output
+        .trim()
+        .rsplit("\n\n")
+        .find(|block| !block.trim().is_empty())?;
+    let sentences: Vec<&str> = paragraph
+        .split_inclusive(['.', '!', '?', '\n'])
+        .map(str::trim)
+        .filter(|sentence| !sentence.is_empty())
+        .collect();
+    sentences
+        .iter()
+        .rev()
+        .take(2)
+        .find(|sentence| {
+            let lower = unquoted(sentence).to_lowercase().replace('\u{2019}', "'");
+            let names_others = lower
+                .split(|character: char| !character.is_alphanumeric() && character != '\'')
+                .any(|word| OTHERS_WORK.contains(&word));
+            !names_others && PENDING_PHRASES.iter().any(|phrase| lower.contains(phrase))
+        })
+        .map(|sentence| (*sentence).to_owned())
+}
+
+fn unquoted(sentence: &str) -> String {
+    let mut quote = None;
+    sentence
+        .chars()
+        .filter(|&character| match quote {
+            Some(open) => {
+                if character == open {
+                    quote = None;
+                }
+                false
+            }
+            None if matches!(character, '"' | '`') => {
+                quote = Some(character);
+                false
+            }
+            None => true,
+        })
+        .collect()
+}
+
+fn unfinished(output: String, exit_code: Option<i64>, pending: &str) -> WorkerOutcome {
+    let reason = format!(
+        "The worker stopped while work it started was still running (it said: \"{}\"). Resume the task so it can wait for that work and finish.",
+        compact(pending)
+    );
+    WorkerOutcome {
+        state: TaskState::Blocked,
+        output,
+        question: None,
+        error: Some(reason.clone()),
+        completion: TaskCompletion {
+            exit_code,
+            blocked: true,
+            code: CompletionCode::Unfinished,
+            reason: Some(reason),
+            ..empty_completion()
+        },
+    }
 }
 
 fn compact(value: &str) -> String {
@@ -667,18 +782,57 @@ mod tests {
         assert_eq!(
             prompt,
             format!(
-                "do the thing\n\n## Memories\nTreat these project facts as shared context. If one conflicts with the task or current files, report the conflict.\n- a: b\n\n{RELEARN_SECTION}\n\n## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `Co-Authored-By: Oga (claude/opus) <oga@desgn.space>` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves."
+                "do the thing\n\n## Memories\nTreat these project facts as shared context. If one conflicts with the task or current files, report the conflict.\n- a: b\n\n{BACKGROUND_SECTION}\n\n{RELEARN_SECTION}\n\n## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `Co-Authored-By: Oga (claude/opus) <oga@desgn.space>` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves."
             )
         );
     }
 
     #[test]
-    fn a_bare_brief_gains_only_the_relearn_step() {
-        let prompt = assemble_worker_message(&WorkerPromptInput {
-            task: "do the thing".into(),
-            ..WorkerPromptInput::default()
-        });
-        assert_eq!(prompt, format!("do the thing\n\n{RELEARN_SECTION}"));
+    fn last_words_about_work_still_going_settle_unfinished() {
+        for said in [
+            "No output yet, because it's piped through `tail`. Waiting for the finish notification.",
+            "The docs check is done. The main frontend report is still coming.",
+            "The suite is still running in the background (the `-race` run took about 6 minutes last time). I'll pick it up when it finishes.",
+            "## Progress\n- Backend: done\n\n- **Status**: build of `pluk-adapters` still running\n- **Next**: monitor fires on exit; I fix any compile errors",
+        ] {
+            let outcome = interpret_worker_outcome(Some(0), said, "", None);
+            assert_eq!(outcome.state, TaskState::Blocked, "{said}");
+            assert_eq!(
+                outcome.completion.code,
+                CompletionCode::Unfinished,
+                "{said}"
+            );
+            assert_eq!(outcome.output, said, "the worker's words are kept");
+        }
+    }
+
+    #[test]
+    fn finished_reports_that_mention_waiting_still_complete() {
+        for said in [
+            "## TL;DR\nPlans ship at `GET /v1/me/plan`. PR: https://github.com/o/r/pull/35\n\n## Tests\n`go test ./...` passes.",
+            "The suite is still running in CI on the PR; locally everything passes.",
+            "PR opened. Waiting for your review.",
+            "CHANGELOG has a line and the docs gained a paragraph under \"Be told when it's done\".",
+            "- A `go test` process from another task was still running; I left it alone.",
+            "Earlier the build was still running when I checked, so I waited for it.\n\nEverything is merged and green.",
+            // A usage limit, which the run reads from the agent's own limit
+            // signal rather than its words.
+            "You've hit your session limit \u{b7} resets 6:20pm (Africa/Douala)",
+        ] {
+            let outcome = interpret_worker_outcome(Some(0), said, "", None);
+            assert_eq!(outcome.state, TaskState::Completed, "{said}");
+        }
+    }
+
+    #[test]
+    fn a_completion_marker_outranks_words_about_waiting() {
+        let outcome = interpret_worker_outcome(
+            Some(0),
+            "Waiting for the finish notification.\nOGA_RESULT: completed",
+            "",
+            None,
+        );
+        assert_eq!(outcome.state, TaskState::Completed);
     }
 
     #[test]

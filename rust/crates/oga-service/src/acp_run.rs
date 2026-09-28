@@ -44,8 +44,8 @@ use crate::{
     acp_question::{Answer, Questions, TurnClock, permission_question},
     lifecycle::{
         ActiveRun, ActiveRuns, LifecycleError, MAX_ABORT_RETRIES, RunOutcome, Settlement,
-        broker_base_url, completion, encode, load_task, now_iso, record_profile_outcome,
-        settle_task, worker_env,
+        broker_base_url, completion, encode, iso_from_unix_millis, load_task, now_iso,
+        record_profile_outcome, settle_task, worker_env,
     },
     prompt::{WorkerOutcome, interpret_worker_outcome, rate_limit_reset_at},
     transport::{self, AcpStart},
@@ -371,6 +371,41 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
             Err(error) => Err(error),
         };
     }
+    // Background work the worker left running lives until the session ends, so it can still wait for it.
+    let mut waits = 0;
+    while waits < MAX_BACKGROUND_WAITS
+        && !run.was_cancelled()
+        && matches!(&ended, Ok(TurnEnd::Answered(Ok(response))) if response.stop_reason == StopReason::EndTurn)
+    {
+        // The agent sends its last words before its answer, so they are already queued.
+        while let Ok(notification) = updates.try_recv() {
+            if let Err(error) = transcript
+                .push(store, &task.id, turn.turn_id, notification)
+                .await
+            {
+                ended = Err(error);
+                break;
+            }
+        }
+        if ended.is_err() || !transcript.left_work_running() {
+            break;
+        }
+        waits += 1;
+        ended = match record_background_wait(&turn, &mut transcript, waits).await {
+            Ok(()) => {
+                converse(
+                    &turn,
+                    &run,
+                    &mut updates,
+                    &mut transcript,
+                    WAIT_FOR_BACKGROUND_WORK,
+                    &run.questions.clock,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+    }
     run.questions.close();
     let ended = withdraw_question(store, &task.id)
         .await
@@ -452,6 +487,35 @@ async fn record_turn_retry(
         }),
     )
     .await?;
+    Ok(())
+}
+
+/// Waits one run asks for before it settles as unfinished.
+const MAX_BACKGROUND_WAITS: usize = 2;
+
+const WAIT_FOR_BACKGROUND_WORK: &str = "Your run isn't over: you ended your turn while work you started, such as a background command or subagent, was still going, and it stops when your turn ends. Wait for it to finish, then finish the task and give your final report.";
+
+async fn record_background_wait(
+    turn: &AcpTurn<'_>,
+    transcript: &mut Transcript,
+    attempt: usize,
+) -> Result<(), LifecycleError> {
+    transcript
+        .flush(turn.store, &turn.task.id, turn.turn_id)
+        .await?;
+    append_turn_event(
+        turn.store,
+        &turn.task.id,
+        turn.turn_id,
+        "background_wait".into(),
+        json!({
+            "said": transcript.final_message.trim(),
+            "attempt": attempt,
+            "maxAttempts": MAX_BACKGROUND_WAITS,
+        }),
+    )
+    .await?;
+    transcript.final_message.clear();
     Ok(())
 }
 
@@ -925,6 +989,9 @@ struct Transcript {
     /// Only the last one matters: an agent that paused and then got through
     /// reports that too.
     recovery: Option<ModelRecovery>,
+    /// Claude's last word on the account's usage limit: whether it now turns
+    /// requests away, and when it resets, in Unix seconds.
+    usage_limit: Option<(bool, Option<u64>)>,
     refused: Refused,
 }
 
@@ -978,6 +1045,12 @@ impl Transcript {
         if let Some(recovery) = payload.get("_meta").and_then(ModelRecovery::from_meta) {
             self.recovery = Some(recovery);
         }
+        if let Some(limit) = payload
+            .get("_meta")
+            .and_then(|meta| meta.get("_claude/rateLimit"))
+        {
+            self.usage_limit = Some((limit["status"] == "rejected", limit["resetsAt"].as_u64()));
+        }
         let kind = payload
             .get("sessionUpdate")
             .and_then(Value::as_str)
@@ -1006,6 +1079,16 @@ impl Transcript {
 
     // A rate-limited provider leaves the work untouched; wait for its reset.
     fn rate_limit_wait(&self) -> Option<WorkerOutcome> {
+        if let Some((true, resets_at)) = self.usage_limit {
+            let mut worker = failed(
+                CompletionCode::RateLimit,
+                "This worker's account reached its usage limit. Oga waits for the usage to reset, then runs the task again.".into(),
+            );
+            worker.completion.resets_at = resets_at
+                .and_then(|seconds| seconds.checked_mul(1_000))
+                .and_then(iso_from_unix_millis);
+            return Some(worker);
+        }
         let reason = self
             .recovery
             .as_ref()
@@ -1041,6 +1124,15 @@ impl Transcript {
         paths.sort();
         paths.dedup();
         Some(paths)
+    }
+
+    fn left_work_running(&self) -> bool {
+        self.rate_limit_wait().is_none()
+            && self.stopped_on_refusal().is_none()
+            && interpret_worker_outcome(Some(0), self.final_text(), "", None)
+                .completion
+                .code
+                == CompletionCode::Unfinished
     }
 
     fn final_text(&self) -> String {

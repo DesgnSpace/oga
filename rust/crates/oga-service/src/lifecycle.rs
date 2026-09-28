@@ -966,6 +966,7 @@ pub(crate) fn settle_task(
     let now = now_iso();
     let mut worker = worker.clone();
     if worker.state == TaskState::Blocked
+        && worker.completion.code != CompletionCode::Unfinished
         && worker.output.contains("https://github.com/")
         && worker.output.contains("/pull/")
         && has_invalid_routes(store, &task.id)?

@@ -4893,6 +4893,7 @@ fn lifecycle_title(event_type: &str) -> String {
         "network_retry_exhausted" => "Network retries exhausted",
         "effort_mismatch" => "Effort mismatch",
         "steered" => "Instruction sent",
+        "background_wait" => "Asked to wait for its background work",
         "instruction_added" => "Instruction added",
         "edited" => "Changed before starting",
         "requeued" => "Back in line",
