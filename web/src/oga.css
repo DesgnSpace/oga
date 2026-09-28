@@ -601,12 +601,10 @@ a {
     overflow: hidden;
 }
 
-.title-bar-stat-separator {
-    color: var(--color-text-muted);
-}
-
 .title-bar-diff {
-    color: var(--color-success);
+    display: inline-flex;
+    gap: var(--space-1);
+    margin-inline-start: var(--space-2);
     font-family: var(--font-mono);
     font-size: var(--text-base-mono);
     font-weight: 600;
@@ -1089,7 +1087,7 @@ a {
     font-size: var(--text-sm);
 }
 
-/* One look per state, shared by the sidebar row, task header, and composer — see TaskStatusDot and docs/task-status-dots.md. */
+/* One look per state, shared by the sidebar row, task header, and composer — see TaskStatusDot. */
 .task-dot {
     --task-dot-color: var(--color-text-muted);
     width: 8px;
@@ -1602,6 +1600,7 @@ h1 {
     top: var(--gutter);
     min-height: 0;
     max-height: 100%;
+    margin-block-end: var(--space-3);
     overflow: hidden;
     overscroll-behavior: contain;
     border: 1px solid var(--color-border);
@@ -1651,15 +1650,19 @@ h1 {
     padding-left: var(--macos-titlebar-inset);
 }
 
+/* On a narrow panel the actions drop below the title as one row, never
+   splitting across two lines. */
 .changed-files-header-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-3);
+    gap: var(--space-2) var(--space-3);
 }
 
 .changed-files-header-title {
     display: flex;
+    flex: 1 1 10rem;
     align-items: center;
     gap: var(--space-3);
     min-width: 0;
@@ -1690,19 +1693,20 @@ h1 {
 .changed-files-header-actions {
     display: flex;
     align-items: center;
-    flex: 0 1 auto;
-    flex-wrap: wrap;
+    flex: 0 0 auto;
     justify-content: flex-end;
-    gap: var(--space-3);
+    gap: var(--space-1);
+    margin-inline-start: auto;
 }
 
 .changed-files-source-picker {
     position: relative;
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .changed-files-source-trigger {
-    max-width: 200px;
+    max-width: min(200px, 100%);
     font-size: var(--text-md);
 }
 
@@ -2546,6 +2550,7 @@ h1 {
     white-space: nowrap;
 }
 
+.task-detail-project,
 .task-detail-worker,
 .task-detail-effort {
     flex: 0 0 auto;

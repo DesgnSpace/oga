@@ -4,11 +4,12 @@ import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
-import { RunChangeProjection, runChangeSetAdded, RUN_CHANGES_EMPTY } from "@/domain/changes";
+import { RunChangeProjection, runChangeSetAdded, runChangeSetRemoved, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { copyText } from "@/lib/identifiers";
+import { projectName } from "@/state/sidebar-projection";
 import { toast } from "@/state/toast";
 import { WorktreeIcon } from "@/ui/icons";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
@@ -173,11 +174,13 @@ function TaskDetailSecondary({
   onChanged: () => void;
 }) {
   const effort = effortDisplay(task);
-  const factTitle = [workerLabel, task.model, taskDetailStatsSummary(task, events)].filter(Boolean).join(" · ");
+  const projectPath = task.worktree?.originCwd ?? task.cwd;
+  const factTitle = [projectPath, workerLabel, task.model, taskDetailStatsSummary(task, events)].filter(Boolean).join(" · ");
   return (
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
       {task.worktree && <WorktreeChip worktree={task.worktree} label={task.worktreeLabel} />}
       <span className="task-detail-fact" title={factTitle}>
+        <span className="task-detail-project">{projectName(projectPath)} · </span>
         {workerLabel && <span className="task-detail-worker">{workerLabel} · </span>}
         <span className="task-detail-model">{task.model}</span>
         {effort && (
@@ -436,6 +439,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     onHeader({
       title,
       diffAdded: runChangeSetAdded(reportedChanges),
+      diffRemoved: runChangeSetRemoved(reportedChanges),
       showingChanges,
       onToggleChanges: () => setShowingChanges((value) => !value),
       terminalCommand,
