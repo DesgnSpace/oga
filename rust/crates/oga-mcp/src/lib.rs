@@ -20,8 +20,8 @@ use oga_http::{HttpState, settings::ModelQuery as SettingsModelQuery};
 use oga_routing::{ModelNameMatch, ambiguous_message, not_enabled_message, resolve_model_name};
 use oga_service::{
     ArchiveRequest, CancelRequest, CompletionAssertion, DispatchRequest, EditRequest,
-    FollowUpQueue, HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest,
-    WorktreeRemoveRequest,
+    FollowUpQueue, HandoffRequest, InstructRequest, Instructed, ReplyRequest, ResumeRequest,
+    SteerRequest, WorktreeRemoveRequest,
 };
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
@@ -250,6 +250,7 @@ impl McpServer {
             "reply" => self.reply(&args).await?,
             "resume" => self.resume(&args).await?,
             "steer" => self.steer(&args).await?,
+            "instruct" => self.instruct(&args).await?,
             "handoff" => self.handoff(&args).await?,
             "edit" => self.edit(&args).await?,
             "cancel" => self.cancel(&args).await?,
@@ -641,6 +642,11 @@ impl McpServer {
                 }
                 "clear" => {
                     follow_ups.clear(&task_id, current.state, "removed on request")?;
+                    oga_service::saved_instructions::clear(
+                        &self.state.store,
+                        &task_id,
+                        current.state,
+                    )?;
                     true
                 }
                 _ => return Err(McpError::InvalidParams("queue must be add or clear".into())),
@@ -664,7 +670,9 @@ impl McpServer {
                 action,
             );
         }
-        if let Some((message, next)) = hints::resume_refusal(&current) {
+        if let Some((message, next)) =
+            hints::resume_refusal(&current, optional_string(args, "instruction").as_deref())
+        {
             return Err(McpError::Refused { message, next });
         }
         let mut request = ResumeRequest::new(task_id);
@@ -701,17 +709,28 @@ impl McpServer {
             .dispatcher
             .task(&task_id)
             .map_err(McpError::from)?;
-        if let Some((message, next)) = hints::steer_refusal(&current) {
-            return Err(McpError::Refused { message, next });
-        }
+        let instruction = optional_string(args, "instruction");
         let mut request = SteerRequest::new(task_id);
-        if let Some(value) = optional_string(args, "instruction") {
+        if let Some(value) = instruction.clone() {
             request = request.instruction(value);
         }
         if let Some(value) = optional_string(args, "model") {
             request = request.model(value);
         }
-        let outcome = self.state.dispatcher.steer(request).await?;
+        let outcome = match self.state.dispatcher.steer(request).await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return Err(
+                    match hints::steer_refusal(&current, instruction.as_deref()) {
+                        Some((_, next)) => McpError::Refused {
+                            message: error.to_string(),
+                            next,
+                        },
+                        None => error.into(),
+                    },
+                );
+            }
+        };
         let task = self.enrich_task(outcome.task)?;
         let cwd = project_cwd(&task);
         let fields = fields(args.get("fields"))?.unwrap_or_default();
@@ -732,6 +751,73 @@ impl McpServer {
             .expect("task view is an object")
             .insert("note".into(), json!(note));
         Ok((shaping::with_next(value, &task, action), Some(cwd)))
+    }
+
+    async fn instruct(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
+        let ids = task_ids(args.get("taskId"))?;
+        let instruction = required_string(args, "instruction")?;
+        let now = optional_bool(args, "now").unwrap_or(false);
+        let fields = fields(args.get("fields"))?.unwrap_or_default();
+        let mut entries = Vec::with_capacity(ids.len());
+        for id in &ids {
+            entries.push(self.instruct_one(id, &instruction, now, &fields).await?);
+        }
+        let cwd = match ids.as_slice() {
+            [id] => self
+                .state
+                .dispatcher
+                .task(id)
+                .ok()
+                .map(|task| project_cwd(&task)),
+            _ => None,
+        };
+        Ok((json!({ "results": entries }), cwd))
+    }
+
+    async fn instruct_one(
+        &self,
+        id: &str,
+        instruction: &str,
+        now: bool,
+        fields: &[String],
+    ) -> Result<Value, McpError> {
+        let refused = |error: String, next: Vec<Value>| {
+            let mut entry = json!({ "id": id, "outcome": "refused", "error": error });
+            if !next.is_empty() {
+                entry["next"] = Value::Array(next);
+            }
+            entry
+        };
+        let current = match self.state.dispatcher.task(id) {
+            Ok(task) => task,
+            Err(error) => return Ok(refused(error.to_string(), Vec::new())),
+        };
+        if let Some((message, next)) = hints::instruct_refusal(&current) {
+            return Ok(refused(message, next));
+        }
+        let mut request = InstructRequest::new(id, instruction);
+        if now {
+            request = request.now();
+        }
+        let outcome = match self.state.dispatcher.instruct(request).await {
+            Ok(outcome) => outcome,
+            Err(error) => return Ok(refused(error.to_string(), Vec::new())),
+        };
+        let task = self.enrich_task(outcome.task)?;
+        let action = match outcome.instructed {
+            Instructed::Queued => hints::Move::Queued,
+            Instructed::Saved => hints::Move::Settled {
+                branch_gone: task_branch_unavailable(&task).await,
+            },
+            Instructed::Appended | Instructed::Delivered | Instructed::Resumed => {
+                hints::Move::Started
+            }
+        };
+        let mut value = shaping::task_view(&task, fields);
+        let object = value.as_object_mut().expect("task view is an object");
+        object.insert("outcome".into(), json!(outcome.instructed));
+        object.insert("note".into(), json!(outcome.instructed.note()));
+        Ok(shaping::with_next(value, &task, action))
     }
 
     async fn handoff(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {

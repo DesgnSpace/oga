@@ -185,6 +185,7 @@ Every tool is available over MCP (`http://127.0.0.1:7331/mcp`) and the REST API.
 | `reply` | Answer a `needs_input` question on the same provider session. |
 | `resume` | Retry a failed, cancelled, or blocked task on the same session. |
 | `steer` | Send an instruction to work that is still active. |
+| `instruct` | Give one instruction to one or more tasks in any state: added to a brief, sent mid-run, queued, or saved for the next resume. |
 | `handoff` | Move a dead task to a different profile, keeping the same task ID. |
 | `edit` | Change a task that has not started — its prerequisites, settings, or brief — or requeue one cancelled before it started. |
 | `cancel` | Stop a task and its worker process tree. |

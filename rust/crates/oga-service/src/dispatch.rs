@@ -262,6 +262,13 @@ impl Dispatcher {
         steer::steer(self, request).await
     }
 
+    pub async fn instruct(
+        &self,
+        request: crate::instruct::InstructRequest,
+    ) -> Result<crate::instruct::InstructOutcome, ContinuationError> {
+        crate::instruct::instruct(self, request).await
+    }
+
     pub async fn handoff(&self, request: HandoffRequest) -> Result<Task, ContinuationError> {
         handoff::handoff(self, request).await
     }
@@ -999,20 +1006,26 @@ impl Dispatcher {
                         .session_id
                         .clone()
                         .filter(|_| hold.verb == HoldVerb::Resume && profile.command.is_none());
+                    let saved = self.take_saved_instructions(&task);
                     let prompt = match &session_id {
                         Some(_) => WorkerPromptInput {
                             task: crate::resume_prompt(
                                 TaskState::Cancelled,
-                                hold.args
-                                    .instruction
-                                    .as_deref()
-                                    .unwrap_or(CONTINUE_INSTRUCTION),
+                                crate::saved_instructions::with_saved(
+                                    hold.args.instruction.clone(),
+                                    &saved,
+                                )
+                                .as_deref()
+                                .unwrap_or(CONTINUE_INSTRUCTION),
                                 true,
                             ),
                             ..WorkerPromptInput::default()
                         },
                         None => WorkerPromptInput {
-                            task: task.prompt.clone(),
+                            task: match crate::saved_instructions::with_saved(None, &saved) {
+                                Some(saved) => crate::continuation_prompt(&task.prompt, &saved),
+                                None => task.prompt.clone(),
+                            },
                             attribution: prompt::attribution_for_task(&task, profile.provider),
                             ..WorkerPromptInput::default()
                         },
@@ -1029,6 +1042,22 @@ impl Dispatcher {
             }
         }
         Ok(report)
+    }
+
+    /// Marked sent here so only the run this hold starts carries them.
+    fn take_saved_instructions(&self, task: &Task) -> Vec<String> {
+        let taken = crate::saved_instructions::waiting(&self.store, &task.id).and_then(|saved| {
+            let now = lifecycle::now_iso();
+            self.store.transaction(|tx| {
+                crate::saved_instructions::mark_sent(tx, &task.id, task.state, saved.len(), &now)?;
+                Ok(())
+            })?;
+            Ok(saved)
+        });
+        taken.unwrap_or_else(|error| {
+            eprintln!("saved instructions unreadable for {}: {error}", task.id);
+            Vec::new()
+        })
     }
 
     /// Run the hold sweep for as long as the broker is up. The first pass runs

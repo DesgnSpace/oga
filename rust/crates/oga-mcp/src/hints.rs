@@ -72,19 +72,21 @@ pub fn next(task: &Task, action: Move) -> Vec<Value> {
     hints
 }
 
-/// The refusal for a task whose state cannot take a resume, with the tool that
+/// The refusal for a task whose state cannot take a resume, with the call that
 /// can. Returns nothing when resume is the right call.
-pub fn resume_refusal(task: &Task) -> Option<(String, Vec<Value>)> {
+pub fn resume_refusal(task: &Task, instruction: Option<&str>) -> Option<(String, Vec<Value>)> {
     let hint = match task.state {
-        TaskState::Running => hint(
-            "steer",
+        TaskState::Running => instruct_hint(
+            task,
+            instruction,
             "tells a running task something — delivered live, or queued for when the run finishes",
         ),
-        TaskState::Queued | TaskState::Answered => hint(
-            "steer",
+        TaskState::Queued | TaskState::Answered | TaskState::PreparingCheckout => instruct_hint(
+            task,
+            instruction,
             "leaves the instruction for the run that is about to start",
         ),
-        TaskState::NeedsInput => hint("reply", "answers the question it is parked on"),
+        TaskState::NeedsInput => reply_hint(task),
         _ => return None,
     };
     Some((
@@ -97,21 +99,71 @@ pub fn resume_refusal(task: &Task) -> Option<(String, Vec<Value>)> {
     ))
 }
 
-/// The refusal for a steer on a task that has not started, pointing at edit.
-pub fn steer_refusal(task: &Task) -> Option<(String, Vec<Value>)> {
-    if task.state != TaskState::Pending || !never_started(task) {
+/// The refusal for a steer on a task that is not running, pointing at the
+/// instruct call that fits its state.
+pub fn steer_refusal(task: &Task, instruction: Option<&str>) -> Option<(String, Vec<Value>)> {
+    if task.state == TaskState::Running {
         return None;
     }
+    let hint = if task.state == TaskState::NeedsInput {
+        reply_hint(task)
+    } else {
+        instruct_hint(task, instruction, instruct_effect(task))
+    };
     Some((
         format!(
-            "only a running task takes an instruction; this one is pending: {}",
+            "only a running task can be steered; this one is {}: {}",
+            task.state.as_str(),
             task.id
         ),
-        vec![hint(
-            "edit",
-            "instruction: adds it to the brief the worker starts from",
-        )],
+        vec![hint],
     ))
+}
+
+/// The refusal for an instruct on a task that has to be answered first.
+pub fn instruct_refusal(task: &Task) -> Option<(String, Vec<Value>)> {
+    (task.state == TaskState::NeedsInput).then(|| {
+        (
+            format!(
+                "task {} is waiting on an answer to its question, so it takes no instruction until it has one",
+                task.id
+            ),
+            vec![reply_hint(task)],
+        )
+    })
+}
+
+/// What instruct does with an instruction for `task` as it stands.
+fn instruct_effect(task: &Task) -> &'static str {
+    match task.state {
+        TaskState::Pending | TaskState::Blocked if never_started(task) => {
+            "adds it to the brief the worker starts from"
+        }
+        TaskState::Running => "hands it to the running worker, or queues it behind the run",
+        TaskState::Queued | TaskState::PreparingCheckout | TaskState::Answered => {
+            "queues it behind the run that is about to start"
+        }
+        _ => "saves it for the task's next run; add now: true to start that run with it",
+    }
+}
+
+fn instruct_hint(task: &Task, instruction: Option<&str>, when: &str) -> Value {
+    call(
+        "instruct",
+        when,
+        json!({
+            "taskId": [task.id],
+            "instruction": instruction.unwrap_or("<instruction>"),
+        }),
+    )
+}
+
+fn reply_hint(task: &Task) -> Value {
+    call(
+        "reply",
+        "answers the question it is parked on; the answer can carry the instruction too",
+        json!({ "taskId": task.id, "answer": "<answer>" }),
+    )
 }
 
 fn started(task: &Task, hints: &mut Vec<Value>) {
@@ -311,6 +363,11 @@ fn hint(tool: &str, when: impl Into<String>) -> Value {
     json!({ "tool": tool, "when": when.into() })
 }
 
+/// A hint that names the exact arguments of the call that works.
+fn call(tool: &str, when: impl Into<String>, arguments: Value) -> Value {
+    json!({ "tool": tool, "when": when.into(), "arguments": arguments })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,10 +433,15 @@ mod tests {
 
     #[test]
     fn resume_on_a_running_task_is_refused_and_names_steer() {
-        let (message, hints) = resume_refusal(&task(TaskState::Running)).expect("refusal");
+        let (message, hints) =
+            resume_refusal(&task(TaskState::Running), Some("merge main")).expect("refusal");
         assert!(message.contains("state running"), "{message}");
         assert_eq!(hints.len(), 1);
-        assert_eq!(hints[0]["tool"], json!("steer"));
+        assert_eq!(hints[0]["tool"], json!("instruct"));
+        assert_eq!(
+            hints[0]["arguments"],
+            json!({"taskId": ["task-1"], "instruction": "merge main"})
+        );
     }
 
     #[test]
@@ -391,7 +453,7 @@ mod tests {
             TaskState::Completed,
             TaskState::Pending,
         ] {
-            assert!(resume_refusal(&task(state)).is_none(), "{state:?}");
+            assert!(resume_refusal(&task(state), None).is_none(), "{state:?}");
         }
     }
 

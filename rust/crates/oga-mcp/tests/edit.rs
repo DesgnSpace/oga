@@ -286,7 +286,11 @@ async fn an_instruction_added_while_waiting_reaches_the_worker() {
             json!({ "taskId": waiting, "instruction": "push when done" }),
         )
         .await;
-    assert_eq!(tools(&steered), ["edit"], "{steered}");
+    assert_eq!(tools(&steered), ["instruct"], "{steered}");
+    assert_eq!(
+        steered["next"][0]["arguments"],
+        json!({ "taskId": [waiting], "instruction": "push when done" })
+    );
 
     let body = broker
         .call(
@@ -364,4 +368,10 @@ async fn a_task_that_already_ran_cannot_be_edited() {
         .call("edit", json!({ "taskId": done, "instruction": "more" }))
         .await;
     assert!(error(&body).contains("already run"), "{body}");
+    assert!(
+        error(&body).contains(&format!(
+            "instruct {{\"taskId\":\"{done}\",\"instruction\":\"more\"}}"
+        )),
+        "{body}"
+    );
 }

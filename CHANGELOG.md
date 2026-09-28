@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Give several tasks the same instruction in one go, whatever each is doing. Work that hasn't started, is running, or has stopped each takes it the right way, and finished work follows it the next time it picks up.
 - Buttons and pickers now line up in tighter rows across tasks, changed files, and settings.
 - A task's header now names the project it runs in, and shows lines added and removed right beside the changed files button.
 - Copy any message or code block with one click, and selected text copies itself.
