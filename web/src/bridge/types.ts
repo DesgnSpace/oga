@@ -124,6 +124,10 @@ export interface TaskWorktree {
   path: string;
   branch: string;
   links?: string[];
+  /** Commit, branch or tag the checkout was asked to start from. */
+  from?: string;
+  /** Commit the checkout started from; absent until the checkout exists. */
+  base?: string;
 }
 
 /** A listed task row. Timestamps are ISO strings kept verbatim from the wire. */

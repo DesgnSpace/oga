@@ -101,7 +101,11 @@ pub async fn resume(
         )));
     }
     let mut recreated_worktree = false;
-    if let Some(worktree) = &old.worktree {
+    if let Some(worktree) = old
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.deferred())
+    {
         if !std::path::Path::new(&worktree.path).join(".git").exists() {
             if old.archived_at.is_some() {
                 oga_worktree::recreate_task_worktree(worktree).await?;

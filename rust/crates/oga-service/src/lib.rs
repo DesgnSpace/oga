@@ -78,7 +78,11 @@ pub(crate) fn require_profile(
 }
 
 pub(crate) fn require_existing_worktree(task: &Task) -> Result<(), ContinuationError> {
-    if let Some(worktree) = &task.worktree {
+    if let Some(worktree) = task
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.deferred())
+    {
         oga_worktree::require_worktree_paths(worktree)?;
     }
     Ok(())

@@ -709,15 +709,6 @@ pub async fn create_task_worktree_at(
     Ok(planned.created)
 }
 
-pub async fn plan_task_worktree(
-    origin_cwd: &Path,
-    task_id: &str,
-    request: &WorktreeRequest,
-    title: Option<&str>,
-) -> Result<PlannedWorktree, WorktreeError> {
-    plan_task_worktree_at(&worktrees_root(), origin_cwd, task_id, request, title).await
-}
-
 pub async fn plan_task_worktree_at(
     root_dir: &Path,
     origin_cwd: &Path,
@@ -725,43 +716,126 @@ pub async fn plan_task_worktree_at(
     request: &WorktreeRequest,
     title: Option<&str>,
 ) -> Result<PlannedWorktree, WorktreeError> {
-    let root_dir = absolute_path(root_dir)?;
+    let root = checkout_repository(origin_cwd, request).await?;
+    let from = request.from.as_deref().unwrap_or("HEAD");
+    let base = commit_of(&root, from)
+        .await?
+        .ok_or_else(|| missing_base(&root, request, ""))?;
+    let mut created = plan_checkout(root_dir, &root, origin_cwd, task_id, request, title).await?;
+    created.worktree.base = Some(base.clone());
+    Ok(PlannedWorktree {
+        created,
+        root,
+        base,
+    })
+}
+
+/// Plans a checkout that is made when its task is released, so nothing is
+/// created yet. `from` may name a branch that does not exist so long as it is
+/// one of `prerequisite_branches`, which a prerequisite will create.
+pub async fn plan_task_worktree_on_release_at(
+    root_dir: &Path,
+    origin_cwd: &Path,
+    task_id: &str,
+    request: &WorktreeRequest,
+    title: Option<&str>,
+    prerequisite_branches: &[String],
+) -> Result<CreatedWorktree, WorktreeError> {
+    let root = checkout_repository(origin_cwd, request).await?;
+    let from = request.from.as_deref().unwrap_or("HEAD");
+    if !prerequisite_branches.iter().any(|branch| branch == from)
+        && commit_of(&root, from).await?.is_none()
+    {
+        return Err(missing_base(
+            &root,
+            request,
+            ", or the worktree.branch of a prerequisite",
+        ));
+    }
+    plan_checkout(root_dir, &root, origin_cwd, task_id, request, title).await
+}
+
+/// Resolves a deferred checkout's base now that its task is released.
+/// `from_prerequisite` says `from` is a prerequisite's branch, whose base is
+/// that branch's newest tip, local or pushed.
+pub async fn plan_released_checkout(
+    worktree: &TaskWorktree,
+    from_prerequisite: bool,
+) -> Result<PlannedWorktree, WorktreeError> {
+    let origin_cwd = Path::new(&worktree.origin_cwd);
+    let root = require_repository_root(origin_cwd).await?;
+    let from = worktree.from.as_deref().unwrap_or("HEAD");
+    let base = if from_prerequisite {
+        latest_branch_tip(&root, from).await?.ok_or_else(|| {
+            WorktreeError::Message(format!(
+                "worktree base branch {from} does not exist, here or on its remote — the prerequisite that works on it finished without creating it"
+            ))
+        })?
+    } else {
+        commit_of(&root, from).await?.ok_or_else(|| {
+            WorktreeError::Message(format!(
+                "worktree base is not a commit in this repository: {from}"
+            ))
+        })?
+    };
+    let checkout = PathBuf::from(&worktree.path);
+    Ok(PlannedWorktree {
+        created: CreatedWorktree {
+            cwd: checkout_cwd(&checkout, &root, origin_cwd)?,
+            worktree: TaskWorktree {
+                base: Some(base.clone()),
+                ..worktree.clone()
+            },
+        },
+        root,
+        base,
+    })
+}
+
+async fn checkout_repository(
+    origin_cwd: &Path,
+    request: &WorktreeRequest,
+) -> Result<PathBuf, WorktreeError> {
     if request.join.is_some() {
         return Err(WorktreeError::Message(
             "worktree.join must enter an existing checkout".into(),
         ));
     }
-    let root = repository_root(origin_cwd).await?.ok_or_else(|| {
+    require_repository_root(origin_cwd).await
+}
+
+async fn require_repository_root(origin_cwd: &Path) -> Result<PathBuf, WorktreeError> {
+    repository_root(origin_cwd).await?.ok_or_else(|| {
         WorktreeError::Message(format!(
             "worktree needs a git repository: {} is not inside one",
             origin_cwd.display()
         ))
-    })?;
-    let from = request.from.as_deref().unwrap_or("HEAD");
-    let base_ref = format!("{from}^{{commit}}");
-    let base = git_output(
-        &root,
-        &[
-            "rev-parse".into(),
-            "--verify".into(),
-            "--quiet".into(),
-            base_ref,
-        ],
-    )
-    .await?;
-    let base = base.ok_or_else(|| {
-        WorktreeError::Message(if request.from.is_some() {
-            format!(
-                "worktree base is not a commit in this repository: {from} — name a branch, tag or commit {} already has",
-                root.display()
-            )
-        } else {
-            format!(
-                "worktree needs a commit to branch from: {} has no commits yet — commit once, then delegate",
-                root.display()
-            )
-        })
-    })?;
+    })
+}
+
+/// `alternative` extends the list of bases the caller could have named.
+fn missing_base(root: &Path, request: &WorktreeRequest, alternative: &str) -> WorktreeError {
+    WorktreeError::Message(match request.from.as_deref() {
+        Some(from) => format!(
+            "worktree base is not a commit in this repository: {from} — name a branch, tag or commit {} already has{alternative}",
+            root.display()
+        ),
+        None => format!(
+            "worktree needs a commit to branch from: {} has no commits yet — commit once, then delegate",
+            root.display()
+        ),
+    })
+}
+
+async fn plan_checkout(
+    root_dir: &Path,
+    root: &Path,
+    origin_cwd: &Path,
+    task_id: &str,
+    request: &WorktreeRequest,
+    title: Option<&str>,
+) -> Result<CreatedWorktree, WorktreeError> {
+    let root_dir = absolute_path(root_dir)?;
     let requested_links = match request.link.as_deref() {
         Some(links) => links.to_vec(),
         None => default_links(origin_cwd).await?,
@@ -770,10 +844,10 @@ pub async fn plan_task_worktree_at(
     let checkout = root_dir.join(task_id);
     let branch = match request.branch.as_deref() {
         Some(branch) => branch.to_owned(),
-        None => available_default_branch(&root, task_id, title).await?,
+        None => available_default_branch(root, task_id, title).await?,
     };
     let branch_check = run_git(
-        &root,
+        root,
         &["check-ref-format".into(), "--branch".into(), branch.clone()],
     )
     .await?;
@@ -782,20 +856,114 @@ pub async fn plan_task_worktree_at(
             "invalid worktree branch: {branch}"
         )));
     }
-    let worktree = TaskWorktree {
-        origin_cwd: origin_cwd.to_string_lossy().into_owned(),
-        path: checkout.to_string_lossy().into_owned(),
-        branch,
-        links: (!links.is_empty()).then_some(links),
-    };
-    Ok(PlannedWorktree {
-        created: CreatedWorktree {
-            cwd: checkout_cwd(&checkout, &root, origin_cwd)?,
-            worktree,
+    Ok(CreatedWorktree {
+        cwd: checkout_cwd(&checkout, root, origin_cwd)?,
+        worktree: TaskWorktree {
+            origin_cwd: origin_cwd.to_string_lossy().into_owned(),
+            path: checkout.to_string_lossy().into_owned(),
+            branch,
+            links: (!links.is_empty()).then_some(links),
+            from: Some(request.from.as_deref().unwrap_or("HEAD").to_owned()),
+            base: None,
         },
-        root,
-        base,
     })
+}
+
+async fn commit_of(root: &Path, revision: &str) -> Result<Option<String>, WorktreeError> {
+    git_output(
+        root,
+        &[
+            "rev-parse".into(),
+            "--verify".into(),
+            "--quiet".into(),
+            format!("{revision}^{{commit}}"),
+        ],
+    )
+    .await
+}
+
+/// The newest commit on `branch`. The pushed tip wins when it is ahead of the
+/// local branch, as when work was pushed from another clone; otherwise the
+/// local tip does, including when the two have diverged, because the local
+/// branch holds what the prerequisite committed here.
+async fn latest_branch_tip(root: &Path, branch: &str) -> Result<Option<String>, WorktreeError> {
+    let local = commit_of(root, &format!("refs/heads/{branch}")).await?;
+    let Some(remote) = branch_remote(root, branch).await? else {
+        return Ok(local);
+    };
+    let tracking = format!("refs/remotes/{remote}/{branch}");
+    fetch_branch(root, &remote, branch, &tracking).await;
+    let pushed = commit_of(root, &tracking).await?;
+    Ok(match (local, pushed) {
+        (Some(local), Some(pushed))
+            if local != pushed && is_ancestor(root, &local, &pushed).await? =>
+        {
+            Some(pushed)
+        }
+        (Some(local), _) => Some(local),
+        (None, pushed) => pushed,
+    })
+}
+
+/// The remote `branch` tracks, or `origin` when it tracks none.
+async fn branch_remote(root: &Path, branch: &str) -> Result<Option<String>, WorktreeError> {
+    let configured = git_output(
+        root,
+        &[
+            "config".into(),
+            "--get".into(),
+            format!("branch.{branch}.remote"),
+        ],
+    )
+    .await?
+    .filter(|remote| remote != ".");
+    if configured.is_some() {
+        return Ok(configured);
+    }
+    let remotes = git_output(root, &["remote".into()])
+        .await?
+        .unwrap_or_default();
+    Ok(remotes
+        .lines()
+        .any(|remote| remote == "origin")
+        .then(|| "origin".to_owned()))
+}
+
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Best effort: offline, or a branch that was never pushed, leaves the
+/// tracking ref as it was.
+async fn fetch_branch(root: &Path, remote: &str, branch: &str, tracking: &str) {
+    let fetch = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["fetch", "--quiet", "--no-tags", remote])
+        .arg(format!("+refs/heads/{branch}:{tracking}"))
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .kill_on_drop(true)
+        .output();
+    let _ = tokio::time::timeout(FETCH_TIMEOUT, fetch).await;
+}
+
+async fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> Result<bool, WorktreeError> {
+    let run = run_git(
+        root,
+        &[
+            "merge-base".into(),
+            "--is-ancestor".into(),
+            ancestor.into(),
+            descendant.into(),
+        ],
+    )
+    .await?;
+    match run.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(WorktreeError::Message(format!(
+            "could not compare {ancestor} with {descendant}: {}",
+            run.stderr.trim()
+        ))),
+    }
 }
 
 pub async fn prepare_task_worktree(planned: &PlannedWorktree) -> Result<(), WorktreeError> {

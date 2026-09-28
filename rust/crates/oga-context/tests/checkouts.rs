@@ -182,6 +182,8 @@ fn a_worktree_ranks_its_own_files_and_shares_the_origin_routes() {
             path: worktree.path().display().to_string(),
             branch: "refunds".into(),
             links: None,
+            from: None,
+            base: None,
         }),
         ..Task::default()
     };

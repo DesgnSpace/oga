@@ -267,7 +267,7 @@ fn worktree_schema() -> Value {
                 "from".into(),
                 described(
                     json!({ "type": "string", "minLength": 1, "maxLength": 200 }),
-                    "Commit, branch or tag to start from. Default HEAD. Not with join.",
+                    "Commit, branch, tag or a prerequisite's branch. Default HEAD. Not with join.",
                 ),
             ),
             (
@@ -281,7 +281,7 @@ fn worktree_schema() -> Value {
                 "link".into(),
                 described(
                     json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 32 }),
-                    "Untracked paths relative to cwd to copy into the checkout, such as dependency folders. Omitted, git-ignored folders are copied except dependencies, build output and agent state (`node_modules`, `target`, `dist`, `build`, `.venv`, `.claude`); files such as `.env` are not. `[]` copies nothing. Not with join.",
+                    "Untracked paths relative to cwd to copy into the checkout. Omitted, git-ignored folders are copied except dependencies, build output and agent state (`node_modules`, `target`, `dist`, `build`, `.venv`, `.claude`); files such as `.env` are not. `[]` copies nothing. Not with join.",
                 ),
             ),
             (

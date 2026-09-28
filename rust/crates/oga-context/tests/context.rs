@@ -1436,6 +1436,8 @@ fn validates_worktree_routes_against_the_checkout_before_the_origin_catches_up()
             path: checkout.path().display().to_string(),
             branch: "task/context".into(),
             links: None,
+            from: None,
+            base: None,
         }),
         ..fixture.task()
     };
