@@ -57,6 +57,24 @@ gap reaches the outer radius, the inner element keeps its own token.
 
 Descriptions use `--color-text-muted` and stop at `65ch`.
 
+## Controls
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--control-height` | 28px | Text buttons, icon buttons, selects, and source pickers in the same row |
+| `--control-height-small` | 24px | Compact menu, toast, and inline controls |
+| `--control-padding-block` | `--space-1` (4px) | Top and bottom of text controls |
+| `--control-padding-inline` | `--space-3` (12px) | Left and right of standard text controls |
+| `--control-padding-inline-small` | `--space-2` (8px) | Left and right of compact controls |
+| `--control-line-height` | 1.3 | Single-line control labels |
+
+Standard controls use `--text-base` (13px), a 1px border, and
+`--radius-control`. Their height includes the padding and border. Icon
+buttons are square and centre their icons. Menu items use the compact height;
+navigation rows, file rows, and image previews keep their content-driven
+heights. On coarse pointers, text buttons and selects use 8px block padding
+and compact controls grow to `--control-height`, so touch targets stay large.
+
 ## Layout
 
 ### Sidebar (rail)

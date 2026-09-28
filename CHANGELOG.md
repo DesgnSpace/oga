@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Buttons and pickers now line up in tighter rows across tasks, changed files, and settings.
 - Copy any message or code block with one click, and selected text copies itself.
 - A task's menu now sits right beside its title, with the task's details, the thinking toggle, and actions like archive all in one place.
 - Rounded corners now match across the app. Cards, panels, the reply box, buttons, menus, and list rows share one set of shapes, and corners inside a card follow its edge.
