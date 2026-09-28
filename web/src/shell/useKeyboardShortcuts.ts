@@ -14,7 +14,7 @@ function hasDesktopBridge(): boolean {
   return typeof window !== "undefined" && "__TAURI__" in window;
 }
 
-function isTextField(target: EventTarget | null): boolean {
+export function isTextField(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement
     || target instanceof HTMLTextAreaElement
     || target instanceof HTMLSelectElement

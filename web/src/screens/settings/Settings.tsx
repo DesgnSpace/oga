@@ -794,7 +794,7 @@ function AppearancePanel() {
             <CardRow
               as="label"
               title="Show technical details"
-              description="Show the raw data behind Oga's own messages in a task, for troubleshooting."
+              description="Show the raw data behind each message in a task, for troubleshooting."
             >
               <input
                 type="checkbox"

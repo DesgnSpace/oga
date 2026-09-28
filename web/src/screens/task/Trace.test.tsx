@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { applyTechnicalDetails } from "@/appearance";
 import { setTransport, tauriTransport, type Transport } from "@/bridge/transport";
 import type { TaskEventView } from "@/bridge/types";
 import type { FileChange } from "@/domain/changes";
@@ -15,7 +16,10 @@ stylesheet.textContent = readFileSync(new URL("../../oga.css", import.meta.url),
 beforeAll(() => document.head.append(stylesheet));
 afterAll(() => stylesheet.remove());
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  applyTechnicalDetails(false);
+});
 
 function fileEvent(id: number): TaskEventView {
   return {
@@ -90,6 +94,9 @@ describe("TraceRows", () => {
     expect(screen.getByText("Used oga: resume")).toBeTruthy();
     expect(screen.getByText("Message:")).toBeTruthy();
     expect(screen.getByText("Please continue from the saved brief.")).toBeTruthy();
+    expect(screen.queryByText("Result:")).toBeNull();
+
+    act(() => applyTechnicalDetails(true));
     expect(screen.getByText("Result:")).toBeTruthy();
     expect(screen.getByText(/"message"/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Used oga: resume" }));
@@ -252,7 +259,7 @@ describe("TraceRows", () => {
     expect(changes).toEqual([["call:0:first", true]]);
   });
 
-  it("renders an OpenCode todo payload as checklist items with raw details available", () => {
+  it("renders an OpenCode todo payload as checklist items, with raw details behind the setting", () => {
     const event: TaskEventView = {
       ...fileEvent(1),
       source: "opencode",
@@ -286,6 +293,9 @@ describe("TraceRows", () => {
     expect(screen.getByText("Read the files")).toBeDefined();
     expect(screen.getByText("Fix the palette")).toBeDefined();
     expect(screen.getByText("Run the tests")).toBeDefined();
+    expect(screen.queryByText("Show technical details")).toBeNull();
+
+    act(() => applyTechnicalDetails(true));
     expect(container.querySelector(".trace-raw-event")?.hasAttribute("open")).toBe(false);
     fireEvent.click(screen.getByText("Show technical details"));
     expect(container.querySelector(".trace-raw-event")?.hasAttribute("open")).toBe(true);

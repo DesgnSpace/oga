@@ -401,8 +401,7 @@ export function EventExpansionView({
 }) {
   const showTechnicalDetails = useShowTechnicalDetails();
   const hasPrimaryExpansion = expansion.type !== "payload";
-  // Oga's own events hold only what the reader wrote, so their raw data waits for the setting.
-  const raw = hasPrimaryExpansion && (event.source !== "broker" || showTechnicalDetails) ? event.rawText : undefined;
+  const raw = hasPrimaryExpansion && showTechnicalDetails ? event.rawText : undefined;
   const humanText = ["skill", "prose", "detail", "report"].includes(expansion.type)
     || (expansion.type === "content" && event.presentation?.type === "tool");
   if (humanText) {
