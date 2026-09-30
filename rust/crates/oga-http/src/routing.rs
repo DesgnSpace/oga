@@ -307,7 +307,8 @@ async fn take_advice(
 /// holds goes nowhere but the request header.
 fn advisor(state: &HttpState) -> Result<Option<Advisor>, HttpError> {
     let settings = settings::advisor_settings(&state.store)?;
-    Ok((settings.enabled && !settings.api_key.is_empty()).then(|| Advisor::new(settings.api_key)))
+    Ok((settings.enabled && !settings.api_key.is_empty())
+        .then(|| Advisor::new(settings.api_key).instructions(settings.instructions)))
 }
 
 /// Follow one answer in place of the route the rules built. Advice naming a
@@ -615,7 +616,12 @@ fn decision_from_audit(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::{
+        collections::BTreeMap,
+        io::{Read, Write},
+        net::TcpListener,
+        sync::{Arc, Mutex},
+    };
 
     use axum::extract::State;
     use oga_domain::{Profile, Provider};
@@ -974,6 +980,76 @@ mod tests {
             .expect("advisor settings");
     }
 
+    fn advisor_stub(choice: &str) -> (String, Arc<Mutex<String>>) {
+        let payload = json!({
+            "answers": {
+                "worker": { "type": "choice", "choice": choice, "confidence": 0.9 },
+            },
+        })
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
+        let address = listener.local_addr().expect("address");
+        let captured = Arc::new(Mutex::new(String::new()));
+        let sink = captured.clone();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut raw = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while let Ok(read) = stream.read(&mut chunk) {
+                    if read == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&chunk[..read]);
+                    let text = String::from_utf8_lossy(&raw);
+                    let Some(head) = text.find("\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = text[..head]
+                        .lines()
+                        .find_map(|line| line.split_once(':'))
+                        .and_then(|(name, value)| {
+                            name.trim()
+                                .eq_ignore_ascii_case("content-length")
+                                .then_some(value)
+                        })
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if raw.len() >= head + 4 + length {
+                        break;
+                    }
+                }
+                if let Ok(text) = String::from_utf8(raw) {
+                    *sink.lock().expect("capture") = text;
+                }
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://{address}/v1/systemone"), captured)
+    }
+
+    async fn advisor_request_body(state: &HttpState, cwd: &Path, choice: &str) -> Value {
+        let (endpoint, captured) = advisor_stub(choice);
+        let advisor = advisor(state)
+            .expect("advisor settings")
+            .expect("advisor on")
+            .endpoint(endpoint);
+        let input = unnamed(cwd);
+        let world = world_of(state, &input);
+        let brief = advisor_brief(&input, TaskClass::Build);
+        let destinations = describe_destinations(&world, None);
+
+        advisor.choose(&brief, &destinations).await.expect("choice");
+
+        let raw = captured.lock().expect("capture").clone();
+        let body = raw.split("\r\n\r\n").nth(1).expect("request body");
+        serde_json::from_str(body).expect("request json")
+    }
+
     fn advice(profile_id: &str, model: &str, confidence: f64) -> Choice {
         Choice {
             profile_id: profile_id.into(),
@@ -1018,8 +1094,12 @@ mod tests {
             .await
             .expect("read")
             .0;
-        assert_eq!(shown["apiKey"], "••••••••");
-        assert_eq!(shown["enabled"], true);
+        assert_eq!(shown.api_key, "••••••••");
+        assert!(shown.enabled);
+        assert_eq!(
+            shown.default_instructions,
+            oga_advisor::DEFAULT_INSTRUCTIONS
+        );
 
         // Writing the mask back leaves the stored key where it was, so
         // turning the switch off and on again does not wipe it.
@@ -1049,6 +1129,66 @@ mod tests {
             "{}",
             refusal.message
         );
+    }
+
+    #[tokio::test]
+    async fn a_saved_routing_prompt_reaches_the_advisor_request() {
+        let (directory, store) = two_workers();
+        let state = HttpState::new(store);
+        store_advisor(
+            &state,
+            json!({
+                "enabled": true,
+                "apiKey": "secret",
+                "instructions": "Never pick the fast worker.",
+            }),
+        )
+        .await;
+
+        let body =
+            advisor_request_body(&state, directory.path(), &format!("deep:{DEEP_MODEL}")).await;
+
+        assert_eq!(
+            body["questions"]["worker"]["instructions"],
+            "Never pick the fast worker."
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_routing_prompt_sends_the_built_in_default() {
+        let (directory, store) = two_workers();
+        let state = HttpState::new(store);
+        store_advisor(&state, json!({ "enabled": true, "apiKey": "secret" })).await;
+
+        let body =
+            advisor_request_body(&state, directory.path(), &format!("deep:{DEEP_MODEL}")).await;
+
+        assert_eq!(
+            body["questions"]["worker"]["instructions"],
+            oga_advisor::DEFAULT_INSTRUCTIONS
+        );
+    }
+
+    #[tokio::test]
+    async fn a_routing_prompt_past_the_cap_is_refused_on_save() {
+        let (_directory, store) = two_workers();
+        let state = HttpState::new(store);
+
+        let refusal = settings::put_advisor(
+            State(state),
+            Bytes::from(
+                json!({
+                    "enabled": true,
+                    "apiKey": "secret",
+                    "instructions": "x".repeat(8_001),
+                })
+                .to_string(),
+            ),
+        )
+        .await
+        .expect_err("refused");
+
+        assert!(refusal.message.contains("8000"), "{}", refusal.message);
     }
 
     #[tokio::test]

@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
 import { FONT_OPTIONS } from "@/appearance";
 import type {
+  AdvisorSettings,
+  AdvisorView,
   AppearanceSettings,
   BrokerCall,
   CleanupResult,
@@ -21,6 +23,10 @@ let callerPrompt = inheritedPrompt;
 let savedCallerPrompt: { cwd: string; written: boolean; value: string } | undefined;
 let appearance: AppearanceSettings = { font: null, showTechnicalDetails: false };
 let savedAppearance: AppearanceSettings | undefined;
+const defaultAdvisorInstructions = "Pick the worker that should run this task.";
+let advisor: AdvisorView = { enabled: false, apiKey: "", instructions: "", defaultInstructions: defaultAdvisorInstructions };
+let savedAdvisor: AdvisorSettings | undefined;
+let advisorSaveError: string | undefined;
 
 afterEach(() => {
   cleanup();
@@ -29,6 +35,9 @@ afterEach(() => {
   savedCallerPrompt = undefined;
   appearance = { font: null, showTechnicalDetails: false };
   savedAppearance = undefined;
+  advisor = { enabled: false, apiKey: "", instructions: "", defaultInstructions: defaultAdvisorInstructions };
+  savedAdvisor = undefined;
+  advisorSaveError = undefined;
   document.documentElement.removeAttribute("style");
   localStorage.clear();
 });
@@ -196,6 +205,13 @@ function makeTransport(
           savedAppearance = call.settings;
           appearance = call.settings;
           return appearance as T;
+        case "advisor":
+          return advisor as T;
+        case "putAdvisor":
+          if (advisorSaveError) throw new Error(advisorSaveError);
+          savedAdvisor = call.settings;
+          advisor = { ...advisor, ...call.settings };
+          return advisor as T;
         case "runCleanup":
           return (
             onRunCleanup
@@ -629,5 +645,86 @@ describe("brief rules", () => {
 
     await waitFor(() => expect(savedCallerPrompt).toBeTruthy());
     expect(savedCallerPrompt).toMatchObject({ written: false, value: "" });
+  });
+});
+
+describe("choosing a worker tab", () => {
+  it("sits in General right after Workers and answers to routing searches", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    const tab = await screen.findByRole("tab", { name: "Choosing a worker" });
+    const group = tab.closest(".settings-nav-group")!;
+    expect(group.querySelector(".settings-nav-label")?.textContent).toBe("General");
+    const tabs = [...group.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    expect(tabs.indexOf("Choosing a worker")).toBe(tabs.indexOf("Workers") + 1);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), { target: { value: "routing" } });
+    expect(screen.getByRole("tab", { name: "Choosing a worker" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Workers" })).toBeNull();
+  });
+
+  it("keeps worker picking out of the workers tab", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    await screen.findByRole("button", { name: /Claude work/ });
+    expect(within(document.getElementById("settings-panel-workers")!).queryByLabelText("TypeSafe key")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Choosing a worker" }));
+    const panel = document.getElementById("settings-panel-choosingWorker")!;
+    expect(panel.hasAttribute("hidden")).toBe(false);
+    expect(await within(panel).findByLabelText("TypeSafe key")).toBeTruthy();
+  });
+
+  it("saves custom wording for how work is matched, and resets to the default", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Choosing a worker" }));
+    const panel = document.getElementById("settings-panel-choosingWorker")!;
+    const editor = await within(panel).findByLabelText("How it chooses");
+    expect((editor as HTMLTextAreaElement).value).toBe(defaultAdvisorInstructions);
+    expect(within(panel).getByText("Using the default")).toBeTruthy();
+
+    fireEvent.change(editor, { target: { value: "Prefer free workers for docs." } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(savedAdvisor).toMatchObject({ instructions: "Prefer free workers for docs." }));
+    expect(within(panel).getByText("Your own wording")).toBeTruthy();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Reset to default" }));
+    await waitFor(() => expect(savedAdvisor).toMatchObject({ instructions: "" }));
+    expect((editor as HTMLTextAreaElement).value).toBe(defaultAdvisorInstructions);
+  });
+
+  it("shows the backend save error", async () => {
+    advisorSaveError = "Your text is too long to save. Shorten it to 8000 characters or fewer.";
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Choosing a worker" }));
+    const panel = document.getElementById("settings-panel-choosingWorker")!;
+    const editor = await within(panel).findByLabelText("How it chooses");
+    fireEvent.change(editor, { target: { value: `${defaultAdvisorInstructions} More.` } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Save changes" }));
+
+    expect(await within(panel).findByText("Your text is too long to save. Shorten it to 8000 characters or fewer.")).toBeTruthy();
+  });
+
+  it("keeps an unsaved prompt draft when the switch is flipped", async () => {
+    advisor = { ...advisor, apiKey: "MASKED" };
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Choosing a worker" }));
+    const panel = document.getElementById("settings-panel-choosingWorker")!;
+    const editor = await within(panel).findByLabelText("How it chooses");
+    fireEvent.change(editor, { target: { value: "Prefer free workers for docs." } });
+
+    fireEvent.click(within(panel).getByRole("checkbox", { name: /Match the worker to the brief/ }));
+
+    await waitFor(() => expect(savedAdvisor).toMatchObject({ enabled: true }));
+    expect((editor as HTMLTextAreaElement).value).toBe("Prefer free workers for docs.");
   });
 });

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.
+- Choosing a worker has its own Settings page, where you can also tell it how to pick — which workers to prefer or avoid, and when.
 
 ## 0.2.3 - 2026-09-29
 

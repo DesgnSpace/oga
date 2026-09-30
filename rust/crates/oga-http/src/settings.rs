@@ -12,15 +12,16 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
+use oga_advisor::DEFAULT_INSTRUCTIONS;
 use oga_config::{
     ConfigLayer, ConfigLayers, LoveRules, MASKED_SECRET, ModelOverrides, ResolvedModelSettings,
     config_revision, global_cwd, load_config_layers, model_enabled, model_override_for,
     read_model_overrides, read_model_settings,
 };
 use oga_domain::{
-    AdvisorSettings, AppearanceSettings, CleanupSettings, CleanupSnapshot, MemoryEntry, ModelInfo,
-    ModelInfoSource, ModelQuery as DomainModelQuery, ModelSettingsRow, Profile, ProfileUsage,
-    Provider, UsageSource, UsageWindow, UsageWindowKind, WaitSettings,
+    AdvisorSettings, AdvisorView, AppearanceSettings, CleanupSettings, CleanupSnapshot,
+    MemoryEntry, ModelInfo, ModelInfoSource, ModelQuery as DomainModelQuery, ModelSettingsRow,
+    Profile, ProfileUsage, Provider, UsageSource, UsageWindow, UsageWindowKind, WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{
@@ -52,6 +53,7 @@ const MIN_CLEANUP_DAYS: u64 = 1;
 const MAX_CLEANUP_DAYS: u64 = 3_650;
 const MAX_WAIT_MINUTES: u64 = 24 * 60;
 const MAX_WAIT_ATTEMPTS: u32 = 100;
+const MAX_ADVISOR_INSTRUCTIONS: usize = 8_000;
 const MAX_MEMORY_VALUE: usize = 16_000;
 const MAX_MEMORY_ENTRIES: u64 = 100;
 const MAX_MEMORY_CHARS: u64 = 64_000;
@@ -399,19 +401,31 @@ pub async fn put_waiting(
 /// The advisor's own settings, with the key masked. Everything else here
 /// reads a project's settings; this one is global, because the key signs in
 /// to one account whichever project a task starts from.
-pub async fn get_advisor(State(state): State<HttpState>) -> Result<Json<Value>, HttpError> {
+pub async fn get_advisor(State(state): State<HttpState>) -> Result<Json<AdvisorView>, HttpError> {
     let settings = run_blocking(move || advisor_settings(&state.store)).await?;
-    Ok(Json(json!({
-        "enabled": settings.enabled,
-        "apiKey": if settings.api_key.is_empty() { "" } else { MASKED_SECRET },
-    })))
+    Ok(Json(AdvisorView {
+        enabled: settings.enabled,
+        api_key: if settings.api_key.is_empty() {
+            String::new()
+        } else {
+            MASKED_SECRET.to_owned()
+        },
+        instructions: settings.instructions,
+        default_instructions: DEFAULT_INSTRUCTIONS.to_owned(),
+    }))
 }
 
 pub async fn put_advisor(
     State(state): State<HttpState>,
     body: Bytes,
-) -> Result<Json<Value>, HttpError> {
+) -> Result<Json<AdvisorView>, HttpError> {
     let body: AdvisorSettings = parse_json(&body)?;
+    let instructions = body.instructions.trim().to_owned();
+    if instructions.chars().count() > MAX_ADVISOR_INSTRUCTIONS {
+        return Err(HttpError::bad_request(format!(
+            "Your text is too long to save. Shorten it to {MAX_ADVISOR_INSTRUCTIONS} characters or fewer."
+        )));
+    }
     let store = state.store.clone();
     run_blocking(move || {
         let stored = advisor_settings(&store)?;
@@ -431,6 +445,7 @@ pub async fn put_advisor(
             &serde_json::to_string(&AdvisorSettings {
                 enabled: body.enabled,
                 api_key,
+                instructions,
             })
             .unwrap(),
             &now_iso(),
