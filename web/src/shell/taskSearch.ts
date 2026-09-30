@@ -3,10 +3,14 @@
 import type { SidebarController } from "@/state";
 
 const SEARCH_SELECTOR = "input[data-task-search]";
+const SEARCH_TOGGLE_SELECTOR = "button[data-task-search-toggle]";
 const SIDEBAR_SELECTOR = ".task-sidebar";
 
+/** The field only exists while search is open; the toggle opens and focuses it. */
 export function focusTaskSearch(): void {
-  document.querySelector<HTMLInputElement>(SEARCH_SELECTOR)?.focus();
+  const field = document.querySelector<HTMLInputElement>(SEARCH_SELECTOR);
+  if (field) field.focus();
+  else document.querySelector<HTMLButtonElement>(SEARCH_TOGGLE_SELECTOR)?.click();
 }
 
 export function focusTaskList(): void {

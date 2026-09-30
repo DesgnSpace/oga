@@ -9,7 +9,6 @@ export type Route =
   | { kind: "home" }
   | { kind: "task"; id: string }
   | { kind: "settings"; tab?: SettingsTab }
-  | { kind: "usage" }
   | { kind: "icons" }
   | { kind: "not-found" };
 
@@ -21,7 +20,7 @@ export function routeFromPath(path: string): Route {
   const trimmed = withoutQuery.replace(/\/+$/, "");
   if (trimmed === "") return { kind: "home" };
   if (trimmed === "/settings") return { kind: "settings" };
-  if (trimmed === "/usage") return { kind: "usage" };
+  if (trimmed === "/usage") return { kind: "settings", tab: "usage" };
   if (trimmed === "/icons") return { kind: "icons" };
   if (trimmed.startsWith("/tasks/") && trimmed.length > "/tasks/".length) {
     return { kind: "task", id: trimmed.slice("/tasks/".length) };
@@ -37,9 +36,7 @@ export function routePath(route: Route): string {
     case "task":
       return `/tasks/${route.id}`;
     case "settings":
-      return "/settings";
-    case "usage":
-      return "/usage";
+      return route.tab === "usage" ? "/usage" : "/settings";
     case "icons":
       return "/icons";
   }

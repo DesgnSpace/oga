@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { broker } from "@/bridge/client";
 import type { Provider, UsageBreakdown, UsageDay, UsagePeriod, UsageResponse } from "@/bridge/types";
+import { PageHeader } from "@/components/primitives/Page";
 import { formatCost, formatTokenCount } from "@/lib/format";
 import { BackArrowIcon, ForwardArrowIcon } from "@/ui/icons";
 import { providerLabel } from "../settings/state";
@@ -148,9 +149,7 @@ export default function UsagePage() {
 }
 
 function UsageHeader() {
-  return (
-    <header className="usage-header"><div><p className="eyebrow">Spending</p><h1 id="usage-modal-title">Usage</h1><p className="usage-subtitle">Cost and tokens from your tasks.</p></div></header>
-  );
+  return <PageHeader title="Usage" description="Cost and tokens from your tasks." />;
 }
 
 function OverviewPanel({

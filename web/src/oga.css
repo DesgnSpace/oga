@@ -734,8 +734,7 @@ a {
 .sidebar-search-row {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3) var(--space-1);
+    padding: 0 var(--space-3) var(--space-1);
 }
 
 .sidebar-search-wrap {
@@ -772,38 +771,6 @@ a {
     color: var(--color-text-muted);
 }
 
-/* Collapsed to an icon button beside the filter button; clicking or focusing
-   it (⌘K) expands the field back to its full width. */
-.sidebar-search-collapsed {
-    flex: 0 0 auto;
-    cursor: pointer;
-}
-
-.sidebar-search-collapsed .sidebar-search {
-    width: var(--control-height);
-    height: var(--control-height);
-    padding: 0;
-    border-color: transparent;
-    background: transparent;
-}
-
-.sidebar-search-collapsed .sidebar-search:hover {
-    background: var(--color-bg);
-}
-
-.sidebar-search-collapsed .search-field {
-    width: 100%;
-    justify-content: center;
-}
-
-.sidebar-search-collapsed .search-field input,
-.sidebar-search-collapsed .search-field-clear {
-    width: 0;
-    padding: 0;
-    opacity: 0;
-    pointer-events: none;
-}
-
 .search-field input {
     min-width: 0;
     flex: 1;
@@ -830,18 +797,13 @@ a {
     padding: 0;
 }
 
+/* Not positioned itself, so the popover anchors to the top bar and stays
+   inside the sidebar at its narrowest width. */
 .sidebar-filter {
-    position: relative;
     flex: 0 0 auto;
 }
 
-.sidebar-filter-button {
-    border: 1px solid var(--color-border);
-    background: var(--color-bg);
-}
-
 .sidebar-filter-button-active {
-    border-color: var(--color-accent);
     color: var(--color-accent);
 }
 
@@ -849,7 +811,7 @@ a {
     position: absolute;
     z-index: var(--z-popover);
     top: calc(100% + var(--space-1));
-    right: 0;
+    right: var(--space-2);
     width: 232px;
     max-height: 60vh;
     overflow-y: auto;
@@ -861,12 +823,6 @@ a {
     box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
 }
 
-/* With search collapsed the filter button sits at the sidebar's left edge,
-   so the popover opens rightward instead of past the window edge. */
-.sidebar-search-collapsed + .sidebar-filter .filter-popover {
-    right: auto;
-    left: 0;
-}
 
 .filter-popover-header {
     display: flex;
@@ -880,6 +836,26 @@ a {
     margin: 0;
     font-size: var(--text-md);
     font-weight: 600;
+}
+
+.filter-popover-action {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+    padding: 5px var(--space-1);
+    border: 0;
+    border-radius: calc(var(--radius-panel) - var(--space-2));
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: var(--text-base);
+    text-align: left;
+}
+
+.filter-popover-action:hover {
+    background: var(--color-bg);
 }
 
 .filter-section {
@@ -3989,54 +3965,17 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     right: var(--space-5);
 }
 
-.modal-dialog-usage {
-    width: fit-content;
-    min-width: min(92vw, 42rem);
-    max-width: min(92vw, 72rem);
-    max-height: min(88dvh, 48rem);
-}
-
-.modal-dialog-usage .modal-body {
-    display: flex;
-    min-height: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    padding: 0;
-}
-
 .usage-page {
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
     min-width: 0;
-    min-height: 0;
-    flex: 1 1 auto;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: var(--space-5);
 }
 
-.usage-page h1, .usage-page h2, .usage-page p { margin: 0; }
+.usage-page h2, .usage-page p { margin: 0; }
 
-/* The dialog's close control floats over this corner, so the header keeps clear of it. */
-.usage-header {
-    padding-right: 2.5rem;
-}
-
-.usage-header h1 {
-    font-size: var(--text-lg);
-}
-
-.usage-header .eyebrow {
-    margin-bottom: var(--space-1);
-}
-
-.usage-subtitle {
-    max-width: 65ch;
-    margin: var(--space-2) 0 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-base);
-}
+/* The page's own gap spaces the header from the charts. */
+.usage-page .page-header { margin-bottom: 0; }
 
 .usage-topbar {
     display: flex;
@@ -4432,7 +4371,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .usage-skeleton { height: 24rem; background: var(--color-sidebar); border-radius: var(--radius-panel); }
 
 @media (max-width: 700px) {
-    .usage-page { padding: var(--space-4); }
     .usage-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

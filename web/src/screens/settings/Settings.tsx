@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { broker, installMcpConfigs } from "@/bridge/client";
 import { EmptyState } from "@/components/atoms/ListState";
 import { absoluteTime, relativeTime } from "@/ui/time";
@@ -19,6 +19,7 @@ import {
   ListIcon,
   TerminalIcon,
   TypeIcon,
+  UsageIcon,
 } from "@/ui/icons";
 import { Card, CardRow, PageHeader, Section } from "@/components/primitives/Page";
 import { MarkdownContent } from "@/domain/markdown";
@@ -82,6 +83,8 @@ import {
 import type { ProjectSettingsScope, PromptsModel, SettingsState, SettingsTab } from "./state";
 import { SETTINGS_GROUPS, SETTINGS_TABS, tabLabel, tabMatchesQuery } from "./state";
 
+const UsagePage = lazy(() => import("@/screens/usage").then(({ UsagePage }) => ({ default: UsagePage })));
+
 function defaultModelFor(provider: Provider): string {
   switch (provider) {
     case "claude":
@@ -120,6 +123,9 @@ export default function SettingsPage({
 }) {
   const [state, setState] = useState<SettingsState>(() => readCachedSettingsState() ?? defaultSettingsState());
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "workers");
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
   const [sectionQuery, setSectionQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const wasOpen = useRef(false);
@@ -344,6 +350,20 @@ export default function SettingsPage({
             />
           </div>
           <div
+            id="settings-panel-usage"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-usage"
+            hidden={activeTab !== "usage"}
+            className={activeTab !== "usage" ? "settings-tab-panel-hidden" : undefined}
+          >
+            {activeTab === "usage" && (
+              <Suspense fallback={null}>
+                <UsagePage />
+              </Suspense>
+            )}
+          </div>
+          <div
             id="settings-panel-connections"
             role="tabpanel"
             tabIndex={0}
@@ -445,6 +465,8 @@ function TabIcon({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case "workers":
       return <TerminalIcon />;
+    case "usage":
+      return <UsageIcon />;
     case "connections":
       return <LinkIcon />;
     case "notifications":

@@ -23,7 +23,6 @@ import { useAppUpdates } from "./useAppUpdates";
 const LAST_SELECTED_TASK_KEY = "lastSelectedTask";
 
 const SettingsPage = lazy(() => import("@/screens/settings").then(({ SettingsPage }) => ({ default: SettingsPage })));
-const UsagePage = lazy(() => import("@/screens/usage").then(({ UsagePage }) => ({ default: UsagePage })));
 const TaskDetailPage = lazy(() => import("@/screens/task/TaskDetail").then(({ TaskDetail }) => ({ default: TaskDetail })));
 const IconGallery = lazy(() => import("@/ui/IconGallery").then(({ IconGallery }) => ({ default: IconGallery })));
 
@@ -50,7 +49,7 @@ function scheduleMenuCommands(work: () => void): () => void {
 }
 
 function ScreenLoading({ route }: { route: Route }) {
-  const label = route.kind === "task" ? "Loading task activity…" : route.kind === "settings" ? "Loading settings…" : route.kind === "usage" ? "Loading usage…" : "Loading…";
+  const label = route.kind === "task" ? "Loading task activity…" : route.kind === "settings" ? "Loading settings…" : "Loading…";
   return (
     <div id="page-title">
       <LoadingState label={label} />
@@ -249,7 +248,7 @@ function sidebarFloats(): boolean {
 }
 
 function isOverlayRoute(route: Route): boolean {
-  return route.kind === "settings" || route.kind === "usage";
+  return route.kind === "settings";
 }
 
 function Shell() {
@@ -274,7 +273,7 @@ function Shell() {
 
   const closeSettings = useCallback(() => navigate(underlyingRoute), [navigate, underlyingRoute]);
   const openSettings = useCallback((tab: "workers" | "connections") => navigate({ kind: "settings", tab }), [navigate]);
-  const openUsage = useCallback(() => navigate({ kind: "usage" }), [navigate]);
+  const openUsage = useCallback(() => navigate({ kind: "settings", tab: "usage" }), [navigate]);
 
   const contextRef = useRef({ sidebar: sidebarController, route, navigate, checkForUpdates: () => void checkForUpdates() });
   contextRef.current = { sidebar: sidebarController, route, navigate, checkForUpdates: () => void checkForUpdates() };
@@ -367,8 +366,7 @@ function Shell() {
           sidebarController={sidebarController}
           initialTask={initialTask}
           onSelectTask={selectTask}
-            onOpenSettings={openSettings}
-            onOpenUsage={openUsage}
+          onOpenSettings={openSettings}
           navigation={navigation}
         />
         <div className="app-main" onPointerDown={closeFloatingSidebar}>
@@ -415,11 +413,6 @@ function Shell() {
             onCheckForUpdates={() => void checkForUpdates()}
             onInstallUpdate={() => void installUpdate()}
           />
-        </Suspense>
-      </Modal>
-      <Modal open={route.kind === "usage"} onClose={() => navigate(underlyingRoute)} labelledBy="usage-modal-title" className="modal-dialog-usage">
-        <Suspense fallback={<ScreenLoading route={route} />}>
-          <UsagePage />
         </Suspense>
       </Modal>
       <ToastViewport />

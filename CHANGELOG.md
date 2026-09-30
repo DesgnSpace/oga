@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.
+
 ## 0.2.3 - 2026-09-29
 
 - Work that waits on other work now starts from what that work left behind. Its branch is made when it starts, so a chain of branches builds on each one before it, however long.

@@ -69,7 +69,7 @@ import {
   withViewportHeight,
   type SidebarRow,
 } from "@/state/sidebar-projection";
-import { BackArrowIcon, FilterIcon, ForwardArrowIcon, RefreshIcon, SettingsIcon, SidebarIcon, UsageIcon } from "@/ui/icons";
+import { BackArrowIcon, FilterIcon, ForwardArrowIcon, RefreshIcon, SearchIcon, SettingsIcon, SidebarIcon } from "@/ui/icons";
 import { formatCost, taskDuration } from "@/lib/format";
 import { relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
@@ -181,7 +181,6 @@ export interface SidebarProps {
   sidebarController?: SidebarController;
   onSelectTask?: (id: string) => void;
   onOpenSettings?: (tab: "workers") => void;
-  onOpenUsage?: () => void;
   initialTask?: string;
   navigation?: HistoryNavigation;
 }
@@ -193,7 +192,7 @@ export interface HistoryNavigation {
   onForward: () => void;
 }
 
-function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage, initialTask, navigation }: SidebarProps) {
+function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask, navigation }: SidebarProps) {
   const sidebarRef = useMemo(() => sidebarController ?? new SidebarController(), [sidebarController]);
 
   const sidebar = useStore(sidebarRef as unknown as { snapshot: SidebarState; subscribe: (l: () => void) => () => void });
@@ -505,6 +504,12 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
     void sidebarRef.refresh();
   }, [sidebarRef]);
 
+  const handleRefreshFromFilters = useCallback(() => {
+    setFiltersOpen(false);
+    filterButtonRef.current?.focus();
+    void sidebarRef.refresh();
+  }, [sidebarRef]);
+
   const handleLoadMore = useCallback(() => {
     void sidebarRef.loadMore();
   }, [sidebarRef]);
@@ -578,6 +583,19 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
     },
     [sidebarRef],
   );
+
+  const searchVisible = searchOpen || sidebar.search !== "";
+
+  const handleSearchToggle = useCallback(() => {
+    if (searchVisible && sidebar.search === "") setSearchOpen(false);
+    else if (searchVisible) searchFieldRef.current?.focus();
+    else setSearchOpen(true);
+  }, [searchVisible, sidebar.search]);
+
+  // The field only exists while search is open, so it takes focus once it mounts.
+  useEffect(() => {
+    if (searchOpen) searchFieldRef.current?.focus();
+  }, [searchOpen]);
 
   const handleGrouping = useCallback(
     (value: string) => {
@@ -686,64 +704,6 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
         >
           <SettingsIcon />
         </a>
-        <a className="icon-button" href="/usage" aria-label="Usage" title="Usage ⇧⌘U" onClick={(event) => {
-          if (!handlesClick(event)) return;
-          event.preventDefault();
-          if (onOpenUsage) onOpenUsage();
-          else {
-            window.history.pushState(null, "", "/usage");
-            window.dispatchEvent(new PopStateEvent("popstate"));
-          }
-        }}><UsageIcon /></a>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Refresh tasks"
-          title="Refresh tasks ⌘R"
-          onClick={handleRefresh}
-        >
-          <RefreshIcon />
-        </button>
-      </div>
-
-      <div
-        className="sidebar-resize-handle"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          setResizeStart({ x: event.clientX, width: sidebar.sidebarWidth });
-        }}
-      />
-
-      <div className="sidebar-search-row">
-        <div
-          className={`sidebar-search-wrap${searchOpen || sidebar.search !== "" ? "" : " sidebar-search-collapsed"}`}
-          onFocus={() => setSearchOpen(true)}
-          onBlur={(event) => {
-            if (sidebar.search !== "") return;
-            const next = event.relatedTarget as Node | null;
-            if (next && event.currentTarget.contains(next)) return;
-            setSearchOpen(false);
-          }}
-          onClick={() => searchFieldRef.current?.focus()}
-        >
-          <SearchField
-            className="sidebar-search"
-            inputRef={searchFieldRef}
-            value={sidebar.search}
-            onChange={handleSearch}
-            placeholder="Search tasks"
-            aria-label="Search tasks"
-            title="Search tasks (⌘K)"
-            data-task-search
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown" && taskIds.length > 0) {
-                event.preventDefault();
-                focusTask(taskIds[0]);
-              }
-            }}
-          />
-        </div>
-
         <div className="sidebar-filter">
           <button
             ref={filterButtonRef}
@@ -780,6 +740,11 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
                   Reset
                 </button>
               </div>
+
+              <button className="filter-popover-action" type="button" title="Refresh tasks ⌘R" onClick={handleRefreshFromFilters}>
+                <RefreshIcon />
+                <span>Refresh tasks</span>
+              </button>
 
               <fieldset className="filter-section">
                 <legend>Group by</legend>
@@ -858,7 +823,58 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, onOpenUsage,
             </div>
           )}
         </div>
+        <button
+          className={`icon-button${searchVisible ? " icon-button-active" : ""}`}
+          type="button"
+          aria-expanded={searchVisible}
+          aria-label="Search tasks"
+          title="Search tasks ⌘K"
+          data-task-search-toggle
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={handleSearchToggle}
+        >
+          <SearchIcon />
+        </button>
       </div>
+
+      <div
+        className="sidebar-resize-handle"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          setResizeStart({ x: event.clientX, width: sidebar.sidebarWidth });
+        }}
+      />
+
+      {searchVisible && (
+        <div className="sidebar-search-row">
+          <div
+            className="sidebar-search-wrap"
+            onBlur={(event) => {
+              if (sidebar.search !== "") return;
+              const next = event.relatedTarget as Node | null;
+              if (next && event.currentTarget.contains(next)) return;
+              setSearchOpen(false);
+            }}
+          >
+            <SearchField
+              className="sidebar-search"
+              inputRef={searchFieldRef}
+              value={sidebar.search}
+              onChange={handleSearch}
+              placeholder="Search tasks"
+              aria-label="Search tasks"
+              title="Search tasks (⌘K)"
+              data-task-search
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" && taskIds.length > 0) {
+                  event.preventDefault();
+                  focusTask(taskIds[0]);
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <div
         id="task-list"

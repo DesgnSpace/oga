@@ -51,7 +51,6 @@ function TerminalResumeButton({ command }: { command: string }) {
 function fallbackTitle(route: Route): string {
   if (route.kind === "home") return "Your workspace";
   if (route.kind === "settings") return "Settings";
-  if (route.kind === "usage") return "Usage";
   if (route.kind === "icons") return "Icons";
   if (route.kind === "not-found") return "Page not found";
   return "";
