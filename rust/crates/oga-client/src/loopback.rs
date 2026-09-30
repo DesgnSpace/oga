@@ -5,9 +5,9 @@ use std::{env, time::Duration};
 use bytes::Bytes;
 use futures_util::{StreamExt, stream::BoxStream};
 use oga_domain::{
-    ActivityCounts, ArchivedFilter, CleanupSettings, CleanupSnapshot, ConsumerCursor, HealthReport,
-    MemoryEntry, ModelInfo, ModelQuery, ProfileUsage, ProfileView, Task, TaskDiff, TaskTurn,
-    WorktreeDeleteEntry,
+    ActivityCounts, AdvisorView, ArchivedFilter, CleanupSettings, CleanupSnapshot, ConsumerCursor,
+    HealthReport, MemoryEntry, ModelInfo, ModelQuery, ProfileUsage, ProfileView, Task, TaskDiff,
+    TaskTurn, WorktreeDeleteEntry,
 };
 use reqwest::{Method, StatusCode, header};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -674,14 +674,14 @@ impl LoopbackClient {
         .await
     }
 
-    pub async fn advisor(&self) -> Result<oga_domain::AdvisorSettings, ClientError> {
+    pub async fn advisor(&self) -> Result<AdvisorView, ClientError> {
         self.get_json(self.endpoint(&["api", "advisor"])).await
     }
 
     pub async fn put_advisor(
         &self,
         settings: &oga_domain::AdvisorSettings,
-    ) -> Result<oga_domain::AdvisorSettings, ClientError> {
+    ) -> Result<AdvisorView, ClientError> {
         self.put_json(
             self.endpoint(&["api", "advisor"]),
             serde_json::to_value(settings).map_err(ClientError::Encode)?,

@@ -34,7 +34,7 @@ pub use socket::{
     MAX_EVENT_TITLE, OUTCOME_STATES, SubscribeFrame, WireTaskOutcome,
 };
 pub use store::{
-    AdvisorSettings, AppearanceSettings, CleanupPlan, CleanupRecord, CleanupResult,
+    AdvisorSettings, AdvisorView, AppearanceSettings, CleanupPlan, CleanupRecord, CleanupResult,
     CleanupSettings, CleanupSnapshot, CleanupStateCount, FailureCode, ProfileFailure,
     ProfileSuccess, SpendTotals, WaitSettings,
 };

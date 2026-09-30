@@ -139,16 +139,26 @@ impl Default for WaitSettings {
     }
 }
 
-/// Whether an advisor picks the worker for tasks that name none, and the key
-/// it signs in with. The key leaves the broker only in the advisor's own
-/// request header: every read over the API masks it, the way a worker's
-/// secret environment values are masked.
+/// Every read over the API masks `api_key`; an empty `instructions` means the
+/// built-in default routing prompt.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdvisorSettings {
     pub enabled: bool,
     #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub instructions: String,
+}
+
+/// The advisor settings as read back, with the prompt used when none is saved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvisorView {
+    pub enabled: bool,
+    pub api_key: String,
+    pub instructions: String,
+    pub default_instructions: String,
 }
 
 /// `font` is a font id from the web app's list; `None` means its default.

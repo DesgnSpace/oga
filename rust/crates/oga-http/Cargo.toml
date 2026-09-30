@@ -27,6 +27,7 @@ tokio-stream = "0.1"
 uuid = { version = "1", default-features = false, features = ["v4", "fast-rng"] }
 
 [dev-dependencies]
+oga-advisor = { path = "../oga-advisor", features = ["test-support"] }
 http-body-util = "0.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

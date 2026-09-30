@@ -14,7 +14,9 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 
 const QUESTION: &str = "worker";
 
-const INSTRUCTIONS: &str = "Pick the worker that should run this task. The state is the brief \
+/// The routing prompt the worker question is asked with when the user has
+/// saved none of their own.
+pub const DEFAULT_INSTRUCTIONS: &str = "Pick the worker that should run this task. The state is the brief \
      the task will be given. Weigh what the brief actually asks for against what each worker is \
      good at. Among workers that can do the job well, prefer a free or cheaper one, and one whose \
      unused allowance resets soon, so it is spent rather than lost; avoid one close to its limit \
@@ -111,6 +113,7 @@ fn client() -> Option<&'static reqwest::Client> {
 pub struct Advisor {
     endpoint: String,
     api_key: String,
+    instructions: String,
 }
 
 impl Advisor {
@@ -118,11 +121,22 @@ impl Advisor {
         Advisor {
             endpoint: ENDPOINT.to_owned(),
             api_key: api_key.into(),
+            instructions: String::new(),
         }
     }
 
-    #[cfg(test)]
-    fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
+    /// The routing prompt sent for the worker question. Empty or blank falls
+    /// back to [`DEFAULT_INSTRUCTIONS`].
+    pub fn instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.instructions = instructions.into();
+        self
+    }
+
+    /// Points the advisor at another endpoint. Kept behind `test-support` so
+    /// a shipped build cannot redirect the key.
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoint = endpoint.into();
         self
     }
@@ -146,7 +160,7 @@ impl Advisor {
             .ok_or(NoAdvice::Unreachable)?
             .post(&self.endpoint)
             .bearer_auth(&self.api_key)
-            .json(&request_body(state, destinations))
+            .json(&request_body(state, destinations, &self.instructions))
             .send()
             .await
             .map_err(sent)?;
@@ -164,7 +178,17 @@ impl Advisor {
     }
 }
 
-fn request_body(state: &str, destinations: &[Destination]) -> Value {
+/// The routing prompt actually sent: the user's when they wrote one, the
+/// built-in default otherwise.
+fn instructions_for(instructions: &str) -> &str {
+    if instructions.trim().is_empty() {
+        DEFAULT_INSTRUCTIONS
+    } else {
+        instructions
+    }
+}
+
+fn request_body(state: &str, destinations: &[Destination], instructions: &str) -> Value {
     let criteria: serde_json::Map<String, Value> = destinations
         .iter()
         .map(|destination| (destination.key(), json!(destination.description)))
@@ -174,7 +198,7 @@ fn request_body(state: &str, destinations: &[Destination]) -> Value {
         QUESTION.into(),
         json!({
             "type": "choice",
-            "instructions": INSTRUCTIONS,
+            "instructions": instructions_for(instructions),
             "criteria": criteria,
         }),
     );
@@ -282,11 +306,15 @@ mod tests {
 
     #[test]
     fn the_request_carries_the_brief_the_model_and_one_choice_question() {
-        let body = request_body("port the parser", &destinations());
+        let body = request_body("port the parser", &destinations(), "");
 
         assert_eq!(body["state"], "port the parser");
         assert_eq!(body["model"], "jev-latest");
         assert_eq!(body["questions"]["worker"]["type"], "choice");
+        assert_eq!(
+            body["questions"]["worker"]["instructions"],
+            DEFAULT_INSTRUCTIONS
+        );
         let criteria = &body["questions"]["worker"]["criteria"];
         assert_eq!(criteria["fast:vendor/small"], "free");
         assert_eq!(criteria["deep:vendor/large"], "reasoning, long-context");
@@ -296,6 +324,25 @@ mod tests {
         let mut levels: Vec<_> = efforts.keys().map(String::as_str).collect();
         levels.sort_unstable();
         assert_eq!(levels, ["high", "low", "medium"]);
+    }
+
+    #[test]
+    fn a_saved_routing_prompt_replaces_the_default_for_the_worker_question() {
+        let body = request_body(
+            "port the parser",
+            &destinations(),
+            "Never pick the free worker.",
+        );
+
+        assert_eq!(
+            body["questions"]["worker"]["instructions"],
+            "Never pick the free worker."
+        );
+        // The effort question keeps its own fixed instructions.
+        assert_ne!(
+            body["questions"]["effort"]["instructions"],
+            "Never pick the free worker."
+        );
     }
 
     #[test]
