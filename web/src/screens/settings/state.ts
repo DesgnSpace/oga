@@ -22,6 +22,7 @@ import type {
 
 export type SettingsTab =
   | "workers"
+  | "choosingWorker"
   | "usage"
   | "connections"
   | "notifications"
@@ -34,6 +35,7 @@ export type SettingsTab =
 
 export const SETTINGS_TABS: SettingsTab[] = [
   "workers",
+  "choosingWorker",
   "usage",
   "connections",
   "notifications",
@@ -47,7 +49,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
 
 /** Tabs stay in `SETTINGS_TABS` order: the arrow keys move through that list. */
 export const SETTINGS_GROUPS: { label: string; tabs: SettingsTab[] }[] = [
-  { label: "General", tabs: ["workers", "usage", "connections", "notifications"] },
+  { label: "General", tabs: ["workers", "choosingWorker", "usage", "connections", "notifications"] },
   { label: "Instructions", tabs: ["memories", "callerPrompts"] },
   { label: "App", tabs: ["appearance", "storage", "shortcuts", "about"] },
 ];
@@ -56,6 +58,8 @@ export function tabLabel(tab: SettingsTab): string {
   switch (tab) {
     case "workers":
       return "Workers";
+    case "choosingWorker":
+      return "Choosing a worker";
     case "usage":
       return "Usage";
     case "connections":
@@ -79,6 +83,8 @@ export function tabLabel(tab: SettingsTab): string {
 
 function tabSearchTerms(tab: SettingsTab): string[] {
   switch (tab) {
+    case "choosingWorker":
+      return ["jev", "advisor", "routing", "typesafe", "match the worker", "pick"];
     case "usage":
       return ["cost", "spending", "tokens"];
     case "appearance":

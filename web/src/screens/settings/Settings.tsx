@@ -12,6 +12,7 @@ import {
   BookmarkIcon,
   ChevronIcon,
   CloseIcon,
+  HandoffIcon,
   HistoryIcon,
   InfoIcon,
   KeyboardIcon,
@@ -30,6 +31,7 @@ import type { AppUpdateStatus } from "@/shell/useAppUpdates";
 import { applyFont, applyTechnicalDetails, FONT_OPTIONS, resolveFont } from "@/appearance";
 import type {
   AdvisorSettings,
+  AdvisorView,
   AppearanceSettings,
   BridgeResult,
   CleanupSettings,
@@ -350,6 +352,16 @@ export default function SettingsPage({
             />
           </div>
           <div
+            id="settings-panel-choosingWorker"
+            role="tabpanel"
+            tabIndex={0}
+            aria-labelledby="settings-tab-choosingWorker"
+            hidden={activeTab !== "choosingWorker"}
+            className={activeTab !== "choosingWorker" ? "settings-tab-panel-hidden" : undefined}
+          >
+            <AdvisorPanel offline={offline} />
+          </div>
+          <div
             id="settings-panel-usage"
             role="tabpanel"
             tabIndex={0}
@@ -465,6 +477,8 @@ function TabIcon({ tab }: { tab: SettingsTab }) {
   switch (tab) {
     case "workers":
       return <TerminalIcon />;
+    case "choosingWorker":
+      return <HandoffIcon />;
     case "usage":
       return <UsageIcon />;
     case "connections":
@@ -644,17 +658,21 @@ function WaitingPanel() {
   );
 }
 
-function AdvisorPanel() {
-  const [settings, setSettings] = useState<AdvisorSettings | undefined>(undefined);
+function AdvisorPanel({ offline }: { offline: boolean }) {
+  const [settings, setSettings] = useState<AdvisorView | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [saveError, setSaveError] = useState<string | undefined>(undefined);
   const [keyDraft, setKeyDraft] = useState("");
+  const [promptDraft, setPromptDraft] = useState<string | undefined>(undefined);
+  const [promptSaved, setPromptSaved] = useState(false);
 
   const loadAdvisor = useCallback(async () => {
     const result = await broker.advisor();
     if (result.ok) {
       setSettings(result.value);
       setError(undefined);
+      setPromptSaved(false);
     } else {
       setError(result.error.message);
     }
@@ -668,9 +686,18 @@ function AdvisorPanel() {
     if (settings) setKeyDraft(settings.apiKey);
   }, [settings?.apiKey]);
 
-  const save = async (next: AdvisorSettings) => {
+  const savedInstructions = settings?.instructions ?? "";
+  const defaultInstructions = settings?.defaultInstructions ?? "";
+  const shownPrompt = savedInstructions.trim() ? savedInstructions : defaultInstructions;
+  // The dep is the text, not the settings object: key and toggle saves leave
+  // `instructions` untouched, so an unsaved draft survives them.
+  useEffect(() => {
+    setPromptDraft(shownPrompt);
+  }, [shownPrompt]);
+
+  const saveConnection = async (next: AdvisorSettings) => {
     const previous = settings;
-    setSettings(next);
+    setSettings((current) => (current ? { ...current, ...next } : current));
     setSaving(true);
     const result = await broker.putAdvisor(next);
     setSaving(false);
@@ -683,64 +710,165 @@ function AdvisorPanel() {
     setError(result.error.message);
   };
 
+  // Prompt saves stay pessimistic: the editor already shows the draft, so a
+  // failure keeps both the saved settings and the draft for another try.
+  const savePrompt = async (instructions: string) => {
+    if (!settings) return;
+    const request: AdvisorSettings = { enabled: settings.enabled, apiKey: settings.apiKey, instructions };
+    setSaving(true);
+    setSaveError(undefined);
+    const result = await broker.putAdvisor(request);
+    setSaving(false);
+    if (result.ok) {
+      setSettings(result.value);
+      setError(undefined);
+      setPromptSaved(true);
+      return;
+    }
+    setPromptSaved(false);
+    setSaveError(result.error.message);
+  };
+
   const commitKey = () => {
     if (!settings || keyDraft === settings.apiKey) return;
-    void save({ ...settings, apiKey: keyDraft.trim() });
+    void saveConnection({ enabled: settings.enabled, apiKey: keyDraft.trim(), instructions: settings.instructions });
+  };
+
+  const promptDirty = promptDraft !== undefined && settings !== undefined && promptDraft !== shownPrompt;
+  const isCustom = savedInstructions.trim() !== "";
+
+  const handlePromptChange = (text: string) => {
+    setPromptDraft(text);
+    setPromptSaved(false);
+    setSaveError(undefined);
+  };
+
+  const handlePromptSave = () => {
+    if (promptDraft === undefined || !promptDirty || saving) return;
+    const value = promptDraft.trim();
+    // Empty means the default; the backend trims, so draft what it stores.
+    const instructions = value === defaultInstructions.trim() ? "" : value;
+    setPromptDraft(instructions === "" ? defaultInstructions : value);
+    void savePrompt(instructions);
+  };
+
+  const handleReset = () => {
+    if (saving) return;
+    setPromptDraft(defaultInstructions);
+    void savePrompt("");
   };
 
   const hasKey = Boolean(settings?.apiKey);
 
   return (
-    <Section
-      title="Choosing a worker"
-      description="Your rules decide today. Turn this on and Oga reads the brief first, so the work lands on the worker that suits it."
-    >
-      {error ? (
-        <div className="settings-message settings-message-error" role="alert">
-          <strong>Couldn&apos;t load these choices</strong>
-          <p>{error}</p>
-          <button className="text-button" type="button" onClick={() => void loadAdvisor()}>
-            Try again
-          </button>
-        </div>
-      ) : null}
-      {settings ? (
-        <Card>
-          <CardRow as="label" title="TypeSafe key" description="From your TypeSafe account. It stays on this machine.">
-            <input
-              className="settings-mono settings-text-input"
-              type="password"
-              spellCheck={false}
-              autoComplete="off"
-              aria-label="TypeSafe key"
-              value={keyDraft}
-              disabled={saving}
-              placeholder="Paste your key"
-              onChange={(event) => setKeyDraft(event.target.value)}
-              onBlur={commitKey}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitKey();
-                }
-              }}
-            />
-          </CardRow>
-          <CardRow
-            as="label"
-            title="Match the worker to the brief"
-            description={hasKey ? "Your rules still decide when no answer comes back." : "Add your key first."}
-          >
-            <input
-              type="checkbox"
-              checked={settings.enabled}
-              disabled={saving || !hasKey}
-              onChange={(event) => void save({ ...settings, enabled: event.target.checked })}
-            />
-          </CardRow>
-        </Card>
-      ) : null}
-    </Section>
+    <>
+      <PageHeader
+        title={tabLabel("choosingWorker")}
+        description="Turn this on and Oga reads the brief first, so the work lands on the worker that suits it."
+      />
+      <div className="page-sections">
+        <Section>
+          {error ? (
+            <div className="settings-message settings-message-error" role="alert">
+              <strong>Couldn&apos;t load these choices</strong>
+              <p>{error}</p>
+              <button className="text-button" type="button" onClick={() => void loadAdvisor()}>
+                Try again
+              </button>
+            </div>
+          ) : null}
+          {settings ? (
+            <Card>
+              <CardRow as="label" title="TypeSafe key" description="From your TypeSafe account. It stays on this machine.">
+                <input
+                  className="settings-mono settings-text-input"
+                  type="password"
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-label="TypeSafe key"
+                  value={keyDraft}
+                  disabled={saving}
+                  placeholder="Paste your key"
+                  onChange={(event) => setKeyDraft(event.target.value)}
+                  onBlur={commitKey}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitKey();
+                    }
+                  }}
+                />
+              </CardRow>
+              <CardRow
+                as="label"
+                title="Match the worker to the brief"
+                description={hasKey ? "Your rules still decide when no answer comes back." : "Add your key first."}
+              >
+                <input
+                  type="checkbox"
+                  checked={settings.enabled}
+                  disabled={saving || !hasKey}
+                  onChange={(event) =>
+                    void saveConnection({
+                      enabled: event.target.checked,
+                      apiKey: settings.apiKey,
+                      instructions: settings.instructions,
+                    })
+                  }
+                />
+              </CardRow>
+            </Card>
+          ) : null}
+        </Section>
+        <Section title="How it chooses">
+          {!settings && !error ? (
+            <p className="settings-status">Loading…</p>
+          ) : settings ? (
+            <div className="settings-prompt-editor">
+              <div className="settings-prompt-meta">
+                <span className="settings-muted">{isCustom ? "Your own wording" : "Using the default"}</span>
+                {isCustom ? (
+                  <button className="text-button" type="button" onClick={handleReset} disabled={saving}>
+                    Reset to default
+                  </button>
+                ) : null}
+              </div>
+              <textarea
+                value={promptDraft ?? ""}
+                onChange={(event) => handlePromptChange(event.target.value)}
+                aria-label="How it chooses"
+                disabled={saving}
+              />
+              <p className="settings-helper">
+                Say how work should be matched — which workers to prefer or avoid, and when. For example:
+                &ldquo;Docs never need the paid worker — use a free one.&rdquo; This only matters while
+                &ldquo;Match the worker to the brief&rdquo; is switched on.
+              </p>
+              {saveError ? (
+                <p className="settings-form-error" role="alert">
+                  {saveError}
+                </p>
+              ) : null}
+              <div className="settings-form-footer">
+                <button
+                  className="settings-button settings-button-primary"
+                  type="button"
+                  onClick={handlePromptSave}
+                  disabled={!promptDirty || saving || offline}
+                >
+                  {saving ? "Saving…" : "Save changes"}
+                </button>
+                {promptDirty ? (
+                  <span className="settings-muted">Unsaved changes</span>
+                ) : promptSaved ? (
+                  <span className="settings-muted">Saved for new tasks</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </Section>
+      </div>
+    </>
   );
 }
 
@@ -1255,7 +1383,6 @@ function WorkersPanel({
         </Section>
 
         <FavouriteModels rules={state.modelSettings.snapshot?.love ?? []} />
-        <AdvisorPanel />
         <WaitingPanel />
       </div>
     </>
