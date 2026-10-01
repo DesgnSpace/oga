@@ -27,12 +27,16 @@ oga archive <task-id> --delete-branch
 ```
 
 Oga removes the branch only when Git confirms it is safe. Unmerged commits or
-another checkout keep it. Uncommitted work keeps both the checkout and branch;
-the archive result first reports `removing_checkout` while this check runs in
-the background. The branch stays until removal finishes; the task history then
-records the final result and reason.
+another checkout keep it. Uncommitted work keeps both the checkout and branch,
+and the archive result and the task history say so. A checkout a live task
+still uses is kept the same way, with the reason and the task using it.
 
 The Oga app offers the same action from a task's menu and asks for confirmation.
 
-Cleanup can remove an eligible, clean worktree after its task is archived. It
-does not remove the branch. Worktrees with uncommitted changes stay in place.
+Oga also collects stale checkouts on its own, at broker start and on the
+cleanup cycle, so a checkout that failed to go when its task was archived, or
+was left by an earlier run, is cleaned up later. A checkout goes once no live
+task uses it, it has no uncommitted work, and at least one task using it is
+older than the cleanup retention. The branch stays. A checkout a live task
+still uses, or one with uncommitted work, is kept and the task history records
+why.

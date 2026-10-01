@@ -265,7 +265,16 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
     let wake_task = state.dispatcher.start_wake_watch(WAKE_WATCH_INTERVAL);
     let cleanup_task = {
         let store = store.clone();
+        let dispatcher = state.dispatcher.clone();
         tokio::spawn(async move {
+            // Collect checkouts an earlier run left behind at broker start.
+            let startup = scheduled_cleanup_settings(&store)
+                .ok()
+                .flatten()
+                .filter(|settings| settings.enabled);
+            if let Some(settings) = startup {
+                sweep_checkouts(&dispatcher, &settings).await;
+            }
             let mut announced = false;
             sleep(FIRST_CLEANUP_PASS).await;
             loop {
@@ -286,6 +295,7 @@ async fn run_serve(args: &[String], command_is_stdio: bool) -> CliResult<()> {
                         if let Err(error) = scheduled_cleanup_pass(&store, settings).await {
                             eprintln!("cleanup failed: {error}");
                         }
+                        sweep_checkouts(&dispatcher, &settings).await;
                     }
                     Ok(Some(_)) | Ok(None) => announced = false,
                     Err(error) => eprintln!("cleanup settings unavailable: {error}"),
@@ -2503,9 +2513,13 @@ fn scheduled_cleanup_settings(store: &Store) -> CliResult<Option<CleanupSettings
     }))
 }
 
+fn cleanup_cutoff(settings: &CleanupSettings) -> String {
+    let age = (settings.older_than_days * 86_400_000) as i64;
+    format_rfc3339_ms(now_ms().saturating_sub(age))
+}
+
 async fn scheduled_cleanup_pass(store: &Arc<Store>, settings: CleanupSettings) -> CliResult<()> {
-    let cutoff =
-        format_rfc3339_ms(now_ms().saturating_sub((settings.older_than_days * 86_400_000) as i64));
+    let cutoff = cleanup_cutoff(&settings);
     let finished_at = format_rfc3339_ms(now_ms());
     let store = Arc::clone(store);
     let result = tokio::task::spawn_blocking(move || {
@@ -2523,6 +2537,26 @@ async fn scheduled_cleanup_pass(store: &Arc<Store>, settings: CleanupSettings) -
         );
     }
     Ok(())
+}
+
+/// Collects checkouts no live task needs. Runs in the broker's own process, so
+/// it can safely touch a checkout while tasks are being served. Settled work
+/// waits out the same retention the cleanup settings name; a crashed removal
+/// and an unowned checkout do not.
+async fn sweep_checkouts(dispatcher: &oga_service::Dispatcher, settings: &CleanupSettings) {
+    let cutoff = cleanup_cutoff(settings);
+    match oga_service::sweep_checkouts(dispatcher, &cutoff, settings.archived_only).await {
+        Ok(sweep) => {
+            let removed = sweep.removed.len() + sweep.orphans_removed.len();
+            if removed > 0 || !sweep.kept.is_empty() {
+                eprintln!(
+                    "checkout cleanup: removed {removed}, kept {}",
+                    sweep.kept.len()
+                );
+            }
+        }
+        Err(error) => eprintln!("checkout cleanup failed: {error}"),
+    }
 }
 
 async fn run_cleanup(args: &[String]) -> CliResult<i32> {
@@ -2646,7 +2680,7 @@ fn checkout_in_use(store: &Store, path: &str, task_id: &str) -> CliResult<bool> 
     store
         .with_connection(|connection| {
             let count = connection.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE worktree_path=? AND id != ?",
+                "SELECT COUNT(*) FROM tasks WHERE worktree_path=? AND id != ? AND state NOT IN ('completed','failed','cancelled')",
                 params![path, task_id],
                 |row| row.get::<_, u64>(0),
             )?;

@@ -244,6 +244,10 @@ impl Dispatcher {
         &self.store
     }
 
+    pub fn worktrees_root(&self) -> &Path {
+        &self.worktrees_root
+    }
+
     pub(crate) fn active_runs(&self) -> ActiveRuns {
         self.active.clone()
     }

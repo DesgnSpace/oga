@@ -560,23 +560,9 @@ async fn archives_a_clean_worktree_and_deletes_its_branch() {
     .await
     .expect("archive");
 
-    assert_eq!(result.task.state, TaskState::RemovingCheckout);
-    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
-    assert_eq!(result.branch, Some(BranchOutcome::Kept));
-    assert_eq!(
-        result.branch_reason.as_deref(),
-        Some("checkout removal is in progress; the branch is kept until it finishes")
-    );
-    for _ in 0..100 {
-        if dispatcher.task("archive-worktree").expect("task").state == TaskState::Completed {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(
-        dispatcher.task("archive-worktree").expect("task").state,
-        TaskState::Completed
-    );
+    assert_eq!(result.task.state, TaskState::Completed);
+    assert_eq!(result.checkout.as_deref(), Some("removed"));
+    assert_eq!(result.branch, Some(BranchOutcome::Deleted));
     assert!(!Path::new(&created.worktree.path).exists());
     assert!(
         !branch_exists(&repo, &created.worktree.branch)
@@ -645,26 +631,8 @@ async fn prunes_a_missing_checkout_before_deleting_its_branch() {
     .await
     .expect("archive");
 
-    assert_eq!(result.task.state, TaskState::RemovingCheckout);
-    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
-    for _ in 0..100 {
-        if dispatcher
-            .task("archive-missing-checkout")
-            .expect("task")
-            .state
-            == TaskState::Completed
-        {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(
-        dispatcher
-            .task("archive-missing-checkout")
-            .expect("task")
-            .state,
-        TaskState::Completed
-    );
+    assert_eq!(result.task.state, TaskState::Completed);
+    assert_eq!(result.checkout.as_deref(), Some("removed"));
     assert!(
         !branch_exists(&repo, &created.worktree.branch)
             .await
@@ -732,28 +700,28 @@ async fn keeps_uncommitted_worktree_and_branch_when_archiving() {
     .await
     .expect("archive");
 
-    assert_eq!(result.task.state, TaskState::RemovingCheckout);
-    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
+    assert_eq!(result.task.state, TaskState::Completed);
+    assert_eq!(
+        result.checkout.as_deref(),
+        Some("kept: it still has uncommitted changes")
+    );
     assert_eq!(result.branch, Some(BranchOutcome::Kept));
     assert_eq!(
         result.branch_reason.as_deref(),
-        Some("checkout removal is in progress; the branch is kept until it finishes")
-    );
-    for _ in 0..100 {
-        let task = dispatcher.task("archive-uncommitted").expect("task");
-        if task.state == TaskState::Completed && task.error.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let archived = dispatcher.task("archive-uncommitted").expect("task");
-    assert_eq!(archived.state, TaskState::Completed);
-    assert!(
-        archived
-            .error
-            .is_some_and(|error| error.starts_with("kept because it has uncommitted work: "))
+        Some("checkout was kept, so the branch was kept")
     );
     assert!(Path::new(&created.worktree.path).exists());
+    let events = store
+        .with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT event_type FROM task_events WHERE task_id='archive-uncommitted' ORDER BY id",
+            )?;
+            Ok(statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
+        .expect("events");
+    assert!(events.contains(&"checkout_kept".to_owned()), "{events:?}");
     assert!(
         branch_exists(&repo, &created.worktree.branch)
             .await
@@ -762,7 +730,7 @@ async fn keeps_uncommitted_worktree_and_branch_when_archiving() {
 }
 
 #[tokio::test]
-async fn archive_keeps_a_checkout_used_by_a_settled_joined_task() {
+async fn archive_keeps_a_checkout_a_live_joined_task_still_uses() {
     let (directory, store, dispatcher) = service();
     let repo = directory.path().join("project");
     fs::create_dir(&repo).expect("repository directory");
@@ -792,7 +760,7 @@ async fn archive_keeps_a_checkout_used_by_a_settled_joined_task() {
     .expect("worktree created");
     for (id, state) in [
         ("archive-owner", TaskState::Completed),
-        ("archive-joined", TaskState::Completed),
+        ("archive-joined", TaskState::Running),
     ] {
         let mut fixture = task(id, &created.cwd.to_string_lossy(), state);
         fixture.branch = Some(created.worktree.branch.clone());
@@ -823,7 +791,7 @@ async fn archive_keeps_a_checkout_used_by_a_settled_joined_task() {
 
     assert_eq!(
         result.checkout.as_deref(),
-        Some("kept because archive-joined is still using it")
+        Some("kept: shared with a live task still using this checkout (archive-joined)")
     );
     assert_eq!(result.branch, Some(BranchOutcome::Kept));
     assert!(Path::new(&created.worktree.path).exists());
@@ -832,23 +800,6 @@ async fn archive_keeps_a_checkout_used_by_a_settled_joined_task() {
             .await
             .expect("branch inspected")
     );
-
-    let result = archive(
-        &dispatcher,
-        ArchiveRequest::new("archive-joined", true).delete_branch(),
-    )
-    .await
-    .expect("archive joined task");
-    assert_eq!(result.task.state, TaskState::RemovingCheckout);
-    assert_eq!(result.checkout.as_deref(), Some("removal in progress"));
-    assert_eq!(result.branch, Some(BranchOutcome::Kept));
-    for _ in 0..100 {
-        if dispatcher.task("archive-joined").expect("task").state == TaskState::Completed {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(!Path::new(&created.worktree.path).exists());
 }
 
 #[tokio::test]
