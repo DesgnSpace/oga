@@ -36,6 +36,11 @@ pub struct StateQuery {
     pub created_since: Option<String>,
     #[serde(rename = "idPrefix")]
     pub id_prefix: Option<String>,
+    pub project: Option<String>,
+    pub search: Option<String>,
+    /// Which grouping the summary's `groupCounts` are keyed by: `status`,
+    /// `project`, `parent`, or `none`.
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -65,6 +70,11 @@ pub async fn get_state(
         let limit = query.limit.unwrap_or(50).clamp(1, 2_000);
         let profiles = public_profiles(&store)?;
         let (tasks, tasks_has_more) = list_tasks(&store, &query, summary, limit)?;
+        let group_counts = if summary && query.group.is_some() {
+            serde_json::to_value(group_counts(&store, &query)?).unwrap()
+        } else {
+            Value::Object(serde_json::Map::new())
+        };
         let memory_projects = if skip_summary_aggregates {
             Vec::new()
         } else {
@@ -81,6 +91,7 @@ pub async fn get_state(
         body.insert("tasks".into(), tasks);
         if summary {
             body.insert("tasksHasMore".into(), json!(tasks_has_more));
+            body.insert("groupCounts".into(), group_counts);
         }
         if !compact {
             body.insert(
@@ -550,34 +561,143 @@ fn public_profiles(store: &Store) -> Result<Vec<ProfileView>, HttpError> {
         .collect()
 }
 
+/// The conditions a summary read and its per-group counts both select on, so a
+/// group's total always matches the rows the same filters would return.
+fn summary_filter(
+    query: &StateQuery,
+    alias: &str,
+) -> Result<(Vec<String>, Vec<String>), HttpError> {
+    let mut clauses = vec![format!("{alias}kind='delegated'")];
+    let mut values = Vec::new();
+    match archived_filter(query.archived.as_deref()) {
+        ArchivedFilter::Active => clauses.push(format!("{alias}archived_at IS NULL")),
+        ArchivedFilter::Only => clauses.push(format!("{alias}archived_at IS NOT NULL")),
+        ArchivedFilter::Include => {}
+    }
+    if let Some(state) = &query.state {
+        serde_json::from_value::<TaskState>(Value::String(state.clone()))
+            .map_err(|_| HttpError::bad_request(format!("unknown task state: {state}")))?;
+        clauses.push(format!("{alias}state=?"));
+        values.push(state.clone());
+    }
+    if let Some(since) = &query.created_since {
+        clauses.push(format!("{alias}created_at>=?"));
+        values.push(since.clone());
+    }
+    // A range rather than LIKE, so the lookup stays on the primary key.
+    if let Some(prefix) = &query.id_prefix {
+        clauses.push(format!("{alias}id>=? AND {alias}id<?"));
+        values.extend([prefix.clone(), format!("{prefix}{}", char::MAX)]);
+    }
+    if let Some(project) = &query.project {
+        clauses.push(format!("COALESCE({alias}origin_cwd,{alias}cwd)=?"));
+        values.push(project.clone());
+    }
+    if let Some(search) = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|search| !search.is_empty())
+    {
+        // The list row shows the title when it has one and the prompt
+        // otherwise, so the count searches the same field.
+        clauses.push(format!(
+            "(CASE WHEN TRIM(COALESCE({alias}title,'')) <> '' THEN {alias}title ELSE {alias}prompt END) LIKE ? ESCAPE '\\'"
+        ));
+        values.push(format!("%{}%", escape_like(search)));
+    }
+    Ok((clauses, values))
+}
+
+fn escape_like(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// True totals per group for a summary read's filters, counted in SQL. The
+/// parent grouping walks the parent chain with a depth guard and roots each
+/// task in the filtered set, matching how the sidebar nests rows.
+fn group_counts(store: &Store, query: &StateQuery) -> Result<BTreeMap<String, u64>, HttpError> {
+    let (clauses, values) = summary_filter(query, "")?;
+    let where_sql = clauses.join(" AND ");
+    let (alias_clauses, alias_values) = summary_filter(query, "t.")?;
+    let alias_where = alias_clauses.join(" AND ");
+    store
+        .with_connection(|connection| {
+            let mut counts = BTreeMap::new();
+            match query.group.as_deref().unwrap_or("none") {
+                "status" => {
+                    let sql = format!(
+                        "SELECT state,COUNT(*) FROM tasks WHERE {where_sql} GROUP BY state"
+                    );
+                    let mut statement = connection.prepare(&sql)?;
+                    let rows = statement.query_map(rusqlite::params_from_iter(&values), |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+                    })?;
+                    for row in rows {
+                        let (id, count) = row?;
+                        counts.insert(id, count);
+                    }
+                }
+                "project" => {
+                    let sql = format!(
+                        "SELECT COALESCE(origin_cwd,cwd),COUNT(*) FROM tasks WHERE {where_sql} GROUP BY COALESCE(origin_cwd,cwd)"
+                    );
+                    let mut statement = connection.prepare(&sql)?;
+                    let rows = statement.query_map(rusqlite::params_from_iter(&values), |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+                    })?;
+                    for row in rows {
+                        let (id, count) = row?;
+                        counts.insert(id, count);
+                    }
+                }
+                "parent" => {
+                    let sql = format!(
+                        "WITH RECURSIVE tree(id,root_id,depth) AS (\
+                           SELECT t.id,t.id,0 FROM tasks t WHERE {alias_where} \
+                           AND (t.parent_task_id IS NULL OR t.parent_task_id NOT IN (SELECT id FROM tasks WHERE {where_sql})) \
+                           UNION ALL \
+                           SELECT t.id,tree.root_id,tree.depth+1 FROM tasks t JOIN tree ON t.parent_task_id=tree.id \
+                           WHERE {alias_where} AND tree.depth<32\
+                         ) SELECT root_id,COUNT(*) FROM tree GROUP BY root_id"
+                    );
+                    let mut parent_values = alias_values.clone();
+                    parent_values.extend(values.iter().cloned());
+                    parent_values.extend(alias_values);
+                    let mut statement = connection.prepare(&sql)?;
+                    let rows =
+                        statement.query_map(rusqlite::params_from_iter(&parent_values), |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+                        })?;
+                    for row in rows {
+                        let (id, count) = row?;
+                        counts.insert(id, count);
+                    }
+                }
+                _ => {
+                    let sql = format!("SELECT COUNT(*) FROM tasks WHERE {where_sql}");
+                    let count: i64 = connection.query_row(
+                        &sql,
+                        rusqlite::params_from_iter(&values),
+                        |row| row.get(0),
+                    )?;
+                    counts.insert("all".into(), count.max(0) as u64);
+                }
+            }
+            Ok(counts)
+        })
+        .map_err(HttpError::from)
+}
+
 fn list_tasks(
     store: &Store,
     query: &StateQuery,
     summary: bool,
     limit: u64,
 ) -> Result<(Value, bool), HttpError> {
-    let mut clauses = vec!["kind='delegated'"];
-    let mut values = Vec::new();
-    match archived_filter(query.archived.as_deref()) {
-        ArchivedFilter::Active => clauses.push("archived_at IS NULL"),
-        ArchivedFilter::Only => clauses.push("archived_at IS NOT NULL"),
-        ArchivedFilter::Include => {}
-    }
-    if let Some(state) = &query.state {
-        serde_json::from_value::<TaskState>(Value::String(state.clone()))
-            .map_err(|_| HttpError::bad_request(format!("unknown task state: {state}")))?;
-        clauses.push("state=?");
-        values.push(state.clone());
-    }
-    if let Some(since) = &query.created_since {
-        clauses.push("created_at>=?");
-        values.push(since.clone());
-    }
-    // A range rather than LIKE, so the lookup stays on the primary key.
-    if let Some(prefix) = &query.id_prefix {
-        clauses.push("id>=? AND id<?");
-        values.extend([prefix.clone(), format!("{prefix}{}", char::MAX)]);
-    }
+    let (clauses, values) = summary_filter(query, "")?;
     let row_limit = if summary { limit + 1 } else { 200 };
     store.with_connection(|connection| {
         let sql = format!(

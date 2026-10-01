@@ -47,6 +47,18 @@ describe("summary paging", () => {
     expect(summaryQuery(defaultSidebarState()).skipSummaryAggregates).toBe(true);
   });
 
+  it("sends the filters that shape the group totals", () => {
+    const query = summaryQuery({
+      ...defaultSidebarState(),
+      projectFilter: "/work/oga",
+      search: "  ship ",
+      grouping: "project",
+    });
+    expect(query.project).toBe("/work/oga");
+    expect(query.search).toBe("ship");
+    expect(query.group).toBe("project");
+  });
+
   it("grows by one page", () => {
     const state: SidebarState = { ...defaultSidebarState(), tasksHasMore: true };
     expect(summaryQuery(state).limit).toBe(TASK_PAGE_SIZE);
@@ -209,6 +221,14 @@ describe("filters", () => {
     expect(next).toEqual(defaultSidebarState());
     expect(resetFilters(next)[1]).toBe(false);
   });
+
+  it("requeries when only the project filter or grouping was changed", () => {
+    const project = { ...defaultSidebarState(), projectFilter: "/work/oga" };
+    expect(resetFilters(project)[1]).toBe(true);
+
+    const grouped = { ...defaultSidebarState(), grouping: "project" as const };
+    expect(resetFilters(grouped)[1]).toBe(true);
+  });
 });
 
 describe("preferences", () => {
@@ -228,7 +248,7 @@ describe("preferences", () => {
 });
 
 describe("event frames", () => {
-  it("folds a batch once and refreshes only when a pointer needs it", () => {
+  it("folds a batch once and refreshes when a pointer moves a task", () => {
     const state: SidebarState = { ...defaultSidebarState(), tasks: [task("task", "/tmp/project", "running")] };
     const [next, action] = applyEventBatch(state, {
       cursor: 2,
@@ -240,9 +260,24 @@ describe("event frames", () => {
       ],
     });
 
-    expect(action).toBe("none");
+    // The first pointer leaves the task where it was; the second moves it and
+    // so needs the group totals reread.
+    expect(action).toBe("refresh");
     expect(next.eventCursor).toBe(2);
     expect(next.tasks[0].state).toBe("completed");
+  });
+
+  it("stays quiet when a pointer repeats the state the task already has", () => {
+    const state: SidebarState = { ...defaultSidebarState(), tasks: [task("task", "/tmp/project", "running")] };
+    const [, action] = applyEventBatch(state, {
+      cursor: 1,
+      streamFloor: 0,
+      stale: false,
+      pointers: [
+        { id: 1, cursor: 1, taskId: "task", type: "progress", kind: "message", state: "running", at: "2026-07-29T11:00:00Z", title: "", summary: "" },
+      ],
+    });
+    expect(action).toBe("none");
   });
 
   it("updates a known task and cursor from a pointer", () => {
@@ -266,7 +301,7 @@ describe("event frames", () => {
     };
 
     const [next, action] = applyEventFrame(state, frame);
-    expect(action).toBe("none");
+    expect(action).toBe("refresh");
     expect(next.eventCursor).toBe(1);
     expect(next.tasks[0].state).toBe("completed");
     expect(next.tasks[0].title).toBe("Finished");

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.
+- Each group in the task list shows how many tasks it really holds, not just the ones loaded so far, and Load more no longer covers a collapsed group.
 
 ## 0.2.3 - 2026-09-29
 

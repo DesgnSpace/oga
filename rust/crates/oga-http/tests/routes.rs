@@ -390,6 +390,85 @@ async fn read_routes() {
     assert_eq!(missing, json!({ "error": "unknown task" }));
 }
 
+#[tokio::test]
+async fn summary_group_counts_cover_the_filter_not_just_the_page() {
+    let fixture = Fixture::new();
+    let here = fixture.cwd.clone();
+    let elsewhere = "/work/elsewhere".to_owned();
+    let running = |id: &str, cwd: &str, updated_at: &str| Task {
+        id: id.into(),
+        kind: Some(TaskKind::Delegated),
+        profile_id: "profile".into(),
+        model: "fake".into(),
+        prompt: format!("prompt {id}"),
+        cwd: cwd.into(),
+        state: TaskState::Running,
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: updated_at.into(),
+        output: String::new(),
+        scope: TaskScope {
+            read: vec!["**".into()],
+            write: vec!["**".into()],
+        },
+        can_delegate: false,
+        ..Task::default()
+    };
+    fixture.insert_task(&running("run-1", &here, "2026-01-02T00:00:00.000Z"));
+    fixture.insert_task(&running("run-2", &here, "2026-01-03T00:00:00.000Z"));
+    fixture.insert_task(&running("run-3", &elsewhere, "2026-01-04T00:00:00.000Z"));
+
+    let (status, page) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/state?view=summary&compact=1&skipSummaryAggregates=1&group=status&limit=2",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page["tasks"].as_array().expect("tasks").len(), 2);
+    assert_eq!(page["tasksHasMore"], true);
+    assert_eq!(page["groupCounts"]["running"], 3);
+    assert_eq!(page["groupCounts"]["completed"], 1);
+
+    let (status, filtered) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/state?view=summary&compact=1&skipSummaryAggregates=1&group=project&project=/work/elsewhere",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(filtered["tasks"].as_array().expect("tasks").len(), 1);
+    assert_eq!(filtered["groupCounts"]["/work/elsewhere"], 1);
+    assert_eq!(
+        filtered["groupCounts"].as_object().expect("counts").len(),
+        1
+    );
+
+    let (status, searched) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/state?view=summary&compact=1&skipSummaryAggregates=1&group=status&search=run-2",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(searched["groupCounts"]["running"], 1);
+    assert_eq!(
+        searched["groupCounts"].as_object().expect("counts").len(),
+        1
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn archive_returns_while_a_worktree_copy_is_preparing() {
     let fixture = Fixture::new();

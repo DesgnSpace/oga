@@ -12,15 +12,16 @@ import {
   projectionEmptyMessage,
   projectionFromState,
   projectionListedTaskIds,
+  projectionRows,
   projectionTaskCount,
   projectName,
   projects,
   projectTree,
+  rowTops,
   taskProjectLabel,
+  virtualListTotalHeight,
   virtualListVisibleRange,
-  newVirtualList,
-  withScrollOffset,
-  withViewportHeight,
+  type SidebarRow,
 } from "./sidebar-projection";
 
 function task(id: string, cwd: string, state: TaskState): TaskSummary {
@@ -128,12 +129,33 @@ describe("organize", () => {
   });
 });
 
-describe("virtual list", () => {
+describe("virtual list geometry", () => {
+  const heights = { header: 44, task: 36 };
+
+  it("reserves each header's real height so the footer clears the last row", () => {
+    // Two collapsed headers are 44px each, not the 36px a task row is. The
+    // list must reserve 88px, or the footer sits on the second header.
+    const rows: SidebarRow[] = [
+      { type: "groupHeader", id: "running", title: "Running", count: 1, collapsed: true, indented: false },
+      { type: "groupHeader", id: "completed", title: "Completed", count: 51, collapsed: true, indented: false },
+    ];
+    const tops = rowTops(rows, heights);
+    expect(tops).toEqual([0, 44, 88]);
+    expect(virtualListTotalHeight(tops)).toBe(88);
+  });
+
   it("keeps the visible range bounded for large lists", () => {
-    const list = withScrollOffset(withViewportHeight(newVirtualList(10_000), 400), 5_000);
-    const [start, end] = virtualListVisibleRange(list);
+    const rows: SidebarRow[] = Array.from(
+      { length: 10_000 },
+      (_, index): SidebarRow => ({
+        type: "task",
+        task: task(`t${index}`, "/work/oga", "running"),
+        indented: false,
+      }),
+    );
+    const [start, end] = virtualListVisibleRange(rowTops(rows, heights), 400, 5_000, 4);
     expect(start).toBeGreaterThan(0);
-    expect(end - start).toBeLessThan(100);
+    expect(end - start).toBeLessThan(120);
     expect(end).toBeLessThanOrEqual(10_000);
   });
 });
@@ -306,6 +328,25 @@ it("counts tasks across every group", () => {
 it("names a project from its path", () => {
   expect(projectName("/work/oga/")).toBe("oga");
   expect(projectName("/")).toBe("/");
+});
+
+describe("group totals", () => {
+  it("shows the broker's true total over the loaded length", () => {
+    const state: SidebarState = {
+      ...defaultSidebarState(),
+      grouping: "status",
+      tasks: [task("one", "/work/oga", "running"), task("two", "/work/oga", "completed")],
+      groupCounts: { running: 1, completed: 40 },
+    };
+    const rows = projectionRows(projectionFromState(state), state.collapsed, state.grouping);
+    const counts = rows.flatMap((row) =>
+      row.type === "groupHeader" ? [{ id: row.id, count: row.count }] : [],
+    );
+    expect(counts).toEqual([
+      { id: "running", count: 1 },
+      { id: "completed", count: 40 },
+    ]);
+  });
 });
 
 describe("taskProjectLabel", () => {

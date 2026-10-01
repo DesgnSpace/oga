@@ -15,6 +15,8 @@ export interface TaskProject {
 export interface TaskGroup {
   id: string;
   title: string | undefined;
+  /** The group's true total, which can exceed `tasks.length` while rows page in. */
+  count: number;
   tasks: TaskSummary[];
 }
 
@@ -35,9 +37,19 @@ export interface SidebarProjection {
 export type TaskUnread = (task: TaskSummary) => boolean;
 
 export function projectionFromState(state: SidebarState, isUnread?: TaskUnread): SidebarProjection {
-  const groups = organize(matching(state.tasks, searchTerm(state)), state.projectFilter, state.grouping, state.sort, isUnread);
+  const groups = withGroupTotals(
+    organize(matching(state.tasks, searchTerm(state)), state.projectFilter, state.grouping, state.sort, isUnread),
+    state.groupCounts,
+  );
   const projectNodes = state.grouping === "project" ? projectTree(groups) : undefined;
   return { groups, projectNodes, projects: projects(state.tasks) };
+}
+
+function withGroupTotals(groups: TaskGroup[], totals: Record<string, number>): TaskGroup[] {
+  return groups.map((group) => {
+    const total = totals[group.id];
+    return total === undefined ? group : { ...group, count: total };
+  });
 }
 
 export function projectionTaskCount(projection: SidebarProjection): number {
@@ -106,7 +118,7 @@ function rowsForNode(node: ProjectSidebarNode, collapsed: Set<string>): SidebarR
       type: "groupHeader",
       id: node.id,
       title: node.title,
-      count: node.children.reduce((total, group) => total + group.tasks.length, 0),
+      count: node.children.reduce((total, group) => total + group.count, 0),
       collapsed: collapsed.has(node.id),
       indented: false,
     },
@@ -124,7 +136,7 @@ function rowsForGroup(group: TaskGroup, collapsed: Set<string>, indented: boolea
       type: "groupHeader",
       id: group.id,
       title: group.title,
-      count: group.tasks.length,
+      count: group.count,
       collapsed: collapsed.has(group.id),
       indented,
     });
@@ -136,61 +148,78 @@ function rowsForGroup(group: TaskGroup, collapsed: Set<string>, indented: boolea
 }
 
 // --- Virtualised list geometry ---------------------------------------------
+//
+// Group headings and task rows are different heights, so rows are placed by
+// accumulated measured heights rather than one item height.
 
-export interface VirtualList {
-  itemCount: number;
-  itemHeight: number;
-  viewportHeight: number;
-  scrollOffset: number;
-  overscan: number;
-}
-
-/** Must match `.sidebar-task` and `.sidebar-group` in style.css. */
+/** Starting heights before the rows are measured; must match style.css. */
 export const VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT = 32;
+export const VIRTUAL_LIST_DEFAULT_HEADER_HEIGHT = 44;
 export const VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT = 480;
 export const VIRTUAL_LIST_DEFAULT_OVERSCAN = 4;
 
-export function newVirtualList(itemCount: number): VirtualList {
-  return {
-    itemCount,
-    itemHeight: VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT,
-    viewportHeight: VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT,
-    scrollOffset: 0,
-    overscan: VIRTUAL_LIST_DEFAULT_OVERSCAN,
-  };
+export interface RowHeights {
+  header: number;
+  task: number;
 }
 
-export function withItemHeight(list: VirtualList, height: number): VirtualList {
-  return { ...list, itemHeight: Math.max(height, 1) };
+/** Every row's top edge in order, with the list's total height as the last entry. */
+export function rowTops(rows: SidebarRow[], heights: RowHeights): number[] {
+  const tops = Array.from({ length: rows.length + 1 }, () => 0);
+  for (let index = 0; index < rows.length; index += 1) {
+    const height = rows[index].type === "groupHeader" ? heights.header : heights.task;
+    tops[index + 1] = tops[index] + Math.max(height, 1);
+  }
+  return tops;
 }
 
-export function withViewportHeight(list: VirtualList, height: number): VirtualList {
-  return { ...list, viewportHeight: height };
+export function virtualListTotalHeight(tops: number[]): number {
+  return tops[tops.length - 1] ?? 0;
 }
 
-export function withScrollOffset(list: VirtualList, offset: number): VirtualList {
-  return { ...list, scrollOffset: offset };
-}
-
-export function withOverscan(list: VirtualList, overscan: number): VirtualList {
-  return { ...list, overscan };
-}
-
-export function virtualListTotalHeight(list: VirtualList): number {
-  return list.itemHeight * list.itemCount;
-}
-
-export function virtualListVisibleRange(list: VirtualList): [number, number] {
-  if (list.itemCount === 0) return [0, 0];
-  const first = Math.floor(list.scrollOffset / list.itemHeight);
-  const visible = Math.floor((list.viewportHeight + list.itemHeight - 1) / list.itemHeight);
-  const start = Math.min(Math.max(first - list.overscan, 0), list.itemCount);
-  const end = Math.min(first + visible + list.overscan, list.itemCount);
+/** The `[start, end)` rows the viewport shows, extended by `overscan` each way. */
+export function virtualListVisibleRange(
+  tops: number[],
+  viewportHeight: number,
+  scrollOffset: number,
+  overscan: number,
+): [number, number] {
+  const count = Math.max(tops.length - 1, 0);
+  if (count === 0) return [0, 0];
+  const first = Math.min(Math.max(topsAbove(tops, scrollOffset) - 1, 0), count - 1);
+  const last = topsAtOrAbove(tops, scrollOffset + viewportHeight);
+  const start = Math.max(first - overscan, 0);
+  const end = Math.min(last + overscan, count);
   return [start, Math.max(end, start)];
 }
 
-export function virtualListOffsetFor(list: VirtualList, index: number): number {
-  return list.itemHeight * index;
+/** First row whose top is past `offset`. */
+function topsAbove(tops: number[], offset: number): number {
+  let low = 0;
+  let high = tops.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (tops[mid] <= offset) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+/** First row whose top is at or past `offset`. */
+function topsAtOrAbove(tops: number[], offset: number): number {
+  let low = 0;
+  let high = tops.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (tops[mid] < offset) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+export function virtualListOffsetFor(tops: number[], index: number): number {
+  const clamped = Math.min(Math.max(index, 0), Math.max(tops.length - 1, 0));
+  return tops[clamped] ?? 0;
 }
 
 // --- Organising tasks into groups -------------------------------------------
@@ -260,8 +289,10 @@ export function organize(
   const scoped = tasks.filter((task) => activeProject === undefined || projectId(task) === activeProject);
 
   switch (grouping) {
-    case "none":
-      return [{ id: "all", title: undefined, tasks: sorted(scoped, sort, isUnread) }];
+    case "none": {
+      const tasks = sorted(scoped, sort, isUnread);
+      return [{ id: "all", title: undefined, count: tasks.length, tasks }];
+    }
     case "project":
       return sortedGroups(
         bucket(scoped, (task) => [projectId(task), projectName(projectId(task))]),
@@ -343,7 +374,7 @@ function parentGroups(tasks: TaskSummary[]): TaskGroup[] {
   });
   return groups.map((group) => {
     const solo = group.tasks.length === 1 && group.tasks[0].parentTaskId === undefined;
-    return solo ? { id: group.id, title: undefined, tasks: group.tasks } : group;
+    return solo ? { ...group, title: undefined } : group;
   });
 }
 
@@ -375,7 +406,10 @@ function bucket(tasks: TaskSummary[], key: (task: TaskSummary) => [string, strin
     }
     buckets.get(id)!.push(task);
   }
-  return order.map((id) => ({ id, title: titles.get(id), tasks: buckets.get(id) ?? [] }));
+  return order.map((id) => {
+    const tasks = buckets.get(id) ?? [];
+    return { id, title: titles.get(id), count: tasks.length, tasks };
+  });
 }
 
 /**
@@ -408,7 +442,9 @@ function statusGroups(tasks: TaskSummary[]): TaskGroup[] {
   const groups: TaskGroup[] = [];
   for (const state of PRIORITY_ORDER) {
     const bucketTasks = buckets.get(state);
-    if (bucketTasks) groups.push({ id: state, title: taskStateLabel(state), tasks: bucketTasks });
+    if (bucketTasks) {
+      groups.push({ id: state, title: taskStateLabel(state), count: bucketTasks.length, tasks: bucketTasks });
+    }
   }
   return groups;
 }
