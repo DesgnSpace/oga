@@ -1,6 +1,6 @@
 //! Archive, restore, and explicit worktree removal actions.
 
-use std::{path::Path, time::Duration};
+use std::{collections::HashSet, fs, path::Path, time::Duration};
 
 use oga_domain::{
     BranchOutcome, Task, TaskState, TaskWorktree, WorktreeDeleteBatchResult, WorktreeDeleteEntry,
@@ -21,6 +21,7 @@ use crate::{
 const ARCHIVE_STOPS_REASON: &str = "archived while running — stopped first";
 const ARCHIVE_CANCEL_TIMEOUT: Duration = Duration::from_secs(10);
 const ARCHIVE_CANCEL_POLL: Duration = Duration::from_millis(10);
+const CHECKOUT_KEPT_BRANCH_REASON: &str = "checkout was kept, so the branch was kept";
 
 #[derive(Debug, Clone)]
 pub struct ArchiveRequest {
@@ -104,34 +105,34 @@ pub async fn archive(
     let mut branch = None;
     let mut branch_reason = None;
     if request.archived && task.worktree.is_some() {
-        if task.state == TaskState::RemovingCheckout {
-            checkout = Some("removal in progress".into());
-            if request.delete_branch {
-                branch = Some(BranchOutcome::Kept);
-                branch_reason = Some(
-                    "checkout removal is still in progress; the branch is kept until it finishes"
-                        .into(),
-                );
-            }
-        } else if let Some(reason) = checkout_in_use_reason(dispatcher, &task)? {
+        if let Some(reason) = checkout_in_use_reason(dispatcher, &task)? {
+            record_checkout_kept(dispatcher, &task, &reason)?;
             checkout = Some(reason);
             if request.delete_branch {
                 branch = Some(BranchOutcome::Kept);
-                branch_reason = Some("checkout was kept, so the branch was kept".into());
+                branch_reason = Some(CHECKOUT_KEPT_BRANCH_REASON.into());
             }
         } else {
-            task = begin_checkout_removal(dispatcher, &task)?;
-            let cleanup = task.clone();
-            let cleanup_dispatcher = dispatcher.clone();
-            tokio::spawn(async move {
-                finish_checkout_removal(cleanup_dispatcher, cleanup, request.delete_branch).await;
-            });
-            checkout = Some("removal in progress".into());
-            if request.delete_branch {
+            if task.state != TaskState::RemovingCheckout {
+                task = begin_checkout_removal(dispatcher, &task)?;
+            }
+            let removal = finish_checkout_removal(dispatcher, &task, request.delete_branch).await;
+            task = require_task(dispatcher.store(), &task.id)?;
+            checkout = Some(
+                removal
+                    .keep_reason
+                    .clone()
+                    .unwrap_or_else(|| "removed".into()),
+            );
+            if let Some(result) = removal.branch {
+                branch = Some(result.outcome);
+                branch_reason = result.reason;
+            } else if let Some(error) = removal.branch_error {
                 branch = Some(BranchOutcome::Kept);
-                branch_reason = Some(
-                    "checkout removal is in progress; the branch is kept until it finishes".into(),
-                );
+                branch_reason = Some(error);
+            } else if request.delete_branch {
+                branch = Some(BranchOutcome::Kept);
+                branch_reason = Some(CHECKOUT_KEPT_BRANCH_REASON.into());
             }
         }
     }
@@ -142,6 +143,15 @@ pub async fn archive(
         branch,
         branch_reason,
     })
+}
+
+/// The outcome of one checkout removal attempt. `keep_reason` is set when the
+/// checkout stays behind.
+#[derive(Debug, Clone, Default)]
+pub struct CheckoutRemoval {
+    pub keep_reason: Option<String>,
+    pub branch: Option<oga_worktree::BranchRemoval>,
+    pub branch_error: Option<String>,
 }
 
 async fn wait_for_cancellation(
@@ -181,6 +191,40 @@ fn archive_stops_state(state: TaskState) -> bool {
     )
 }
 
+/// The siblings on a checkout that a live worker could still write to. A
+/// finished task does not hold its checkout, archived or not.
+fn live_checkout_tasks(
+    dispatcher: &Dispatcher,
+    path: &str,
+    exclude: &str,
+) -> Result<Vec<String>, ContinuationError> {
+    let rows = dispatcher.store().with_connection(|connection| {
+        let mut statement =
+            connection.prepare("SELECT id,state FROM tasks WHERE worktree_path=?")?;
+        Ok(statement
+            .query_map([path], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    })?;
+    Ok(rows
+        .into_iter()
+        .filter(|(id, _)| id != exclude)
+        .filter(|(_, state)| state_holds_checkout(state))
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// Whether a state string holds a checkout. A state Oga does not know counts
+/// as holding it, so an upgrade never removes live work.
+fn state_holds_checkout(state: &str) -> bool {
+    parse_task_state(state).is_none_or(oga_worktree::checkout_in_use)
+}
+
+fn parse_task_state(state: &str) -> Option<TaskState> {
+    serde_json::from_str(&format!("\"{state}\"")).ok()
+}
+
 fn checkout_in_use_reason(
     dispatcher: &Dispatcher,
     task: &Task,
@@ -188,26 +232,48 @@ fn checkout_in_use_reason(
     let Some(worktree) = &task.worktree else {
         return Ok(None);
     };
-    let active = checkout_tasks(dispatcher, &worktree.path, Some(&task.id))?;
-    if !active.is_empty() {
-        let ids = active
-            .iter()
-            .map(|task| task.id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Ok(Some(format!(
-            "kept because {ids} {} still using it",
-            if active.len() == 1 { "is" } else { "are" }
-        )));
+    let active = live_checkout_tasks(dispatcher, &worktree.path, &task.id)?;
+    if active.is_empty() {
+        return Ok(None);
     }
-    Ok(None)
+    let ids = active.join(", ");
+    Ok(Some(format!(
+        "kept: shared with {} still using this checkout ({ids})",
+        if active.len() == 1 {
+            "a live task"
+        } else {
+            "live tasks"
+        }
+    )))
+}
+
+/// Records, in the task's history, a checkout it kept in place.
+fn record_checkout_kept(
+    dispatcher: &Dispatcher,
+    task: &Task,
+    reason: &str,
+) -> Result<(), ContinuationError> {
+    let now = now_iso();
+    dispatcher.store().transaction(|tx| {
+        append_event(
+            tx,
+            &task.id,
+            "checkout_kept",
+            task.state,
+            &json!({ "reason": reason }),
+            &now,
+            None,
+        )?;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 fn begin_checkout_removal(dispatcher: &Dispatcher, task: &Task) -> Result<Task, ContinuationError> {
     let now = now_iso();
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='removing_checkout',checkout_state=?,updated_at=? WHERE id=? AND archived_at IS NOT NULL AND state<> 'removing_checkout'",
+            "UPDATE tasks SET state='removing_checkout',checkout_state=?,updated_at=? WHERE id=? AND state<> 'removing_checkout'",
             rusqlite::params![task.state.as_str(), now, task.id],
         )?;
         if changed != 1 {
@@ -230,42 +296,62 @@ fn begin_checkout_removal(dispatcher: &Dispatcher, task: &Task) -> Result<Task, 
     require_task(dispatcher.store(), &task.id)
 }
 
-async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_branch: bool) {
-    let Some(worktree) = &task.worktree else {
-        return;
+enum CheckoutAttempt {
+    Removed,
+    /// Kept on purpose, with the sentence a person reads.
+    Kept(String),
+    /// Git refused or could not be read.
+    Failed(String),
+}
+
+async fn finish_checkout_removal(
+    dispatcher: &Dispatcher,
+    task: &Task,
+    delete_branch: bool,
+) -> CheckoutRemoval {
+    let Some(worktree) = task.worktree.as_ref() else {
+        return CheckoutRemoval::default();
     };
-    let outcome = if Path::new(&worktree.path).exists() {
+    let attempt = if Path::new(&worktree.path).exists() {
         match oga_worktree::worktree_has_uncommitted_work(worktree).await {
-            Ok(true) => Err(format!(
-                "kept because it has uncommitted work: {}",
-                worktree.path
-            )),
-            Ok(false) => oga_worktree::remove_task_worktree(worktree)
-                .await
-                .map_err(|error| format!("could not remove the checkout: {error}")),
-            Err(error) => Err(format!("could not inspect the checkout: {error}")),
-        }
-    } else {
-        oga_worktree::remove_task_worktree(worktree)
-            .await
-            .map_err(|error| format!("could not prune the checkout: {error}"))
-    };
-    if outcome.is_ok() {
-        forget_index(&dispatcher, worktree).await;
-    }
-    let mut error = outcome.err();
-    let branch = if error.is_none() && delete_branch {
-        match oga_worktree::remove_task_branch_safely(worktree).await {
-            Ok(result) => Some(result),
-            Err(branch_error) => {
-                error = Some(format!(
-                    "branch safety check failed, so the branch was kept: {branch_error}"
-                ));
-                None
+            Ok(true) => CheckoutAttempt::Kept("kept: it still has uncommitted changes".into()),
+            Ok(false) => match oga_worktree::remove_task_worktree(worktree).await {
+                Ok(()) => CheckoutAttempt::Removed,
+                Err(error) => {
+                    CheckoutAttempt::Failed(format!("could not remove the checkout: {error}"))
+                }
+            },
+            Err(error) => {
+                CheckoutAttempt::Failed(format!("could not inspect the checkout: {error}"))
             }
         }
     } else {
-        None
+        match oga_worktree::remove_task_worktree(worktree).await {
+            Ok(()) => CheckoutAttempt::Removed,
+            Err(error) => CheckoutAttempt::Failed(format!("could not prune the checkout: {error}")),
+        }
+    };
+    let removed = matches!(attempt, CheckoutAttempt::Removed);
+    if removed {
+        forget_index(dispatcher, worktree).await;
+    }
+    let (branch, branch_error) = if removed && delete_branch {
+        match oga_worktree::remove_task_branch_safely(worktree).await {
+            Ok(result) => (Some(result), None),
+            Err(error) => (None, Some(format!("could not check the branch: {error}"))),
+        }
+    } else {
+        (None, None)
+    };
+    // `error` is for git failing, not for a checkout Oga chose to keep.
+    let (event, error) = match &attempt {
+        CheckoutAttempt::Removed => ("checkout_removed", None),
+        CheckoutAttempt::Kept(_) => ("checkout_kept", None),
+        CheckoutAttempt::Failed(error) => ("checkout_removal_failed", Some(error.clone())),
+    };
+    let keep_reason = match attempt {
+        CheckoutAttempt::Kept(reason) => Some(reason),
+        _ => None,
     };
     let now = now_iso();
     let _ = dispatcher.store().transaction(|tx| {
@@ -276,7 +362,7 @@ async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_bran
         )?;
         let state = previous
             .as_deref()
-            .and_then(|state| serde_json::from_str(&format!("\"{state}\"")).ok())
+            .and_then(parse_task_state)
             .unwrap_or(TaskState::Cancelled);
         let changed = tx.execute(
             "UPDATE tasks SET state=?,checkout_state=NULL,error=?,updated_at=? WHERE id=? AND state='removing_checkout'",
@@ -286,12 +372,14 @@ async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_bran
             append_event(
                 tx,
                 &task.id,
-                if error.is_some() { "checkout_removal_failed" } else { "checkout_removed" },
+                event,
                 state,
                 &json!({
+                    "reason": keep_reason,
                     "error": error,
                     "branchOutcome": branch.as_ref().map(|result| result.outcome),
                     "branchReason": branch.as_ref().and_then(|result| result.reason.as_deref()),
+                    "branchError": branch_error,
                 }),
                 &now,
                 None,
@@ -299,6 +387,11 @@ async fn finish_checkout_removal(dispatcher: Dispatcher, task: Task, delete_bran
         }
         Ok(())
     });
+    CheckoutRemoval {
+        keep_reason,
+        branch,
+        branch_error,
+    }
 }
 
 /// A removed checkout's code index goes with it. Failing to drop it leaves
@@ -375,18 +468,13 @@ pub async fn remove_worktree(
             reason: "task is not settled".into(),
         }));
     }
-    let active = checkout_tasks(dispatcher, &worktree.path, Some(&task.id))?;
+    let active = live_checkout_tasks(dispatcher, &worktree.path, &task.id)?;
     if !active.is_empty() {
-        let ids = active
-            .iter()
-            .map(|task| task.id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
         return Ok(WorktreeDeleteEntry::Skipped(WorktreeDeleteSkipped {
             task_id: task.id,
             skipped: true,
             state: task.state,
-            reason: format!("still in use by {ids}"),
+            reason: format!("shared with a live task ({})", active.join(", ")),
         }));
     }
     let checkout = if Path::new(&worktree.path).exists() {
@@ -444,29 +532,190 @@ pub async fn remove_project_worktrees(
     Ok(WorktreeDeleteBatchResult { project, results })
 }
 
-fn checkout_tasks(
+/// The result of one automatic checkout collection pass.
+#[derive(Debug, Clone, Default)]
+pub struct CheckoutSweep {
+    /// Tasks whose checkout was removed.
+    pub removed: Vec<String>,
+    /// A task or an unowned checkout path, and why it stayed.
+    pub kept: Vec<CheckoutKept>,
+    /// Unowned checkouts under the worktrees root that were removed.
+    pub orphans_removed: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckoutKept {
+    /// The task id, or the checkout path when no task row owns it.
+    pub subject: String,
+    pub reason: String,
+}
+
+/// Removes checkouts no live task needs: unfinished removals from a previous
+/// broker, settled work the cleanup settings include, and unowned checkouts
+/// under the worktrees root. A dirty checkout or one a live task uses stays.
+pub async fn sweep_checkouts(
     dispatcher: &Dispatcher,
-    path: &str,
-    exclude: Option<&str>,
+    archived_only: bool,
+) -> Result<CheckoutSweep, ContinuationError> {
+    let mut sweep = CheckoutSweep::default();
+    // So a task the recovery pass already restored is not attempted again below.
+    let mut handled = HashSet::new();
+
+    // A removal a previous broker began but never finished: the row still reads
+    // `removing_checkout`, which is neither live nor eligible below.
+    for task in tasks_matching(dispatcher, "state='removing_checkout'")? {
+        if let Some(worktree) = task.worktree.as_ref() {
+            handled.insert(worktree.path.clone());
+        }
+        let removal = finish_checkout_removal(dispatcher, &task, false).await;
+        record_removal(&mut sweep, &task.id, removal);
+    }
+
+    // Finished work the cleanup settings include.
+    for task in eligible_checkout_tasks(dispatcher, archived_only)? {
+        let Some(worktree) = task.worktree.as_ref() else {
+            continue;
+        };
+        if !Path::new(&worktree.path).exists() || !handled.insert(worktree.path.clone()) {
+            continue;
+        }
+        if let Some(reason) = checkout_in_use_reason(dispatcher, &task)? {
+            record_checkout_kept(dispatcher, &task, &reason)?;
+            push_kept(&mut sweep, &task.id, reason);
+            continue;
+        }
+        let started = match begin_checkout_removal(dispatcher, &task) {
+            Ok(started) => started,
+            Err(error) => {
+                push_kept(
+                    &mut sweep,
+                    &task.id,
+                    format!("could not start removal: {error}"),
+                );
+                continue;
+            }
+        };
+        let removal = finish_checkout_removal(dispatcher, &started, false).await;
+        record_removal(&mut sweep, &task.id, removal);
+    }
+
+    sweep_orphan_checkouts(dispatcher, &mut sweep).await;
+    Ok(sweep)
+}
+
+fn record_removal(sweep: &mut CheckoutSweep, subject: &str, removal: CheckoutRemoval) {
+    match removal.keep_reason {
+        Some(reason) => push_kept(sweep, subject, reason),
+        None => sweep.removed.push(subject.to_owned()),
+    }
+}
+
+fn push_kept(sweep: &mut CheckoutSweep, subject: &str, reason: String) {
+    if !sweep.kept.iter().any(|kept| kept.subject == subject) {
+        sweep.kept.push(CheckoutKept {
+            subject: subject.to_owned(),
+            reason,
+        });
+    }
+}
+
+fn tasks_matching(dispatcher: &Dispatcher, clause: &str) -> Result<Vec<Task>, ContinuationError> {
+    let query = format!("SELECT id FROM tasks WHERE {clause}");
+    load_tasks(dispatcher, task_ids(dispatcher, &query)?)
+}
+
+fn eligible_checkout_tasks(
+    dispatcher: &Dispatcher,
+    archived_only: bool,
 ) -> Result<Vec<Task>, ContinuationError> {
+    let archive = if archived_only {
+        " AND archived_at IS NOT NULL"
+    } else {
+        ""
+    };
+    let query = format!(
+        "SELECT id FROM tasks WHERE worktree_path IS NOT NULL \
+         AND state IN ('completed','failed','cancelled'){archive} ORDER BY updated_at"
+    );
+    load_tasks(dispatcher, task_ids(dispatcher, &query)?)
+}
+
+fn task_ids(dispatcher: &Dispatcher, query: &str) -> Result<Vec<String>, ContinuationError> {
     let ids = dispatcher.store().with_connection(|connection| {
-        let mut statement = connection
-            .prepare("SELECT id FROM tasks WHERE worktree_path=? AND archived_at IS NULL")?;
-        statement
-            .query_map([path], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(oga_store::StoreError::from)
+        let mut statement = connection.prepare(query)?;
+        Ok(statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?)
     })?;
-    let tasks = ids
-        .into_iter()
-        .filter(|id| exclude != Some(id.as_str()))
+    Ok(ids)
+}
+
+fn load_tasks(dispatcher: &Dispatcher, ids: Vec<String>) -> Result<Vec<Task>, ContinuationError> {
+    ids.into_iter()
         .map(|id| {
             lifecycle::load_task(dispatcher.store(), &id)?.ok_or_else(|| {
                 ContinuationError::Refusal(format!("task disappeared from checkout: {id}"))
             })
         })
-        .collect::<Result<Vec<_>, ContinuationError>>()?;
-    Ok(tasks)
+        .collect()
+}
+
+/// Removes checkouts under the worktrees root that no task row references.
+/// Only a clean git checkout goes; anything else is left where it is.
+async fn sweep_orphan_checkouts(dispatcher: &Dispatcher, sweep: &mut CheckoutSweep) {
+    let root = dispatcher.worktrees_root().to_path_buf();
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let path = path.to_string_lossy().into_owned();
+        if path_is_owned(dispatcher, &path).unwrap_or(true) {
+            continue;
+        }
+        let Some(worktree) = orphan_worktree(&path).await else {
+            continue;
+        };
+        match oga_worktree::worktree_has_uncommitted_work(&worktree).await {
+            Ok(false) => match oga_worktree::remove_task_worktree(&worktree).await {
+                Ok(()) => sweep.orphans_removed.push(path),
+                Err(error) => push_kept(sweep, &path, format!("could not remove it: {error}")),
+            },
+            Ok(true) => push_kept(sweep, &path, "it still has uncommitted changes".into()),
+            Err(error) => push_kept(sweep, &path, format!("could not inspect it: {error}")),
+        }
+    }
+}
+
+/// Builds the worktree record an unowned checkout needs, resolving the
+/// repository git records for it. `None` leaves a path git cannot place.
+async fn orphan_worktree(path: &str) -> Option<TaskWorktree> {
+    let root = oga_worktree::checkout_repository_root(Path::new(path))
+        .await
+        .ok()
+        .flatten()?;
+    Some(TaskWorktree {
+        origin_cwd: root.to_string_lossy().into_owned(),
+        path: path.to_owned(),
+        branch: String::new(),
+        links: None,
+        from: None,
+        base: None,
+    })
+}
+
+fn path_is_owned(dispatcher: &Dispatcher, path: &str) -> Result<bool, ContinuationError> {
+    let count = dispatcher.store().with_connection(|connection| {
+        Ok(connection.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE worktree_path=?",
+            [path],
+            |row| row.get::<_, u64>(0),
+        )?)
+    })?;
+    Ok(count > 0)
 }
 
 #[cfg(test)]

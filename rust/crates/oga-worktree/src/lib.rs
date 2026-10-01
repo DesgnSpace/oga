@@ -176,6 +176,27 @@ async fn repository_root(cwd: &Path) -> Result<Option<PathBuf>, WorktreeError> {
     )))
 }
 
+/// The repository a checkout belongs to, for a checkout found without a task
+/// row. A linked worktree's `.git` points at the shared repository, so this
+/// reads the common git dir. `None` means git cannot place the path.
+pub async fn checkout_repository_root(path: &Path) -> Result<Option<PathBuf>, WorktreeError> {
+    let run = run_git(path, &["rev-parse".into(), "--git-common-dir".into()]).await?;
+    if !run.succeeded() {
+        return Ok(None);
+    }
+    let value = run.stdout.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let git_dir = if Path::new(value).is_absolute() {
+        PathBuf::from(value)
+    } else {
+        path.join(value)
+    };
+    let git_dir = fs::canonicalize(&git_dir).unwrap_or(git_dir);
+    Ok(git_dir.parent().map(Path::to_path_buf))
+}
+
 fn checkout_cwd(checkout: &Path, root: &Path, origin_cwd: &Path) -> Result<PathBuf, WorktreeError> {
     let root =
         fs::canonicalize(root).map_err(|source| file_system_error("resolve", root, source))?;
@@ -648,6 +669,15 @@ pub fn worktree_active(state: TaskState) -> bool {
             | TaskState::Running
             | TaskState::NeedsInput
             | TaskState::Answered
+    )
+}
+
+/// Whether a task in this state still needs its recorded checkout. A finished
+/// task does not, archived or not.
+pub fn checkout_in_use(state: TaskState) -> bool {
+    !matches!(
+        state,
+        TaskState::Completed | TaskState::Failed | TaskState::Cancelled
     )
 }
 

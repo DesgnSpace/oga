@@ -475,7 +475,7 @@ describe("storage tab", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "Task history" }));
     expect(await screen.findByRole("heading", { name: "Logs ready to remove" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /Remove old logs automatically/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Clean up finished tasks automatically/ }));
     expect(screen.getByRole("button", { name: "Review and remove now" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(saved?.enabled).toBe(true));

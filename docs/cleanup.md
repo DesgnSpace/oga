@@ -15,5 +15,12 @@ removes task activity; the task record remains. It also removes eligible task
 worktrees when they have no uncommitted changes. The branch remains in the
 repository.
 
+Oga also collects task checkouts by itself, at broker start and on the cleanup
+cycle, without waiting for the retention. A checkout goes once every task that
+uses it has finished. When the setting includes unarchived work, a finished
+task's checkout goes whether or not the task is archived. A checkout a live
+task still uses, or one with uncommitted work, stays, and its task history says
+why.
+
 The app offers the same preview in **Settings → Task history**. Review the preview
 before deleting: cleanup is permanent. Quit Oga before using `--delete`.

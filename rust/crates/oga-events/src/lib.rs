@@ -4877,6 +4877,7 @@ fn lifecycle_title(event_type: &str) -> String {
         "checkout_preparation_failed" => "Checkout preparation failed",
         "checkout_removal_started" => "Removing checkout",
         "checkout_removed" => "Checkout removed",
+        "checkout_kept" => "Checkout kept",
         "checkout_removal_failed" => "Checkout removal failed",
         "line_dropped" | "event_dropped" | "events_truncated" => ACTIVITY_SKIPPED_TITLE,
         "history_dropped" => "History removed",

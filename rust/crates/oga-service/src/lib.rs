@@ -166,8 +166,8 @@ pub(crate) fn resume_prompt(
 }
 
 pub use archive::{
-    ArchiveRequest, ArchiveResult, WorktreeRemoveRequest, archive, remove_project_worktrees,
-    remove_worktree,
+    ArchiveRequest, ArchiveResult, CheckoutKept, CheckoutSweep, WorktreeRemoveRequest, archive,
+    remove_project_worktrees, remove_worktree, sweep_checkouts,
 };
 pub use cancel::{CancelRequest, cancel};
 pub use complete::{CompletionAssertion, assert_completion, force_complete};

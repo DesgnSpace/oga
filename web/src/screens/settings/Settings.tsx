@@ -2510,7 +2510,7 @@ function CleanupPanel({
     <>
       <PageHeader
         title={tabLabel("storage")}
-        description="Oga keeps each task's request and answer. These choices remove only its detailed activity."
+        description="Oga keeps each task's request, its answer, and a copy of your project while the task can still use it. These choices set how long each is kept."
         actions={
           <button className="settings-button" type="button" onClick={() => void reload()} disabled={state.cleanup.loading}>
             Refresh
@@ -2522,7 +2522,7 @@ function CleanupPanel({
         <div className="page-sections">
           <Section title="What Oga keeps">
             <Card>
-              <CardRow as="label" title="Remove old logs automatically" description="Remove logs after they reach the age you choose.">
+              <CardRow as="label" title="Clean up finished tasks automatically" description="Remove old logs and project copies once their tasks are finished.">
                 <input type="checkbox" checked={settings.enabled} onChange={(event) => updateDraft({ enabled: event.target.checked })} />
               </CardRow>
               <CardRow as="label" title="Keep logs for" description="Logs older than this can be removed.">
@@ -2538,7 +2538,7 @@ function CleanupPanel({
                   <span>days</span>
                 </span>
               </CardRow>
-              <CardRow as="label" title="Remove logs only for archived tasks" description="Logs for active and unarchived tasks stay.">
+              <CardRow as="label" title="Only clean up archived tasks" description="Active and unarchived tasks keep their logs and project copies.">
                 <input type="checkbox" checked={settings.archivedOnly} onChange={(event) => updateDraft({ archivedOnly: event.target.checked })} />
               </CardRow>
             </Card>

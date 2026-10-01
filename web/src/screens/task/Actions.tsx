@@ -171,9 +171,26 @@ export function archiveBranchTitles(task: TaskToastSource): TaskToastTitles {
     });
 }
 
-export function archiveBranchSuccess(task: TaskToastSource, response: ArchiveTaskResponse | undefined): string {
+function taskSubject(task: TaskToastSource): string {
   const name = taskToastName(task);
-  const subject = name ? `"${name}"` : "Task";
+  return name ? `"${name}"` : "Task";
+}
+
+/** What an archive says about the checkout it left behind, or removed. */
+export function archiveSuccess(
+  task: TaskToastSource,
+  archived: boolean,
+  response: ArchiveTaskResponse | undefined,
+): string {
+  const subject = taskSubject(task);
+  if (!archived) return `${subject} restored`;
+  if (!response?.checkout) return `${subject} archived`;
+  if (response.checkout === "removed") return `${subject} archived; checkout removed`;
+  return `${subject} archived; checkout ${response.checkout}`;
+}
+
+export function archiveBranchSuccess(task: TaskToastSource, response: ArchiveTaskResponse | undefined): string {
+  const subject = taskSubject(task);
   if (!response) return `${subject} archived; branch status unavailable`;
   if (response.branchOutcome === "deleted") return `${subject} archived and branch deleted`;
   if (response.branchOutcome === "already_gone") return `${subject} archived; branch was already gone`;
@@ -490,9 +507,10 @@ export function TaskHeaderActions({
     };
   }, [menuOpen, showDetails]);
 
-  const run = async (
-    action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
+  const run = async <T,>(
+    action: () => Promise<{ ok: true; value: T } | { ok: false; error: BridgeError }>,
     titles: TaskToastTitles,
+    describeSuccess?: (value: T) => string,
   ) => {
     if (busy) return;
     setBusy(true);
@@ -501,7 +519,7 @@ export function TaskHeaderActions({
       const result = await action();
       setBusy(false);
       if (result.ok) {
-        lifecycle.success(titles.success);
+        lifecycle.success(describeSuccess ? describeSuccess(result.value) : titles.success);
         onChanged();
       } else {
         const failure = actionFailure(result.error, titles.failure);
@@ -571,7 +589,11 @@ export function TaskHeaderActions({
         disabled: busy,
         onSelect: () => {
           setMenuOpen(false);
-          void run(() => executeArchive(task.id, !archived), archiveTitles(task, archived));
+          void run(
+            () => executeArchive(task.id, !archived),
+            archiveTitles(task, archived),
+            (value) => archiveSuccess(task, !archived, value),
+          );
         },
       },
       ...(canDeleteBranch

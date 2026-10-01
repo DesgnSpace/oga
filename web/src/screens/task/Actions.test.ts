@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   archiveBranchSuccess,
+  archiveSuccess,
   awaitsPermission,
   canCancel,
   canComplete,
@@ -129,6 +130,34 @@ describe("archiveBranchSuccess", () => {
 
     expect(archiveBranchSuccess({ title: "Build the widget" }, response)).toBe(
       '"Build the widget" archived; branch kept: branch has unmerged commits',
+    );
+  });
+});
+
+describe("archiveSuccess", () => {
+  test("says why a checkout was kept", () => {
+    const response: ArchiveTaskResponse = {
+      id: "task",
+      state: "completed",
+      checkout: "kept: it still has uncommitted changes",
+    };
+
+    expect(archiveSuccess({ title: "Build the widget" }, true, response)).toBe(
+      '"Build the widget" archived; checkout kept: it still has uncommitted changes',
+    );
+  });
+
+  test("says a checkout was removed", () => {
+    const response: ArchiveTaskResponse = { id: "task", state: "completed", checkout: "removed" };
+
+    expect(archiveSuccess({ title: "Build the widget" }, true, response)).toBe(
+      '"Build the widget" archived; checkout removed',
+    );
+  });
+
+  test("a restore says restored and nothing about a checkout", () => {
+    expect(archiveSuccess({ title: "Build the widget" }, false, undefined)).toBe(
+      '"Build the widget" restored',
     );
   });
 });
