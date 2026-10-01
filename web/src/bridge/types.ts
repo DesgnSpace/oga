@@ -448,6 +448,12 @@ export interface StateQuery {
   compact: boolean;
   limit?: number;
   skipSummaryAggregates?: boolean;
+  /** Narrows the list and its group counts to one project (its cwd). */
+  project?: string;
+  /** Narrows the list and its group counts to this title or prompt text. */
+  search?: string;
+  /** Which grouping `groupCounts` is keyed by: `status`, `project`, `parent`, or `none`. */
+  group?: "parent" | "project" | "status" | "none";
 }
 
 export interface TaskEventsQuery {
@@ -536,6 +542,8 @@ export interface BrokerSummaryState {
   profiles: ProfileView[];
   tasks: TaskSummary[];
   tasksHasMore?: boolean;
+  /** True totals per group for the query's filters, keyed by group id. */
+  groupCounts?: Record<string, number>;
   memoryProjects: MemoryProject[];
   spend?: SpendTotals;
 }

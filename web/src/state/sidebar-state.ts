@@ -46,6 +46,8 @@ export interface SidebarState {
   profiles: ProfileView[];
   tasks: SidebarTask[];
   tasksHasMore: boolean;
+  /** True totals per group for the current filters, keyed by group id. */
+  groupCounts: Record<string, number>;
   loadedPages: number;
   isLoadingMore: boolean;
   loadMoreFailed: boolean;
@@ -73,6 +75,7 @@ export function defaultSidebarState(): SidebarState {
     profiles: [],
     tasks: [],
     tasksHasMore: false,
+    groupCounts: {},
     loadedPages: 1,
     isLoadingMore: false,
     loadMoreFailed: false,
@@ -125,11 +128,15 @@ export function sidebarPreferencesFrom(state: SidebarState): SidebarPreferences 
 }
 
 export function summaryQuery(state: SidebarState): StateQuery {
+  const search = searchTerm(state);
   return {
     compact: true,
     archived: state.archiveFilter,
     limit: state.loadedPages * TASK_PAGE_SIZE,
     skipSummaryAggregates: true,
+    project: state.projectFilter,
+    search: search === "" ? undefined : search,
+    group: state.grouping,
   };
 }
 
@@ -151,6 +158,7 @@ export function applySummary(state: SidebarState, summary: BrokerSummaryState): 
     profiles: summary.profiles,
     tasks: mergeTasks(state.tasks, summary.tasks, tasksHasMore),
     tasksHasMore,
+    groupCounts: summary.groupCounts ?? {},
     loadState: "ready",
     connection: "connected",
     error: undefined,
@@ -206,7 +214,15 @@ export function finishLoadMoreError(state: SidebarState, message: string): Sideb
 export function setArchiveFilter(state: SidebarState, filter: TaskArchiveFilter): [SidebarState, boolean] {
   if (state.archiveFilter === filter) return [state, false];
   return [
-    { ...state, archiveFilter: filter, tasks: [], loadedPages: 1, tasksHasMore: false, loadMoreFailed: false },
+    {
+      ...state,
+      archiveFilter: filter,
+      tasks: [],
+      groupCounts: {},
+      loadedPages: 1,
+      tasksHasMore: false,
+      loadMoreFailed: false,
+    },
     true,
   ];
 }
@@ -255,7 +271,10 @@ export function filtersHideTasks(state: SidebarState): boolean {
 /** Restores the default view. Reports whether the broker query changed. */
 export function resetFilters(state: SidebarState): [SidebarState, boolean] {
   const defaults = defaultSidebarPreferences();
-  const [next, changed] = setArchiveFilter(
+  // A reset can drop the project filter or grouping without touching the
+  // archive filter, and both shape the broker query, so all four decide.
+  const changed = filtersActive(state);
+  const [next] = setArchiveFilter(
     { ...state, projectFilter: undefined, grouping: defaults.grouping, sort: defaults.sort },
     defaults.archiveFilter,
   );
@@ -352,12 +371,14 @@ function applyPointer(state: SidebarState, pointer: EventPointer): [SidebarState
   const tasks = state.tasks.slice();
   if (archived !== undefined && !filterAdmits(state.archiveFilter, archived)) {
     tasks.splice(index, 1);
-    return [{ ...state, eventCursor, tasks }, "none"];
+    // A task leaving the list changes its group's total.
+    return [{ ...state, eventCursor, tasks }, "refresh"];
   }
 
   let archivedAt = task.archivedAt;
   if (archived === true) archivedAt = pointer.at;
   if (archived === false) archivedAt = undefined;
+  const moved = pointer.state !== task.state;
   tasks[index] = {
     ...task,
     state: pointer.state,
@@ -365,8 +386,9 @@ function applyPointer(state: SidebarState, pointer: EventPointer): [SidebarState
     updatedAt: pointer.at,
     archivedAt,
   };
-  if (pointer.state !== task.state) tasks[index].staleOutcome = true;
-  return [{ ...state, eventCursor, tasks }, "none"];
+  if (moved) tasks[index].staleOutcome = true;
+  // The row moved, so the group totals the last read returned are stale too.
+  return [{ ...state, eventCursor, tasks }, moved ? "refresh" : "none"];
 }
 
 /** The task's new archive standing, or `undefined` when the event left it
@@ -455,13 +477,21 @@ export class SidebarController {
   }
 
   setProjectFilter(project: string | undefined): void {
-    this.store.update((state) => setProjectFilter(state, project));
+    const next = setProjectFilter(this.store.snapshot, project);
+    if (next.projectFilter === this.store.snapshot.projectFilter) return;
+    this.store.set(next);
     this.persist();
+    // The read is filtered by project, so its totals move with the choice.
+    void this.refresh();
   }
 
   setGrouping(grouping: TaskGrouping): void {
-    this.store.update((state) => setGrouping(state, grouping));
+    const next = setGrouping(this.store.snapshot, grouping);
+    if (next.grouping === this.store.snapshot.grouping) return;
+    this.store.set(next);
     this.persist();
+    // Totals are keyed by the grouping, so a change needs a fresh read.
+    void this.refresh();
   }
 
   setSort(sort: TaskSort): void {

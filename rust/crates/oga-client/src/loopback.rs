@@ -1074,6 +1074,15 @@ fn append_state_query(url: &mut Url, query: &StateQuery, summary: bool) {
     if let Some(prefix) = &query.id_prefix {
         url.query_pairs_mut().append_pair("idPrefix", prefix);
     }
+    if let Some(project) = &query.project {
+        url.query_pairs_mut().append_pair("project", project);
+    }
+    if let Some(search) = &query.search {
+        url.query_pairs_mut().append_pair("search", search);
+    }
+    if let Some(group) = &query.group {
+        url.query_pairs_mut().append_pair("group", group);
+    }
 }
 
 fn append_event_query(url: &mut Url, query: &TaskEventsQuery) {

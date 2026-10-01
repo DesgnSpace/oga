@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
 import { resetFeedsForTests } from "@/bridge/events";
 import { EVENT_BATCH_EVENT, STATUS_EVENT, type EventBatch, type StreamStatus, type TaskSummary } from "@/bridge/types";
@@ -30,7 +30,11 @@ function task(id: string, preview: string, extra: Partial<TaskSummary> = {}): Ta
 }
 
 function transport(
-  options: { profiles?: Array<{ id: string; label: string }>; tasks?: TaskSummary[] } = {},
+  options: {
+    profiles?: Array<{ id: string; label: string }>;
+    tasks?: TaskSummary[];
+    tasksHasMore?: boolean;
+  } = {},
 ): Transport {
   return {
     invoke: async (command: string, args?: Record<string, unknown>) => {
@@ -40,7 +44,7 @@ function transport(
         return {
           profiles: options.profiles ?? [],
           tasks: options.tasks ?? [task("one", "first task"), task("two", "second task")],
-          tasksHasMore: false,
+          tasksHasMore: options.tasksHasMore ?? false,
           profileFailures: [],
           grants: [],
           memoryProjects: [],
@@ -53,11 +57,20 @@ function transport(
 }
 
 /** jsdom lays nothing out, so the list reads the row and viewport sizes a browser would give it. */
-function stubRowLayout({ rowHeight, viewportHeight }: { rowHeight: number; viewportHeight: number }): () => void {
+function stubRowLayout({
+  rowHeight,
+  headerHeight = rowHeight,
+  viewportHeight,
+}: {
+  rowHeight: number;
+  headerHeight?: number;
+  viewportHeight: number;
+}): () => void {
   const prototype = window.HTMLElement.prototype;
   const offsetHeight = Object.getOwnPropertyDescriptor(prototype, "offsetHeight")!;
   const getBoundingClientRect = prototype.getBoundingClientRect;
   const isRow = (element: Element) => element.classList.contains("sidebar-task-row");
+  const isHeader = (element: Element) => element.classList.contains("sidebar-group");
   Object.defineProperty(prototype, "offsetHeight", {
     configurable: true,
     get(this: HTMLElement) {
@@ -71,7 +84,7 @@ function stubRowLayout({ rowHeight, viewportHeight }: { rowHeight: number; viewp
     },
   });
   prototype.getBoundingClientRect = function (this: HTMLElement) {
-    const height = isRow(this) ? rowHeight : 0;
+    const height = isHeader(this) ? headerHeight : isRow(this) ? rowHeight : 0;
     return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect;
   };
   return () => {
@@ -86,6 +99,9 @@ describe("the sidebar", () => {
   beforeEach(() => {
     projectionFromState.mockClear();
     resetTaskOutcomeViewsForTests();
+    // Preferences persist between tests otherwise: one that groups by none
+    // would leave the next one without headers.
+    window.localStorage.clear();
   });
   afterEach(cleanup);
 
@@ -368,6 +384,42 @@ describe("the sidebar", () => {
       const listWindow = list.querySelector<HTMLElement>(".sidebar-list-window")!;
       const offset = parseFloat(listWindow.style.transform.replace("translateY(", ""));
       expect(offset).toBeCloseTo(firstIndex * rowHeight, 3);
+    } finally {
+      restore();
+    }
+  });
+
+  it("reserves each header's height and hides Load more when every group is collapsed", async () => {
+    const restore = stubRowLayout({ rowHeight: 36, headerHeight: 44, viewportHeight: 480 });
+    try {
+      setTransport(
+        transport({
+          tasks: [
+            task("run", "running task", { state: "running" }),
+            task("done", "done task", { state: "completed" }),
+          ],
+          tasksHasMore: true,
+        }),
+      );
+      const controller = new SidebarController();
+      render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+      await screen.findByText("running task");
+
+      const list = document.getElementById("task-list")!;
+      const spacer = () => list.querySelector<HTMLElement>(".sidebar-list-spacer")!;
+
+      await waitFor(() =>
+        expect(parseFloat(spacer().style.height)).toBeCloseTo(2 * 44 + 2 * 36, 3),
+      );
+      expect(screen.getByRole("button", { name: /Load more/i })).toBeTruthy();
+
+      act(() => {
+        controller.toggleGroup("running");
+        controller.toggleGroup("completed");
+      });
+
+      await waitFor(() => expect(parseFloat(spacer().style.height)).toBeCloseTo(2 * 44, 3));
+      expect(screen.queryByRole("button", { name: /Load more/i })).toBeNull();
     } finally {
       restore();
     }

@@ -52,21 +52,20 @@ import {
 } from "@/state/sidebar-state";
 import {
   displayLabel,
-  newVirtualList,
   NO_TASKS_MESSAGE,
   projectionEmptyMessage,
   projectionFromState,
   projectionRows,
+  rowTops,
   sidebarRowKey,
   taskProjectLabel,
+  VIRTUAL_LIST_DEFAULT_HEADER_HEIGHT,
   VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT,
+  VIRTUAL_LIST_DEFAULT_OVERSCAN,
   VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT,
   virtualListOffsetFor,
   virtualListTotalHeight,
   virtualListVisibleRange,
-  withItemHeight,
-  withScrollOffset,
-  withViewportHeight,
   type SidebarRow,
 } from "@/state/sidebar-projection";
 import { BackArrowIcon, FilterIcon, ForwardArrowIcon, RefreshIcon, SearchIcon, SettingsIcon, SidebarIcon } from "@/ui/icons";
@@ -207,12 +206,14 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(VIRTUAL_LIST_DEFAULT_VIEWPORT_HEIGHT);
   const [itemHeight, setItemHeight] = useState(VIRTUAL_LIST_DEFAULT_ITEM_HEIGHT);
+  const [headerHeight, setHeaderHeight] = useState(VIRTUAL_LIST_DEFAULT_HEADER_HEIGHT);
   const [resizeStart, setResizeStart] = useState<{ x: number; width: number } | null>(null);
   const [rowMenu, setRowMenu] = useState<{ task: TaskSummary } | null>(null);
   const [archiveBranchTask, setArchiveBranchTask] = useState<ArchiveBranchTask | null>(null);
   const [rowMenuPlacement, setRowMenuPlacement] = useState<{ top: number; left: number } | null>(null);
   const connectionWasLive = useRef(false);
   const connectionState = useRef<ConnectionState>(sidebarRef.snapshot.connection);
+  const lastReadSearch = useRef(sidebarRef.snapshot.search.trim());
 
   const listShellRef = useRef<HTMLDivElement>(null);
   const sidebarElementRef = useRef<HTMLElement>(null);
@@ -223,6 +224,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   const rowMenuAnchorRef = useRef<HTMLElement>(null);
   const searchFieldRef = useRef<HTMLInputElement>(null);
   const taskRowRefs = useRef(new Map<string, HTMLAnchorElement>());
+  const groupRowRefs = useRef(new Map<string, HTMLButtonElement>());
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(initialTask);
   const [, setClock] = useState(0);
 
@@ -250,18 +252,21 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   // message doesn't explain, so the footer points at the fix.
   const hasNoWorkers = sidebar.loadState === "ready" && sidebar.profiles.length === 0;
 
-  const virtual = useMemo(
-    () =>
-      withScrollOffset(
-        withItemHeight(withViewportHeight(newVirtualList(effectiveRows.length), viewportHeight), itemHeight),
-        scrollTop,
-      ),
-    [effectiveRows.length, viewportHeight, itemHeight, scrollTop],
+  const tops = useMemo(
+    () => rowTops(effectiveRows, { header: headerHeight, task: itemHeight }),
+    [effectiveRows, headerHeight, itemHeight],
   );
-  const [start, end] = virtualListVisibleRange(virtual);
+  const [start, end] = useMemo(
+    () => virtualListVisibleRange(tops, viewportHeight, scrollTop, VIRTUAL_LIST_DEFAULT_OVERSCAN),
+    [tops, viewportHeight, scrollTop],
+  );
   const visibleRows = effectiveRows.slice(start, end);
-  const totalHeight = virtualListTotalHeight(virtual);
-  const offset = virtualListOffsetFor(virtual, start);
+  const totalHeight = virtualListTotalHeight(tops);
+  const offset = virtualListOffsetFor(tops, start);
+  // With every group collapsed no row can appear, so Load more would do
+  // nothing visible; the footer hides until a group is expanded again.
+  const allGroupsCollapsed =
+    effectiveRows.length > 0 && effectiveRows.every((row) => row.type === "groupHeader");
 
   const taskIds = useMemo(
     () => effectiveRows.flatMap((row) => (row.type === "task" ? [row.task.id] : [])),
@@ -275,8 +280,8 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   const focusTask = useCallback((id: string) => {
     const index = effectiveRows.findIndex((row) => row.type === "task" && row.task.id === id);
     if (index < 0) return;
-    const top = index * itemHeight;
-    const bottom = top + itemHeight;
+    const top = virtualListOffsetFor(tops, index);
+    const bottom = virtualListOffsetFor(tops, index + 1);
     const nextScrollTop = top < scrollTop
       ? top
       : bottom > scrollTop + viewportHeight
@@ -288,7 +293,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
     }
     setFocusedTaskId(id);
     requestAnimationFrame(() => taskRowRefs.current.get(id)?.focus());
-  }, [effectiveRows, itemHeight, scrollTop, viewportHeight]);
+  }, [effectiveRows, tops, scrollTop, viewportHeight]);
 
   const handleListKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (taskIds.length === 0) return;
@@ -333,6 +338,21 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
     return () => observer.disconnect();
   }, [measuredTaskId]);
 
+  const measuredGroupId = visibleRows.find((row) => row.type === "groupHeader")?.id;
+  useLayoutEffect(() => {
+    // Headings are taller than task rows, so the list measures one of each.
+    const header = measuredGroupId === undefined ? undefined : groupRowRefs.current.get(measuredGroupId);
+    if (!header) return;
+    const measure = () => {
+      const height = header.getBoundingClientRect().height;
+      if (height > 0) setHeaderHeight(height);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [measuredGroupId]);
+
   useEffect(() => {
     if (initialTask) {
       sidebarRef.update((s) => ({ ...s, selectedTask: initialTask }));
@@ -346,6 +366,19 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   useEffect(() => {
     void sidebarRef.refresh();
   }, [sidebarRef]);
+
+  // Group totals come from the broker filtered by search, so the box rereads
+  // once typing settles instead of on every keystroke.
+  useEffect(() => {
+    const term = sidebar.search.trim();
+    if (term === lastReadSearch.current) return;
+    const timer = setTimeout(() => {
+      if (lastReadSearch.current === term) return;
+      lastReadSearch.current = term;
+      void sidebarRef.refresh();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [sidebar.search, sidebarRef]);
 
   useEffect(() => {
     let active = true;
@@ -899,6 +932,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
                 openMenuTaskId={rowMenu?.task.id}
                 focusedTaskId={focusedTaskId}
                 taskRowRefs={taskRowRefs}
+                groupRowRefs={groupRowRefs}
                 onFocusTask={setFocusedTaskId}
               />
             ))}
@@ -908,6 +942,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
           state={sidebar}
           emptyMessage={emptyMessage}
           hasNoWorkers={hasNoWorkers}
+          allGroupsCollapsed={allGroupsCollapsed}
           onOpenSettings={onOpenSettings}
           onRefresh={handleRefresh}
           onLoadMore={handleLoadMore}
@@ -962,6 +997,7 @@ function SidebarRowView({
   openMenuTaskId,
   focusedTaskId,
   taskRowRefs,
+  groupRowRefs,
   onFocusTask,
 }: {
   row: SidebarRow;
@@ -973,12 +1009,17 @@ function SidebarRowView({
   openMenuTaskId?: string;
   focusedTaskId?: string;
   taskRowRefs: React.RefObject<Map<string, HTMLAnchorElement>>;
+  groupRowRefs: React.RefObject<Map<string, HTMLButtonElement>>;
   onFocusTask: (id: string) => void;
 }) {
   if (row.type === "groupHeader") {
     const className = row.indented ? "sidebar-group sidebar-group-indented" : "sidebar-group";
     return (
       <button
+        ref={(element) => {
+          if (element) groupRowRefs.current.set(row.id, element);
+          else groupRowRefs.current.delete(row.id);
+        }}
         className={className}
         type="button"
         tabIndex={-1}
@@ -1055,6 +1096,7 @@ function SidebarFooter({
   state,
   emptyMessage,
   hasNoWorkers,
+  allGroupsCollapsed,
   onOpenSettings,
   onRefresh,
   onLoadMore,
@@ -1062,6 +1104,7 @@ function SidebarFooter({
   state: SidebarState;
   emptyMessage: string | undefined;
   hasNoWorkers: boolean;
+  allGroupsCollapsed: boolean;
   onOpenSettings?: (tab: "workers") => void;
   onRefresh: () => void;
   onLoadMore: () => void;
@@ -1127,7 +1170,7 @@ function SidebarFooter({
       </div>
     );
   }
-  if (state.tasksHasMore) {
+  if (state.tasksHasMore && !allGroupsCollapsed) {
     const label = state.isLoadingMore ? "Loading…" : state.loadMoreFailed ? "Couldn't load more. Try again" : "Load more";
     return (
       <>

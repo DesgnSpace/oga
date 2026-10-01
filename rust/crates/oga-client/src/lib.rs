@@ -53,6 +53,14 @@ pub struct StateQuery {
     pub created_since: Option<String>,
     #[serde(rename = "idPrefix")]
     pub id_prefix: Option<String>,
+    /// Narrows the list and its group counts to one project (its cwd).
+    pub project: Option<String>,
+    /// Narrows the list and its group counts to tasks whose title or prompt
+    /// contains this text.
+    pub search: Option<String>,
+    /// Which grouping the summary's `groupCounts` are keyed by: `status`,
+    /// `project`, `parent`, or `none`.
+    pub group: Option<String>,
 }
 
 impl StateQuery {
@@ -90,6 +98,24 @@ impl StateQuery {
     /// Only tasks whose id starts with this text.
     pub fn id_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.id_prefix = Some(prefix.into());
+        self
+    }
+
+    /// Only tasks in this project (its cwd).
+    pub fn project(mut self, project: impl Into<String>) -> Self {
+        self.project = Some(project.into());
+        self
+    }
+
+    /// Only tasks whose title or prompt contains this text.
+    pub fn search(mut self, search: impl Into<String>) -> Self {
+        self.search = Some(search.into());
+        self
+    }
+
+    /// The grouping `groupCounts` are keyed by.
+    pub fn group(mut self, group: impl Into<String>) -> Self {
+        self.group = Some(group.into());
         self
     }
 }
@@ -197,6 +223,10 @@ pub struct BrokerSummaryState {
     pub tasks: Vec<TaskSummary>,
     #[serde(default)]
     pub tasks_has_more: Option<bool>,
+    /// True totals per group for the filters the query carried, keyed by the
+    /// group id the sidebar renders. Empty when the query named no grouping.
+    #[serde(default)]
+    pub group_counts: BTreeMap<String, u64>,
     #[serde(default)]
     pub memory_projects: Vec<MemoryProject>,
     #[serde(default)]
