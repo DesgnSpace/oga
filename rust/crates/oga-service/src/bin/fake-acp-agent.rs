@@ -779,6 +779,32 @@ fn prompt(
                 );
             }
         }
+        // Shape recorded from opencode2 2.0.18 on a free model: a file edit,
+        // then a turn that ends with no words at all. `silent-once` reports
+        // once asked to finish; `silent` never says anything.
+        turns if turns.starts_with("silent") => {
+            if prompts_logged(log_path) == 1 || turns == "silent" {
+                update(
+                    &session,
+                    json!({
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "call-edit",
+                        "title": "edit",
+                        "kind": "edit",
+                    }),
+                );
+                update(
+                    &session,
+                    json!({
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "call-edit",
+                        "status": "completed",
+                    }),
+                );
+            } else {
+                chunk(&session, "Edited the file and the checks pass.");
+            }
+        }
         "usage-limit" => {
             update(
                 &session,

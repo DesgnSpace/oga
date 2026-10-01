@@ -372,7 +372,9 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         };
     }
     // Background work the worker left running lives until the session ends, so it can still wait for it.
+    // A worker that ended without a word is asked once to finish and report.
     let mut waits = 0;
+    let mut nudged = false;
     while waits < MAX_BACKGROUND_WAITS
         && !run.was_cancelled()
         && matches!(&ended, Ok(TurnEnd::Answered(Ok(response))) if response.stop_reason == StopReason::EndTurn)
@@ -387,9 +389,16 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
                 break;
             }
         }
-        if ended.is_err() || !transcript.left_work_running() {
+        let prompt = if ended.is_err() {
             break;
-        }
+        } else if transcript.left_work_running() {
+            WAIT_FOR_BACKGROUND_WORK
+        } else if transcript.said_nothing() && !nudged {
+            nudged = true;
+            REPORT_AFTER_SILENT_END
+        } else {
+            break;
+        };
         waits += 1;
         ended = match record_background_wait(&turn, &mut transcript, waits).await {
             Ok(()) => {
@@ -398,7 +407,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
                     &run,
                     &mut updates,
                     &mut transcript,
-                    WAIT_FOR_BACKGROUND_WORK,
+                    prompt,
                     &run.questions.clock,
                 )
                 .await
@@ -494,6 +503,8 @@ async fn record_turn_retry(
 const MAX_BACKGROUND_WAITS: usize = 2;
 
 const WAIT_FOR_BACKGROUND_WORK: &str = "Your run isn't over: you ended your turn while work you started, such as a background command or subagent, was still going, and it stops when your turn ends. Wait for it to finish, then finish the task and give your final report.";
+
+const REPORT_AFTER_SILENT_END: &str = "Your run isn't over: you ended your turn without writing anything, so nobody knows whether the task is done. Finish any work that is left, then give your final report.";
 
 async fn record_background_wait(
     turn: &AcpTurn<'_>,
@@ -1126,8 +1137,17 @@ impl Transcript {
         Some(paths)
     }
 
+    /// An agent that ended its turn with no words, and was not turned away by
+    /// a limit or a refusal that explain it.
+    fn said_nothing(&self) -> bool {
+        self.final_message.trim().is_empty()
+            && self.rate_limit_wait().is_none()
+            && self.stopped_on_refusal().is_none()
+    }
+
     fn left_work_running(&self) -> bool {
-        self.rate_limit_wait().is_none()
+        !self.said_nothing()
+            && self.rate_limit_wait().is_none()
             && self.stopped_on_refusal().is_none()
             && interpret_worker_outcome(Some(0), self.final_text(), "", None)
                 .completion

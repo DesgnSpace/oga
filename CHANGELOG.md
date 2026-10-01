@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A task whose worker stops without ever replying is no longer marked completed. Oga first asks the worker once to finish and report; if it still says nothing, the task shows as unfinished with a reason, so you can resume it, and tasks waiting on it hold.
 - Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.
 - Each group in the task list shows how many tasks it really holds, not just the ones loaded so far, and Load more no longer covers a collapsed group.
 - Choosing a worker has its own Settings page, where you can also tell it how to pick — which workers to prefer or avoid, and when.

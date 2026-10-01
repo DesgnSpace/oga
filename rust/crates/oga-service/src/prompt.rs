@@ -7,6 +7,7 @@ use std::{
 
 use chrono::{Datelike, SecondsFormat, TimeZone, Utc};
 use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskState};
+use oga_providers::NO_FINAL_MESSAGE;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -370,6 +371,9 @@ pub fn interpret_worker_outcome(
             },
         };
     }
+    if output.trim() == NO_FINAL_MESSAGE {
+        return said_nothing(output, exit);
+    }
     if let Some(pending) = pending_work(&output) {
         return unfinished(output, exit, &pending);
     }
@@ -545,6 +549,25 @@ fn unfinished(output: String, exit_code: Option<i64>, pending: &str) -> WorkerOu
         "The worker stopped while work it started was still running (it said: \"{}\"). Resume the task so it can wait for that work and finish.",
         compact(pending)
     );
+    WorkerOutcome {
+        state: TaskState::Blocked,
+        output,
+        question: None,
+        error: Some(reason.clone()),
+        completion: TaskCompletion {
+            exit_code,
+            blocked: true,
+            code: CompletionCode::Unfinished,
+            reason: Some(reason),
+            ..empty_completion()
+        },
+    }
+}
+
+/// A run that ended without a word may have stopped halfway, so it never
+/// counts as finished.
+fn said_nothing(output: String, exit_code: Option<i64>) -> WorkerOutcome {
+    let reason = "The worker ended its run without a reply, so Oga can't tell whether the task is done. Resume the task so it can finish and report.".to_owned();
     WorkerOutcome {
         state: TaskState::Blocked,
         output,

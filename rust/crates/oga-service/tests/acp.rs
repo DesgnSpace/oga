@@ -575,6 +575,41 @@ async fn a_worker_that_keeps_leaving_background_work_running_settles_unfinished(
         .expect("an unfinished task resumes");
 }
 
+#[tokio::test]
+async fn a_worker_that_ends_its_turn_without_a_word_is_asked_once_to_report() {
+    let harness = harness("silent-once");
+
+    let task = harness.run("edit the file and report").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(task.output, "Edited the file and the checks pass.");
+    let prompts = prompt_texts(&harness);
+    assert_eq!(prompts.len(), 2, "one nudge: {prompts:?}");
+    assert!(prompts[1].contains("final report"), "{}", prompts[1]);
+    assert_eq!(harness.received("session/new").len(), 1);
+}
+
+#[tokio::test]
+async fn a_worker_that_never_says_anything_settles_unfinished_not_completed() {
+    let harness = harness("silent");
+
+    let task = harness.run("edit the file and report").await;
+
+    assert_eq!(task.state, TaskState::Blocked, "{task:?}");
+    let completion = task.completion.as_ref().expect("a completion");
+    assert_eq!(completion.code, CompletionCode::Unfinished);
+    let reason = completion.reason.as_deref().expect("a reason");
+    assert!(
+        reason.contains("without a reply") && reason.contains("Resume"),
+        "{reason}"
+    );
+    assert_eq!(prompt_texts(&harness).len(), 2, "the run and one nudge");
+
+    resume(&harness.dispatcher, ResumeRequest::new(&task.id))
+        .await
+        .expect("an unfinished task resumes");
+}
+
 /// Recorded from claude-agent-acp: the account's limit turned the agent away
 /// mid-run, and it ended the turn on the limit notice as its final words.
 #[tokio::test]
