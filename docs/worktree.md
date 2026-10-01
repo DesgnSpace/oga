@@ -36,6 +36,7 @@ The Oga app offers the same action from a task's menu and asks for confirmation.
 Oga also collects stale checkouts on its own, at broker start and on the
 cleanup cycle, so a checkout that failed to go when its task was archived, or
 was left by an earlier run, is cleaned up later. A checkout goes once no live
-task uses it and it has no uncommitted work. The branch stays. A checkout a
-live task still uses, or one with uncommitted work, is kept and the task
-history records why.
+task uses it, it has no uncommitted work, and at least one task using it is
+older than the cleanup retention. The branch stays. A checkout a live task
+still uses, or one with uncommitted work, is kept and the task history records
+why.

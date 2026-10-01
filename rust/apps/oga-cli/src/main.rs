@@ -2513,9 +2513,13 @@ fn scheduled_cleanup_settings(store: &Store) -> CliResult<Option<CleanupSettings
     }))
 }
 
+fn cleanup_cutoff(settings: &CleanupSettings) -> String {
+    let age = (settings.older_than_days * 86_400_000) as i64;
+    format_rfc3339_ms(now_ms().saturating_sub(age))
+}
+
 async fn scheduled_cleanup_pass(store: &Arc<Store>, settings: CleanupSettings) -> CliResult<()> {
-    let cutoff =
-        format_rfc3339_ms(now_ms().saturating_sub((settings.older_than_days * 86_400_000) as i64));
+    let cutoff = cleanup_cutoff(&settings);
     let finished_at = format_rfc3339_ms(now_ms());
     let store = Arc::clone(store);
     let result = tokio::task::spawn_blocking(move || {
@@ -2536,9 +2540,12 @@ async fn scheduled_cleanup_pass(store: &Arc<Store>, settings: CleanupSettings) -
 }
 
 /// Collects checkouts no live task needs. Runs in the broker's own process, so
-/// it can safely touch a checkout while tasks are being served.
+/// it can safely touch a checkout while tasks are being served. Settled work
+/// waits out the same retention the cleanup settings name; a crashed removal
+/// and an unowned checkout do not.
 async fn sweep_checkouts(dispatcher: &oga_service::Dispatcher, settings: &CleanupSettings) {
-    match oga_service::sweep_checkouts(dispatcher, settings.archived_only).await {
+    let cutoff = cleanup_cutoff(settings);
+    match oga_service::sweep_checkouts(dispatcher, &cutoff, settings.archived_only).await {
         Ok(sweep) => {
             let removed = sweep.removed.len() + sweep.orphans_removed.len();
             if removed > 0 || !sweep.kept.is_empty() {

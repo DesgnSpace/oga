@@ -11,6 +11,9 @@ use oga_store::Store;
 use oga_worktree::{branch_exists, create_task_worktree_at};
 use tempfile::TempDir;
 
+/// Far enough ahead that every fixture task has aged past the retention.
+const CUTOFF: &str = "2999-01-01T00:00:00.000Z";
+
 struct Fixture {
     /// Keeps the temporary repository and worktrees root alive for the test.
     _directory: TempDir,
@@ -135,6 +138,19 @@ fn record_task(
         .expect("checkout recorded");
 }
 
+fn set_updated_at(fixture: &Fixture, id: &str, updated_at: &str) {
+    fixture
+        .store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET updated_at=? WHERE id=?",
+                rusqlite::params![updated_at, id],
+            )?;
+            Ok(())
+        })
+        .expect("updated_at");
+}
+
 async fn make_checkout(fixture: &Fixture, task_id: &str, title: &str) -> oga_domain::TaskWorktree {
     create_task_worktree_at(
         &fixture.worktrees,
@@ -149,7 +165,7 @@ async fn make_checkout(fixture: &Fixture, task_id: &str, title: &str) -> oga_dom
 }
 
 async fn sweep(fixture: &Fixture) -> oga_service::CheckoutSweep {
-    sweep_checkouts(&fixture.dispatcher, true)
+    sweep_checkouts(&fixture.dispatcher, CUTOFF, true)
         .await
         .expect("sweep")
 }
@@ -193,17 +209,39 @@ async fn an_unarchived_finished_checkout_is_collected_when_the_setting_allows_it
     record_task(&fixture, "loose", &checkout, TaskState::Completed, false);
 
     // Archived-only, the default, leaves unarchived work alone.
-    let archived_only = sweep_checkouts(&fixture.dispatcher, true)
+    let archived_only = sweep_checkouts(&fixture.dispatcher, CUTOFF, true)
         .await
         .expect("sweep");
     assert!(archived_only.removed.is_empty(), "{archived_only:?}");
     assert!(Path::new(&checkout.path).exists());
 
-    let report = sweep_checkouts(&fixture.dispatcher, false)
+    let report = sweep_checkouts(&fixture.dispatcher, CUTOFF, false)
         .await
         .expect("sweep");
     assert_eq!(report.removed, vec!["loose".to_owned()]);
     assert!(!Path::new(&checkout.path).exists());
+}
+
+#[tokio::test]
+async fn a_settled_checkout_younger_than_the_retention_stays() {
+    let fixture = fixture();
+    let fresh = make_checkout(&fixture, "fresh", "fresh work").await;
+    let old = make_checkout(&fixture, "old", "old work").await;
+    record_task(&fixture, "fresh", &fresh, TaskState::Completed, true);
+    record_task(&fixture, "old", &old, TaskState::Completed, true);
+    set_updated_at(&fixture, "fresh", "2026-09-01T00:00:00.000Z");
+    set_updated_at(&fixture, "old", "2026-01-01T00:00:00.000Z");
+
+    let report = sweep_checkouts(&fixture.dispatcher, "2026-06-01T00:00:00.000Z", true)
+        .await
+        .expect("sweep");
+
+    assert_eq!(report.removed, vec!["old".to_owned()]);
+    assert!(!Path::new(&old.path).exists());
+    assert!(
+        Path::new(&fresh.path).exists(),
+        "a recent task keeps its checkout"
+    );
 }
 
 #[tokio::test]

@@ -122,7 +122,7 @@ git merge oga/&lt;branch-name&gt;</code></pre>
 
         <h2 id="space">Freeing the space<a class="heading-anchor" href="#space" aria-label="Copy link to this section"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 7h3V5H8a4 4 0 1 0 0 8h3v-2H8a2 2 0 1 1 0-4Zm5 0h3a2 2 0 1 1 0-4h-3v2h3a4 4 0 1 1 0-8h-3v2Zm-5 1v2h8V8H8Z"></path></svg></a></h2>
         <p><code>oga cleanup</code> shows what old work is holding on disk and deletes nothing until you say so. To delete, use <code>oga cleanup --older-than 30d --delete</code>. Only finished, archived work is eligible. Cleanup can remove a clean task copy, but the branch remains.</p>
-        <p>Oga also collects copies on its own, when it starts and once a day, so a copy that could not be removed when its task was archived does not linger. A copy goes once every task using it has finished. A copy a running task still uses, or one with uncommitted changes, stays, and the task says why.</p>
+        <p>Oga also collects copies on its own, when it starts and once a day, so a copy that could not be removed when its task was archived does not linger. A copy goes once every task using it has finished and the age you set in Settings has passed. A copy a running task still uses, or one with uncommitted changes, stays, and the task says why.</p>
 
         <div class="docs-next">
           <a href="/docs/data.html">Next: Everything Oga keeps stays on your Mac &rarr;</a>

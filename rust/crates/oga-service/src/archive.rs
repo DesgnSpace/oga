@@ -552,9 +552,11 @@ pub struct CheckoutKept {
 
 /// Removes checkouts no live task needs: unfinished removals from a previous
 /// broker, settled work the cleanup settings include, and unowned checkouts
-/// under the worktrees root. A dirty checkout or one a live task uses stays.
+/// under the worktrees root. Settled work waits out the retention the settings
+/// name; a dirty checkout or one a live task uses stays.
 pub async fn sweep_checkouts(
     dispatcher: &Dispatcher,
+    cutoff: &str,
     archived_only: bool,
 ) -> Result<CheckoutSweep, ContinuationError> {
     let mut sweep = CheckoutSweep::default();
@@ -571,8 +573,8 @@ pub async fn sweep_checkouts(
         record_removal(&mut sweep, &task.id, removal);
     }
 
-    // Finished work the cleanup settings include.
-    for task in eligible_checkout_tasks(dispatcher, archived_only)? {
+    // Finished work the cleanup settings include and the retention has aged.
+    for task in eligible_checkout_tasks(dispatcher, cutoff, archived_only)? {
         let Some(worktree) = task.worktree.as_ref() else {
             continue;
         };
@@ -621,11 +623,12 @@ fn push_kept(sweep: &mut CheckoutSweep, subject: &str, reason: String) {
 
 fn tasks_matching(dispatcher: &Dispatcher, clause: &str) -> Result<Vec<Task>, ContinuationError> {
     let query = format!("SELECT id FROM tasks WHERE {clause}");
-    load_tasks(dispatcher, task_ids(dispatcher, &query)?)
+    load_tasks(dispatcher, task_ids(dispatcher, &query, None)?)
 }
 
 fn eligible_checkout_tasks(
     dispatcher: &Dispatcher,
+    cutoff: &str,
     archived_only: bool,
 ) -> Result<Vec<Task>, ContinuationError> {
     let archive = if archived_only {
@@ -635,17 +638,24 @@ fn eligible_checkout_tasks(
     };
     let query = format!(
         "SELECT id FROM tasks WHERE worktree_path IS NOT NULL \
-         AND state IN ('completed','failed','cancelled'){archive} ORDER BY updated_at"
+         AND state IN ('completed','failed','cancelled') AND updated_at < ?{archive} ORDER BY updated_at"
     );
-    load_tasks(dispatcher, task_ids(dispatcher, &query)?)
+    load_tasks(dispatcher, task_ids(dispatcher, &query, Some(cutoff))?)
 }
 
-fn task_ids(dispatcher: &Dispatcher, query: &str) -> Result<Vec<String>, ContinuationError> {
+fn task_ids(
+    dispatcher: &Dispatcher,
+    query: &str,
+    cutoff: Option<&str>,
+) -> Result<Vec<String>, ContinuationError> {
     let ids = dispatcher.store().with_connection(|connection| {
         let mut statement = connection.prepare(query)?;
-        Ok(statement
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?)
+        let ids = statement
+            .query_map(rusqlite::params_from_iter(cutoff), |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
     })?;
     Ok(ids)
 }

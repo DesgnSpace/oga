@@ -5,7 +5,7 @@
 - Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.
 - Each group in the task list shows how many tasks it really holds, not just the ones loaded so far, and Load more no longer covers a collapsed group.
 - Choosing a worker has its own Settings page, where you can also tell it how to pick — which workers to prefer or avoid, and when.
-- Finished tasks no longer leave old copies of your project taking up space. Oga removes a task's copy once its work is done, and keeps one with uncommitted changes or still in use by a running task, telling you why.
+- Finished tasks no longer leave old copies of your project taking up space. Once a task's work is done and the age you set has passed, Oga removes its copy; a copy with uncommitted changes or still in use by a running task stays, and the task tells you why.
 
 ## 0.2.3 - 2026-09-29
 
