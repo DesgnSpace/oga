@@ -408,14 +408,21 @@ export interface WaitSettings {
 }
 
 /**
- * Whether a task that names no worker has one picked for it, and the key that
- * signs in. A read never carries the key itself — `apiKey` comes back masked
- * when one is stored, and empty when none is. Sending the mask back leaves the
- * stored key alone.
+ * Whether a task that names no worker has one picked for it, the key that
+ * signs in, and the text the advisor is asked to pick with. An empty
+ * `instructions` means the built-in default. A read never carries the key
+ * itself — `apiKey` comes back masked when one is stored, and empty when none
+ * is. Sending the mask back leaves the stored key alone.
  */
 export interface AdvisorSettings {
   enabled: boolean;
   apiKey: string;
+  instructions: string;
+}
+
+/** The advisor settings as read back, with the text used when none is saved. */
+export interface AdvisorView extends AdvisorSettings {
+  defaultInstructions: string;
 }
 
 /** `null` means the default font. */
@@ -815,8 +822,8 @@ export interface BrokerCallResult {
   runCleanup: CleanupResult;
   waiting: WaitSettings;
   putWaiting: WaitSettings;
-  advisor: AdvisorSettings;
-  putAdvisor: AdvisorSettings;
+  advisor: AdvisorView;
+  putAdvisor: AdvisorView;
   appearance: AppearanceSettings;
   putAppearance: AppearanceSettings;
   archiveTask: ArchiveTaskResponse;

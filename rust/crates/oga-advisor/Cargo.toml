@@ -3,6 +3,10 @@ name = "oga-advisor"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Lets another crate's tests point the advisor at a local endpoint.
+test-support = []
+
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
