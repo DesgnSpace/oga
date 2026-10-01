@@ -389,7 +389,6 @@ function ChangedFilesView({
   const [activePath, setActivePath] = React.useState<string | undefined>(undefined);
   const [scrollRequest, setScrollRequest] = React.useState<{ path: string } | undefined>(undefined);
   const seenTurnsRef = React.useRef<Set<string>>(new Set());
-  const seenPathsRef = React.useRef<Set<string>>(new Set());
   const rowElementsRef = React.useRef<Map<string, HTMLElement>>(new Map());
   const scrollFrameRef = React.useRef<number | undefined>(undefined);
 
@@ -407,20 +406,6 @@ function ChangedFilesView({
       return next;
     });
   }, [turns, full]);
-
-  // Full screen reads as one continuous diff, so a file opens the first time
-  // it appears and stays however the reader leaves it.
-  React.useEffect(() => {
-    if (!full) return;
-    const fresh = changes.files.map((file) => file.path).filter((path) => !seenPathsRef.current.has(path));
-    if (fresh.length === 0) return;
-    for (const path of fresh) seenPathsRef.current.add(path);
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      for (const path of fresh) next.add(path);
-      return next;
-    });
-  }, [full, changes.files]);
 
   React.useEffect(() => {
     if (!filePopoverOpen) return;
