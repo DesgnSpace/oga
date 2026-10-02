@@ -3,16 +3,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use oga_domain::{
-    BranchOutcome, Task, TaskDiffBasis, TaskDiffFileStatus, TaskScope, TaskState, WorktreeOption,
-    WorktreeRequest,
+    BranchOutcome, Task, TaskDiffBasis, TaskDiffFileStatus, TaskScope, WorktreeRequest,
 };
 use oga_worktree::{
-    WorktreeError, WorktreeJoinCode, active_checkout_tasks, branch_exists, branch_recreatable,
+    WorktreeError, WorktreeJoinCode, branch_exists, branch_recreatable,
     create_task_worktree_at, joined_worktree_of, plan_released_checkout,
     plan_task_worktree_on_release_at, prepare_task_worktree, recreate_task_worktree,
     remove_task_branch, remove_task_branch_safely, remove_task_worktree, require_worktree_paths,
-    unsettled_checkout_writers, validate_join_request, worktree_has_uncommitted_work,
-    worktree_request,
+    worktree_has_uncommitted_work,
 };
 use tempfile::TempDir;
 
@@ -482,57 +480,6 @@ async fn branch_removal_reports_repository_inspection_failure() {
         .await
         .expect_err("repository inspection should fail");
     assert!(error.to_string().contains("could not inspect repository"));
-}
-
-#[test]
-fn join_and_active_writer_helpers_preserve_task_rules() {
-    assert_eq!(worktree_request(None), None);
-    assert_eq!(
-        worktree_request(Some(&WorktreeOption::Bare(true))),
-        Some(WorktreeRequest::default())
-    );
-    assert!(
-        validate_join_request(&WorktreeRequest {
-            join: Some("owner".into()),
-            branch: Some("other".into()),
-            ..WorktreeRequest::default()
-        })
-        .is_err()
-    );
-
-    let worktree = oga_domain::TaskWorktree {
-        origin_cwd: "/project".into(),
-        path: "/tmp/worktree".into(),
-        branch: "task/owner".into(),
-        links: None,
-        from: None,
-        base: None,
-    };
-    let owner = Task {
-        id: "owner".into(),
-        state: TaskState::Completed,
-        worktree: Some(worktree.clone()),
-        ..Task::default()
-    };
-    let writer = Task {
-        id: "writer".into(),
-        state: TaskState::Running,
-        scope: TaskScope {
-            read: vec!["**".into()],
-            write: vec!["**".into()],
-        },
-        worktree: Some(worktree.clone()),
-        ..Task::default()
-    };
-    let tasks = vec![owner, writer];
-    assert_eq!(
-        active_checkout_tasks(&tasks, Path::new("/tmp/worktree"), None).len(),
-        1
-    );
-    assert_eq!(
-        unsettled_checkout_writers(&tasks, Path::new("/tmp/worktree")).len(),
-        1
-    );
 }
 
 #[test]

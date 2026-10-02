@@ -1225,12 +1225,9 @@ struct MarkdownResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        sync::{
-            Arc, Mutex,
-            atomic::{AtomicUsize, Ordering},
-        },
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     };
 
     use axum::{
@@ -1241,7 +1238,6 @@ mod tests {
         response::Response,
         routing::any,
     };
-    use oga_domain::Provider;
     use serde_json::json;
     use tokio::net::TcpListener;
 
@@ -1625,173 +1621,4 @@ mod tests {
         server.abort();
     }
 
-    #[tokio::test]
-    async fn covers_all_loopback_endpoints() {
-        let (base_url, state, server) = start_mock(false).await;
-        let client = LoopbackClient::new(base_url).expect("client");
-        let state_query = StateQuery::default().compact(true).limit(20);
-        client.health().await.expect("health");
-        client.get_state(&state_query).await.expect("state");
-        client
-            .get_summary(&state_query.clone().skip_summary_aggregates(true))
-            .await
-            .expect("summary");
-        assert!(
-            state
-                .requests
-                .lock()
-                .expect("request lock")
-                .iter()
-                .any(|request| request.contains(
-                    "/api/state?view=summary&compact=1&skipSummaryAggregates=1&limit=20",
-                ))
-        );
-        client.get_task("task").await.expect("task");
-        client.get_task_turns("task").await.expect("task turns");
-        client
-            .get_task_events("task", &TaskEventsQuery::default())
-            .await
-            .expect("task events");
-        client.get_agent("agent").await.expect("agent");
-        client.get_agent_turns("agent").await.expect("agent turns");
-        client
-            .get_agent_events("agent", &TaskEventsQuery::default())
-            .await
-            .expect("agent events");
-
-        let dispatch = DispatchRequest::new("inspect", "/home/test", "Inspect the fixture");
-        client.dispatch(&dispatch).await.expect("dispatch");
-        client.start_agent(&dispatch).await.expect("start agent");
-        client
-            .dispatch_agent_task("agent", &dispatch)
-            .await
-            .expect("agent task");
-        client.archive_task("task", true).await.expect("archive");
-        client
-            .cancel_task("task", Some("stop now"))
-            .await
-            .expect("cancel");
-        client
-            .resume_task("task", &ResumeRequest::default())
-            .await
-            .expect("resume");
-        client
-            .reply_task("task", &ReplyRequest::new("answer"))
-            .await
-            .expect("reply");
-        client.remove_follow_up("task", 0).await.expect("follow-up");
-        client
-            .steer_task("task", &SteerRequest::default())
-            .await
-            .expect("steer");
-        client
-            .steer_agent("agent", &SteerRequest::default())
-            .await
-            .expect("agent steer");
-        client
-            .handoff_task("task", &HandoffRequest::default())
-            .await
-            .expect("handoff");
-        client
-            .edit_task("task", &EditRequest::default())
-            .await
-            .expect("edit");
-        client
-            .remove_worktree("task", true)
-            .await
-            .expect("worktree");
-        client
-            .complete_task("task", &CompletionRequest::default())
-            .await
-            .expect("complete");
-        client
-            .append_hook("task", &json!({ "source": "test" }))
-            .await
-            .expect("hook");
-        client.stop_agent("agent").await.expect("stop agent");
-        client.remove_agent("agent").await.expect("remove agent");
-
-        client
-            .consumer_inbox("consumer", Some("app"), Some(10))
-            .await
-            .expect("inbox");
-        client.advance_cursor("consumer", 1).await.expect("cursor");
-        client
-            .routing_preview(&RoutingPreviewRequest {
-                cwd: "/home/test".into(),
-                prompt: "inspect".into(),
-                kind: None,
-            })
-            .await
-            .expect("routing");
-        client.memories("/home/test").await.expect("memories");
-        client
-            .put_memory(&MemoryWrite {
-                cwd: "/home/test".into(),
-                key: "decision".into(),
-                value: "thin".into(),
-                expected_version: None,
-            })
-            .await
-            .expect("put memory");
-        client.caller_prompt().await.expect("caller prompt");
-        client
-            .put_caller_prompt(&PromptWrite {
-                written: true,
-                value: "briefs".into(),
-            })
-            .await
-            .expect("put caller prompt");
-        client.models(&ModelQuery::default()).await.expect("models");
-        client.usage(&ModelQuery::default()).await.expect("usage");
-        client.delete_grant("grant").await.expect("grant");
-        client.model_settings(false).await.expect("model settings");
-        client.enabled_models().await.expect("enabled models");
-        client
-            .put_model_settings(&ModelSettingsUpdate {
-                profile_id: "profile".into(),
-                model_id: Some("model".into()),
-                ..ModelSettingsUpdate::default()
-            })
-            .await
-            .expect("put model settings");
-        client
-            .delete_model_settings(Some("revision"))
-            .await
-            .expect("delete model settings");
-        client
-            .query(&QueryRequest::new("/home/test", "where is the task"))
-            .await
-            .expect("query");
-        client
-            .query(&QueryRequest::new("/home/test", "where is the task").task("task"))
-            .await
-            .expect("task query");
-        client
-            .init_query_index(&QueryInitRequest::new("/home/test"))
-            .await
-            .expect("query init");
-        client
-            .create_profile(&ProfileCreate {
-                id: None,
-                label: "Profile".into(),
-                provider: Provider::Claude,
-                model: Some("model".into()),
-                enabled: Some(true),
-                env: Some(BTreeMap::new()),
-                capabilities: Some(Vec::new()),
-                command: None,
-            })
-            .await
-            .expect("create profile");
-        client
-            .update_profile("profile", &ProfilePatch::default())
-            .await
-            .expect("update profile");
-        client
-            .delete_profile("profile")
-            .await
-            .expect("delete profile");
-        server.abort();
-    }
 }

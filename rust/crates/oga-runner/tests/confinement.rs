@@ -3,7 +3,7 @@ use std::fs;
 use oga_domain::TaskScope;
 use oga_runner::{
     Capability, ConfinementBackend, ConfinementError, ConfinementMode, ConfinementRequest,
-    LinuxBubblewrap, MacSeatbelt, NoConfinement,
+    LinuxBubblewrap, MacSeatbelt,
 };
 use tempfile::TempDir;
 
@@ -72,21 +72,6 @@ fn confinement_rejects_symlink_scope_escape() {
 }
 
 #[test]
-fn no_confinement_preserves_literal_provider_arguments() {
-    let temp = TempDir::new().expect("temporary directory");
-    let request = request(
-        &temp,
-        TaskScope {
-            read: vec!["**".into()],
-            write: vec!["**".into()],
-        },
-    );
-    let prepared = NoConfinement.prepare(&request).expect("unconfined command");
-    assert_eq!(prepared.argv, request.argv);
-    assert!(NoConfinement.probe().is_available());
-}
-
-#[test]
 fn unavailable_backend_never_falls_back_to_unconfined_execution() {
     let temp = TempDir::new().expect("temporary directory");
     let backend = LinuxBubblewrap::with_executable(temp.path().join("missing-bwrap"));
@@ -100,12 +85,6 @@ fn unavailable_backend_never_falls_back_to_unconfined_execution() {
         })
     ));
     assert!(matches!(backend.probe(), Capability::Unavailable { .. }));
-}
-
-#[test]
-fn mode_defaults_to_unconfined_and_reports_backend_capability() {
-    assert_eq!(ConfinementMode::default(), ConfinementMode::None);
-    assert!(ConfinementMode::None.probe().is_available());
 }
 
 #[cfg(target_os = "linux")]

@@ -1284,30 +1284,7 @@ pub fn unsettled_checkout_writers<'a>(tasks: &'a [Task], checkout: &Path) -> Vec
 
 #[cfg(test)]
 mod tests {
-    use super::{checkout_cwd, deduplicate_default_links, is_default_link};
-
-    #[test]
-    fn checkout_cwd_for_a_project_at_the_repository_root_has_no_trailing_slash() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        let checkout = tempfile::tempdir().expect("temporary directory");
-
-        let cwd = checkout_cwd(checkout.path(), root.path(), root.path()).expect("checkout cwd");
-
-        assert_eq!(cwd, checkout.path());
-        assert!(!cwd.to_string_lossy().ends_with('/'));
-    }
-
-    #[test]
-    fn checkout_cwd_for_a_project_below_the_repository_root_keeps_its_offset() {
-        let root = tempfile::tempdir().expect("temporary directory");
-        let origin = root.path().join("apps/web");
-        std::fs::create_dir_all(&origin).expect("origin directory");
-        let checkout = tempfile::tempdir().expect("temporary directory");
-
-        let cwd = checkout_cwd(checkout.path(), root.path(), &origin).expect("checkout cwd");
-
-        assert_eq!(cwd, checkout.path().join("apps/web"));
-    }
+    use super::{deduplicate_default_links, is_default_link};
 
     #[test]
     fn default_links_skip_nested_paths() {

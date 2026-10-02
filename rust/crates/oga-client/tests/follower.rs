@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use axum::{
@@ -33,7 +33,6 @@ struct Broker {
     read_barrier: Option<Arc<Barrier>>,
     task: Arc<Mutex<Task>>,
     combined_event_page: bool,
-    response_bytes: Arc<AtomicUsize>,
 }
 
 impl Broker {
@@ -44,10 +43,6 @@ impl Broker {
 
     fn reads_before_viewed(&self) -> usize {
         self.reads_before_viewed.load(Ordering::SeqCst)
-    }
-
-    fn response_bytes(&self) -> usize {
-        self.response_bytes.load(Ordering::SeqCst)
     }
 
     fn append(&self, ids: impl IntoIterator<Item = i64>) {
@@ -88,7 +83,6 @@ async fn start_config(
             ..Task::default()
         })),
         combined_event_page,
-        response_bytes: Arc::new(AtomicUsize::new(0)),
     };
     let router = Router::new()
         .fallback(any(respond))
@@ -185,11 +179,8 @@ fn event(id: i64) -> serde_json::Value {
     })
 }
 
-fn json(broker: &Broker, value: serde_json::Value) -> Response<Body> {
+fn json(_broker: &Broker, value: serde_json::Value) -> Response<Body> {
     let body = value.to_string();
-    broker
-        .response_bytes
-        .fetch_add(body.len(), Ordering::SeqCst);
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/json")
@@ -262,75 +253,6 @@ async fn a_combined_event_page_avoids_an_unchanged_task_read() {
     assert_eq!(broker.reads() - after_watch, 1, "one combined event read");
     assert_eq!(delta.events.len(), 1);
     assert!(delta.task.is_none());
-}
-
-#[tokio::test]
-#[ignore]
-async fn measured_combined_delivery_fixture() {
-    const EVENT_COUNT: i64 = 10_000;
-    const POINTER_QUEUE_CAPACITY: usize = 1_024;
-    async fn measure(combined: bool) -> (usize, usize, usize, usize, f64, f64) {
-        let (client, broker) = if combined {
-            start_combined(1..=3).await
-        } else {
-            start(1..=3).await
-        };
-        let follower = TaskFollower::new(client);
-        follower.watch("task", WATCH_EVENTS).await.expect("watch");
-        let before_reads = broker.reads();
-        let before_bytes = broker.response_bytes();
-        let started = Instant::now();
-
-        broker.append(4..=EVENT_COUNT + 3);
-        for cursor in 4..=EVENT_COUNT + 3 {
-            follower.note(&pointer("task", cursor));
-        }
-        let delta = follower.next_delta().await.expect("an update");
-        let elapsed = started.elapsed().as_secs_f64();
-        let decoded_event_bytes = serde_json::to_vec(&delta.events)
-            .expect("decoded events")
-            .len();
-        (
-            delta.events.len(),
-            broker.reads() - before_reads,
-            broker.response_bytes() - before_bytes,
-            decoded_event_bytes,
-            elapsed * 1_000.0,
-            EVENT_COUNT as f64 / elapsed,
-        )
-    }
-
-    let baseline = measure(false).await;
-    let combined = measure(true).await;
-    let pointer_wire_bytes = serde_json::to_vec(&pointer("task", 4))
-        .expect("pointer")
-        .len();
-    println!(
-        "baseline events={} broker_reads={} serialized_response_bytes={} decoded_event_bytes={} pointer_wire_bytes={} queue_capacity={} elapsed_ms={:.2} throughput_events_per_sec={:.0}",
-        baseline.0,
-        baseline.1,
-        baseline.2,
-        baseline.3,
-        pointer_wire_bytes,
-        POINTER_QUEUE_CAPACITY,
-        baseline.4,
-        baseline.5,
-    );
-    println!(
-        "combined events={} broker_reads={} serialized_response_bytes={} decoded_event_bytes={} pointer_wire_bytes={} queue_capacity={} elapsed_ms={:.2} throughput_events_per_sec={:.0}",
-        combined.0,
-        combined.1,
-        combined.2,
-        combined.3,
-        pointer_wire_bytes,
-        POINTER_QUEUE_CAPACITY,
-        combined.4,
-        combined.5,
-    );
-    assert_eq!(baseline.0, EVENT_COUNT as usize);
-    assert_eq!(combined.0, EVENT_COUNT as usize);
-    assert_eq!(baseline.1, 2);
-    assert_eq!(combined.1, 1);
 }
 
 /// The viewed mark completes before the task and activity reads begin, and

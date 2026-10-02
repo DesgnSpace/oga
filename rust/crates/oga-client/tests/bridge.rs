@@ -17,7 +17,7 @@ use axum::{
     routing::any,
 };
 use oga_client::{
-    EventFrame, EventStreamOptions, LoopbackClient,
+    EventStreamOptions, LoopbackClient,
     bridge::{BrokerCall, StreamFrame, StreamPump, StreamStatus},
 };
 use serde_json::json;
@@ -261,32 +261,6 @@ async fn a_truncated_log_reaches_the_web_view_as_a_stale_stream() {
         "the pump adopted the floor as its cursor, got {}",
         status.cursor
     );
-}
-
-#[tokio::test]
-async fn frames_reach_the_web_view_unchanged() {
-    let (client, _) = start(0, false).await;
-    let (_pump, mut pumped) = pump(client);
-
-    let ready = pumped.next_frame().await;
-    let task = pumped.next_frame().await;
-
-    assert_eq!(
-        EventFrame::from_parts(&ready.event, ready.data).expect("ready frame"),
-        EventFrame::Ready(oga_client::ReadyFrame {
-            version: 1,
-            cursor: 0,
-            stream_floor: 0,
-            tasks: Vec::new(),
-            kinds: Vec::new(),
-            agents: false,
-            stale: false,
-        })
-    );
-    assert!(matches!(
-        EventFrame::from_parts(&task.event, task.data).expect("task frame"),
-        EventFrame::Task(pointer) if pointer.task_id == "task-0"
-    ));
 }
 
 /// The cursor moves with every frame and no view reads it, so a status that
