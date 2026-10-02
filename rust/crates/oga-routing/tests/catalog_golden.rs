@@ -309,7 +309,6 @@ fn settings(models: &[oga_domain::ModelInfo]) -> ResolvedModelSettings {
                 },
             )]),
         },
-        project: None,
         overrides: None,
         love: LoveRules::default(),
     }
@@ -463,7 +462,6 @@ fn a_model_nobody_switched_on_is_reported_unavailable() {
     let catalog = claude_models(&profile(Provider::Claude));
     let nothing_on = ResolvedModelSettings {
         global: DirectoryModelSettings::default(),
-        project: None,
         overrides: None,
         love: LoveRules::default(),
     };

@@ -496,7 +496,6 @@ export interface CompletionRequest {
 }
 
 export interface PromptWrite {
-  cwd: string;
   written: boolean;
   value: string;
 }
@@ -507,7 +506,6 @@ export interface PromptWrite {
  * to clear an override back to the inherited value.
  */
 export interface ModelSettingsUpdate {
-  cwd: string;
   profileId: string;
   modelId?: string;
   expectedRevision?: string;
@@ -556,18 +554,11 @@ export interface TaskEventPage {
   hasEarlier?: boolean;
 }
 
-export interface ProjectList {
-  global: string;
-  projects: string[];
-}
-
 export interface PromptConfig {
-  cwd: string;
-  scope: string;
   written: boolean;
   value: string;
   inherited: string;
-  /** Set when the instructions come from a project file, which owns them. */
+  /** Set when the instructions come from your own `.oga.yaml`, which owns them. */
   configPath?: string;
 }
 
@@ -577,15 +568,8 @@ export interface ModelSettingsModel {
   /** The model's published window, when the catalog knows one. Absent means unknown, never zero. */
   contextWindow?: number;
   enabled: boolean;
-  inheritedEnabled: boolean;
-  hasEnabledOverride: boolean;
   preferred: boolean;
-  inheritedPreferred: boolean;
-  hasPreferredOverride: boolean;
   capabilities: string[];
-  inheritedCapabilities: string[];
-  hasCapabilitiesOverride: boolean;
-  availableGlobally: boolean;
 }
 
 export interface WorkerSettings {
@@ -593,9 +577,6 @@ export interface WorkerSettings {
   label: string;
   provider: Provider;
   enabled: boolean;
-  inheritedEnabled: boolean;
-  hasEnabledOverride: boolean;
-  availableGlobally: boolean;
   configured: boolean;
   models: ModelSettingsModel[];
 }
@@ -644,8 +625,6 @@ export interface LoveRule {
 }
 
 export interface ModelSettingsSnapshot {
-  cwd: string;
-  scope: string;
   revision: string;
   workers: WorkerSettings[];
   love: LoveRule[];
@@ -774,11 +753,10 @@ export type BrokerCall =
   | { call: "taskBranch"; taskId: string }
   | { call: "taskBranches"; taskId: string }
   | { call: "openTaskFile"; taskId: string; path: string }
-  | { call: "projects" }
   | { call: "memories"; cwd: string }
-  | { call: "callerPrompt"; cwd?: string }
-  | { call: "modelSettings"; cwd?: string; refresh?: boolean }
-  | { call: "enabledModels"; cwd?: string }
+  | { call: "callerPrompt" }
+  | { call: "modelSettings"; refresh?: boolean }
+  | { call: "enabledModels" }
   | { call: "cleanup" }
   | { call: "putCleanup"; settings: CleanupSettings }
   | { call: "runCleanup" }
@@ -798,7 +776,7 @@ export type BrokerCall =
   | { call: "removeFollowUp"; taskId: string; index: number }
   | { call: "putCallerPrompt"; request: PromptWrite }
   | { call: "putModelSettings"; request: ModelSettingsUpdate }
-  | { call: "resetModelSettings"; cwd?: string; revision?: string }
+  | { call: "resetModelSettings"; revision?: string }
   | { call: "createProfile"; profile: ProfileCreate }
   | { call: "updateProfile"; profileId: string; patch: ProfilePatch }
   | { call: "deleteProfile"; profileId: string };
@@ -814,7 +792,6 @@ export interface BrokerCallResult {
   taskBranch: { branch?: string; source: "checkout" | "recorded" };
   taskBranches: TaskBranches;
   openTaskFile: void;
-  projects: ProjectList;
   memories: MemoryEntry[];
   callerPrompt: PromptConfig;
   modelSettings: ModelSettingsSnapshot;

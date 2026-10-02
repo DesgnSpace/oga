@@ -3947,7 +3947,6 @@ select {
     min-height: var(--control-height);
 }
 
-.settings-scope-picker select,
 .settings-search,
 .handoff-form select,
 .settings-section-search input {
@@ -5167,25 +5166,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     text-align: center;
 }
 
-.settings-scope-picker {
-    display: flex;
-    min-width: min(100%, 250px);
-    align-items: center;
-    gap: var(--space-2);
-}
-
-.settings-scope-picker > span {
-    flex: 0 0 auto;
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-    font-weight: 600;
-}
-
-.settings-scope-picker select {
-    min-width: 0;
-    flex: 1;
-}
-
 .settings-provider-select {
     position: relative;
     display: block;
@@ -5207,7 +5187,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 }
 
 .settings-prompt-editor textarea,
-.settings-scope-picker select,
 .settings-search {
     width: 100%;
     min-height: var(--control-height);
@@ -5218,12 +5197,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     color: var(--color-text);
     font: inherit;
     font-size: var(--text-base);
-}
-
-.settings-scope-picker select {
-    padding-block: var(--control-padding-block);
-    padding-right: calc(var(--control-padding-inline) + var(--space-4));
-    line-height: var(--control-line-height);
 }
 
 .settings-search {
@@ -5797,10 +5770,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
         max-height: 240px;
         overflow: auto;
     }
-
-    .settings-scope-picker {
-        width: 100%;
-    }
 }
 
 @media (max-width: 560px) {
@@ -5822,7 +5791,6 @@ textarea:disabled {
     .settings-button,
     .text-button,
     .changed-files-source-trigger,
-    .settings-scope-picker select,
     .handoff-form select {
         height: auto;
         line-height: 1.35;
@@ -5835,7 +5803,6 @@ textarea:disabled {
         padding: var(--space-2) var(--space-4);
     }
 
-    .settings-scope-picker select,
     .handoff-form select {
         padding-block: var(--space-2);
     }

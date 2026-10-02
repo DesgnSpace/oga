@@ -203,7 +203,6 @@ pub fn router(state: HttpState) -> Router {
                 .put(settings::put_caller_prompt)
                 .delete(settings::delete_caller_prompt),
         )
-        .route("/api/projects", get(settings::get_projects))
         .route(
             "/api/cleanup",
             get(settings::get_cleanup).put(settings::put_cleanup),

@@ -18,9 +18,9 @@ import { clearCachedSettingsState } from "./state";
 import { SettingsPage } from "./index";
 
 const defaultBriefRules = "The brief is all the worker gets: it can't see this conversation and guesses badly. Write it as a message to a teammate. Cover what done looks like and why it matters, what you already know, the choices you've made, what must not change, how to check the work, and what to send back, including what it couldn't verify. One deliverable per task. Don't read files just to write the brief; if you'd need to, the task is too vague or too big. Use headings only when the work has several parts.";
-const inheritedPrompt: PromptConfig = { cwd: "/tmp/project", scope: "global", written: false, value: defaultBriefRules, inherited: defaultBriefRules };
+const inheritedPrompt: PromptConfig = { written: false, value: defaultBriefRules, inherited: defaultBriefRules };
 let callerPrompt = inheritedPrompt;
-let savedCallerPrompt: { cwd: string; written: boolean; value: string } | undefined;
+let savedCallerPrompt: { written: boolean; value: string } | undefined;
 let appearance: AppearanceSettings = { font: null, showTechnicalDetails: false };
 let savedAppearance: AppearanceSettings | undefined;
 const defaultAdvisorInstructions = "Pick the worker that should run this task.";
@@ -68,8 +68,6 @@ const profiles = [
 
 function snapshot(): ModelSettingsSnapshot {
   return {
-    cwd: "/tmp/project",
-    scope: "global",
     revision: "rev1",
     love: [
       { model: "openai/gpt-5.6-luna", profileId: "opencode-work", when: ["context"], effort: "low", scope: "project" },
@@ -81,24 +79,14 @@ function snapshot(): ModelSettingsSnapshot {
         label: "Claude work",
         provider: "claude",
         enabled: true,
-        inheritedEnabled: true,
-        hasEnabledOverride: false,
-        availableGlobally: true,
         configured: true,
         models: [
           {
             id: "opus",
             label: "Opus",
             enabled: false,
-            inheritedEnabled: true,
-            hasEnabledOverride: true,
             preferred: true,
-            inheritedPreferred: false,
-            hasPreferredOverride: true,
             capabilities: ["build"],
-            inheritedCapabilities: ["build"],
-            hasCapabilitiesOverride: false,
-            availableGlobally: true,
           },
         ],
       },
@@ -107,38 +95,21 @@ function snapshot(): ModelSettingsSnapshot {
         label: "OpenCode work",
         provider: "opencode",
         enabled: false,
-        inheritedEnabled: true,
-        hasEnabledOverride: false,
-        availableGlobally: true,
         configured: true,
         models: [
           {
             id: longModelId,
             label: longModelId,
             enabled: true,
-            inheritedEnabled: true,
-            hasEnabledOverride: false,
             preferred: false,
-            inheritedPreferred: false,
-            hasPreferredOverride: false,
             capabilities: [],
-            inheritedCapabilities: [],
-            hasCapabilitiesOverride: false,
-            availableGlobally: true,
           },
           {
             id: "openai/gpt-5.6-luna",
             label: "openai/gpt-5.6-luna",
             enabled: false,
-            inheritedEnabled: false,
-            hasEnabledOverride: false,
             preferred: false,
-            inheritedPreferred: false,
-            hasPreferredOverride: false,
             capabilities: [],
-            inheritedCapabilities: [],
-            hasCapabilitiesOverride: false,
-            availableGlobally: true,
           },
         ],
       },
@@ -176,8 +147,6 @@ function makeTransport(
       switch (call.call) {
         case "summary":
           return { profiles, tasks: [], memoryProjects: [] } as T;
-        case "projects":
-          return { global: "/tmp/project", projects: [] } as T;
         case "health":
           return { version: "test", mcpContractVersion: 1, build: "test", stale: false } as T;
         case "modelSettings":
@@ -567,7 +536,6 @@ describe("model access", () => {
       const worker = next.workers.find((w) => w.id === "opencode-work")!;
       const model = worker.models.find((m) => m.id === "openai/gpt-5.6-luna")!;
       model.enabled = true;
-      model.hasEnabledOverride = true;
       return next;
     });
     setTransport(transport);
@@ -600,14 +568,12 @@ describe("model access", () => {
 });
 
 describe("brief rules", () => {
-  it("shows brief rules a project file owns as read-only, and says where to edit them", async () => {
+  it("shows brief rules your own config file owns as read-only, and says where to edit them", async () => {
     callerPrompt = {
-      cwd: "/tmp/project",
-      scope: "project",
       written: false,
       value: "Always name the entry file.",
       inherited: "",
-      configPath: "/tmp/project/.oga.yaml",
+      configPath: "/Users/you/.oga.yaml",
     };
     setTransport(makeTransport());
     render(<SettingsPage />);
@@ -620,7 +586,7 @@ describe("brief rules", () => {
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
   });
 
-  it("saves brief rules the user types for a scope no project file owns", async () => {
+  it("saves brief rules the user types for every project", async () => {
     setTransport(makeTransport());
     render(<SettingsPage />);
 
@@ -645,6 +611,25 @@ describe("brief rules", () => {
 
     await waitFor(() => expect(savedCallerPrompt).toBeTruthy());
     expect(savedCallerPrompt).toMatchObject({ written: false, value: "" });
+  });
+
+  it("offers one set of rules for the machine, with no project to choose", async () => {
+    setTransport(makeTransport());
+    render(<SettingsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Claude work/ }));
+    await screen.findByRole("switch", { name: /Opus/ });
+    expect(screen.queryByLabelText("Applies to")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Brief rules" }));
+    const editor = await screen.findByLabelText("How briefs are written");
+    expect(screen.queryByLabelText("Applies to")).toBeNull();
+
+    fireEvent.change(editor, { target: { value: "Name the entry file." } });
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Your instructions, for every project")).toBeTruthy();
+    expect(savedCallerPrompt).toMatchObject({ written: true, value: "Name the entry file." });
   });
 });
 

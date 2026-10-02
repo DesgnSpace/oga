@@ -1779,12 +1779,14 @@ mod tests {
     }
 
     /// Write the switch the user would flip in Settings.
-    fn switch(store: &Store, cwd: &std::path::Path, model: &str, on: bool) {
+    fn switch(store: &Store, model: &str, on: bool) {
         store
             .repositories()
             .settings()
             .put(
-                &oga_config::canonical_cwd(cwd).display().to_string(),
+                &oga_config::canonical_cwd(oga_config::global_cwd())
+                    .display()
+                    .to_string(),
                 oga_config::MODEL_SETTINGS_KEY,
                 &serde_json::json!({ "profiles": { "fake": { "modelEnabled": { model: on } } } })
                     .to_string(),
@@ -1795,7 +1797,7 @@ mod tests {
 
     fn service() -> (tempfile::TempDir, Dispatcher) {
         let (directory, dispatcher) = service_with_nothing_on();
-        switch(&dispatcher.store, directory.path(), "fake-model", true);
+        switch(&dispatcher.store, "fake-model", true);
         (directory, dispatcher)
     }
 
@@ -1854,7 +1856,7 @@ mod tests {
             .await
             .expect("dispatched while on");
 
-        switch(&dispatcher.store, directory.path(), "fake-model", false);
+        switch(&dispatcher.store, "fake-model", false);
         let refusal = dispatcher
             .dispatch(DispatchRequest::new("fake", "second", directory.path()))
             .await
@@ -1957,7 +1959,7 @@ mod tests {
             .repositories()
             .settings()
             .put(
-                &oga_config::canonical_cwd(directory.path())
+                &oga_config::canonical_cwd(oga_config::global_cwd())
                     .display()
                     .to_string(),
                 oga_config::MODEL_SETTINGS_KEY,

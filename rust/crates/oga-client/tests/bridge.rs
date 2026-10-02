@@ -334,7 +334,7 @@ async fn calls_carry_the_broker_status_back_to_the_web_view() {
 
     let health = client.call(BrokerCall::Health).await.expect("health");
     let refused = client
-        .call(BrokerCall::Projects)
+        .call(BrokerCall::Cleanup)
         .await
         .expect_err("the mock refuses every other route");
 

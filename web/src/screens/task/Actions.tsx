@@ -702,7 +702,7 @@ function useContextWindow(task: Task): number | undefined {
     let disposed = false;
     setContextWindow(undefined);
     void broker
-      .modelSettings(task.worktree?.originCwd ?? task.cwd)
+      .modelSettings()
       .then((result) => {
         if (disposed || !result.ok) return;
         const window = result.value.workers
@@ -713,7 +713,7 @@ function useContextWindow(task: Task): number | undefined {
     return () => {
       disposed = true;
     };
-  }, [task.worktree?.originCwd, task.cwd, task.profileId, task.model]);
+  }, [task.profileId, task.model]);
   return contextWindow;
 }
 
@@ -766,7 +766,7 @@ function HandoffDialog({
     setNoOtherWorker(false);
     void Promise.all([
       broker.summary({ compact: true, limit: 1 }),
-      broker.enabledModels(task.cwd),
+      broker.enabledModels(),
     ]).then(([summary, settings]) => {
       if (disposed) return;
       if (!summary.ok) {
@@ -803,7 +803,7 @@ function HandoffDialog({
     return () => {
       disposed = true;
     };
-  }, [open, task.cwd, task.model, task.profileId]);
+  }, [open, task.model, task.profileId]);
 
   const selectedWorker = workers.find(({ profile }) => profile.id === workerId);
   const models = selectedWorker?.settings.models.filter((model) => model.enabled) ?? [];

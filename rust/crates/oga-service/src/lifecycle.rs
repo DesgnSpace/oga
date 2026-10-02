@@ -368,7 +368,7 @@ pub(crate) async fn run_task_with_session_and_active(
 ) -> Result<RunOutcome, LifecycleError> {
     authorization::check_model_enabled(
         &store,
-        &authorization::settings_cwd(&task),
+        &authorization::love_layer_cwd(&task),
         &task.profile_id,
         &task.model,
     )

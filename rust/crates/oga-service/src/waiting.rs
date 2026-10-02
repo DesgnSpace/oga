@@ -155,7 +155,7 @@ fn model_info(profile: &Profile, model: &str) -> ModelInfo {
     }
 }
 
-/// Another worker that can take this task now: turned on for the project, at
+/// Another worker that can take this task now: turned on by the user, at
 /// least as capable as the model that ran out, and not itself out of usage.
 /// Weakest qualifying model first, so a rate limit does not silently promote a
 /// task to the most expensive account on the machine.
@@ -166,7 +166,7 @@ pub fn alternative_worker(
 ) -> Option<(String, String)> {
     let settings = crate::authorization::resolved_model_settings(
         store,
-        &crate::authorization::settings_cwd(task),
+        &crate::authorization::love_layer_cwd(task),
     )
     .ok()?;
     let profiles = store.repositories().profiles().list().ok()?;
@@ -205,17 +205,11 @@ fn quality(profiles: &[Profile], profile_id: &str, model: &str) -> u8 {
         })
 }
 
-/// Every model the user turned on for one worker, across the global and
-/// project layers.
+/// Every model the user turned on for one worker.
 fn enabled_models(settings: &ResolvedModelSettings, profile: &str) -> Vec<String> {
     let mut models: BTreeSet<String> = BTreeSet::new();
-    for layer in [Some(&settings.global), settings.project.as_ref()]
-        .into_iter()
-        .flatten()
-    {
-        if let Some(enablement) = layer.profiles.get(profile) {
-            models.extend(enablement.model_enabled.keys().cloned());
-        }
+    if let Some(enablement) = settings.global.profiles.get(profile) {
+        models.extend(enablement.model_enabled.keys().cloned());
     }
     models
         .into_iter()

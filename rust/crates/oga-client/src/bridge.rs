@@ -63,21 +63,15 @@ pub enum BrokerCall {
         channel: Option<String>,
         limit: Option<u64>,
     },
-    Projects,
     Memories {
         cwd: String,
     },
-    CallerPrompt {
-        cwd: Option<String>,
-    },
+    CallerPrompt,
     ModelSettings {
-        cwd: Option<String>,
         refresh: Option<bool>,
     },
     /// The model settings trimmed to enabled workers and their enabled models.
-    EnabledModels {
-        cwd: Option<String>,
-    },
+    EnabledModels,
     Cleanup,
     PutCleanup {
         settings: CleanupSettings,
@@ -139,7 +133,6 @@ pub enum BrokerCall {
         request: ModelSettingsUpdate,
     },
     ResetModelSettings {
-        cwd: Option<String>,
         revision: Option<String>,
     },
     CreateProfile {
@@ -310,18 +303,12 @@ mod native {
                     self.consumer_inbox(&consumer_id, channel.as_deref(), limit)
                         .await,
                 ),
-                BrokerCall::Projects => encode(self.projects().await),
                 BrokerCall::Memories { cwd } => encode(self.memories(&cwd).await),
-                BrokerCall::CallerPrompt { cwd } => {
-                    encode(self.caller_prompt(cwd.as_deref()).await)
+                BrokerCall::CallerPrompt => encode(self.caller_prompt().await),
+                BrokerCall::ModelSettings { refresh } => {
+                    encode(self.model_settings(refresh == Some(true)).await)
                 }
-                BrokerCall::ModelSettings { cwd, refresh } => encode(
-                    self.model_settings(cwd.as_deref(), refresh == Some(true))
-                        .await,
-                ),
-                BrokerCall::EnabledModels { cwd } => {
-                    encode(self.enabled_models(cwd.as_deref()).await)
-                }
+                BrokerCall::EnabledModels => encode(self.enabled_models().await),
                 BrokerCall::Cleanup => encode(self.cleanup().await),
                 BrokerCall::PutCleanup { settings } => encode(self.put_cleanup(&settings).await),
                 BrokerCall::RunCleanup => encode(self.run_cleanup().await),
@@ -371,10 +358,9 @@ mod native {
                 BrokerCall::PutModelSettings { request } => {
                     encode(self.put_model_settings(&request).await)
                 }
-                BrokerCall::ResetModelSettings { cwd, revision } => encode(
-                    self.delete_model_settings(cwd.as_deref(), revision.as_deref())
-                        .await,
-                ),
+                BrokerCall::ResetModelSettings { revision } => {
+                    encode(self.delete_model_settings(revision.as_deref()).await)
+                }
                 BrokerCall::CreateProfile { profile } => {
                     encode(self.create_profile(&profile).await)
                 }

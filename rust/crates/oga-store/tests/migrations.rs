@@ -87,6 +87,76 @@ fn write_v47(path: &std::path::Path) {
     connection.execute_batch(V47).expect("v47 fixture writes");
 }
 
+/// The shape a database carries at v55, with the rows the settings fold reads:
+/// two projects that each set these for themselves, and the tasks that say
+/// which of them the user worked in last.
+const V55: &str = r#"BEGIN IMMEDIATE;
+    CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      cwd TEXT,
+      origin_cwd TEXT,
+      state TEXT NOT NULL,
+      updated_at TEXT
+    );
+    CREATE TABLE cwd_settings (
+      cwd TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL CHECK(json_valid(value)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(cwd, key)
+    );
+    INSERT INTO tasks(id,cwd,origin_cwd,state,updated_at) VALUES
+      ('older','/work/older','/work/older','completed','2026-01-02T00:00:00.000Z'),
+      ('newer','/work/newer','/work/newer','completed','2026-03-02T00:00:00.000Z');
+    INSERT INTO cwd_settings(cwd,key,value,created_at,updated_at) VALUES
+      ('/work/older','models','{"profiles":{"claude":{"modelEnabled":{"opus":true}}}}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'),
+      ('/work/older','callerPrompts','{"written":true,"value":"older briefs"}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'),
+      ('/work/newer','models','{"profiles":{"claude":{"modelEnabled":{"haiku":true}}}}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'),
+      ('/work/older','memories','{"kept":true}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+    INSERT INTO schema_migrations(version, name) VALUES (55, 'task checkout base');
+    COMMIT;"#;
+
+/// Where the broker will look for the one global row, which is the same
+/// directory the migration reads `HOME` for.
+fn home() -> String {
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME is set"));
+    std::fs::canonicalize(&home)
+        .unwrap_or(home)
+        .display()
+        .to_string()
+}
+
+fn write_v55(path: &std::path::Path) {
+    let connection = Connection::open(path).expect("fixture database opens");
+    connection.execute_batch(V55).expect("v55 fixture writes");
+}
+
+fn setting(store: &Store, cwd: &str, key: &str) -> Option<String> {
+    store
+        .repositories()
+        .settings()
+        .get(cwd, key)
+        .expect("setting reads")
+}
+
+fn cwds_with_key(store: &Store, key: &str) -> Vec<String> {
+    store
+        .with_connection(|connection| {
+            let mut statement =
+                connection.prepare("SELECT cwd FROM cwd_settings WHERE key=?1 ORDER BY cwd")?;
+            Ok(statement
+                .query_map([key], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<String>, _>>()?)
+        })
+        .expect("settings listed")
+}
+
 fn columns(store: &Store, table: &str) -> Vec<String> {
     store
         .with_connection(|connection| {
@@ -256,6 +326,101 @@ fn reopening_an_upgraded_database_changes_nothing() {
         recorded, 1,
         "a migration must be recorded once, not per open"
     );
+}
+
+#[test]
+fn per_project_models_and_brief_rules_fold_into_the_project_used_most_recently() {
+    let database = TestDatabase::new();
+    write_v55(&database.path());
+
+    let store = database.open_writable();
+
+    assert_eq!(version(&store), LATEST_SCHEMA_VERSION);
+    assert_eq!(
+        cwds_with_key(&store, "models"),
+        vec![home()],
+        "one row answers for every project, and it is the one the user used last"
+    );
+    assert_eq!(
+        setting(&store, &home(), "models").as_deref(),
+        Some(r#"{"profiles":{"claude":{"modelEnabled":{"haiku":true}}}}"#)
+    );
+    assert_eq!(
+        setting(&store, &home(), "callerPrompts"),
+        None,
+        "the project that speaks for the machine never set these, so nothing is invented"
+    );
+    assert_eq!(
+        cwds_with_key(&store, "memories"),
+        vec!["/work/older".to_owned()],
+        "a setting that is still per project keeps its own rows"
+    );
+}
+
+#[test]
+fn the_project_used_most_recently_carries_both_settings_together() {
+    let database = TestDatabase::new();
+    write_v55(&database.path());
+    {
+        let connection = Connection::open(database.path()).expect("fixture database opens");
+        connection
+            .execute_batch(
+                "INSERT INTO tasks(id,cwd,origin_cwd,state,updated_at) \
+                 VALUES('newest','/work/newer','/work/newer','completed','2026-06-02T00:00:00.000Z');",
+            )
+            .expect("the project the user worked in last");
+        connection
+            .execute_batch(
+                "INSERT INTO cwd_settings(cwd,key,value,created_at,updated_at) \
+                 VALUES('/work/newer','callerPrompts','{\"written\":true,\"value\":\"newer briefs\"}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');",
+            )
+            .expect("the newer project's brief rules");
+    }
+
+    let store = database.open_writable();
+
+    assert_eq!(
+        setting(&store, &home(), "callerPrompts").as_deref(),
+        Some(r#"{"written":true,"value":"newer briefs"}"#)
+    );
+    assert_eq!(
+        setting(&store, &home(), "models").as_deref(),
+        Some(r#"{"profiles":{"claude":{"modelEnabled":{"haiku":true}}}}"#),
+        "both settings come from the same project, never a mix of two"
+    );
+}
+
+#[test]
+fn a_global_choice_survives_the_fold_and_the_project_rows_it_replaces_are_dropped() {
+    let database = TestDatabase::new();
+    write_v55(&database.path());
+    {
+        let connection = Connection::open(database.path()).expect("fixture database opens");
+        connection
+            .execute_batch(&format!(
+                r#"BEGIN IMMEDIATE;
+                INSERT INTO cwd_settings(cwd,key,value,created_at,updated_at) VALUES
+                  ('{home}','models','{{"profiles":{{"claude":{{"modelEnabled":{{"sonnet":true}}}}}}}}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z'),
+                  ('{home}','callerPrompts','{{"written":true,"value":"my briefs"}}','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z');
+                COMMIT;"#,
+                home = home()
+            ))
+            .expect("the global rows a user already set");
+    }
+
+    let store = database.open_writable();
+
+    assert_eq!(
+        setting(&store, &home(), "models").as_deref(),
+        Some(r#"{"profiles":{"claude":{"modelEnabled":{"sonnet":true}}}}"#),
+        "what the user chose everywhere is still what they choose everywhere"
+    );
+    assert_eq!(
+        setting(&store, &home(), "callerPrompts").as_deref(),
+        Some(r#"{"written":true,"value":"my briefs"}"#)
+    );
+    assert_eq!(cwds_with_key(&store, "models"), vec![home()]);
+    assert_eq!(cwds_with_key(&store, "callerPrompts"), vec![home()]);
 }
 
 #[test]

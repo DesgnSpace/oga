@@ -4,44 +4,40 @@
 
 use oga_config::{
     MODEL_SETTINGS_KEY, ResolvedModelSettings, canonical_cwd, global_cwd, load_config_layers,
-    model_enabled, model_not_enabled_message, read_model_overrides, read_model_settings,
+    model_enabled, model_not_enabled_message, read_global_overrides, read_model_settings,
 };
 use oga_domain::Task;
 use oga_store::{Store, StoreError};
 use serde_json::{Value, json};
 
-/// The directory whose settings govern a task. A worktree run answers to the
+/// The directory whose love rules govern a task. A worktree run answers to the
 /// project it was cut from, not to the checkout it happens to live in.
-pub(crate) fn settings_cwd(task: &Task) -> String {
+pub(crate) fn love_layer_cwd(task: &Task) -> String {
     task.worktree
         .as_ref()
         .map_or_else(|| task.cwd.clone(), |worktree| worktree.origin_cwd.clone())
 }
 
+/// Which models are switched on, for the whole machine, plus the love rules of
+/// the directory a task runs in.
 pub fn resolved_model_settings(
     store: &Store,
     cwd: &str,
 ) -> Result<ResolvedModelSettings, StoreError> {
     let global = canonical_cwd(global_cwd()).display().to_string();
     let cwd = canonical_cwd(cwd).display().to_string();
-    let project = if cwd == global {
-        None
-    } else {
-        saved(store, &cwd)?.as_ref().map(read_model_settings)
-    };
     let layers = load_config_layers((cwd != global).then_some(std::path::Path::new(&cwd)))
         .map_err(|error| StoreError::Refusal(error.to_string()))?;
     let (overrides, love) =
-        read_model_overrides(&layers).map_err(|error| StoreError::Refusal(error.to_string()))?;
+        read_global_overrides(&layers).map_err(|error| StoreError::Refusal(error.to_string()))?;
     Ok(ResolvedModelSettings {
-        global: read_model_settings(&saved(store, &global)?.unwrap_or_else(|| json!({}))),
-        project,
+        global: read_model_settings(&saved(store)?.unwrap_or_else(|| json!({}))),
         overrides: Some(overrides),
         love,
     })
 }
 
-/// Refuse a model the user has not turned on for this worker, in this project.
+/// Refuse a model the user has not turned on for this worker.
 pub fn check_model_enabled(
     store: &Store,
     cwd: &str,
@@ -56,10 +52,13 @@ pub fn check_model_enabled(
     }
 }
 
-fn saved(store: &Store, cwd: &str) -> Result<Option<Value>, StoreError> {
+fn saved(store: &Store) -> Result<Option<Value>, StoreError> {
     Ok(store
         .repositories()
         .settings()
-        .get(cwd, MODEL_SETTINGS_KEY)?
+        .get(
+            &canonical_cwd(global_cwd()).display().to_string(),
+            MODEL_SETTINGS_KEY,
+        )?
         .and_then(|raw| serde_json::from_str(&raw).ok()))
 }

@@ -116,12 +116,12 @@ fn all_on(models: &[ModelInfo]) -> DirectoryModelSettings {
 }
 
 fn settings() -> ResolvedModelSettings {
-    settings_with(all_on(&models()), None)
+    settings_with(all_on(&models()))
 }
 
 /// Nothing turned on anywhere: a fresh install, before anyone has chosen.
 fn nothing_on() -> ResolvedModelSettings {
-    settings_with(DirectoryModelSettings::default(), None)
+    settings_with(DirectoryModelSettings::default())
 }
 
 fn spent(profile_id: &str, provider: Provider, used_percent: f64) -> ProfileUsage {
@@ -319,7 +319,7 @@ fn one_account_routes_every_class_from_defaults_alone() {
             &catalog,
             &workers,
             &RoutePreferences::default(),
-            &SelectionInputs::new(&settings_with(all_on(&catalog), None)),
+            &SelectionInputs::new(&settings_with(all_on(&catalog))),
         )
         .unwrap();
         assert_eq!(route.task_class, task_class, "{label}");
@@ -340,7 +340,7 @@ fn one_account_routes_every_class_from_defaults_alone() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))),
     )
     .unwrap();
     let open = choose_model(
@@ -348,7 +348,7 @@ fn one_account_routes_every_class_from_defaults_alone() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))),
     )
     .unwrap();
     assert_ne!(cheap.model, open.model);
@@ -773,7 +773,7 @@ fn perishable_headroom_breaks_score_ties() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)).usage(&rows),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))).usage(&rows),
     )
     .unwrap();
     assert_eq!(route.profile_id, "claude");
@@ -796,7 +796,7 @@ fn perishable_headroom_breaks_score_ties() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)).usage(&rows),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))).usage(&rows),
     )
     .unwrap();
     assert_eq!(route.profile_id, "claude-work");
@@ -815,7 +815,7 @@ fn perishable_headroom_breaks_score_ties() {
         &catalog,
         &workers,
         &named,
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)).usage(&rows),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))).usage(&rows),
     )
     .unwrap();
     assert_eq!(route.profile_id, "claude");
@@ -827,7 +827,7 @@ fn perishable_headroom_breaks_score_ties() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))),
     )
     .unwrap();
     let rows = [
@@ -839,7 +839,7 @@ fn perishable_headroom_breaks_score_ties() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None)).usage(&rows),
+        &SelectionInputs::new(&settings_with(all_on(&catalog))).usage(&rows),
     )
     .unwrap();
     assert_eq!(route.profile_id, baseline.profile_id);
@@ -1125,7 +1125,7 @@ fn local_status_picks_between_profiles_offering_the_same_allowed_model() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(all_on(&catalog), None))
+        &SelectionInputs::new(&settings_with(all_on(&catalog)))
             .statuses(&statuses)
             .policy(&build_policy),
     )
@@ -1510,13 +1510,9 @@ fn an_ambiguous_name_is_refused_with_candidates() {
     );
 }
 
-fn settings_with(
-    global: DirectoryModelSettings,
-    project: Option<DirectoryModelSettings>,
-) -> ResolvedModelSettings {
+fn settings_with(global: DirectoryModelSettings) -> ResolvedModelSettings {
     ResolvedModelSettings {
         global,
-        project,
         overrides: None,
         love: LoveRules::default(),
     }
@@ -1559,7 +1555,7 @@ fn model_settings_bound_selection() {
     assert!(refused.to_string().contains("Open Settings"));
 
     // A model switched off is not a candidate.
-    let opus_off = settings_with(without(all_on(&catalog), "claude", &["opus"]), None);
+    let opus_off = settings_with(without(all_on(&catalog), "claude", &["opus"]));
     let route = choose_model(
         "Design the architecture and the migration.",
         &catalog,
@@ -1609,24 +1605,6 @@ fn model_settings_bound_selection() {
     .unwrap();
     assert_eq!(route.model, "opus");
 
-    // A project's own switch removes a model the global scope allows.
-    let route = choose_model(
-        "Implement the feature.",
-        &catalog,
-        &workers,
-        &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(
-            all_on(&catalog),
-            Some(without(
-                DirectoryModelSettings::default(),
-                "claude",
-                &["opus", "sonnet", "haiku"],
-            )),
-        )),
-    )
-    .unwrap();
-    assert_eq!(route.profile_id, "opencode");
-
     // Turning a worker off removes every model it offers.
     let mut worker_off = all_on(&catalog);
     worker_off
@@ -1639,7 +1617,7 @@ fn model_settings_bound_selection() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(worker_off, None)),
+        &SelectionInputs::new(&settings_with(worker_off)),
     )
     .unwrap();
     assert_eq!(route.profile_id, "opencode");
@@ -1651,14 +1629,11 @@ fn model_settings_bound_selection() {
         &catalog,
         &workers,
         &RoutePreferences::default(),
-        &SelectionInputs::new(&settings_with(
-            without(
-                without(all_on(&catalog), "claude", &["haiku", "sonnet", "opus"]),
-                "opencode",
-                &["opencode/kimi-k3", "opencode/big-pickle"],
-            ),
-            None,
-        )),
+        &SelectionInputs::new(&settings_with(without(
+            without(all_on(&catalog), "claude", &["haiku", "sonnet", "opus"]),
+            "opencode",
+            &["opencode/kimi-k3", "opencode/big-pickle"],
+        ))),
     )
     .unwrap_err();
     assert_eq!(failure.code(), NoEligibleModel::CODE);
@@ -1746,7 +1721,7 @@ fn advice_outranks_a_love_rule_and_gives_way_when_it_cannot_run() {
 fn only_reachable_destinations_are_offered() {
     let catalog = models();
     let workers = profiles();
-    let settings = settings_with(all_on(&catalog), None);
+    let settings = settings_with(all_on(&catalog));
 
     let offered = offered_models(&catalog, &workers, &SelectionInputs::new(&settings));
     assert!(offered.iter().any(|model| model.id == "sonnet"));
@@ -1815,7 +1790,6 @@ fn chain(rules: Vec<(&str, Option<&str>, Option<&str>)>, when: &[WorkKind]) -> L
 fn love_rules(rules: Vec<LoveRule>) -> ResolvedModelSettings {
     ResolvedModelSettings {
         global: all_on(&models()),
-        project: None,
         overrides: None,
         love: LoveRules(rules),
     }

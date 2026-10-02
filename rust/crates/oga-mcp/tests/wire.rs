@@ -125,25 +125,17 @@ async fn initialize_advertises_protocol_and_instructions() {
     assert!(description.contains(oga_config::DEFAULT_CALLER_PROMPT));
 }
 
+/// The rules for writing a brief are one answer for the machine, so a project
+/// folder's own file cannot steer every brief.
 #[tokio::test]
-async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
+async fn a_project_file_no_longer_writes_the_brief_rules_the_caller_reads() {
     let (directory, server) = test_server();
     std::fs::write(
         directory.path().join(".oga.yaml"),
-        "version: 1\ncaller:\n  prompt: |\n    {{default}}\n    Project root: {{project}}. Always name the entry file.\n",
+        "version: 1\ncaller:\n  prompt: |\n    Always name the entry file.\n",
     )
     .expect("project config");
     let server = server.with_project(directory.path());
-
-    let initialize = server
-        .handle_value(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }))
-        .await
-        .expect("initialize response");
-    let instructions = initialize["result"]["instructions"]
-        .as_str()
-        .expect("instructions");
-    assert!(!instructions.contains("Always name the entry file."));
-    let project = std::fs::canonicalize(directory.path()).expect("canonical project path");
 
     let tools = server
         .handle_value(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
@@ -159,15 +151,8 @@ async fn a_project_file_writes_the_brief_rules_the_caller_reads() {
         .as_str()
         .expect("prompt description");
     assert!(description.contains("sent as written"));
-    assert!(description.contains("Always name the entry file."));
-    assert!(!description.contains("memories"));
-    assert!(!description.contains("reporting protocol"));
-    assert!(!description.contains("the scope"));
-    assert!(description.contains(&format!(
-        "Project root: {}. Always name the entry file.",
-        project.display()
-    )));
-    assert!(!description.contains(oga_config::DEFAULT_CALLER_PROMPT));
+    assert!(!description.contains("Always name the entry file."));
+    assert!(description.contains(oga_config::DEFAULT_CALLER_PROMPT));
 }
 
 #[tokio::test]
@@ -396,7 +381,7 @@ async fn tool_call_returns_mcp_content() {
 }
 
 #[tokio::test]
-async fn models_honor_project_model_enablement() {
+async fn models_honor_the_switches_set_for_the_whole_machine() {
     let (directory, server) = test_server();
     let profile = Profile {
         id: "main".into(),
@@ -424,7 +409,9 @@ async fn models_honor_project_model_enablement() {
         .repositories()
         .settings()
         .put(
-            &cwd,
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
             "models",
             r#"{"profiles":{"main":{"models":{"sonnet":false}}}}"#,
             "2026-08-26T00:00:00.000Z",
@@ -450,7 +437,6 @@ async fn models_honor_project_model_enablement() {
     let catalog: Value = serde_json::from_str(text).expect("model rows JSON");
     let rows = catalog["models"].as_array().expect("model rows");
     assert!(rows.iter().all(|row| row["model"] != "sonnet"));
-    assert_eq!(catalog["love"], json!([]));
 }
 
 #[tokio::test]

@@ -9,15 +9,12 @@ import type {
   McpInstallResult,
   MemoryEntry,
   MemoryProject,
-  ModelSettingsModel,
   ModelSettingsSnapshot,
   ModelSettingsUpdate,
   ProfileView,
-  ProjectList,
   PromptConfig,
   PromptWrite,
   Provider,
-  WorkerSettings,
 } from "@/bridge/types";
 
 export type SettingsTab =
@@ -98,21 +95,6 @@ export function tabMatchesQuery(tab: SettingsTab, query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   return [tabLabel(tab), ...tabSearchTerms(tab)].some((term) => term.toLowerCase().includes(needle));
-}
-
-export type ProjectSettingsScope = { kind: "global" } | { kind: "project"; path: string };
-
-export function scopeKey(scope: ProjectSettingsScope): string {
-  return scope.kind === "global" ? "global" : scope.path;
-}
-
-export function scopeFromKey(raw: string): ProjectSettingsScope {
-  return raw === "global" ? { kind: "global" } : { kind: "project", path: raw };
-}
-
-export function scopeCwd(scope: ProjectSettingsScope, projects: ProjectList | undefined): string | undefined {
-  if (!projects) return undefined;
-  return scope.kind === "global" ? projects.global : scope.path;
 }
 
 export type LoadState = "idle" | "loading" | "ready" | "error";
@@ -209,15 +191,12 @@ export function finishModelUpdate(
   };
 }
 
-/**
- * Apply an optimistic patch to the snapshot before the server responds.
- * Used for allow/prefer toggles so the row updates immediately.
- */
+/** Apply an optimistic patch before the server answers, so the row moves at once. */
 export function applyOptimisticModelUpdate(
   store: ModelSettingsStore,
   workerId: string,
   modelId: string | undefined,
-  patch: { enabled?: boolean | null; preferred?: boolean | null; capabilities?: string[] | null },
+  patch: { enabled?: boolean; preferred?: boolean; capabilities?: string[] },
 ): ModelSettingsStore {
   if (!store.snapshot) return store;
   const snapshot: ModelSettingsSnapshot = {
@@ -225,38 +204,15 @@ export function applyOptimisticModelUpdate(
     workers: store.snapshot.workers.map((worker) => {
       if (worker.id !== workerId) return worker;
       const models = worker.models.map((model) => {
-        if (modelId && model.id !== modelId) return model;
-        if (!modelId && modelId !== undefined) return model;
-        let next: ModelSettingsModel = { ...model };
-        if (patch.enabled !== undefined) {
-          if (patch.enabled === null) {
-            next = { ...next, enabled: next.inheritedEnabled, hasEnabledOverride: false };
-          } else {
-            next = { ...next, enabled: patch.enabled, hasEnabledOverride: true };
-          }
-        }
-        if (patch.preferred !== undefined) {
-          if (patch.preferred === null) {
-            next = { ...next, preferred: next.inheritedPreferred, hasPreferredOverride: false };
-          } else {
-            next = { ...next, preferred: patch.preferred, hasPreferredOverride: true };
-          }
-        }
-        if (patch.capabilities !== undefined) {
-          if (patch.capabilities === null) {
-            next = {
-              ...next,
-              capabilities: [...next.inheritedCapabilities],
-              hasCapabilitiesOverride: false,
-            };
-          } else {
-            next = { ...next, capabilities: patch.capabilities, hasCapabilitiesOverride: true };
-          }
-        }
-        return next;
+        if (modelId !== undefined && model.id !== modelId) return model;
+        return {
+          ...model,
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+          ...(patch.preferred !== undefined ? { preferred: patch.preferred } : {}),
+          ...(patch.capabilities !== undefined ? { capabilities: patch.capabilities } : {}),
+        };
       });
-      // Update worker-level enabled counts derived from models, if needed — not stored separately.
-      return { ...worker, models } as WorkerSettings;
+      return { ...worker, models };
     }),
   };
   return { ...store, snapshot };
@@ -270,8 +226,6 @@ export function modelRevision(store: ModelSettingsStore): string | undefined {
 export type PromptsSaveError = { kind: "message"; message: string } | { kind: "unreachable" };
 
 export interface PromptsModel {
-  cwd: string;
-  scope: string;
   written: boolean;
   text: string;
   inherited: string;
@@ -287,8 +241,6 @@ export interface PromptsModel {
 
 export function defaultPromptsModel(): PromptsModel {
   return {
-    cwd: "",
-    scope: "global",
     written: false,
     text: "",
     inherited: "",
@@ -306,8 +258,6 @@ export function defaultPromptsModel(): PromptsModel {
 export function applyPromptConfig(model: PromptsModel, snapshot: PromptConfig): PromptsModel {
   return {
     ...model,
-    cwd: snapshot.cwd,
-    scope: snapshot.scope,
     written: snapshot.written,
     text: snapshot.value,
     inherited: snapshot.inherited,
@@ -336,7 +286,7 @@ export function isPromptDirty(model: PromptsModel): boolean {
 export function promptPayload(model: PromptsModel): PromptWrite {
   const value = model.text.trim();
   const inherited = model.inherited.trim();
-  return { cwd: model.cwd, written: value.length > 0 && value !== inherited, value };
+  return { written: value.length > 0 && value !== inherited, value };
 }
 
 export function beginPromptLoad(model: PromptsModel): PromptsModel {
@@ -430,10 +380,7 @@ export interface SettingsState {
   overview: LoadState;
   error: string | undefined;
   profiles: ProfileView[];
-  projects: ProjectList | undefined;
-  modelScope: ProjectSettingsScope;
   modelSettings: ModelSettingsStore;
-  callerPromptScope: ProjectSettingsScope;
   callerPrompts: PromptsModel;
   memories: MemoryState;
   health: HealthReport | undefined;
@@ -446,10 +393,7 @@ export function defaultSettingsState(): SettingsState {
     overview: "idle",
     error: undefined,
     profiles: [],
-    projects: undefined,
-    modelScope: { kind: "global" },
     modelSettings: defaultModelSettingsStore(),
-    callerPromptScope: { kind: "global" },
     callerPrompts: defaultPromptsModel(),
     memories: defaultMemoryState(),
     health: undefined,
@@ -486,14 +430,12 @@ export function settingsFirstPaintReady(state: SettingsState): boolean {
 export function applyOverview(
   state: SettingsState,
   summary: BrokerSummaryState,
-  projects: ProjectList,
   health: HealthReport | undefined,
 ): SettingsState {
   return {
     ...state,
     profiles: summary.profiles,
     memories: applyMemoryProjects(state.memories, summary.memoryProjects),
-    projects,
     health: health ?? state.health,
     overview: "ready",
     error: undefined,
@@ -566,14 +508,12 @@ export function projectName(path: string): string {
 }
 
 export function buildModelSettingsUpdate(
-  cwd: string,
   profileId: string,
   modelId: string | undefined,
   revision: string | undefined,
   patch: { enabled?: boolean | null; preferred?: boolean | null; capabilities?: string[] | null },
 ): ModelSettingsUpdate {
   return {
-    cwd,
     profileId,
     modelId,
     expectedRevision: revision,

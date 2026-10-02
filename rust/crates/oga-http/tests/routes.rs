@@ -1647,7 +1647,7 @@ async fn settings_routes() {
         request(
             &fixture.router,
             Method::GET,
-            &format!("/api/model-settings?cwd={cwd}"),
+            "/api/model-settings",
             Body::empty(),
         )
         .await,
@@ -1657,10 +1657,6 @@ async fn settings_routes() {
     assert_eq!(settings["workers"][0]["id"], "profile");
     assert_eq!(settings["workers"][0]["enabled"], true);
     assert_eq!(settings["workers"][0]["models"][0]["enabled"], true);
-    assert_eq!(
-        settings["workers"][0]["models"][0]["inheritedEnabled"],
-        true
-    );
 
     let (status, settings) = json_response(
         request(
@@ -1668,8 +1664,7 @@ async fn settings_routes() {
             Method::PUT,
             "/api/model-settings",
             Body::from(
-                json!({ "cwd": cwd, "profileId": "profile", "modelId": "fake", "enabled": false })
-                    .to_string(),
+                json!({ "profileId": "profile", "modelId": "fake", "enabled": false }).to_string(),
             ),
         )
         .await,
@@ -1678,22 +1673,21 @@ async fn settings_routes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(settings["workers"][0]["enabled"], true);
     assert_eq!(settings["workers"][0]["models"][0]["enabled"], false);
-    assert_eq!(
-        settings["workers"][0]["models"][0]["inheritedEnabled"],
-        true
-    );
 
-    let (status, projects) =
-        json_response(request(&fixture.router, Method::GET, "/api/projects", Body::empty()).await)
-            .await;
+    let (status, gone) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/model-settings",
+            Body::from(
+                json!({ "profileId": "profile", "modelId": "fake", "enabled": true }).to_string(),
+            ),
+        )
+        .await,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        projects["projects"]
-            .as_array()
-            .expect("projects")
-            .iter()
-            .any(|project| project == cwd)
-    );
+    assert_eq!(gone["workers"][0]["models"][0]["enabled"], true);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1966,16 +1960,21 @@ async fn appearance_reads_a_stored_value_that_no_longer_parses_as_the_default() 
     );
 }
 
+/// Which models are on is one answer for the machine, so a project folder's own
+/// file cannot turn one on for it.
 #[tokio::test]
-async fn model_settings_reflect_yaml_enablement_overrides() {
+async fn a_project_file_cannot_switch_a_model_on_for_the_machine() {
     let fixture = Fixture::new();
-    fixture.write_source(".oga.yaml", "models:\n  fake:\n    enabled: false\n");
+    fixture.write_source(
+        ".oga.yaml",
+        "models:\n  profile:\n    fake:\n      enabled: false\n",
+    );
 
     let (status, settings) = json_response(
         request(
             &fixture.router,
             Method::GET,
-            &format!("/api/model-settings?cwd={}", fixture.cwd),
+            "/api/model-settings",
             Body::empty(),
         )
         .await,
@@ -1983,99 +1982,80 @@ async fn model_settings_reflect_yaml_enablement_overrides() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(settings["workers"][0]["models"][0]["enabled"], false);
     assert_eq!(
-        settings["workers"][0]["models"][0]["inheritedEnabled"],
-        true
-    );
-    assert_eq!(
-        settings["workers"][0]["models"][0]["hasEnabledOverride"],
-        true
+        settings["workers"][0]["models"][0]["enabled"], true,
+        "the switch a project file carries is not the machine's switch"
     );
 }
 
 #[tokio::test]
-async fn a_project_file_owns_its_brief_rules() {
+async fn brief_rules_saved_for_the_machine_reach_a_project_that_has_its_own_file() {
     let fixture = Fixture::new();
     let cwd = fixture.canonical_cwd();
     fixture.write_source(
         ".oga.yaml",
         "version: 1\ncaller:\n  prompt: |\n    Name the entry file.\n",
     );
+    switch_on(&fixture.store, "profile", "fake");
 
-    fixture
-        .store
-        .repositories()
-        .settings()
-        .put(
-            &cwd,
-            "callerPrompts",
-            &json!({ "written": true, "value": "Saved briefs." }).to_string(),
-            "2026-01-01T00:00:00Z",
+    let (status, saved) = json_response(
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/caller-prompts",
+            Body::from(json!({ "written": true, "value": "Saved for every project." }).to_string()),
         )
-        .expect("saved brief rules");
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["value"], "Saved for every project.");
 
-    let (status, prompt) = json_response(
+    let (status, shown) = json_response(
         request(
             &fixture.router,
             Method::GET,
-            &format!("/api/caller-prompts?cwd={cwd}"),
+            "/api/caller-prompts",
             Body::empty(),
         )
         .await,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(prompt["value"], "Name the entry file.");
-    assert_eq!(prompt["configPath"], format!("{cwd}/.oga.yaml"));
+    assert_eq!(shown["value"], "Saved for every project.");
 
-    let (status, refused) = json_response(
-        request(
-            &fixture.router,
-            Method::PUT,
-            "/api/caller-prompts",
-            Body::from(json!({ "cwd": cwd, "written": true, "value": "Elsewhere." }).to_string()),
-        )
-        .await,
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(
-        refused["error"],
-        format!("These instructions come from {cwd}/.oga.yaml. Edit them there.")
+        oga_http::settings::caller_prompt(&fixture.store, &cwd).unwrap(),
+        "Saved for every project.",
+        "the caller in a project that keeps its own file still reads the machine's rules"
     );
 
-    fixture.write_source(".oga.yaml", "version: 1\ncaller:\n  attribution: false\n");
-    let (status, invalid) = json_response(
+    let (status, enabled) = json_response(
         request(
             &fixture.router,
             Method::GET,
-            &format!("/api/caller-prompts?cwd={cwd}"),
+            "/api/model-settings?enabled=true",
             Body::empty(),
         )
         .await,
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        invalid["error"]
-            .as_str()
-            .expect("error")
-            .contains("at caller.attribution:"),
-        "{invalid}"
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        enabled["workers"][0]["models"][0]["id"], "fake",
+        "the model a project switched on still runs, from the machine's switch"
     );
 }
 
 #[tokio::test]
 async fn saved_brief_rules_are_returned_and_capped() {
     let fixture = Fixture::new();
-    let cwd = fixture.canonical_cwd();
 
     let (status, fresh) = json_response(
         request(
             &fixture.router,
             Method::GET,
-            &format!("/api/caller-prompts?cwd={cwd}"),
+            "/api/caller-prompts",
             Body::empty(),
         )
         .await,
@@ -2091,8 +2071,7 @@ async fn saved_brief_rules_are_returned_and_capped() {
             Method::PUT,
             "/api/caller-prompts",
             Body::from(
-                json!({ "cwd": cwd, "written": true, "value": oga_config::DEFAULT_CALLER_PROMPT })
-                    .to_string(),
+                json!({ "written": true, "value": oga_config::DEFAULT_CALLER_PROMPT }).to_string(),
             ),
         )
         .await,
@@ -2108,7 +2087,7 @@ async fn saved_brief_rules_are_returned_and_capped() {
             Method::PUT,
             "/api/caller-prompts",
             Body::from(
-                json!({ "cwd": cwd, "written": true, "value": "{{default}}\n\nName the entry file." })
+                json!({ "written": true, "value": "{{default}}\n\nName the entry file." })
                     .to_string(),
             ),
         )
@@ -2119,18 +2098,30 @@ async fn saved_brief_rules_are_returned_and_capped() {
     assert_eq!(saved["written"], true);
     assert_eq!(saved["value"], "{{default}}\n\nName the entry file.");
     assert_eq!(
-        oga_http::settings::caller_prompt(&fixture.store, &cwd).unwrap(),
+        oga_http::settings::caller_prompt(&fixture.store, &fixture.cwd).unwrap(),
         "\n\nName the entry file."
     );
+
+    let (status, cleared) = json_response(
+        request(
+            &fixture.router,
+            Method::DELETE,
+            "/api/caller-prompts",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cleared["written"], false);
+    assert_eq!(cleared["value"], oga_config::DEFAULT_CALLER_PROMPT);
 
     let (status, refused) = json_response(
         request(
             &fixture.router,
             Method::PUT,
             "/api/caller-prompts",
-            Body::from(
-                json!({ "cwd": cwd, "written": true, "value": "x".repeat(8_001) }).to_string(),
-            ),
+            Body::from(json!({ "written": true, "value": "x".repeat(8_001) }).to_string()),
         )
         .await,
     )

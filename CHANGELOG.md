@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Your brief rules and the models you switch on are now one setting for the whole machine, so those pages no longer ask you to pick a project first. If you had set them for a single project, that choice now applies everywhere.
 - A task whose worker stops without ever replying is no longer marked completed. Oga first asks the worker once to finish and report; if it still says nothing, the task shows as unfinished with a reason, so you can resume it, and tasks waiting on it hold.
 - Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.
 - Each group in the task list shows how many tasks it really holds, not just the ones loaded so far, and Load more no longer covers a collapsed group.

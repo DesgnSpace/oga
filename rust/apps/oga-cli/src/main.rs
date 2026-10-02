@@ -3004,13 +3004,10 @@ async fn run_config(args: &[String]) -> CliResult<i32> {
         "routes".into(),
         config_routes_json(policy.as_ref(), &layers),
     );
-    output.insert("models".into(), merged_model_overrides(&layers)?);
+    output.insert("models".into(), model_overrides_json(layers.user.as_ref())?);
     output.insert(
         "callerPrompt".into(),
-        json!(caller_prompt_for_config(
-            &layers,
-            &stored_caller_prompt(&cwd)
-        )?),
+        json!(resolve_caller_prompt(&layers, stored_caller_prompt())?),
     );
     let love = love_rules_from_layers(&layers, &cwd)?;
     if !love.is_empty() {
@@ -3057,44 +3054,11 @@ struct ModelOverrideSet {
     by_profile: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
-fn merged_model_overrides(layers: &oga_config::ConfigLayers) -> CliResult<Value> {
-    let user = model_overrides_for_layer(layers.user.as_ref())?;
-    let project = if layers.project.as_ref().is_some_and(|layer| {
-        Some(layer.path.clone()) != layers.user.as_ref().map(|layer| layer.path.clone())
-    }) {
-        model_overrides_for_layer(layers.project.as_ref())?
-    } else {
-        ModelOverrideSet::default()
-    };
-    let shared = merge_override_entries(&user.shared, &project.shared);
-    let mut profile_ids = user
-        .by_profile
-        .keys()
-        .chain(project.by_profile.keys())
-        .cloned()
-        .collect::<Vec<_>>();
-    profile_ids.sort();
-    profile_ids.dedup();
-    let by_profile = profile_ids
-        .into_iter()
-        .map(|profile_id| {
-            let user_entries = user
-                .by_profile
-                .get(&profile_id)
-                .cloned()
-                .unwrap_or_default();
-            let project_entries = project
-                .by_profile
-                .get(&profile_id)
-                .cloned()
-                .unwrap_or_default();
-            (
-                profile_id,
-                merge_override_entries(&user_entries, &project_entries),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    Ok(json!({ "shared": shared, "byProfile": by_profile }))
+/// Which models the user's own `.oga.yaml` turns on, which is the only file
+/// that decides: a project's cannot switch a model on for the machine.
+fn model_overrides_json(user: Option<&oga_config::ConfigLayer>) -> CliResult<Value> {
+    let user = model_overrides_for_layer(user)?;
+    Ok(json!({ "shared": user.shared, "byProfile": user.by_profile }))
 }
 
 fn model_overrides_for_layer(
@@ -3207,28 +3171,6 @@ fn parse_model_override(value: &serde_yaml::Value, path: &Path, field: &str) -> 
     Ok(Value::Object(output))
 }
 
-fn merge_override_entries(
-    user: &BTreeMap<String, Value>,
-    project: &BTreeMap<String, Value>,
-) -> BTreeMap<String, Value> {
-    user.keys()
-        .chain(project.keys())
-        .cloned()
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .map(|key| {
-            let mut value = Map::new();
-            if let Some(entry) = user.get(&key).and_then(Value::as_object) {
-                value.extend(entry.clone());
-            }
-            if let Some(entry) = project.get(&key).and_then(Value::as_object) {
-                value.extend(entry.clone());
-            }
-            (key, Value::Object(value))
-        })
-        .collect()
-}
-
 fn config_routes_json(policy: Option<&RoutingPolicy>, layers: &oga_config::ConfigLayers) -> Value {
     let Some(policy) = policy else {
         return json!({});
@@ -3292,50 +3234,36 @@ fn config_routes_json(policy: Option<&RoutingPolicy>, layers: &oga_config::Confi
     Value::Object(routes)
 }
 
-fn caller_prompt_for_config(
+/// The brief rules one machine resolves through: the user's own `.oga.yaml`,
+/// then what Settings saved, then the wording Oga ships with.
+fn resolve_caller_prompt(
     layers: &oga_config::ConfigLayers,
-    saved: &SavedCallerPrompt,
+    saved: Option<String>,
 ) -> CliResult<String> {
-    let own = layers.project.as_ref();
-    Ok(read_caller_prompt(own)?
-        .or_else(|| saved.here.clone())
-        .or(read_caller_prompt(layers.user.as_ref())?)
-        .or_else(|| saved.everywhere.clone())
+    Ok(read_caller_prompt(layers.user.as_ref())?
+        .or(saved)
         .unwrap_or_else(|| oga_config::DEFAULT_CALLER_PROMPT.to_owned()))
 }
 
-#[derive(Debug, Default)]
-struct SavedCallerPrompt {
-    here: Option<String>,
-    everywhere: Option<String>,
-}
-
-fn stored_caller_prompt(cwd: &Path) -> SavedCallerPrompt {
-    let Ok(store) = Store::open_observe(database_path()) else {
-        return SavedCallerPrompt::default();
-    };
-    let global = canonical_cwd(global_cwd());
-    let read = |path: &Path, key: &str| {
-        store
-            .repositories()
-            .settings()
-            .get(&path.display().to_string(), key)
-            .ok()
-            .flatten()
-            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            .filter(|value| value.get("written").and_then(Value::as_bool) == Some(true))
-            .and_then(|value| {
-                value
-                    .get("value")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-    };
-    let here = canonical_cwd(cwd) != global;
-    let saved = SavedCallerPrompt {
-        here: here.then(|| read(cwd, CALLER_PROMPTS_KEY)).flatten(),
-        everywhere: read(&global, CALLER_PROMPTS_KEY),
-    };
+fn stored_caller_prompt() -> Option<String> {
+    let store = Store::open_observe(database_path()).ok()?;
+    let saved = store
+        .repositories()
+        .settings()
+        .get(
+            &canonical_cwd(global_cwd()).display().to_string(),
+            CALLER_PROMPTS_KEY,
+        )
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .filter(|value| value.get("written").and_then(Value::as_bool) == Some(true))
+        .and_then(|value| {
+            value
+                .get("value")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
     let _ = store.close();
     saved
 }
@@ -3840,9 +3768,8 @@ async fn love_target_status(
     };
     let offered = client.models(&query).await.unwrap_or_default();
     let unlisted = love_target_catalog_status(profile_id, model, &offered, fallback_unlisted)?;
-    let cwd_string = cwd.display().to_string();
     let was_off = client
-        .model_settings(Some(&cwd_string), false)
+        .model_settings(false)
         .await
         .ok()
         .and_then(|settings| {
@@ -4602,8 +4529,10 @@ mod tests {
         read_love_rules(&layers).unwrap()
     }
 
+    /// `oga config` reports the switches the machine runs on, so a project's own
+    /// file must not show up in them.
     #[test]
-    fn config_models_merge_project_fields_by_scope() {
+    fn config_models_come_from_the_users_own_file() {
         let layers = oga_config::ConfigLayers {
             user: Some(oga_config::ConfigLayer {
                 path: "/home/user/.oga.yaml".into(),
@@ -4614,11 +4543,14 @@ mod tests {
                 root: serde_yaml::from_str("models:\n  alpha:\n    preferred: true\n  claude:\n    opus:\n      enabled: true\n").unwrap(),
             }),
         };
-        let models = merged_model_overrides(&layers).unwrap();
+        let models = model_overrides_json(layers.user.as_ref()).unwrap();
         assert_eq!(models["shared"]["alpha"]["enabled"], false);
-        assert_eq!(models["shared"]["alpha"]["preferred"], true);
+        assert_eq!(models["shared"]["alpha"]["preferred"], Value::Null);
         assert_eq!(models["byProfile"]["claude"]["opus"]["loved"], true);
-        assert_eq!(models["byProfile"]["claude"]["opus"]["enabled"], true);
+        assert_eq!(
+            models["byProfile"]["claude"]["opus"]["enabled"],
+            Value::Null
+        );
     }
 
     #[test]
@@ -4644,7 +4576,7 @@ mod tests {
     }
 
     #[test]
-    fn caller_config_prefers_the_project_file_over_saved_instructions() {
+    fn caller_config_prefers_the_users_own_file_to_saved_instructions() {
         let layers = oga_config::ConfigLayers {
             user: Some(oga_config::ConfigLayer {
                 path: "/home/user/.oga.yaml".into(),
@@ -4655,51 +4587,31 @@ mod tests {
                 root: serde_yaml::from_str("caller:\n  prompt: project briefs\n").unwrap(),
             }),
         };
-        let saved = SavedCallerPrompt {
-            here: Some("saved briefs".into()),
-            ..SavedCallerPrompt::default()
-        };
-        let prompt = caller_prompt_for_config(&layers, &saved).unwrap();
-
-        assert_eq!(prompt, "project briefs");
-    }
-
-    #[test]
-    fn caller_config_falls_back_through_saved_then_the_all_projects_file() {
-        let layers = oga_config::ConfigLayers {
-            user: Some(oga_config::ConfigLayer {
-                path: "/home/user/.oga.yaml".into(),
-                root: serde_yaml::from_str("caller:\n  prompt: user briefs\n").unwrap(),
-            }),
-            project: Some(oga_config::ConfigLayer {
-                path: "/work/.oga.yaml".into(),
-                root: serde_yaml::from_str("profiles:\n  alpha:\n    model: sonnet\n").unwrap(),
-            }),
-        };
-        let saved = SavedCallerPrompt {
-            here: Some("saved briefs".into()),
-            ..SavedCallerPrompt::default()
-        };
 
         assert_eq!(
-            caller_prompt_for_config(&layers, &saved).unwrap(),
-            "saved briefs"
-        );
-        assert_eq!(
-            caller_prompt_for_config(&layers, &SavedCallerPrompt::default()).unwrap(),
+            resolve_caller_prompt(&layers, Some("saved briefs".into())).unwrap(),
             "user briefs"
         );
     }
 
     #[test]
-    fn caller_config_falls_back_to_the_shipped_default() {
-        let prompt = caller_prompt_for_config(
-            &oga_config::ConfigLayers::default(),
-            &SavedCallerPrompt::default(),
-        )
-        .unwrap();
+    fn caller_config_falls_back_through_saved_instructions_to_the_shipped_default() {
+        let without_a_file = oga_config::ConfigLayers {
+            user: None,
+            project: Some(oga_config::ConfigLayer {
+                path: "/work/.oga.yaml".into(),
+                root: serde_yaml::from_str("profiles:\n  alpha:\n    model: sonnet\n").unwrap(),
+            }),
+        };
 
-        assert_eq!(prompt, oga_config::DEFAULT_CALLER_PROMPT);
+        assert_eq!(
+            resolve_caller_prompt(&without_a_file, Some("saved briefs".into())).unwrap(),
+            "saved briefs"
+        );
+        assert_eq!(
+            resolve_caller_prompt(&oga_config::ConfigLayers::default(), None).unwrap(),
+            oga_config::DEFAULT_CALLER_PROMPT
+        );
     }
 
     #[test]

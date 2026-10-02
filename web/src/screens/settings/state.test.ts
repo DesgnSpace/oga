@@ -22,15 +22,11 @@ import {
   profileError,
   projectName,
   resetPrompt,
-  scopeFromKey,
-  scopeKey,
   updatePromptText,
 } from "./state";
 
 function snapshot(revision = "abc"): ModelSettingsSnapshot {
   return {
-    cwd: "/tmp/project",
-    scope: "project",
     revision,
     love: [],
     workers: [
@@ -39,25 +35,15 @@ function snapshot(revision = "abc"): ModelSettingsSnapshot {
         label: "Claude work",
         provider: "claude" as Provider,
         enabled: true,
-        inheritedEnabled: true,
-        hasEnabledOverride: false,
-        availableGlobally: true,
         configured: true,
         models: [
           {
             id: "opus",
             label: "Opus",
             enabled: true,
-            inheritedEnabled: true,
-            hasEnabledOverride: false,
             preferred: false,
-            inheritedPreferred: false,
-            hasPreferredOverride: false,
             capabilities: ["build"],
-            inheritedCapabilities: ["build"],
-            hasCapabilitiesOverride: false,
-            availableGlobally: true,
-          },
+              },
         ],
       },
     ],
@@ -118,7 +104,6 @@ describe("model settings store", () => {
     store = applyOptimisticModelUpdate(store, "claude-work", "opus", { enabled: false });
     const nextSnap = snapshot("rev2");
     nextSnap.workers[0].models[0].enabled = false;
-    nextSnap.workers[0].models[0].hasEnabledOverride = true;
     store = finishModelUpdate(store, key, { ok: true, snapshot: nextSnap });
     expect(store.snapshot?.revision).toBe("rev2");
     expect(store.pending.size).toBe(0);
@@ -140,7 +125,7 @@ describe("model settings store", () => {
 
 describe("prompts model", () => {
   function cfg(written: boolean, value: string, inherited: string): PromptConfig {
-    return { cwd: "/tmp/project", scope: "project", written, value, inherited };
+    return { written, value, inherited };
   }
 
   it("marks inherited text as local when edited", () => {
@@ -199,12 +184,6 @@ describe("helpers", () => {
   it("secret detection", () => {
     expect(isSecretKey("OPENAI_API_KEY")).toBe(true);
     expect(isSecretKey("CLAUDE_CONFIG_DIR")).toBe(false);
-  });
-  it("scope round trips", () => {
-    expect(scopeFromKey("global")).toEqual({ kind: "global" });
-    expect(scopeFromKey("/tmp/project")).toEqual({ kind: "project", path: "/tmp/project" });
-    expect(scopeKey({ kind: "global" })).toBe("global");
-    expect(scopeKey({ kind: "project", path: "/tmp/project" })).toBe("/tmp/project");
   });
   it("project name", () => {
     expect(projectName("/tmp/project")).toBe("project");

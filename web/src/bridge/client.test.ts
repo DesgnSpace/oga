@@ -13,13 +13,13 @@ beforeEach(() => {
 
 describe("broker call serialisation", () => {
   it("wraps a read call in the wire shape broker_call expects", async () => {
-    const invoke = mock().mockResolvedValue({ global: "/home/me", projects: ["/tmp/project"] });
+    const invoke = mock().mockResolvedValue({ written: false, value: "briefs", inherited: "" });
     setTransport(fakeTransport(invoke));
 
-    const result = await broker.projects();
+    const result = await broker.callerPrompt();
 
-    expect(invoke).toHaveBeenCalledWith("broker_call", { call: { call: "projects" } });
-    expect(result).toEqual({ ok: true, value: { global: "/home/me", projects: ["/tmp/project"] } });
+    expect(invoke).toHaveBeenCalledWith("broker_call", { call: { call: "callerPrompt" } });
+    expect(result).toEqual({ ok: true, value: { written: false, value: "briefs", inherited: "" } });
   });
 
   it("carries nested request bodies under their call variant", async () => {

@@ -3,7 +3,9 @@
 //!
 //! [`create_fresh_schema`] produces the current database shape.
 
-use rusqlite::Connection;
+use std::path::PathBuf;
+
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::connection::StoreError;
 
@@ -107,6 +109,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 55,
         name: "task checkout base",
         run: migrate_v54_to_v55,
+    },
+    Migration {
+        version: 56,
+        name: "one answer for models and brief rules",
+        run: migrate_v55_to_v56,
     },
 ];
 
@@ -351,10 +358,10 @@ const BASE_SCHEMA: &str = r#"    CREATE TABLE IF NOT EXISTS schema_migrations (
     );
     CREATE INDEX IF NOT EXISTS deliveries_unseen
       ON deliveries(consumer_id, channel, status, event_id);
-    -- Preferences a person sets, scoped to one directory. The global scope is
-    -- the home directory's own row, so it is an ordinary row rather than a
-    -- sentinel, and one key per concern keeps the table generic: 'models'
-    -- carries per-worker model enablement, and 'callerPrompts' holds brief rules.
+    -- Preferences a person sets. One key per concern keeps the table generic:
+    -- 'models' carries model enablement and 'callerPrompts' holds brief rules,
+    -- both answers for the whole machine, so their rows sit in the home
+    -- directory like every other row here.
     CREATE TABLE IF NOT EXISTS cwd_settings (
       cwd TEXT NOT NULL,
       key TEXT NOT NULL,
@@ -945,6 +952,100 @@ pub fn migrate_v54_to_v55(conn: &Connection) -> Result<(), StoreError> {
         INSERT INTO schema_migrations(version, name) VALUES (55, 'task checkout base');
         COMMIT;"#
     ))?;
+    Ok(())
+}
+
+/// Which models a worker may use, and how briefs are written, become one answer
+/// for the whole machine: the project the user worked in most recently speaks
+/// for it, and the project rows that lose are dropped.
+pub fn migrate_v55_to_v56(conn: &Connection) -> Result<(), StoreError> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    if let Some((home, project)) = home_and_carried_project(&tx)? {
+        for key in ["models", "callerPrompts"] {
+            fold_one_setting_into_home(&tx, &home, &project, key)?;
+        }
+    }
+    tx.execute_batch(
+        "INSERT INTO schema_migrations(version, name) VALUES (56, 'one answer for models and brief rules');",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The user's home, and the one project whose rows speak for it: the project
+/// used most recently, falling back to when the setting itself was last written
+/// for a project no task ever ran in. `HOME` has to name the same directory the
+/// broker reads at run time, or the folded row is never read back.
+fn home_and_carried_project(conn: &Connection) -> Result<Option<(String, String)>, StoreError> {
+    if !has_table(conn, "cwd_settings")? {
+        return Ok(None);
+    }
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return Ok(None);
+    };
+    let home = std::fs::canonicalize(&home).unwrap_or(home);
+    let home = home.display().to_string();
+    let project = if has_column(conn, "tasks", "origin_cwd")? {
+        "COALESCE(origin_cwd,cwd)"
+    } else {
+        "cwd"
+    };
+    let carried: Option<String> = conn
+        .query_row(
+            &format!(
+                "SELECT s.cwd FROM cwd_settings s \
+                 LEFT JOIN (SELECT {project} AS cwd,MAX(updated_at) AS seen FROM tasks \
+                 GROUP BY {project}) used ON used.cwd=s.cwd \
+                 WHERE s.key IN ('models','callerPrompts') AND s.cwd<>?1 \
+                 ORDER BY COALESCE(used.seen,s.updated_at) DESC,s.cwd LIMIT 1"
+            ),
+            params![home],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(carried.map(|project| (home, project)))
+}
+
+/// Leave one row for `key`, in the user's home. A global row the user set is
+/// kept as it is; without one, the carried project's row speaks for the
+/// machine, and a project the user never set this for keeps nothing.
+fn fold_one_setting_into_home(
+    conn: &Connection,
+    home: &str,
+    project: &str,
+    key: &str,
+) -> Result<(), StoreError> {
+    let already_global: Option<String> = conn
+        .query_row(
+            "SELECT value FROM cwd_settings WHERE cwd=?1 AND key=?2",
+            params![home, key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if already_global.is_none()
+        && let Some((value, created_at, updated_at)) = conn
+            .query_row(
+                "SELECT value,created_at,updated_at FROM cwd_settings WHERE cwd=?1 AND key=?2",
+                params![project, key],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+    {
+        conn.execute(
+            "INSERT INTO cwd_settings(cwd,key,value,created_at,updated_at) VALUES(?1,?2,?3,?4,?5)",
+            params![home, key, value, created_at, updated_at],
+        )?;
+    }
+    conn.execute(
+        "DELETE FROM cwd_settings WHERE key=?1 AND cwd<>?2",
+        params![key, home],
+    )?;
     Ok(())
 }
 

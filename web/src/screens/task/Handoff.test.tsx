@@ -20,15 +20,8 @@ function model(id: string, label: string): ModelSettingsModel {
     id,
     label,
     enabled: true,
-    inheritedEnabled: true,
-    hasEnabledOverride: false,
     preferred: false,
-    inheritedPreferred: false,
-    hasPreferredOverride: false,
     capabilities: [],
-    inheritedCapabilities: [],
-    hasCapabilitiesOverride: false,
-    availableGlobally: true,
   };
 }
 
@@ -38,17 +31,12 @@ function worker(id: string, label: string, models: ModelSettingsModel[]): Worker
     label,
     provider: "claude",
     enabled: true,
-    inheritedEnabled: true,
-    hasEnabledOverride: false,
-    availableGlobally: true,
     configured: true,
     models,
   };
 }
 
 const enabledModels: ModelSettingsSnapshot = {
-  cwd: "/repo",
-  scope: "project",
   revision: "r1",
   love: [],
   workers: [

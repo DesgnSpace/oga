@@ -78,17 +78,15 @@ export const broker = {
   openTaskFile: (taskId: string, path: string) =>
     call<"openTaskFile">({ call: "openTaskFile", taskId, path }),
 
-  projects: () => call({ call: "projects" }),
-
   memories: (cwd: string) => call({ call: "memories", cwd }),
 
-  callerPrompt: (cwd?: string) => call({ call: "callerPrompt", cwd }),
+  callerPrompt: () => call({ call: "callerPrompt" }),
 
   putCallerPrompt: (request: PromptWrite) => call({ call: "putCallerPrompt", request }),
 
-  modelSettings: (cwd?: string, refresh = false) => call({ call: "modelSettings", cwd, refresh }),
+  modelSettings: (refresh = false) => call({ call: "modelSettings", refresh }),
 
-  enabledModels: (cwd?: string) => call({ call: "enabledModels", cwd }),
+  enabledModels: () => call({ call: "enabledModels" }),
 
   cleanup: () => call({ call: "cleanup" }),
 
@@ -106,8 +104,7 @@ export const broker = {
 
   putModelSettings: (request: ModelSettingsUpdate) => call({ call: "putModelSettings", request }),
 
-  resetModelSettings: (cwd?: string, revision?: string) =>
-    call({ call: "resetModelSettings", cwd, revision }),
+  resetModelSettings: (revision?: string) => call({ call: "resetModelSettings", revision }),
 
   createProfile: (profile: ProfileCreate) => call({ call: "createProfile", profile }),
 

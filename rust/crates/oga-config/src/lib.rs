@@ -504,10 +504,11 @@ pub struct ProfileModelEnablement {
     #[serde(rename = "modelEnabled", default)]
     pub model_enabled: BTreeMap<String, bool>,
 }
+/// Which models are on, for the whole machine, plus the love rules of the
+/// directory a task runs in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedModelSettings {
     pub global: DirectoryModelSettings,
-    pub project: Option<DirectoryModelSettings>,
     pub overrides: Option<ModelOverrides>,
     pub love: LoveRules,
 }
@@ -587,6 +588,20 @@ pub fn load_profiles(
     let layers = load_config_layers(cwd)?;
     resolve_profiles(base, layers.user.as_ref(), layers.project.as_ref())
 }
+/// `models` comes from the user's own file, which speaks for the whole machine;
+/// love rules come from every layer, because routing a project's work is that
+/// project's own choice.
+pub fn read_global_overrides(
+    layers: &ConfigLayers,
+) -> Result<(ModelOverrides, LoveRules), ConfigError> {
+    let (_, love) = read_model_overrides(layers)?;
+    let (overrides, _) = read_model_overrides(&ConfigLayers {
+        user: layers.user.clone(),
+        project: None,
+    })?;
+    Ok((overrides, love))
+}
+
 pub fn resolve_profiles(
     base: Vec<Profile>,
     user: Option<&ConfigLayer>,
@@ -1043,8 +1058,9 @@ pub fn update_config_file(
 }
 
 /// One directory's saved model settings. A model is written either as a bare
-/// boolean or as an object carrying `enabled`, and files written before the
-/// rename keep the map under `models`.
+/// boolean or as an object carrying `enabled`, under `models` or under the
+/// older `modelEnabled`; where both name the same model, `models` is the newer
+/// answer and wins.
 pub fn read_model_settings(value: &Value) -> DirectoryModelSettings {
     let mut settings = DirectoryModelSettings::default();
     let Some(profiles) = value.get("profiles").and_then(Value::as_object) else {
@@ -1054,17 +1070,18 @@ pub fn read_model_settings(value: &Value) -> DirectoryModelSettings {
         let Some(profile) = value.as_object() else {
             continue;
         };
-        let models = profile
-            .get("modelEnabled")
-            .or_else(|| profile.get("models"))
-            .and_then(Value::as_object);
         let mut model_enabled = BTreeMap::new();
-        for (model_id, value) in models.into_iter().flatten() {
-            if let Some(enabled) = value
-                .as_bool()
-                .or_else(|| value.get("enabled").and_then(Value::as_bool))
-            {
-                model_enabled.insert(model_id.clone(), enabled);
+        for key in ["modelEnabled", "models"] {
+            let Some(models) = profile.get(key).and_then(Value::as_object) else {
+                continue;
+            };
+            for (model_id, value) in models {
+                if let Some(enabled) = value
+                    .as_bool()
+                    .or_else(|| value.get("enabled").and_then(Value::as_bool))
+                {
+                    model_enabled.insert(model_id.clone(), enabled);
+                }
             }
         }
         settings.profiles.insert(
@@ -1539,23 +1556,14 @@ fn parse_model_override(
         capabilities,
     })
 }
-/// Whether a worker may run in this directory at all. Both scopes have to
-/// agree, and silence is consent: a worker nobody has ruled on stays
-/// available, which is what makes an untouched install behave as before.
+/// Whether a worker may run at all. Silence is consent: a worker nobody has
+/// ruled on stays available, which is what makes an untouched install behave as
+/// before.
 pub fn profile_enabled(settings: &ResolvedModelSettings, profile: &str) -> bool {
-    if settings
+    settings
         .global
         .profiles
         .get(profile)
-        .and_then(|p| p.enabled)
-        == Some(false)
-    {
-        return false;
-    }
-    settings
-        .project
-        .as_ref()
-        .and_then(|s| s.profiles.get(profile))
         .and_then(|p| p.enabled)
         != Some(false)
 }
@@ -1570,12 +1578,6 @@ pub fn model_enabled(settings: &ResolvedModelSettings, profile: &str, model: &st
         .get(profile)
         .and_then(|p| p.enabled)
         == Some(false)
-        || settings
-            .project
-            .as_ref()
-            .and_then(|s| s.profiles.get(profile))
-            .and_then(|p| p.enabled)
-            == Some(false)
     {
         return false;
     }
@@ -1586,14 +1588,6 @@ pub fn model_enabled(settings: &ResolvedModelSettings, profile: &str, model: &st
         .and_then(|o| o.enabled)
     {
         return value;
-    }
-    if let Some(value) = settings
-        .project
-        .as_ref()
-        .and_then(|s| s.profiles.get(profile))
-        .and_then(|p| p.model_enabled.get(model))
-    {
-        return *value;
     }
     settings
         .global
@@ -1734,20 +1728,9 @@ mod tests {
     }
 
     #[test]
-    fn model_settings_are_project_first_and_revision_is_stable() {
-        let global = DirectoryModelSettings {
-            profiles: BTreeMap::from([(
-                "main".into(),
-                ProfileModelEnablement {
-                    enabled: None,
-                    model_enabled: BTreeMap::from([("opus".into(), false)]),
-                },
-            )]),
-        };
-        let project = DirectoryModelSettings::default();
+    fn a_switched_off_model_stays_off_and_the_revision_is_stable() {
         let settings = ResolvedModelSettings {
-            global,
-            project: Some(project),
+            global: switched("main", "opus", false),
             overrides: None,
             love: LoveRules::default(),
         };
@@ -1756,13 +1739,9 @@ mod tests {
         assert_ne!(config_revision("same"), config_revision("changed"));
     }
 
-    fn resolved(
-        global: DirectoryModelSettings,
-        project: Option<DirectoryModelSettings>,
-    ) -> ResolvedModelSettings {
+    fn resolved(global: DirectoryModelSettings) -> ResolvedModelSettings {
         ResolvedModelSettings {
             global,
-            project,
             overrides: Some(ModelOverrides::default()),
             love: LoveRules::default(),
         }
@@ -1784,28 +1763,15 @@ mod tests {
     fn a_model_runs_only_where_someone_switched_it_on() {
         // Nobody has ruled on it, so it cannot spend anything.
         assert!(!model_enabled(
-            &resolved(DirectoryModelSettings::default(), None),
+            &resolved(DirectoryModelSettings::default()),
             "main",
             "opus"
         ));
 
-        // On globally, then off again at either scope.
         let on = switched("main", "opus", true);
-        assert!(model_enabled(&resolved(on.clone(), None), "main", "opus"));
+        assert!(model_enabled(&resolved(on), "main", "opus"));
         assert!(!model_enabled(
-            &resolved(on.clone(), Some(switched("main", "opus", false))),
-            "main",
-            "opus"
-        ));
-        assert!(!model_enabled(
-            &resolved(switched("main", "opus", false), None),
-            "main",
-            "opus"
-        ));
-
-        // A project may switch one on that the global scope never mentions.
-        assert!(model_enabled(
-            &resolved(DirectoryModelSettings::default(), Some(on)),
+            &resolved(switched("main", "opus", false)),
             "main",
             "opus"
         ));
@@ -1817,7 +1783,29 @@ mod tests {
             .get_mut("main")
             .expect("main is present")
             .enabled = Some(false);
-        assert!(!model_enabled(&resolved(worker_off, None), "main", "opus"));
+        assert!(!model_enabled(&resolved(worker_off), "main", "opus"));
+    }
+
+    #[test]
+    fn a_yaml_layer_can_switch_a_model_on_for_a_directory() {
+        let mut overrides = ModelOverrides::default();
+        overrides
+            .by_profile
+            .entry("main".into())
+            .or_default()
+            .insert(
+                "opus".into(),
+                ModelOverride {
+                    enabled: Some(true),
+                    ..ModelOverride::default()
+                },
+            );
+        let settings = ResolvedModelSettings {
+            global: DirectoryModelSettings::default(),
+            overrides: Some(overrides),
+            love: LoveRules::default(),
+        };
+        assert!(model_enabled(&settings, "main", "opus"));
     }
 
     #[test]

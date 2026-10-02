@@ -19,10 +19,9 @@ use crate::{
     AgentRemoved, AgentStopped, BrokerState, BrokerSummaryState, CompletionRequest, ConsumerInbox,
     DispatchRequest, EditRequest, EventFrame, EventHead, EventStreamOptions, EventStreamQuery,
     HandoffRequest, MemoryList, MemoryWrite, ModelSettingsSnapshot, ModelSettingsUpdate,
-    ProfileCreate, ProfilePatch, ProjectList, PromptConfig, PromptWrite, QueryInitRequest,
-    QueryInitResponse, QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview,
-    RoutingPreviewRequest, StateQuery, SteerRequest, TaskActionResponse, TaskEventPage,
-    TaskEventsQuery, TurnsResponse, UsageResponse,
+    ProfileCreate, ProfilePatch, PromptConfig, PromptWrite, QueryInitRequest, QueryInitResponse,
+    QueryRequest, ReplyRequest, ResumeRequest, RoutingPreview, RoutingPreviewRequest, StateQuery,
+    SteerRequest, TaskActionResponse, TaskEventPage, TaskEventsQuery, TurnsResponse, UsageResponse,
 };
 
 #[derive(Debug, Error)]
@@ -632,12 +631,9 @@ impl LoopbackClient {
         .await
     }
 
-    pub async fn caller_prompt(&self, cwd: Option<&str>) -> Result<PromptConfig, ClientError> {
-        let mut url = self.endpoint(&["api", "caller-prompts"]);
-        if let Some(cwd) = cwd {
-            url.query_pairs_mut().append_pair("cwd", cwd);
-        }
-        self.get_json(url).await
+    pub async fn caller_prompt(&self) -> Result<PromptConfig, ClientError> {
+        self.get_json(self.endpoint(&["api", "caller-prompts"]))
+            .await
     }
 
     pub async fn put_caller_prompt(
@@ -649,10 +645,6 @@ impl LoopbackClient {
             serde_json::to_value(request).map_err(ClientError::Encode)?,
         )
         .await
-    }
-
-    pub async fn projects(&self) -> Result<ProjectList, ClientError> {
-        self.get_json(self.endpoint(&["api", "projects"])).await
     }
 
     pub async fn cleanup(&self) -> Result<CleanupSnapshot, ClientError> {
@@ -748,26 +740,16 @@ impl LoopbackClient {
 
     pub async fn model_settings(
         &self,
-        cwd: Option<&str>,
         refresh: bool,
     ) -> Result<ModelSettingsSnapshot, ClientError> {
         let mut url = self.endpoint(&["api", "model-settings"]);
-        if let Some(cwd) = cwd {
-            url.query_pairs_mut().append_pair("cwd", cwd);
-        }
         url.query_pairs_mut()
             .append_pair("refresh", if refresh { "true" } else { "false" });
         self.get_json(url).await
     }
 
-    pub async fn enabled_models(
-        &self,
-        cwd: Option<&str>,
-    ) -> Result<ModelSettingsSnapshot, ClientError> {
+    pub async fn enabled_models(&self) -> Result<ModelSettingsSnapshot, ClientError> {
         let mut url = self.endpoint(&["api", "model-settings"]);
-        if let Some(cwd) = cwd {
-            url.query_pairs_mut().append_pair("cwd", cwd);
-        }
         url.query_pairs_mut().append_pair("enabled", "true");
         self.get_json(url).await
     }
@@ -785,13 +767,9 @@ impl LoopbackClient {
 
     pub async fn delete_model_settings(
         &self,
-        cwd: Option<&str>,
         revision: Option<&str>,
     ) -> Result<ModelSettingsSnapshot, ClientError> {
         let mut url = self.endpoint(&["api", "model-settings"]);
-        if let Some(cwd) = cwd {
-            url.query_pairs_mut().append_pair("cwd", cwd);
-        }
         if let Some(revision) = revision {
             url.query_pairs_mut().append_pair("revision", revision);
         }
@@ -1415,10 +1393,6 @@ mod tests {
             ("GET", "/api/caller-prompts") | ("PUT", "/api/caller-prompts") => {
                 json_response(StatusCode::OK, prompt_json())
             }
-            ("GET", "/api/projects") => json_response(
-                StatusCode::OK,
-                json!({ "global": "/home/test", "projects": [] }),
-            ),
             ("GET", "/api/models") => json_response(StatusCode::OK, json!([model_json()])),
             ("GET", "/api/provider-usage") => json_response(StatusCode::OK, json!([])),
             ("DELETE", path) if path.starts_with("/api/grants/") => Response::builder()
@@ -1760,33 +1734,21 @@ mod tests {
             })
             .await
             .expect("put memory");
-        client
-            .caller_prompt(Some("/home/test"))
-            .await
-            .expect("caller prompt");
+        client.caller_prompt().await.expect("caller prompt");
         client
             .put_caller_prompt(&PromptWrite {
-                cwd: "/home/test".into(),
                 written: true,
                 value: "briefs".into(),
             })
             .await
             .expect("put caller prompt");
-        client.projects().await.expect("projects");
         client.models(&ModelQuery::default()).await.expect("models");
         client.usage(&ModelQuery::default()).await.expect("usage");
         client.delete_grant("grant").await.expect("grant");
-        client
-            .model_settings(Some("/home/test"), false)
-            .await
-            .expect("model settings");
-        client
-            .enabled_models(Some("/home/test"))
-            .await
-            .expect("enabled models");
+        client.model_settings(false).await.expect("model settings");
+        client.enabled_models().await.expect("enabled models");
         client
             .put_model_settings(&ModelSettingsUpdate {
-                cwd: "/home/test".into(),
                 profile_id: "profile".into(),
                 model_id: Some("model".into()),
                 ..ModelSettingsUpdate::default()
@@ -1794,7 +1756,7 @@ mod tests {
             .await
             .expect("put model settings");
         client
-            .delete_model_settings(Some("/home/test"), Some("revision"))
+            .delete_model_settings(Some("revision"))
             .await
             .expect("delete model settings");
         client

@@ -14,9 +14,9 @@ use axum::{
 };
 use oga_advisor::DEFAULT_INSTRUCTIONS;
 use oga_config::{
-    ConfigLayer, ConfigLayers, LoveRules, MASKED_SECRET, ModelOverrides, ResolvedModelSettings,
-    config_revision, global_cwd, load_config_layers, model_enabled, model_override_for,
-    read_model_overrides, read_model_settings,
+    ConfigLayers, LoveRules, MASKED_SECRET, ResolvedModelSettings, config_revision, global_cwd,
+    load_config_layers, model_enabled, model_override_for, read_global_overrides,
+    read_model_settings,
 };
 use oga_domain::{
     AdvisorSettings, AdvisorView, AppearanceSettings, CleanupSettings, CleanupSnapshot,
@@ -65,7 +65,6 @@ pub struct CwdQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct ModelSettingsQuery {
-    cwd: Option<String>,
     refresh: Option<bool>,
     /// Only the workers and models a task can move to.
     enabled: Option<bool>,
@@ -82,7 +81,6 @@ struct MemoryWrite {
 
 #[derive(Debug, Deserialize)]
 struct PromptWrite {
-    cwd: String,
     written: bool,
     value: String,
 }
@@ -104,7 +102,6 @@ pub struct ModelQuery {
 
 #[derive(Debug, Deserialize)]
 struct ModelSettingsWrite {
-    cwd: String,
     #[serde(rename = "profileId")]
     profile_id: String,
     #[serde(rename = "modelId")]
@@ -138,13 +135,10 @@ pub struct WaitSettingsWrite {
 #[derive(Debug, Deserialize)]
 pub struct RevisionQuery {
     revision: Option<String>,
-    cwd: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct PromptConfig {
-    cwd: String,
-    scope: String,
     written: bool,
     value: String,
     inherited: String,
@@ -230,9 +224,8 @@ pub async fn put_memory(
 
 pub async fn get_caller_prompt(
     State(state): State<HttpState>,
-    Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    run_blocking(move || read_prompt(&state, query)).await
+    run_blocking(move || read_prompt(&state)).await
 }
 
 pub async fn put_caller_prompt(
@@ -244,22 +237,19 @@ pub async fn put_caller_prompt(
 
 pub async fn delete_caller_prompt(
     State(state): State<HttpState>,
-    Query(query): Query<CwdQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    run_blocking(move || clear_prompt(&state, query)).await
+    run_blocking(move || clear_prompt(&state)).await
 }
 
-fn read_prompt(state: &HttpState, query: CwdQuery) -> Result<Json<Value>, HttpError> {
-    let cwd = requested_cwd(query.cwd.as_deref());
+fn read_prompt(state: &HttpState) -> Result<Json<Value>, HttpError> {
     Ok(Json(
-        serde_json::to_value(prompt_config(&state.store, &cwd)?).unwrap(),
+        serde_json::to_value(prompt_config(&state.store)?).unwrap(),
     ))
 }
 
 fn write_prompt(state: &HttpState, body: &Bytes) -> Result<Json<Value>, HttpError> {
     let body: PromptWrite = parse_json(body)?;
-    let cwd = canonical_cwd(&body.cwd);
-    let prompt = prompt_config(&state.store, &cwd)?;
+    let prompt = prompt_config(&state.store)?;
     if let Some(path) = prompt.config_path {
         return Err(HttpError::bad_request(format!(
             "These instructions come from {path}. Edit them there."
@@ -275,51 +265,32 @@ fn write_prompt(state: &HttpState, body: &Bytes) -> Result<Json<Value>, HttpErro
     let stored =
         json!({ "written": written, "value": if written { value } else { String::new() } });
     state.store.repositories().settings().put(
-        &cwd,
+        &settings_cwd(),
         CALLER_PROMPTS_KEY,
         &stored.to_string(),
         &now_iso(),
     )?;
     Ok(Json(
-        serde_json::to_value(prompt_config(&state.store, &cwd)?).unwrap(),
+        serde_json::to_value(prompt_config(&state.store)?).unwrap(),
     ))
 }
 
-fn clear_prompt(state: &HttpState, query: CwdQuery) -> Result<Json<Value>, HttpError> {
-    let cwd = requested_cwd(query.cwd.as_deref());
+fn clear_prompt(state: &HttpState) -> Result<Json<Value>, HttpError> {
     state.store.repositories().settings().put(
-        &cwd,
+        &settings_cwd(),
         CALLER_PROMPTS_KEY,
         &json!({ "written": false, "value": "" }).to_string(),
         &now_iso(),
     )?;
     Ok(Json(
-        serde_json::to_value(prompt_config(&state.store, &cwd)?).unwrap(),
+        serde_json::to_value(prompt_config(&state.store)?).unwrap(),
     ))
 }
 
-fn requested_cwd(cwd: Option<&str>) -> String {
-    canonical_cwd(cwd.unwrap_or(&global_cwd().display().to_string()))
-}
-
-pub async fn get_projects(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
-    let global = global_cwd().display().to_string();
-    let seen = run_blocking(move || {
-        Ok(state.store.with_connection(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT cwd FROM (SELECT COALESCE(origin_cwd,cwd) AS cwd,MAX(updated_at) AS seen FROM tasks GROUP BY COALESCE(origin_cwd,cwd) UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM memories GROUP BY cwd UNION ALL SELECT cwd,MAX(updated_at) AS seen FROM context_index GROUP BY cwd) GROUP BY cwd ORDER BY MAX(seen) DESC,cwd",
-            )?;
-            Ok(statement
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?)
-        })?)
-    })
-    .await?;
-    let projects = seen
-        .into_iter()
-        .filter(|cwd| cwd != &global)
-        .collect::<Vec<_>>();
-    Ok(Json(json!({ "global": global, "projects": projects })))
+/// Where a machine-wide setting is stored: the user's own home, beside the
+/// `.oga.yaml` they wrote it in.
+fn settings_cwd() -> String {
+    canonical_cwd(&global_cwd().display().to_string())
 }
 
 pub async fn get_cleanup(State(state): State<HttpState>) -> Result<impl IntoResponse, HttpError> {
@@ -762,13 +733,7 @@ pub async fn get_model_settings(
     State(state): State<HttpState>,
     Query(query): Query<ModelSettingsQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let cwd = canonical_cwd(
-        query
-            .cwd
-            .as_deref()
-            .unwrap_or(&global_cwd().display().to_string()),
-    );
-    let mut view = model_settings_view(&state.store, &cwd, query.refresh == Some(true)).await?;
+    let mut view = model_settings_view(&state.store, query.refresh == Some(true)).await?;
     if query.enabled == Some(true) {
         keep_enabled(&mut view);
     }
@@ -795,15 +760,13 @@ pub async fn put_model_settings(
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let body: ModelSettingsWrite = parse_json(&body)?;
-    let cwd = canonical_cwd(&body.cwd);
     let store = state.store.clone();
-    let written = cwd.clone();
-    run_blocking(move || save_model_setting(&store, &written, body)).await?;
-    Ok(Json(model_settings_view(&state.store, &cwd, false).await?))
+    run_blocking(move || save_model_setting(&store, body)).await?;
+    Ok(Json(model_settings_view(&state.store, false).await?))
 }
 
-fn save_model_setting(store: &Store, cwd: &str, body: ModelSettingsWrite) -> Result<(), HttpError> {
-    let current = model_settings_raw(store, cwd)?;
+fn save_model_setting(store: &Store, body: ModelSettingsWrite) -> Result<(), HttpError> {
+    let current = model_settings_raw(store)?;
     check_revision(body.expected_revision.as_deref(), &current)?;
     let profiles = store.repositories().profiles().list()?;
     if !profiles.iter().any(|profile| profile.id == body.profile_id) {
@@ -870,10 +833,12 @@ fn save_model_setting(store: &Store, cwd: &str, body: ModelSettingsWrite) -> Res
             .expect("model settings object")
             .remove(model_id);
     }
-    store
-        .repositories()
-        .settings()
-        .put(cwd, MODEL_SETTINGS_KEY, &root.to_string(), &now_iso())?;
+    store.repositories().settings().put(
+        &settings_cwd(),
+        MODEL_SETTINGS_KEY,
+        &root.to_string(),
+        &now_iso(),
+    )?;
     Ok(())
 }
 
@@ -881,24 +846,17 @@ pub async fn delete_model_settings(
     State(state): State<HttpState>,
     Query(query): Query<RevisionQuery>,
 ) -> Result<impl IntoResponse, HttpError> {
-    let cwd = canonical_cwd(
-        query
-            .cwd
-            .as_deref()
-            .unwrap_or(&global_cwd().display().to_string()),
-    );
     let store = state.store.clone();
-    let removed = cwd.clone();
     run_blocking(move || {
-        let current = model_settings_raw(&store, &removed)?;
+        let current = model_settings_raw(&store)?;
         check_revision(query.revision.as_deref(), &current)?;
         Ok(store
             .repositories()
             .settings()
-            .remove(&removed, MODEL_SETTINGS_KEY)?)
+            .remove(&settings_cwd(), MODEL_SETTINGS_KEY)?)
     })
     .await?;
-    Ok(Json(model_settings_view(&state.store, &cwd, false).await?))
+    Ok(Json(model_settings_view(&state.store, false).await?))
 }
 
 fn parse_json<T: for<'de> Deserialize<'de>>(body: &[u8]) -> Result<T, HttpError> {
@@ -938,23 +896,19 @@ fn validate_memory_key(key: &str) -> Result<String, HttpError> {
     Ok(key.to_owned())
 }
 
-/// The brief rules one scope's text resolves through, highest first: the
-/// `.oga.yaml` sitting in that directory, then what Settings saved for it,
-/// then what it inherits. The file is read here rather than copied into the
-/// store, so editing it changes the next dispatch.
-fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
-    let global = canonical_cwd(&global_cwd().display().to_string());
-    let layers = load_config_layers(Some(Path::new(cwd)))
-        .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let default_text = oga_config::DEFAULT_CALLER_PROMPT.to_owned();
-    let own_layer = layers.project.as_ref();
-    let read_file = |layer: Option<&ConfigLayer>| {
-        oga_config::read_caller_prompt(layer)
-            .map_err(|error| HttpError::bad_request(error.to_string()))
-    };
-    let from_file =
-        read_file(own_layer)?.zip(own_layer.map(|layer| layer.path.display().to_string()));
-    let own = read_json_setting(store, cwd, CALLER_PROMPTS_KEY)?;
+/// The brief rules one machine resolves through, highest first: the
+/// `.oga.yaml` in the user's home, then what Settings saved, then the wording
+/// Oga ships with. Read from the file rather than copied into the store, so
+/// editing it changes the next dispatch.
+fn prompt_config(store: &Store) -> Result<PromptConfig, HttpError> {
+    let own_layer = load_config_layers(None)
+        .map_err(|error| HttpError::bad_request(error.to_string()))?
+        .user;
+    let from_file = oga_config::read_caller_prompt(own_layer.as_ref())
+        .map_err(|error| HttpError::bad_request(error.to_string()))?
+        .zip(own_layer.map(|layer| layer.path.display().to_string()));
+    let inherited = oga_config::DEFAULT_CALLER_PROMPT.to_owned();
+    let own = read_json_setting(store, &settings_cwd(), CALLER_PROMPTS_KEY)?;
     let own_value = own
         .as_ref()
         .and_then(|value| value.get("value"))
@@ -966,20 +920,6 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
         .and_then(|value| value.get("written"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let inherited = if cwd == global {
-        default_text.clone()
-    } else {
-        read_file(layers.user.as_ref())?
-            .or(read_json_setting(store, &global, CALLER_PROMPTS_KEY)?
-                .filter(|value| value.get("written").and_then(Value::as_bool) == Some(true))
-                .and_then(|value| {
-                    value
-                        .get("value")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                }))
-            .unwrap_or(default_text)
-    };
     let saved = if written {
         own_value
     } else {
@@ -990,8 +930,6 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
         None => (saved, None),
     };
     Ok(PromptConfig {
-        cwd: cwd.to_owned(),
-        scope: if cwd == global { "global" } else { "project" }.into(),
         written,
         value,
         inherited,
@@ -1003,11 +941,10 @@ fn prompt_config(store: &Store, cwd: &str) -> Result<PromptConfig, HttpError> {
 /// in. `{{default}}` renders as nothing so older saved rules do not leak it;
 /// every other `{{name}}` stays visible, so a typo reads as a typo.
 pub fn caller_prompt(store: &Store, cwd: &str) -> Result<String, HttpError> {
-    let cwd = canonical_cwd(cwd);
-    let value = prompt_config(store, &cwd)?.value;
+    let value = prompt_config(store)?.value;
     Ok(oga_service::render_template(
         &value,
-        &[("default", String::new()), ("project", cwd)],
+        &[("default", String::new()), ("project", canonical_cwd(cwd))],
     ))
 }
 
@@ -1494,8 +1431,9 @@ fn parse_opencode_cache_models(
     models
 }
 
-fn model_settings_raw(store: &Store, cwd: &str) -> Result<RawModelSettings, HttpError> {
-    let value = read_json_setting(store, cwd, MODEL_SETTINGS_KEY)?.unwrap_or_else(|| json!({}));
+fn model_settings_raw(store: &Store) -> Result<RawModelSettings, HttpError> {
+    let value =
+        read_json_setting(store, &settings_cwd(), MODEL_SETTINGS_KEY)?.unwrap_or_else(|| json!({}));
     let raw = value.to_string();
     Ok(RawModelSettings {
         revision: config_revision(&raw),
@@ -1523,21 +1461,15 @@ pub(crate) fn resolved_model_settings(
     store: &Store,
     cwd: &str,
 ) -> Result<ResolvedModelSettings, HttpError> {
-    let global = canonical_cwd(&global_cwd().display().to_string());
-    let global_raw = read_json_setting(store, &global, MODEL_SETTINGS_KEY)?;
-    let project_raw = if cwd == global {
-        None
-    } else {
-        read_json_setting(store, cwd, MODEL_SETTINGS_KEY)?
-    };
-    let global_raw = global_raw.unwrap_or_else(|| json!({}));
+    let global = settings_cwd();
+    let global_raw =
+        read_json_setting(store, &global, MODEL_SETTINGS_KEY)?.unwrap_or_else(|| json!({}));
     let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let (overrides, love) =
-        read_model_overrides(&layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let (overrides, love) = read_global_overrides(&layers)
+        .map_err(|error| HttpError::bad_request(error.to_string()))?;
     Ok(ResolvedModelSettings {
         global: read_model_settings(&global_raw),
-        project: project_raw.as_ref().map(read_model_settings),
         overrides: Some(overrides),
         love,
     })
@@ -1545,41 +1477,26 @@ pub(crate) fn resolved_model_settings(
 
 /// Where a directory sends work that names no model, rule by rule.
 pub fn love_rules(cwd: &str) -> Result<LoveRules, HttpError> {
-    let global = canonical_cwd(&global_cwd().display().to_string());
+    let global = settings_cwd();
     let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let (_, love) =
-        read_model_overrides(&layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
+    let (_, love) = read_global_overrides(&layers)
+        .map_err(|error| HttpError::bad_request(error.to_string()))?;
     Ok(love)
 }
 
-async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<Value, HttpError> {
+/// Which models every worker may use, as one answer for the whole machine:
+/// what Settings saved, with the user's own `.oga.yaml` layered over it the same
+/// way routing reads them.
+async fn model_settings_view(store: &Store, refresh: bool) -> Result<Value, HttpError> {
     let profiles = store.repositories().profiles().list()?;
-    let global = canonical_cwd(&global_cwd().display().to_string());
-    let current = model_settings_raw(store, cwd)?;
-    let global_raw =
-        read_json_setting(store, &global, MODEL_SETTINGS_KEY)?.unwrap_or_else(|| json!({}));
-    let project_raw = if cwd == global {
-        None
-    } else {
-        read_json_setting(store, cwd, MODEL_SETTINGS_KEY)?
-    };
-    let global_settings = read_model_settings(&global_raw);
-    let project_settings = project_raw.as_ref().map(read_model_settings);
-    let layers = load_config_layers((cwd != global).then_some(Path::new(cwd)))
+    let saved = model_settings_raw(store)?;
+    let (overrides, love) = read_global_overrides(&global_layers()?)
         .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let overrides = model_override_scopes(&layers)?;
-    let global_model_settings = ResolvedModelSettings {
-        global: global_settings.clone(),
-        project: None,
-        overrides: Some(overrides.global.clone()),
-        love: LoveRules::default(),
-    };
-    let model_settings = ResolvedModelSettings {
-        global: global_settings.clone(),
-        project: project_settings.clone(),
-        overrides: Some(overrides.current.clone()),
-        love: overrides.love.clone(),
+    let settings = ResolvedModelSettings {
+        global: read_model_settings(&saved.value),
+        overrides: Some(overrides),
+        love: love.clone(),
     };
     let models = if refresh {
         discover_catalog(&profiles, true).await
@@ -1591,69 +1508,46 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
     let workers = profiles
         .iter()
         .map(|profile| {
-            let global_profile = global_settings.profiles.get(&profile.id);
-            let project_profile = project_settings
-                .as_ref()
-                .and_then(|settings| settings.profiles.get(&profile.id));
-            let inherited_enabled = global_profile
+            let enabled = settings
+                .global
+                .profiles
+                .get(&profile.id)
                 .and_then(|setting| setting.enabled)
                 .unwrap_or(profile.enabled);
-            let enabled = project_profile
-                .and_then(|setting| setting.enabled)
-                .unwrap_or(inherited_enabled);
             let model_rows = models
                 .iter()
                 .filter(|model| model.profile_id == profile.id)
                 .map(|model| {
-                    let project_override = overrides
-                        .project
+                    let stored = model_setting_value(&saved.value, &profile.id, &model.id);
+                    let file = model_override_for(
+                        settings
+                            .overrides
+                            .as_ref()
+                            .expect("overrides are read above"),
+                        &profile.id,
+                        &model.id,
+                    );
+                    let preferred = file
                         .as_ref()
-                        .and_then(|overrides| {
-                            model_override_for(overrides, &profile.id, &model.id)
-                        });
-                    let global_model = model_setting_value(&global_raw, &profile.id, &model.id);
-                    let project_model = project_raw.as_ref().and_then(|raw| {
-                        model_setting_value(raw, &profile.id, &model.id)
-                    });
-                    let inherited_enabled =
-                        model_enabled(&global_model_settings, &profile.id, &model.id);
-                    let enabled = model_enabled(&model_settings, &profile.id, &model.id);
-                    let inherited_preferred = global_model
-                        .as_ref()
-                        .and_then(|setting| setting.preferred)
+                        .and_then(|file| file.preferred)
+                        .or_else(|| stored.as_ref().and_then(|setting| setting.preferred))
                         .unwrap_or(false);
-                    let preferred = project_model
-                        .as_ref()
-                        .and_then(|setting| setting.preferred)
-                        .unwrap_or(inherited_preferred);
-                    let inherited_capabilities = global_model
-                        .as_ref()
-                        .and_then(|setting| setting.capabilities.clone())
+                    let capabilities = file
+                        .and_then(|file| file.capabilities)
+                        .or_else(|| stored.and_then(|setting| setting.capabilities))
                         .unwrap_or_else(|| model_capabilities(model));
-                    let capabilities = project_model
-                        .as_ref()
-                        .and_then(|setting| setting.capabilities.clone())
-                        .unwrap_or_else(|| inherited_capabilities.clone());
                     json!({
                         "id": model.id,
                         "label": model.label,
                         "contextWindow": model.context_window,
-                        "enabled": enabled,
-                        "inheritedEnabled": inherited_enabled,
-                        "hasEnabledOverride": project_model.as_ref().is_some_and(|setting| setting.enabled.is_some())
-                            || project_override.as_ref().is_some_and(|setting| setting.enabled.is_some()),
+                        "enabled": model_enabled(&settings, &profile.id, &model.id),
                         "preferred": preferred,
-                        "inheritedPreferred": inherited_preferred,
-                        "hasPreferredOverride": project_model.as_ref().is_some_and(|setting| setting.preferred.is_some()),
                         "capabilities": capabilities,
-                        "inheritedCapabilities": inherited_capabilities,
-                        "hasCapabilitiesOverride": project_model.as_ref().is_some_and(|setting| setting.capabilities.is_some()),
-                        "loved": overrides.love.names_model(
+                        "loved": love.names_model(
                             &profile.id,
                             &model.id,
                             Some(profile.default_model.as_str())
                         ),
-                        "availableGlobally": inherited_enabled,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -1662,92 +1556,56 @@ async fn model_settings_view(store: &Store, cwd: &str, refresh: bool) -> Result<
                 "label": profile.label,
                 "provider": profile.provider,
                 "enabled": enabled,
-                "inheritedEnabled": inherited_enabled,
-                "hasEnabledOverride": project_profile.is_some_and(|setting| setting.enabled.is_some()),
-                "availableGlobally": global == cwd || inherited_enabled,
                 "configured": profile.enabled,
                 "models": model_rows,
             })
         })
         .collect::<Vec<_>>();
     Ok(json!({
-        "cwd": cwd,
-        "scope": if global == cwd { "global" } else { "project" },
-        "revision": current.revision,
+        "revision": saved.revision,
         "workers": workers,
-        "love": overrides.love,
+        "love": love,
     }))
 }
 
-struct ModelOverrideScopes {
-    current: ModelOverrides,
-    global: ModelOverrides,
-    project: Option<ModelOverrides>,
-    love: LoveRules,
-}
-
-fn model_override_scopes(layers: &ConfigLayers) -> Result<ModelOverrideScopes, HttpError> {
-    let (current, love) =
-        read_model_overrides(layers).map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let (global, _) = read_model_overrides(&ConfigLayers {
-        user: layers.user.clone(),
+/// The user's own `.oga.yaml` and nothing else: which models are on is one
+/// answer for the whole machine.
+fn global_layers() -> Result<ConfigLayers, HttpError> {
+    Ok(ConfigLayers {
+        user: load_config_layers(None)
+            .map_err(|error| HttpError::bad_request(error.to_string()))?
+            .user,
         project: None,
-    })
-    .map_err(|error| HttpError::bad_request(error.to_string()))?;
-    let project = layers
-        .project
-        .clone()
-        .map(|project| {
-            read_model_overrides(&ConfigLayers {
-                user: None,
-                project: Some(project),
-            })
-            .map(|(overrides, _)| overrides)
-            .map_err(|error| HttpError::bad_request(error.to_string()))
-        })
-        .transpose()?;
-    Ok(ModelOverrideScopes {
-        current,
-        global,
-        project,
-        love,
     })
 }
 
 #[derive(Clone, Default)]
 struct ModelSetting {
-    enabled: Option<bool>,
     preferred: Option<bool>,
     capabilities: Option<Vec<String>>,
 }
 
 fn model_setting_value(value: &Value, profile_id: &str, model_id: &str) -> Option<ModelSetting> {
     let profile = value.get("profiles")?.get(profile_id)?.as_object()?;
-    let setting = profile
-        .get("modelEnabled")
-        .or_else(|| profile.get("models"))?
-        .get(model_id)?;
-    match setting {
-        Value::Bool(enabled) => Some(ModelSetting {
-            enabled: Some(*enabled),
-            ..ModelSetting::default()
-        }),
-        Value::Object(setting) => Some(ModelSetting {
-            enabled: setting.get("enabled").and_then(Value::as_bool),
-            preferred: setting.get("preferred").and_then(Value::as_bool),
-            capabilities: setting
-                .get("capabilities")
-                .and_then(Value::as_array)
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                }),
-        }),
-        _ => None,
-    }
+    let setting = ["models", "modelEnabled"]
+        .into_iter()
+        .find_map(|key| profile.get(key)?.get(model_id))?;
+    let Value::Object(setting) = setting else {
+        return Some(ModelSetting::default());
+    };
+    Some(ModelSetting {
+        preferred: setting.get("preferred").and_then(Value::as_bool),
+        capabilities: setting
+            .get("capabilities")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            }),
+    })
 }
 
 fn model_capabilities(model: &ModelInfo) -> Vec<String> {
@@ -2337,7 +2195,6 @@ mod catalog_tests {
         // caller explicitly asks for enabled-only rows.
         let settings = ResolvedModelSettings {
             global: Default::default(),
-            project: None,
             overrides: None,
             love: LoveRules::default(),
         };

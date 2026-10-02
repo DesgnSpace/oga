@@ -34,7 +34,6 @@ import type {
   AdvisorSettings,
   AdvisorView,
   AppearanceSettings,
-  BridgeResult,
   CleanupSettings,
   CleanupSnapshot,
   LoveRule,
@@ -43,7 +42,6 @@ import type {
   ModelSettingsSnapshot,
   ProfileView,
   PromptConfig,
-  PromptWrite,
   Provider,
   WaitSettings,
   WorkKind,
@@ -74,16 +72,13 @@ import {
   providerLabel,
   readCachedSettingsState,
   resetPrompt,
-  scopeCwd,
-  scopeFromKey,
-  scopeKey,
   settingsFirstPaintReady,
   setPromptSaving,
   supportedProviders,
   updatePromptText,
   writeCachedSettingsState,
 } from "./state";
-import type { ProjectSettingsScope, PromptsModel, SettingsState, SettingsTab } from "./state";
+import type { PromptsModel, SettingsState, SettingsTab } from "./state";
 import { SETTINGS_GROUPS, SETTINGS_TABS, tabLabel, tabMatchesQuery } from "./state";
 
 const UsagePage = lazy(() => import("@/screens/usage").then(({ UsagePage }) => ({ default: UsagePage })));
@@ -176,35 +171,25 @@ export default function SettingsPage({
       setState((s) => ({ ...s, overview: "error", error: summaryResult.error.message }));
       return;
     }
-    const projectsResult = await broker.projects();
-    if (!projectsResult.ok) {
-      setState((s) => ({ ...s, overview: "error", error: projectsResult.error.message }));
-      return;
-    }
     const healthResult = await broker.health();
     const health = healthResult.ok ? healthResult.value : undefined;
-    setState((s) => applyOverview(s, summaryResult.value, projectsResult.value, health));
+    setState((s) => applyOverview(s, summaryResult.value, health));
   }, []);
 
-  const loadModelScope = useCallback(
-    async (scope: ProjectSettingsScope, projects: SettingsState["projects"], refresh = false) => {
-      const cwd = scopeCwd(scope, projects);
-      setState((s) => ({ ...s, modelScope: scope, modelSettings: beginModelLoad(s.modelSettings) }));
-      const result = await broker.modelSettings(cwd, refresh);
-      if (result.ok) {
-        setState((s) => ({ ...s, modelSettings: applyModelSnapshot(s.modelSettings, result.value) }));
-      } else {
-        setState((s) => ({ ...s, modelSettings: applyModelLoadError(s.modelSettings, result.error.message) }));
-      }
-    },
-    [],
-  );
+  const loadModels = useCallback(async (refresh = false) => {
+    setState((s) => ({ ...s, modelSettings: beginModelLoad(s.modelSettings) }));
+    const result = await broker.modelSettings(refresh);
+    if (result.ok) {
+      setState((s) => ({ ...s, modelSettings: applyModelSnapshot(s.modelSettings, result.value) }));
+    } else {
+      setState((s) => ({ ...s, modelSettings: applyModelLoadError(s.modelSettings, result.error.message) }));
+    }
+  }, []);
 
-  const loadCallerPromptScope = useCallback(
-    async (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => {
-      const cwd = scopeCwd(scope, projects);
-      setState((s) => ({ ...s, callerPromptScope: scope, callerPrompts: beginPromptLoad(s.callerPrompts) }));
-      const result = await broker.callerPrompt(cwd);
+  const loadCallerPrompt = useCallback(
+    async () => {
+      setState((s) => ({ ...s, callerPrompts: beginPromptLoad(s.callerPrompts) }));
+      const result = await broker.callerPrompt();
       if (result.ok) {
         setState((s) => ({ ...s, callerPrompts: applyPromptConfig(s.callerPrompts, result.value) }));
       } else {
@@ -241,7 +226,7 @@ export default function SettingsPage({
   useEffect(() => {
     if (state.overview !== "ready") return;
     if (!state.modelSettings.snapshot && !state.modelSettings.loading && !state.modelSettings.loadError) {
-      void loadModelScope({ kind: "global" }, state.projects);
+      void loadModels();
     }
     if (
       !state.callerPrompts.loaded &&
@@ -249,7 +234,7 @@ export default function SettingsPage({
       state.callerPrompts.text === "" &&
       state.callerPrompts.inherited === ""
     ) {
-      void loadCallerPromptScope({ kind: "global" }, state.projects);
+      void loadCallerPrompt();
     }
     // This effect must run only when the overview becomes ready.
   }, [state.overview]);
@@ -262,18 +247,18 @@ export default function SettingsPage({
     if (wasOpen.current) return;
     wasOpen.current = true;
     if (!state.modelSettings.snapshot) return;
-    void loadModelScope(state.modelScope, state.projects, true);
-  }, [loadModelScope, open, state.modelScope, state.modelSettings.snapshot, state.projects]);
+    void loadModels(true);
+  }, [loadModels, open, state.modelSettings.snapshot]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await loadOverview();
-      await loadModelScope(state.modelScope, state.projects, true);
+      await loadModels(true);
     } finally {
       setRefreshing(false);
     }
-  }, [loadModelScope, loadOverview, state.modelScope, state.projects]);
+  }, [loadModels, loadOverview]);
 
   if (!settingsFirstPaintReady(state)) {
     return <SettingsSkeleton />;
@@ -346,7 +331,7 @@ export default function SettingsPage({
             <WorkersPanel
               state={state}
               setState={setState}
-              loadModelScope={loadModelScope}
+              loadModels={loadModels}
               onRefresh={handleRefresh}
               refreshing={refreshing}
               offline={offline}
@@ -414,12 +399,11 @@ export default function SettingsPage({
             hidden={activeTab !== "callerPrompts"}
             className={activeTab !== "callerPrompts" ? "settings-tab-panel-hidden" : undefined}
           >
-            <PromptsPanel
+            <BriefRulesPanel
               state={state}
               setState={setState}
-              loadPromptScope={loadCallerPromptScope}
+              loadPrompt={loadCallerPrompt}
               offline={offline}
-              surface={CALLER_PROMPT_SURFACE}
             />
           </div>
           <div
@@ -1189,14 +1173,14 @@ function suggestedModels(state: SettingsState, profileId: string | undefined): s
 function WorkersPanel({
   state,
   setState,
-  loadModelScope,
+  loadModels,
   onRefresh,
   refreshing,
   offline,
 }: {
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
-  loadModelScope: (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => Promise<void>;
+  loadModels: (refresh?: boolean) => Promise<void>;
   onRefresh: () => Promise<void>;
   refreshing: boolean;
   offline: boolean;
@@ -1305,7 +1289,7 @@ function WorkersPanel({
           profile={selected}
           state={state}
           setState={setState}
-          loadModelScope={loadModelScope}
+          loadModels={loadModels}
           offline={offline}
         />
         {deleteId === selected.id ? (
@@ -1460,27 +1444,20 @@ function WorkerModelsSection({
   profile,
   state,
   setState,
-  loadModelScope,
+  loadModels,
   offline,
 }: {
   profile: ProfileView;
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
-  loadModelScope: (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => Promise<void>;
+  loadModels: (refresh?: boolean) => Promise<void>;
   offline: boolean;
 }) {
   const [filter, setFilter] = useState("");
 
   const handleReload = useCallback(() => {
-    void loadModelScope(state.modelScope, state.projects);
-  }, [loadModelScope, state.modelScope, state.projects]);
-
-  const handleScopeChange = useCallback(
-    (raw: string) => {
-      void loadModelScope(scopeFromKey(raw), state.projects);
-    },
-    [loadModelScope, state.projects],
-  );
+    void loadModels();
+  }, [loadModels]);
 
   const worker = state.modelSettings.snapshot?.workers.find((w) => w.id === profile.id);
   const orderedModelIds = useRef<string[]>([]);
@@ -1517,10 +1494,12 @@ function WorkerModelsSection({
     async (modelId: string, enabled: boolean) => {
       const snapshot = latest.current;
       const key = modelRowKey(profile.id, modelId);
-      const cwd = scopeCwd(snapshot.modelScope, snapshot.projects) ?? "";
-      const update = buildModelSettingsUpdate(cwd, profile.id, modelId, snapshot.modelSettings.snapshot?.revision, {
-        enabled,
-      });
+      const update = buildModelSettingsUpdate(
+        profile.id,
+        modelId,
+        snapshot.modelSettings.snapshot?.revision,
+        { enabled },
+      );
 
       setState((s) => {
         let next = beginModelUpdate(s.modelSettings, key);
@@ -1549,19 +1528,6 @@ function WorkerModelsSection({
     <Section
       className="settings-worker-models"
       title="Models"
-      actions={
-        <label className="settings-scope-picker">
-          <span>Applies to</span>
-          <select value={scopeKey(state.modelScope)} onChange={(e) => handleScopeChange(e.target.value)}>
-            <option value="global">All projects</option>
-            {state.projects?.projects.map((path) => (
-              <option key={path} value={path}>
-                {projectName(path)}
-              </option>
-            ))}
-          </select>
-        </label>
-      }
     >
       {state.modelSettings.loading ? (
         <p className="settings-status" role="status">Discovering models…</p>
@@ -2276,73 +2242,36 @@ function MemoriesPanel({
 }
 
 
-/** A prompt text a settings tab edits: its copy, and how the tab reads and writes it. */
-interface PromptSurface {
-  tab: SettingsTab;
-  label: string;
-  /** Shown over the editor when the label differs from the tab's. */
-  heading?: string;
-  helper: React.ReactNode;
-  model: (state: SettingsState) => PromptsModel;
-  scope: (state: SettingsState) => ProjectSettingsScope;
-  apply: (state: SettingsState, model: PromptsModel) => SettingsState;
-  save: (request: PromptWrite) => Promise<BridgeResult<PromptConfig>>;
-}
-
-const CALLER_PROMPT_SURFACE: PromptSurface = {
-  tab: "callerPrompts",
-  label: "How briefs are written",
-  heading: "How briefs are written",
-  helper: (
-    <>
-      Your instructions replace Oga&apos;s defaults. Leave them unchanged or clear the field to use the latest
-      default. Use {"{{project}}"} for the folder path.
-    </>
-  ),
-  model: (state) => state.callerPrompts,
-  scope: (state) => state.callerPromptScope,
-  apply: (state, callerPrompts) => ({ ...state, callerPrompts }),
-  save: (request) => broker.putCallerPrompt(request),
-};
-
-function PromptsPanel({
+/** How briefs are written, for every project on this machine. */
+function BriefRulesPanel({
   state,
   setState,
-  loadPromptScope,
+  loadPrompt,
   offline,
-  surface,
 }: {
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
-  loadPromptScope: (scope: ProjectSettingsScope, projects: SettingsState["projects"]) => Promise<void>;
+  loadPrompt: () => Promise<void>;
   offline: boolean;
-  surface: PromptSurface;
 }) {
-  const prompts = surface.model(state);
-  const handleScopeChange = useCallback(
-    (raw: string) => {
-      const scope = scopeFromKey(raw);
-      void loadPromptScope(scope, state.projects);
-    },
-    [loadPromptScope, state.projects],
-  );
+  const prompts = state.callerPrompts;
 
   const handleReload = useCallback(() => {
-    void loadPromptScope(surface.scope(state), state.projects);
-  }, [loadPromptScope, surface, state]);
+    void loadPrompt();
+  }, [loadPrompt]);
 
   const handleSave = useCallback(async () => {
     const dirty = isPromptDirty(prompts);
     if (!dirty || prompts.saving) return;
-    setState((s) => surface.apply(s, setPromptSaving(surface.model(s), true)));
-    const payload = promptPayload(prompts);
+    setState((s) => ({ ...s, callerPrompts: setPromptSaving(s.callerPrompts, true) }));
     const lifecycle = toast.pending("Saving instructions");
-    const result = await surface.save(payload);
+    const result = await broker.putCallerPrompt(promptPayload(prompts));
     if (result.ok) {
       lifecycle.dismiss();
-      setState((s) =>
-        surface.apply(s, finishPromptSave(surface.model(s), { ok: true, snapshot: result.value })),
-      );
+      setState((s) => ({
+        ...s,
+        callerPrompts: finishPromptSave(s.callerPrompts, { ok: true, snapshot: result.value }),
+      }));
     } else {
       const err =
         result.error.status !== undefined
@@ -2352,40 +2281,25 @@ function PromptsPanel({
         description: err.kind === "unreachable" ? "Check that Oga is running, then try again." : "Try again.",
         detail: err.kind === "message" ? err.message : undefined,
       });
-      setState((s) => surface.apply(s, finishPromptSave(surface.model(s), { ok: false, error: err })));
+      setState((s) => ({ ...s, callerPrompts: finishPromptSave(s.callerPrompts, { ok: false, error: err }) }));
     }
-  }, [prompts, setState, surface]);
+  }, [prompts, setState]);
 
   const handleReset = useCallback(() => {
-    setState((s) => surface.apply(s, resetPrompt(surface.model(s))));
-  }, [setState, surface]);
+    setState((s) => ({ ...s, callerPrompts: resetPrompt(s.callerPrompts) }));
+  }, [setState]);
 
   const handleTextChange = useCallback(
     (text: string) => {
-      setState((s) => surface.apply(s, updatePromptText(surface.model(s), text)));
+      setState((s) => ({ ...s, callerPrompts: updatePromptText(s.callerPrompts, text) }));
     },
-    [setState, surface],
+    [setState],
   );
 
   return (
     <>
-      <PageHeader
-        title={tabLabel(surface.tab)}
-        actions={
-          <label className="settings-scope-picker">
-            <span>Applies to</span>
-            <select value={scopeKey(surface.scope(state))} onChange={(e) => handleScopeChange(e.target.value)}>
-              <option value="global">All projects</option>
-              {state.projects?.projects.map((path) => (
-                <option key={path} value={path}>
-                  {projectName(path)}
-                </option>
-              ))}
-            </select>
-          </label>
-        }
-      />
-      <Section title={surface.heading}>
+      <PageHeader title={tabLabel("callerPrompts")} />
+      <Section title="How briefs are written">
         {prompts.loadError ? (
           <div className="settings-message settings-message-error" role="alert">
             <strong>Couldn&apos;t read these instructions</strong>
@@ -2400,11 +2314,15 @@ function PromptsPanel({
           <div className="settings-prompt-editor">
             <div className="settings-prompt-meta">
               <span className="settings-muted">
-                {prompts.configPath ? "Set by the project file" : prompts.written ? "Set for this project" : "Using the default for all projects"}
+                {prompts.configPath
+                  ? "Set by your own config file"
+                  : prompts.written
+                    ? "Your instructions, for every project"
+                    : "Using the default for every project"}
               </span>
               {prompts.configPath === undefined && prompts.written ? (
                 <button className="text-button" type="button" onClick={handleReset}>
-                  Use inherited
+                  Use the default
                 </button>
               ) : null}
             </div>
@@ -2412,11 +2330,16 @@ function PromptsPanel({
               value={prompts.text}
               onChange={(e) => handleTextChange(e.target.value)}
               readOnly={prompts.configPath !== undefined}
-              aria-label={surface.label}
+              aria-label="How briefs are written"
             />
-            <p className="settings-helper">{surface.helper}</p>
+            <p className="settings-helper">
+              Replaces Oga&apos;s wording for every project; clear it to go back to the default. Use {"{{project}}"} for
+              the folder path.
+            </p>
             {prompts.configPath !== undefined ? (
-              <p className="settings-helper">Set by the project file. Edit that file to change them.</p>
+              <p className="settings-helper">
+                Your own config file sets these. Edit {prompts.configPath} to change them.
+              </p>
             ) : (
               <div className="settings-form-footer">
                 <button

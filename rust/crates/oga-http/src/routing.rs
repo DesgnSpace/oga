@@ -675,7 +675,7 @@ mod tests {
     #[tokio::test]
     async fn model_hint_can_route_without_a_profile() {
         let (directory, store) = fixture();
-        switch_model(&store, directory.path(), "profile", MODEL, true);
+        switch_model(&store, "profile", MODEL, true);
 
         let route = route_to_model(store, directory.path())
             .await
@@ -688,7 +688,7 @@ mod tests {
     #[tokio::test]
     async fn project_loved_model_reaches_unnamed_route() {
         let (directory, store) = fixture();
-        switch_model(&store, directory.path(), "profile", MODEL, true);
+        switch_model(&store, "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("models:\n  profile:\n    {MODEL}:\n      loved: true\n"),
@@ -717,7 +717,7 @@ mod tests {
     #[tokio::test]
     async fn a_love_rule_for_the_kind_of_work_reaches_an_unnamed_route() {
         let (directory, store) = fixture();
-        switch_model(&store, directory.path(), "profile", MODEL, true);
+        switch_model(&store, "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("love:\n  - model: profile:{MODEL}\n    when: [context]\n    effort: low\n"),
@@ -748,7 +748,7 @@ mod tests {
         use oga_domain::WorkKind;
 
         let (directory, store) = fixture();
-        switch_model(&store, directory.path(), "profile", MODEL, true);
+        switch_model(&store, "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("love:\n  - model: profile:{MODEL}\n    when: [ui]\n"),
@@ -802,7 +802,7 @@ mod tests {
         use oga_domain::WorkKind;
 
         let (directory, store) = fixture();
-        switch_model(&store, directory.path(), "profile", MODEL, true);
+        switch_model(&store, "profile", MODEL, true);
         std::fs::write(
             directory.path().join(".oga.yaml"),
             format!("love:\n  - model: profile:{MODEL}\n    when: [mechanical]\n"),
@@ -875,13 +875,13 @@ mod tests {
         );
 
         // Switched on, then off again: the switch is what decides, both ways.
-        switch_model(&store, directory.path(), "profile", MODEL, true);
+        switch_model(&store, "profile", MODEL, true);
         assert!(
             route_to_model(store.clone(), directory.path())
                 .await
                 .is_ok()
         );
-        switch_model(&store, directory.path(), "profile", MODEL, false);
+        switch_model(&store, "profile", MODEL, false);
         assert!(route_to_model(store, directory.path()).await.is_err());
     }
 
@@ -908,13 +908,15 @@ mod tests {
                     "2026-01-01T00:00:00.000Z",
                 )
                 .expect("profile insert");
-            switch_model(&store, directory.path(), id, model, true);
+            switch_model(&store, id, model, true);
         }
         (directory, store)
     }
 
-    fn switch_model(store: &Store, cwd: &Path, profile: &str, model: &str, on: bool) {
-        let cwd = oga_config::canonical_cwd(cwd).display().to_string();
+    fn switch_model(store: &Store, profile: &str, model: &str, on: bool) {
+        let cwd = oga_config::canonical_cwd(oga_config::global_cwd())
+            .display()
+            .to_string();
         let existing: Value = store
             .repositories()
             .settings()
@@ -1247,7 +1249,7 @@ mod tests {
     async fn an_answer_naming_a_worker_that_cannot_run_it_leaves_the_rules_in_charge() {
         let (directory, store) = two_workers();
         love(directory.path(), &format!("fast:{FAST_MODEL}"));
-        switch_model(&store, directory.path(), "deep", DEEP_MODEL, false);
+        switch_model(&store, "deep", DEEP_MODEL, false);
         let state = HttpState::new(store);
         let input = unnamed(directory.path());
         let world = world_of(&state, &input);
@@ -1273,7 +1275,7 @@ mod tests {
     #[tokio::test]
     async fn a_switched_off_worker_is_never_offered_as_a_destination() {
         let (directory, store) = two_workers();
-        switch_model(&store, directory.path(), "deep", DEEP_MODEL, false);
+        switch_model(&store, "deep", DEEP_MODEL, false);
         let state = HttpState::new(store);
         let world = world_of(&state, &unnamed(directory.path()));
 

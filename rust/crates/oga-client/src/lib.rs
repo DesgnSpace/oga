@@ -404,16 +404,8 @@ pub struct MemoryList {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ProjectList {
-    pub global: String,
-    pub projects: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptConfig {
-    pub cwd: String,
-    pub scope: String,
     pub written: bool,
     pub value: String,
     pub inherited: String,
@@ -422,8 +414,6 @@ pub struct PromptConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSettingsSnapshot {
-    pub cwd: String,
-    pub scope: String,
     pub revision: String,
     pub workers: Vec<WorkerSettings>,
 }
@@ -435,9 +425,7 @@ pub struct WorkerSettings {
     pub label: String,
     pub provider: oga_domain::Provider,
     pub enabled: bool,
-    pub inherited_enabled: bool,
     pub has_enabled_override: bool,
-    pub available_globally: bool,
     pub configured: bool,
     pub models: Vec<ModelSettingsModel>,
 }
@@ -448,15 +436,11 @@ pub struct ModelSettingsModel {
     pub id: String,
     pub label: String,
     pub enabled: bool,
-    pub inherited_enabled: bool,
     pub has_enabled_override: bool,
     pub preferred: bool,
-    pub inherited_preferred: bool,
     pub has_preferred_override: bool,
     pub capabilities: Vec<String>,
-    pub inherited_capabilities: Vec<String>,
     pub has_capabilities_override: bool,
-    pub available_globally: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -640,7 +624,6 @@ pub struct MemoryWrite {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptWrite {
-    pub cwd: String,
     pub written: bool,
     pub value: String,
 }
@@ -657,7 +640,6 @@ pub struct RoutingPreviewRequest {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ModelSettingsUpdate {
-    pub cwd: String,
     pub profile_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
