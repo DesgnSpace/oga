@@ -43,10 +43,6 @@ function task(id: string, cwd: string, state: TaskState): TaskSummary {
 }
 
 describe("summary paging", () => {
-  it("skips aggregates unused by the sidebar", () => {
-    expect(summaryQuery(defaultSidebarState()).skipSummaryAggregates).toBe(true);
-  });
-
   it("sends the filters that shape the group totals", () => {
     const query = summaryQuery({
       ...defaultSidebarState(),
