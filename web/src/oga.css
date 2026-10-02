@@ -936,6 +936,20 @@ a {
     color: var(--color-text);
 }
 
+/* A key on a keyboard, drawn as a cap wherever the app lists what it answers. */
+.keycap {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 var(--space-2);
+    border: 1px solid var(--color-border);
+    border-bottom-width: 2px;
+    border-radius: var(--radius-chip);
+    background: var(--color-bg);
+    font: inherit;
+    font-size: var(--text-md);
+    text-align: center;
+}
+
 .sidebar-list-shell {
     flex: 1;
     min-height: 0;
@@ -1590,6 +1604,11 @@ h1 {
     white-space: pre-wrap;
 }
 
+/* Only there so the review keys have a root to listen inside. */
+.changed-files-view {
+    display: contents;
+}
+
 .changed-files-panel {
     display: flex;
     flex-direction: column;
@@ -1834,6 +1853,64 @@ h1 {
     border-radius: var(--radius-panel);
     background: var(--color-surface);
     box-shadow: 0 4px 16px color-mix(in srgb, #000 16%, transparent);
+}
+
+/* The one small cap in the header that opens the whole set. */
+.changed-files-keys {
+    position: relative;
+}
+
+.changed-files-keys-trigger {
+    width: var(--control-height);
+    padding: 0;
+}
+
+.changed-files-keys-panel {
+    position: absolute;
+    z-index: var(--z-raised);
+    top: 100%;
+    right: 0;
+    width: 280px;
+    margin-top: var(--space-1);
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-panel);
+    background: var(--color-surface);
+    box-shadow: 0 4px 16px color-mix(in srgb, #000 16%, transparent);
+}
+
+.changed-files-keys-heading {
+    margin: 0 0 var(--space-2);
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+}
+
+.changed-files-keys-list {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+}
+
+.changed-files-keys-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+}
+
+.changed-files-keys-cap {
+    display: flex;
+    flex: 0 0 auto;
+    gap: var(--space-1);
+}
+
+.changed-files-keys-combo {
+    display: inline-flex;
+    gap: var(--space-1);
+}
+
+.changed-files-keys-action {
+    margin: 0;
+    font-size: var(--text-base);
 }
 
 .changed-files-tree-list {
@@ -4865,19 +4942,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-}
-
-.settings-shortcut-combo kbd {
-    display: inline-block;
-    min-width: 1.6em;
-    padding: 0 var(--space-2);
-    border: 1px solid var(--color-border);
-    border-bottom-width: 2px;
-    border-radius: var(--radius-chip);
-    background: var(--color-bg);
-    font: inherit;
-    font-size: var(--text-md);
-    text-align: center;
 }
 
 /* A worker row opens its worker from anywhere but the switch: the open

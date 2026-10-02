@@ -9,6 +9,7 @@
 - Finished tasks no longer leave old copies of your project taking up space. Once a task's work is done and the age you set has passed, Oga removes its copy; a copy with uncommitted changes or still in use by a running task stays, and the task tells you why.
 - Full-screen changed files now opens with every file closed, so long diffs no longer slow it down. Open a file to read its diff.
 - You can now mark a file reviewed as you read it. The file closes and dims, the header counts how far you are, and a file the worker edits again loses its mark so you never trust a stale tick. Your marks stay put per task, and full screen can open or close every file at once.
+- Review changed files without the mouse: J and K move to the next or previous file, O or Enter opens and closes the one you are on, R marks it reviewed, and N jumps to the next file you have not reviewed. A ? in the panel's header lists them.
 
 ## 0.2.3 - 2026-09-29
 

@@ -27,6 +27,7 @@ import { MarkdownContent } from "@/domain/markdown";
 import { useTaskNotifications } from "@/state/notification-preferences";
 import { toast } from "@/state/toast";
 import { workerToastName } from "@/lib/toast-subject";
+import { REVIEW_SHORTCUTS } from "@/screens/task/reviewKeys";
 import type { AppUpdateStatus } from "@/shell/useAppUpdates";
 import { applyFont, applyTechnicalDetails, FONT_OPTIONS, resolveFont } from "@/appearance";
 import type {
@@ -1047,6 +1048,10 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    heading: "Reviewing changed files",
+    rows: REVIEW_SHORTCUTS,
+  },
+  {
     heading: "The task list",
     rows: [
       { keys: [["↑"], ["↓"]], action: "Move between tasks" },
@@ -1083,7 +1088,7 @@ function ShortcutsPanel() {
                     {row.keys.map((combo) => (
                       <span key={combo.join("+")} className="settings-shortcut-combo">
                         {combo.map((key) => (
-                          <kbd key={key}>{key}</kbd>
+                          <kbd className="keycap" key={key}>{key}</kbd>
                         ))}
                       </span>
                     ))}

@@ -18,11 +18,15 @@ import {
   type ChangesSource,
 } from "@/state/changed-files-preferences";
 import { useReviewedFiles, type ReviewedFiles } from "@/state/reviewed-files";
+import { REVIEW_SHORTCUTS, useReviewKeys } from "./reviewKeys";
 import { patchFromBlocks } from "@/lib/unified-patch";
 import { DiffHeader } from "@/components/DiffHeader";
 
 /** Arrow-key resize increment, in pixels. */
 const RESIZE_KEYBOARD_STEP = 16;
+
+/** How long a scroll the panel asked for keeps the file it aimed at on screen. */
+const SCROLL_SETTLE_MS = 600;
 
 /** Names the full-screen dialog for assistive technology. */
 const FULL_SCREEN_TITLE_ID = "changed-files-full-screen-title";
@@ -84,6 +88,36 @@ function without(previous: Set<string>, key: string): Set<string> {
   return next;
 }
 
+/** Closes an open popover on Escape or on a press anywhere outside it. */
+function useDismissOutside(
+  open: boolean,
+  close: () => void,
+  ref: React.RefObject<HTMLElement | null>,
+): void {
+  React.useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      // SAFETY: pointer events always target a Node in the DOM tree.
+      const target = event.target as Node | null;
+      if (target && ref.current?.contains(target)) return;
+      close();
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      close();
+      // Read in the capture phase, so one Escape takes one layer: the popover
+      // here, and not the full-screen review or the composer behind it.
+      event.stopPropagation();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onEscape, true);
+    };
+  }, [open, close, ref]);
+}
+
 function ChangedFileRow({
   file,
   expanded,
@@ -92,6 +126,7 @@ function ChangedFileRow({
   reviewed,
   active,
   registerRow,
+  registerHeading,
   showDiffHeader,
 }: {
   file: ChangedFileView;
@@ -101,6 +136,7 @@ function ChangedFileRow({
   reviewed: ReviewedFiles;
   active: boolean;
   registerRow: (path: string, element: HTMLElement | null) => void;
+  registerHeading: (path: string, element: HTMLElement | null) => void;
   showDiffHeader: boolean;
 }) {
   const patch = React.useMemo(
@@ -119,6 +155,7 @@ function ChangedFileRow({
           className="changed-file-heading"
           type="button"
           aria-expanded={expanded}
+          ref={(element) => registerHeading(file.path, element)}
           onClick={onToggle}
         >
           <span className="changed-file-disclosure" aria-hidden="true">
@@ -170,10 +207,11 @@ interface FileRowProps {
   onToggleReviewed: (file: ChangedFileView) => void;
   activePath?: string;
   registerRow: (path: string, element: HTMLElement | null) => void;
+  registerHeading: (path: string, element: HTMLElement | null) => void;
   showDiffHeader: boolean;
 }
 
-function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, activePath, registerRow, showDiffHeader }: FileRowProps & { files: ChangedFileView[] }) {
+function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, activePath, registerRow, registerHeading, showDiffHeader }: FileRowProps & { files: ChangedFileView[] }) {
   return (
     <div className="changed-files-list">
       {files.map((file) => (
@@ -186,6 +224,7 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggl
           reviewed={reviewed}
           active={activePath === file.path}
           registerRow={registerRow}
+          registerHeading={registerHeading}
           showDiffHeader={showDiffHeader}
         />
       ))}
@@ -425,14 +464,19 @@ function ChangedFilesView({
 
   const [filePopoverOpen, setFilePopoverOpen] = React.useState(false);
   const filePopoverRef = React.useRef<HTMLDivElement>(null);
+  const [keysOpen, setKeysOpen] = React.useState(false);
+  const keysRef = React.useRef<HTMLDivElement>(null);
   const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(new Set());
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set());
   const [expandedTurns, setExpandedTurns] = React.useState<Set<string>>(new Set());
   const [activePath, setActivePath] = React.useState<string | undefined>(undefined);
-  const [scrollRequest, setScrollRequest] = React.useState<{ path: string } | undefined>(undefined);
+  const [scrollRequest, setScrollRequest] = React.useState<{ path: string; takeFocus?: boolean } | undefined>(undefined);
+  const [viewRoot, setViewRoot] = React.useState<HTMLDivElement | null>(null);
   const seenTurnsRef = React.useRef<Set<string>>(new Set());
   const rowElementsRef = React.useRef<Map<string, HTMLElement>>(new Map());
+  const headingElementsRef = React.useRef<Map<string, HTMLElement>>(new Map());
   const scrollFrameRef = React.useRef<number | undefined>(undefined);
+  const heldUntilRef = React.useRef(0);
 
   // Docked, the newest turn opens on its own, same as the reader would expect
   // from an accordion; turns they have already seen keep whatever they set.
@@ -449,24 +493,10 @@ function ChangedFilesView({
     });
   }, [turns, full]);
 
-  React.useEffect(() => {
-    if (!filePopoverOpen) return;
-    const closeOnPointer = (event: PointerEvent) => {
-      // SAFETY: pointer events always target a Node in the DOM tree.
-      const target = event.target as Node | null;
-      if (target && filePopoverRef.current?.contains(target)) return;
-      setFilePopoverOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFilePopoverOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnPointer);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointer);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [filePopoverOpen]);
+  const closeFilePopover = React.useCallback(() => setFilePopoverOpen(false), []);
+  const closeKeys = React.useCallback(() => setKeysOpen(false), []);
+  useDismissOutside(filePopoverOpen, closeFilePopover, filePopoverRef);
+  useDismissOutside(keysOpen, closeKeys, keysRef);
 
   React.useEffect(() => () => {
     if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current);
@@ -482,6 +512,11 @@ function ChangedFilesView({
       const element = rowElementsRef.current.get(scrollRequest.path);
       if (element) {
         element.scrollIntoView({ block: "center", behavior: "smooth" });
+        // The row takes the focus rather than the document, so Enter and the
+        // rest of the review keys act on the file that just came into view.
+        if (scrollRequest.takeFocus) {
+          headingElementsRef.current.get(scrollRequest.path)?.focus({ preventScroll: true });
+        }
         setActivePath(scrollRequest.path);
         return;
       }
@@ -499,26 +534,31 @@ function ChangedFilesView({
     if (element) rowElementsRef.current.set(path, element);
   }, []);
 
+  const registerHeading = React.useCallback((path: string, element: HTMLElement | null) => {
+    if (element) headingElementsRef.current.set(path, element);
+  }, []);
+
   const toggleDir = (path: string) => {
     setCollapsedDirs((prev) => toggled(prev, path));
   };
 
-  const toggleFile = (path: string) => {
+  const toggleFile = React.useCallback((path: string) => {
     setExpandedPaths((prev) => toggled(prev, path));
-  };
+  }, []);
 
   const toggleTurn = (key: string) => {
     setExpandedTurns((prev) => toggled(prev, key));
   };
 
-  // Marking a file retires it: the diff closes, so the next one is the only one left open.
-  const toggleReviewed = (file: ChangedFileView) => {
+  // Marking a file retires it: the diff closes, so the next one is the only one
+  // left open. The file keeps the panel's place, so the next key moves off the
+  // file just read rather than back onto it.
+  const toggleReviewed = React.useCallback((file: ChangedFileView) => {
     if (!reviewed.isReviewed(file)) {
       setExpandedPaths((prev) => without(prev, file.path));
-      setActivePath((previous) => (previous === file.path ? undefined : previous));
     }
     reviewed.toggle(file);
-  };
+  }, [reviewed]);
 
   const openAll = () => {
     setExpandedPaths(new Set(changes.files.map((file) => file.path)));
@@ -528,7 +568,7 @@ function ChangedFilesView({
 
   const closeAll = () => setExpandedPaths(new Set());
 
-  const selectFile = (path: string) => {
+  const revealFile = React.useCallback((path: string) => {
     if (turns) {
       setExpandedTurns((prev) => {
         const next = new Set(prev);
@@ -539,14 +579,69 @@ function ChangedFilesView({
       });
     }
     setExpandedPaths((prev) => new Set(prev).add(path));
-    setScrollRequest({ path });
+  }, [turns]);
+
+  // The file the reader picked holds the panel still for a moment, so the row
+  // it asked for stays the one on screen while the list glides to it.
+  const requestScroll = (path: string, takeFocus = false) => {
+    heldUntilRef.current = Date.now() + SCROLL_SETTLE_MS;
+    setScrollRequest({ path, takeFocus });
   };
+
+  const selectFile = (path: string) => {
+    revealFile(path);
+    requestScroll(path);
+  };
+
+  /** Opens the file, brings it into view, and puts the keyboard on it. */
+  const goTo = React.useCallback((path: string) => {
+    revealFile(path);
+    setActivePath(path);
+    requestScroll(path, true);
+  }, [revealFile]);
+
+  // Scrolling by hand means it: the file on screen follows the reader's own
+  // scroll from here on, glide or no glide.
+  const endScrollHold = () => {
+    heldUntilRef.current = 0;
+  };
+
+  // The files as the panel lists them: grouped, that is turn by turn, and a
+  // file two turns touched is one file to move through.
+  const order = React.useMemo(() => {
+    const listed = grouped ? turns.turns.flatMap((turn) => turn.files) : changes.files;
+    const seen = new Set<string>();
+    return listed.filter((file) => {
+      if (seen.has(file.path)) return false;
+      seen.add(file.path);
+      return true;
+    });
+  }, [grouped, turns, changes.files]);
+
+  const activeFile = React.useMemo(
+    () => order.find((file) => file.path === activePath),
+    [order, activePath],
+  );
+
+  useReviewKeys({
+    root: viewRoot,
+    files: order,
+    activeFile,
+    isReviewed: reviewed.isReviewed,
+    goTo,
+    toggleOpen: toggleFile,
+    toggleReviewed,
+  });
 
   const handleDiffsScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (scrollFrameRef.current !== undefined) return;
     const container = event.currentTarget;
     scrollFrameRef.current = requestAnimationFrame(() => {
       scrollFrameRef.current = undefined;
+      // Scrolling the panel moves the file on screen, except while it is still
+      // gliding to the file a click or a key asked for: that one is the file
+      // the reader chose, whatever the top of the list happens to be.
+      if (Date.now() < heldUntilRef.current) return;
       const top = container.getBoundingClientRect().top;
       let above: string | undefined;
       let aboveOffset = -Infinity;
@@ -568,7 +663,10 @@ function ChangedFilesView({
     });
   };
 
-  const allOpen = changes.files.every((file) => expandedPaths.has(file.path));
+  // Both counts read the files the panel lists, so a path left behind by a
+  // collapsed turn cannot make the header claim the wrong thing.
+  const allOpen = order.length > 0 && order.every((file) => expandedPaths.has(file.path));
+  const noneOpen = order.every((file) => !expandedPaths.has(file.path));
 
   const fileRowProps: FileRowProps = {
     expandedPaths,
@@ -577,6 +675,7 @@ function ChangedFilesView({
     onToggleReviewed: toggleReviewed,
     activePath,
     registerRow,
+    registerHeading,
     showDiffHeader: !full,
   };
 
@@ -595,7 +694,12 @@ function ChangedFilesView({
   );
 
   const diffs = (
-    <div className="changed-files-diffs" onScroll={handleDiffsScroll}>
+    <div
+      className="changed-files-diffs"
+      onScroll={handleDiffsScroll}
+      onWheel={endScrollHold}
+      onTouchMove={endScrollHold}
+    >
       {grouped ? (
         <div className="changed-files-turns">
           {turns.turns.map((turn) => (
@@ -615,7 +719,7 @@ function ChangedFilesView({
   );
 
   return (
-    <>
+    <div className="changed-files-view" ref={setViewRoot}>
       <header className={`changed-files-header${full ? " changed-files-header-full" : ""}`}>
         <div className="changed-files-header-row">
           <div className="changed-files-header-title">
@@ -662,10 +766,46 @@ function ChangedFilesView({
                 <button className="text-button" type="button" disabled={allOpen} onClick={openAll}>
                   Open all
                 </button>
-                <button className="text-button" type="button" disabled={expandedPaths.size === 0} onClick={closeAll}>
+                <button className="text-button" type="button" disabled={noneOpen} onClick={closeAll}>
                   Close all
                 </button>
               </>
+            )}
+            {!empty && error === undefined && (
+              <div className="changed-files-keys" ref={keysRef}>
+                <button
+                  className="text-button changed-files-keys-trigger"
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded={keysOpen}
+                  title="Keys for reviewing files"
+                  onClick={() => setKeysOpen((value) => !value)}
+                >
+                  <kbd className="keycap" aria-hidden="true">?</kbd>
+                  <span className="visually-hidden">Keys for reviewing files</span>
+                </button>
+                {keysOpen && (
+                  <div className="changed-files-keys-panel">
+                    <p className="changed-files-keys-heading">While the changed files have focus</p>
+                    <dl className="changed-files-keys-list">
+                      {REVIEW_SHORTCUTS.map((row) => (
+                        <div className="changed-files-keys-row" key={row.action}>
+                          <dt className="changed-files-keys-cap">
+                            {row.keys.map((combo) => (
+                              <span className="changed-files-keys-combo" key={combo.join("")}>
+                                {combo.map((key) => (
+                                  <kbd className="keycap" key={key}>{key}</kbd>
+                                ))}
+                              </span>
+                            ))}
+                          </dt>
+                          <dd className="changed-files-keys-action">{row.action}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                )}
+              </div>
             )}
             <button
               className="icon-button"
@@ -753,7 +893,7 @@ function ChangedFilesView({
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 
