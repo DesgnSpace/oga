@@ -10,6 +10,7 @@
 - Full-screen changed files now opens with every file closed, so long diffs no longer slow it down. Open a file to read its diff.
 - You can now mark a file reviewed as you read it. The file closes and dims, the header counts how far you are, and a file the worker edits again loses its mark so you never trust a stale tick. Your marks stay put per task, and full screen can open or close every file at once.
 - Review changed files without the mouse: J and K move to the next or previous file, O or Enter opens and closes the one you are on, R marks it reviewed, and N jumps to the next file you have not reviewed. A ? in the panel's header lists them.
+- Each file in the changed files panel now has its own two actions: a copy button that takes its path, and one that opens it in your editor, right in the task's own copy of the project. A diff too big to show tells you to open it there instead.
 - Changed files can now be read by folder, as they always were, or by size so the biggest edits come first. Lockfiles, snapshots and build output collect into a Generated group at the bottom, closed until you open it and left out of the review count. Whichever order you pick sticks.
 
 ## 0.2.3 - 2026-09-29

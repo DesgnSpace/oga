@@ -18,8 +18,8 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use crate::{
-    agents, consumers, context, health, hooks, profiles, routing, settings, sse, state, tasks,
-    usage,
+    agents, consumers, context, health, hooks, open, profiles, routing, settings, sse, state,
+    tasks, usage,
 };
 
 /// Shared state for every HTTP handler.
@@ -31,6 +31,7 @@ pub struct HttpState {
     pub build: String,
     pub staleness: Staleness,
     pub reconcile_debounce: context::ReconcileDebounce,
+    pub opener: open::Opener,
 }
 
 /// Name used by applications that construct the broker router.
@@ -45,6 +46,7 @@ impl HttpState {
             build: "dev".into(),
             staleness: Staleness::default(),
             reconcile_debounce: context::ReconcileDebounce::default(),
+            opener: open::system_opener(),
         }
     }
 
@@ -60,6 +62,11 @@ impl HttpState {
 
     pub fn with_staleness(mut self, staleness: Staleness) -> Self {
         self.staleness = staleness;
+        self
+    }
+
+    pub fn with_opener(mut self, opener: open::Opener) -> Self {
+        self.opener = opener;
         self
     }
 }
@@ -147,6 +154,7 @@ pub fn router(state: HttpState) -> Router {
         .route("/api/tasks/{id}/diff", get(state::get_task_diff))
         .route("/api/tasks/{id}/branches", get(state::get_task_branches))
         .route("/api/tasks/{id}/branch", get(state::get_task_branch))
+        .route("/api/tasks/{id}/open", post(state::open_task_file))
         .route("/api/tasks", post(tasks::dispatch))
         .route("/api/tasks/{id}/resume", post(tasks::resume))
         .route("/api/tasks/{id}/reply", post(tasks::reply))

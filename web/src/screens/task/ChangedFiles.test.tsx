@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { setTransport, tauriTransport } from "@/bridge/transport";
 import type { ChangedFileSet, ChangedFileView } from "@/domain/changes";
 import { resetReviewedFilesForTests } from "@/state/reviewed-files";
+import { toast } from "@/state/toast";
 import { ChangedFilesPanel, type ChangedFilesPanelProps } from "./ChangedFiles";
 
 function file(path: string, added: number, removed: number, body: string): ChangedFileView {
@@ -88,12 +90,23 @@ function rowPaths(): (string | null)[] {
   return [...document.querySelectorAll(".changed-file-path")].map((row) => row.textContent);
 }
 
-describe("reviewing changed files", () => {
-  afterEach(() => {
-    cleanup();
-    resetReviewedFilesForTests();
-  });
+/** jsdom has no desktop shell, so a test that needs a call sets this. */
+function setDesktopBridge(present: boolean): void {
+  Reflect.set(window, "__TAURI__", present ? {} : undefined);
+}
 
+const originalClipboard = navigator.clipboard;
+
+afterEach(() => {
+  act(() => toast.clear());
+  cleanup();
+  setDesktopBridge(false);
+  setTransport(tauriTransport);
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
+  resetReviewedFilesForTests();
+});
+
+describe("reviewing changed files", () => {
   it("closes a file once reviewed and keeps the mark after the panel reopens", () => {
     const { unmount } = render(<ChangedFilesPanel {...panel(changes([firstFile(), secondFile()]))} />);
 
@@ -202,5 +215,84 @@ describe("reviewing changed files", () => {
     fireEvent.click(group);
     expect(rowPaths()).toEqual(["web/src/two.ts", "web/src/one.ts", "bun.lock"]);
     expect(screen.queryByRole("button", { name: "Mark bun.lock reviewed" })).toBeNull();
+  });
+});
+
+describe("a file's own actions", () => {
+  /** How long the copy button holds its tick before going back to offering a copy. */
+  const FLASH_MS = 1_600;
+
+  it("takes the path as the diff names it, then puts the button back", async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (value: string) => void copied.push(value) },
+    });
+    render(<ChangedFilesPanel {...panel(changes([firstFile(), secondFile()]))} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy path to web/src/one.ts" }));
+
+    // The row shows the path from its middle, so a copy built from what is on
+    // screen would come back truncated or reversed.
+    expect(copied).toEqual(["web/src/one.ts"]);
+    await settle();
+    screen.getByRole("button", { name: "Copied" });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, FLASH_MS));
+    });
+    screen.getByRole("button", { name: "Copy path to web/src/one.ts" });
+  });
+
+  it("reports a failed hand-off, without opening the diff behind it", async () => {
+    setDesktopBridge(true);
+    // SAFETY: this call only ever answers with a failure, which the panel reads
+    // as one whatever shape it carries.
+    setTransport({
+      invoke: mock(async () => {
+        throw { message: "not found" };
+      }) as never,
+      listen: mock(),
+    });
+
+    render(<ChangedFilesPanel {...panel(changes([firstFile(), secondFile()]))} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open web/src/two.ts in your editor" }));
+    await settle();
+
+    // The error reaches the reader only if the press reached the broker, and
+    // the row's own disclosure stays where they left it.
+    expect(toast.snapshot.map((record) => record.title)).toEqual([
+      "Couldn't open web/src/two.ts in your editor",
+    ]);
+    expect(heading("two.ts").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("says nothing when the file opens", async () => {
+    setDesktopBridge(true);
+    const invoke = mock(async () => undefined);
+    // SAFETY: the only call this test makes is a broker_call whose answer it never reads.
+    setTransport({ invoke: invoke as never, listen: mock() });
+
+    render(<ChangedFilesPanel {...panel(changes([firstFile(), secondFile()]))} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open web/src/two.ts in your editor" }));
+    await settle();
+
+    expect(toast.snapshot).toEqual([]);
+  });
+
+  it("keeps a deleted file's path copyable, with no editor to send it to", () => {
+    setDesktopBridge(true);
+    const deleted: ChangedFileView = { ...firstFile(), path: "web/src/old.ts", status: "deleted" };
+    render(<ChangedFilesPanel {...panel(changes([firstFile(), deleted]))} />);
+
+    expect(screen.queryByRole("button", { name: "Open web/src/old.ts in your editor" })).toBeNull();
+    screen.getByRole("button", { name: "Copy path to web/src/old.ts" });
+  });
+
+  it("offers no editor at all where there is no desktop app to ask", () => {
+    render(<ChangedFilesPanel {...panel(changes([firstFile()]))} />);
+
+    expect(screen.queryByRole("button", { name: "Open web/src/one.ts in your editor" })).toBeNull();
+    screen.getByRole("button", { name: "Copy path to web/src/one.ts" });
   });
 });

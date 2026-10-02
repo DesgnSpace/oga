@@ -297,6 +297,17 @@ impl LoopbackClient {
             .await
     }
 
+    pub async fn open_task_file(&self, task_id: &str, path: &str) -> Result<(), ClientError> {
+        self.send_json::<Value>(
+            Method::POST,
+            self.endpoint(&["api", "tasks", task_id, "open"]),
+            Some(serde_json::json!({ "path": path })),
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub async fn mark_task_viewed(&self, task_id: &str) -> Result<(), ClientError> {
         self.send_empty(
             Method::POST,

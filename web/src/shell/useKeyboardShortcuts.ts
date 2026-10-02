@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { hasDesktopBridge } from "@/bridge";
 import { focusTaskSearch } from "./taskSearch";
 
 interface KeyboardShortcutHandlers {
@@ -8,10 +9,6 @@ interface KeyboardShortcutHandlers {
   onUsage: () => void;
   onRefresh: () => void;
   onToggleSidebar: () => void;
-}
-
-function hasDesktopBridge(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
 }
 
 export function isTextField(target: EventTarget | null): boolean {

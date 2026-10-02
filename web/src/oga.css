@@ -2123,11 +2123,34 @@ h1 {
     cursor: pointer;
 }
 
-.changed-file-reviewed {
+.changed-file-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-1);
+    padding-inline-end: var(--space-2);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+.changed-file-row:hover .changed-file-actions,
+.changed-file-row:focus-within .changed-file-actions,
+.changed-file-actions:focus-within {
+    opacity: 1;
+}
+
+.changed-file-reviewed,
+.changed-file-actions .icon-button,
+.changed-file-actions .copy-button {
     width: var(--control-height-small);
     height: var(--control-height-small);
     min-height: var(--control-height-small);
-    margin-inline-end: var(--space-1);
+}
+
+/* Beside the icon buttons, the copy button wears their chrome, not a card. */
+.changed-file-actions .copy-button {
+    border-color: transparent;
+    background: transparent;
 }
 
 .changed-file-heading:hover {
@@ -3208,10 +3231,6 @@ h1 {
 }
 
 .copy-button {
-    position: absolute;
-    inset-block-start: var(--space-2);
-    inset-inline-end: var(--space-2);
-    z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3225,6 +3244,13 @@ h1 {
     cursor: pointer;
     opacity: 0;
     transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.copy-host > .copy-button {
+    position: absolute;
+    inset-block-start: var(--space-2);
+    inset-inline-end: var(--space-2);
+    z-index: 1;
 }
 
 .copy-host:hover > .copy-button,
@@ -3263,6 +3289,17 @@ h1 {
         width: var(--space-7);
         height: var(--space-7);
         opacity: 1;
+    }
+
+    .changed-file-actions {
+        opacity: 1;
+    }
+
+    .changed-file-actions .copy-button,
+    .changed-file-actions .icon-button {
+        width: var(--control-height);
+        height: var(--control-height);
+        min-height: var(--control-height);
     }
 
     .detail-response > .markdown-content > .markdown-code:first-child,

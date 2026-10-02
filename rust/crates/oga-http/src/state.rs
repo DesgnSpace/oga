@@ -1,9 +1,14 @@
 //! State polling and per-task read routes.
 
-use std::{collections::BTreeMap, path::Path, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use axum::{
     Json,
+    body::Bytes,
     extract::{Path as AxumPath, Query, State},
     http::header,
     response::IntoResponse,
@@ -19,7 +24,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
-use crate::router::{HttpError, HttpState};
+use crate::router::{HttpError, HttpState, parse_json, run_blocking};
 
 const TASK_COLUMNS: &str = "id,kind,profile_id,model,prompt,shipped_prompt,cwd,branch,origin_cwd,worktree_path,worktree_branch,worktree_links_json,state,output,error,question,parent_task_id,orchestrator_id,caller_id,scope_json,grant_id,allow_questions,timeout_ms,effort,effort_actual,tldr,title,session_id,completion_json,attempts_json,cost_usd,cost_usd_estimated,turns,archived_at,created_at,updated_at,can_delegate,transport_json,attachments_json,worktree_from,worktree_base";
 
@@ -251,6 +256,50 @@ pub async fn get_task_branch(
         json!({ "branch": recorded(), "source": "recorded" })
     };
     Ok(Json(response))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenFileBody {
+    /// A file as the changed files name it: relative to the task's checkout.
+    pub path: String,
+}
+
+/// The path comes back out of the diff, so it is checked against the checkout:
+/// a name that climbs out, or that lands outside through a link, is refused.
+pub async fn open_task_file(
+    State(state): State<HttpState>,
+    AxumPath(id): AxumPath<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, HttpError> {
+    let body: OpenFileBody = parse_json(&body)?;
+    let task = read_delegated_task(&state, id).await?;
+    let path = checkout_file(&task.cwd, &body.path)?;
+    let opener = state.opener.clone();
+    run_blocking(move || {
+        (opener)(&path)
+            .map_err(|error| HttpError::conflict(format!("could not open the file: {error}")))
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Both sides are resolved through links first, so a checkout reached by
+/// another name still matches, and a link inside it cannot lead out.
+fn checkout_file(checkout: &str, path: &str) -> Result<PathBuf, HttpError> {
+    let refused =
+        || HttpError::bad_request(format!("{path} is not a file in this task's checkout"));
+    let relative = Path::new(path);
+    if path.trim().is_empty() || relative.is_absolute() {
+        return Err(refused());
+    }
+    let root = oga_config::canonical_cwd(checkout);
+    let resolved = std::fs::canonicalize(root.join(relative)).map_err(|_| {
+        HttpError::not_found(format!("{path} is no longer in this task's checkout"))
+    })?;
+    if !resolved.starts_with(&root) || !resolved.is_file() {
+        return Err(refused());
+    }
+    Ok(resolved)
 }
 
 pub async fn get_task_events(

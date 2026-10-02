@@ -5,6 +5,7 @@ pub mod consumers;
 pub mod context;
 pub mod health;
 pub mod hooks;
+pub mod open;
 pub mod profiles;
 pub mod router;
 pub mod routing;

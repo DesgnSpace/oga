@@ -1,8 +1,9 @@
 use std::{
     collections::BTreeMap,
     fs,
+    path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -150,6 +151,20 @@ impl Fixture {
         std::fs::create_dir_all(absolute.parent().expect("source parent"))
             .expect("source directory is creatable");
         std::fs::write(absolute, body).expect("source fixture writes");
+    }
+
+    fn router_recording_opens(&self, opened: &Arc<Mutex<Vec<PathBuf>>>) -> Router {
+        let opened = opened.clone();
+        router(
+            HttpState::new(self.store.clone()).with_opener(Arc::new(move |path: &Path| {
+                opened.lock().expect("opened lock").push(path.to_path_buf());
+                Ok(())
+            })),
+        )
+    }
+
+    fn opened(&self, opened: &Arc<Mutex<Vec<PathBuf>>>) -> Vec<PathBuf> {
+        opened.lock().expect("opened lock").clone()
     }
 }
 
@@ -621,6 +636,65 @@ async fn task_branch_route_falls_back_when_checkout_is_gone() {
         body,
         json!({ "branch": "worker/recorded", "source": "recorded" })
     );
+}
+
+#[tokio::test]
+async fn a_file_opens_only_from_inside_the_task_checkout() {
+    let fixture = Fixture::new();
+    // A checkout of its own inside the fixture's folder, so there is a file on
+    // either side of it to ask for.
+    let checkout = fixture._directory.path().join("checkout");
+    std::fs::create_dir_all(checkout.join("src")).expect("checkout is creatable");
+    std::fs::write(checkout.join("src/auth.ts"), "export const check = true;\n")
+        .expect("file in the checkout");
+    let secret = fixture._directory.path().join("secret.txt");
+    fs::write(&secret, "not yours").expect("file outside the checkout");
+    std::os::unix::fs::symlink(&secret, checkout.join("escape.txt"))
+        .expect("link out of the checkout");
+    let cwd = std::fs::canonicalize(&checkout).expect("canonical checkout");
+    fixture.insert_task(&Task {
+        id: "checkout-task".into(),
+        kind: Some(TaskKind::Delegated),
+        profile_id: "profile".into(),
+        model: "fake".into(),
+        prompt: "edit the checkout".into(),
+        cwd: cwd.display().to_string(),
+        state: TaskState::Completed,
+        created_at: "2026-01-01T00:00:00.000Z".into(),
+        updated_at: "2026-01-01T00:01:00.000Z".into(),
+        ..Task::default()
+    });
+
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let router = fixture.router_recording_opens(&opened);
+    let open = |path: &str| {
+        let router = router.clone();
+        let body = Body::from(json!({ "path": path }).to_string());
+        async move {
+            json_response(
+                request(&router, Method::POST, "/api/tasks/checkout-task/open", body).await,
+            )
+            .await
+        }
+    };
+
+    let (status, body) = open("src/auth.ts").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!({ "ok": true }));
+    assert_eq!(fixture.opened(&opened), vec![cwd.join("src/auth.ts")]);
+
+    for refused in ["../secret.txt", "escape.txt", "/etc/hosts", "src"] {
+        let (status, body) = open(refused).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{refused} should be refused: {body}"
+        );
+    }
+    assert_eq!(fixture.opened(&opened).len(), 1, "nothing else opened");
+
+    let (status, _) = open("src/gone.ts").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

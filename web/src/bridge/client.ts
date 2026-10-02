@@ -75,6 +75,9 @@ export const broker = {
 
   taskBranches: (taskId: string) => call({ call: "taskBranches", taskId }),
 
+  openTaskFile: (taskId: string, path: string) =>
+    call<"openTaskFile">({ call: "openTaskFile", taskId, path }),
+
   projects: () => call({ call: "projects" }),
 
   memories: (cwd: string) => call({ call: "memories", cwd }),

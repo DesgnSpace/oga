@@ -54,6 +54,10 @@ pub enum BrokerCall {
     TaskBranches {
         task_id: String,
     },
+    OpenTaskFile {
+        task_id: String,
+        path: String,
+    },
     ConsumerInbox {
         consumer_id: String,
         channel: Option<String>,
@@ -294,6 +298,9 @@ mod native {
                 BrokerCall::TaskBranch { task_id } => encode(self.get_task_branch(&task_id).await),
                 BrokerCall::TaskBranches { task_id } => {
                     encode(self.get_task_branches(&task_id).await)
+                }
+                BrokerCall::OpenTaskFile { task_id, path } => {
+                    encode(self.open_task_file(&task_id, &path).await)
                 }
                 BrokerCall::ConsumerInbox {
                     consumer_id,

@@ -1,8 +1,5 @@
+import { hasDesktopBridge } from "@/bridge";
 import { AppShell } from "@/shell/AppShell";
-
-function hasDesktopBridge(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
-}
 
 export default function App() {
   return (

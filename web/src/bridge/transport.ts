@@ -14,6 +14,10 @@ function tauriGlobal(): Record<string, any> | undefined {
   return (window as unknown as { __TAURI__?: Record<string, any> }).__TAURI__;
 }
 
+export function hasDesktopBridge(): boolean {
+  return tauriGlobal() !== undefined;
+}
+
 function toBridgeError(error: unknown): BridgeError {
   if (error && typeof error === "object" && "message" in error) {
     const candidate = error as { message: unknown; status?: unknown };

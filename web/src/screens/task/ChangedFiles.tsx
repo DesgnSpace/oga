@@ -1,6 +1,7 @@
 // The changed-files view: files a run touched, with bounded diffs.
 
 import * as React from "react";
+import { broker, hasDesktopBridge } from "@/bridge";
 import type { TaskDiffFileStatus } from "@/bridge/types";
 import type { ChangedFileSet, ChangedFileView } from "@/domain/changes";
 import { runChangeSetAdded, runChangeSetRemoved } from "@/domain/changes";
@@ -16,9 +17,10 @@ import {
 } from "@/domain/changes/ordering";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
-import { CheckCircleIcon, CheckIcon, ChevronIcon, CircleIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
+import { CheckCircleIcon, CheckIcon, ChevronIcon, CircleIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, OpenExternalIcon, RefreshIcon } from "@/ui/icons";
 import { EmptyState, LoadingState } from "@/components/atoms/ListState";
 import { CodeDiff } from "@/components/CodeDiff";
+import { CopyButton } from "@/components/atoms/CopyButton";
 import { Modal } from "@/components/primitives/Modal";
 import { MenuPanel } from "@/components/menu/Menu";
 import {
@@ -27,6 +29,7 @@ import {
   type ChangesSource,
 } from "@/state/changed-files-preferences";
 import { useReviewedFiles, type ReviewedFiles } from "@/state/reviewed-files";
+import { toast } from "@/state/toast";
 import { REVIEW_SHORTCUTS, useReviewKeys } from "./reviewKeys";
 import { patchFromBlocks } from "@/lib/unified-patch";
 import { DiffHeader } from "@/components/DiffHeader";
@@ -157,11 +160,16 @@ function useDismissOutside(
   }, [open, close, ref]);
 }
 
+function canOpenInEditor(file: ChangedFileView): boolean {
+  return file.status !== "deleted" && hasDesktopBridge();
+}
+
 function ChangedFileRow({
   file,
   expanded,
   onToggle,
   onToggleReviewed,
+  onOpenInEditor,
   reviewed,
   reviewable,
   active,
@@ -173,6 +181,7 @@ function ChangedFileRow({
   expanded: boolean;
   onToggle: () => void;
   onToggleReviewed: () => void;
+  onOpenInEditor: () => void;
   reviewed: ReviewedFiles;
   /** False for generated files, which the review does not count. */
   reviewable: boolean;
@@ -187,6 +196,7 @@ function ChangedFileRow({
   );
   const status = file.status === undefined || file.status === "modified" ? undefined : STATUS_LABELS[file.status];
   const isReviewed = reviewed.isReviewed(file);
+  const openable = canOpenInEditor(file);
   return (
     <section
       className={`changed-file-row${active ? " changed-file-row-active" : ""}${isReviewed ? " changed-file-row-reviewed" : ""}`}
@@ -210,25 +220,48 @@ function ChangedFileRow({
             <span className="diff-stat-removed">{`-${file.removed}`}</span>
           </span>
         </button>
-        {reviewable && (
-          <button
-            className="icon-button changed-file-reviewed"
-            type="button"
-            aria-pressed={isReviewed}
-            aria-label={`Mark ${file.path} reviewed`}
-            title="Mark reviewed"
-            onClick={onToggleReviewed}
-          >
-            {isReviewed ? <CheckCircleIcon /> : <CircleIcon />}
-          </button>
-        )}
+        <div className="changed-file-actions">
+          <CopyButton text={file.path} label={`path to ${file.path}`} />
+          {openable && (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={`Open ${file.path} in your editor`}
+              title="Open in your editor"
+              onClick={onOpenInEditor}
+            >
+              <OpenExternalIcon />
+            </button>
+          )}
+          {reviewable && (
+            <button
+              className="icon-button changed-file-reviewed"
+              type="button"
+              aria-pressed={isReviewed}
+              aria-label={`Mark ${file.path} reviewed`}
+              title="Mark reviewed"
+              onClick={onToggleReviewed}
+            >
+              {isReviewed ? <CheckCircleIcon /> : <CircleIcon />}
+            </button>
+          )}
+        </div>
       </div>
       {expanded && (
         <div className="changed-file-diff">
           {showDiffHeader && <DiffHeader />}
           {patch !== undefined && <CodeDiff patch={patch} numbered={file.patch !== undefined} wrap />}
           {file.tooLarge ? (
-            <p className="changed-file-note">This file's diff is too big to show here. Open it in your editor.</p>
+            <p className="changed-file-note">
+              This file's diff is too big to show here.{" "}
+              {openable ? (
+                <button className="text-button" type="button" onClick={onOpenInEditor}>
+                  Open it in your editor
+                </button>
+              ) : (
+                "Open it in your editor."
+              )}
+            </p>
           ) : (
             patch === undefined && <p className="changed-file-note">No text changes to show.</p>
           )}
@@ -249,13 +282,14 @@ interface FileRowProps {
   onToggleFile: (path: string) => void;
   reviewed: ReviewedFiles;
   onToggleReviewed: (file: ChangedFileView) => void;
+  onOpenInEditor: (file: ChangedFileView) => void;
   activePath?: string;
   registerRow: (path: string, element: HTMLElement | null) => void;
   registerHeading: (path: string, element: HTMLElement | null) => void;
   showDiffHeader: boolean;
 }
 
-function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, reviewable, activePath, registerRow, registerHeading, showDiffHeader }: FileRowProps & { files: ChangedFileView[]; reviewable: boolean }) {
+function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, onOpenInEditor, reviewable, activePath, registerRow, registerHeading, showDiffHeader }: FileRowProps & { files: ChangedFileView[]; reviewable: boolean }) {
   return (
     <div className="changed-files-list">
       {files.map((file) => (
@@ -265,6 +299,7 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggl
           expanded={expandedPaths.has(file.path)}
           onToggle={() => onToggleFile(file.path)}
           onToggleReviewed={() => onToggleReviewed(file)}
+          onOpenInEditor={() => onOpenInEditor(file)}
           reviewed={reviewed}
           reviewable={reviewable}
           active={activePath === file.path}
@@ -740,6 +775,18 @@ function ChangedFilesView({
     reviewed.toggle(file);
   }, [reviewed, generatedKeys]);
 
+  // The editor opens outside Oga and says nothing back, so a hand-off that
+  // does not fail needs no confirmation here.
+  const openInEditor = React.useCallback((file: ChangedFileView) => {
+    void broker.openTaskFile(taskId, file.path).then((result) => {
+      if (!result.ok) {
+        toast.error(`Couldn't open ${file.path} in your editor`, {
+          description: "The file may have been deleted, or Oga's checkout may be gone.",
+        });
+      }
+    });
+  }, [taskId]);
+
   const openAll = () => {
     setExpandedPaths(new Set(toReview.map((file) => file.path)));
     // Grouped, a file stays out of sight until its turn is open.
@@ -860,6 +907,7 @@ function ChangedFilesView({
     onToggleFile: toggleFile,
     reviewed,
     onToggleReviewed: toggleReviewed,
+    onOpenInEditor: openInEditor,
     activePath,
     registerRow,
     registerHeading,
