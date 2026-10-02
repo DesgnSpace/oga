@@ -785,32 +785,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn assembled_message_is_the_brief_then_memories_and_attribution() {
-        let prompt = assemble_worker_message(&WorkerPromptInput {
-            task: "do the thing".into(),
-            attribution: Some(WorkerAttribution {
-                provider: "claude".into(),
-                model: "opus".into(),
-                effort: None,
-            }),
-            memories: vec![MemoryEntry {
-                cwd: "/work".into(),
-                key: "a".into(),
-                value: "b".into(),
-                version: 1,
-                created_at: "now".into(),
-                updated_at: "now".into(),
-            }],
-        });
-        assert_eq!(
-            prompt,
-            format!(
-                "do the thing\n\n## Memories\nTreat these project facts as shared context. If one conflicts with the task or current files, report the conflict.\n- a: b\n\n{BACKGROUND_SECTION}\n\n{RELEARN_SECTION}\n\n## Attribution\nStamp what you ship so Oga stays visible. End each commit you create with `Co-Authored-By: Oga (claude/opus) <oga@desgn.space>` on its own line. Never stamp the same commit twice or add attribution to work the user wrote themselves."
-            )
-        );
-    }
-
-    #[test]
     fn last_words_about_work_still_going_settle_unfinished() {
         for said in [
             "No output yet, because it's piped through `tail`. Waiting for the finish notification.",

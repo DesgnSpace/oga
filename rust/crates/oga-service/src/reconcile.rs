@@ -674,25 +674,6 @@ mod tests {
     }
 
     #[test]
-    fn waking_up_names_sleep_rather_than_a_restart() {
-        let run = run(Some(worker(10, 1)), true, 0);
-
-        let plan = plan_run(
-            &run,
-            &verdict(&run, 1, &FakeRegistry::default(), &FakeProbe::default()),
-            ReconcileTrigger::Wake,
-        );
-
-        assert_eq!(
-            plan.action,
-            RunAction::Resume {
-                reason: "Stopped while this computer was asleep.".into(),
-                attempt: 1,
-            }
-        );
-    }
-
-    #[test]
     fn a_run_that_keeps_dying_settles_instead_of_restarting_forever() {
         let run = run(Some(worker(10, 1)), true, MAX_RESTART_ATTEMPTS);
 

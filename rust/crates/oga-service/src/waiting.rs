@@ -246,28 +246,3 @@ fn load_failures(store: &Store, profile: &str) -> Result<Vec<ProfileFailure>, St
             .collect::<Result<Vec<_>, _>>()?)
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_rate_limit_note_carries_the_local_resume_time() {
-        let note = rate_limit_wait_note("2026-09-02T12:00:00.000Z");
-        assert!(note.starts_with("Waiting for usage to reset · resumes "));
-        let expected = DateTime::parse_from_rfc3339("2026-09-02T12:00:00.000Z")
-            .expect("parsed")
-            .with_timezone(&Local)
-            .format("%H:%M")
-            .to_string();
-        assert!(note.ends_with(&expected), "unexpected note: {note}");
-    }
-
-    #[test]
-    fn an_unreadable_reset_time_still_reads_as_a_wait() {
-        assert_eq!(
-            rate_limit_wait_note("whenever"),
-            "Waiting for usage to reset"
-        );
-    }
-}

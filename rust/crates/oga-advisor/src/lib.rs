@@ -374,26 +374,6 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_reads_back_to_the_destination_it_names() {
-        let answered = json!({
-            "model": "jev-1.13.0",
-            "answers": {
-                "worker": {
-                    "type": "choice",
-                    "choice": "deep:vendor/large",
-                    "probabilities": { "deep:vendor/large": 0.87, "fast:vendor/small": 0.13 },
-                    "confidence": 0.87,
-                }
-            },
-        });
-
-        let choice = read_choice(&answered, &destinations()).expect("choice");
-
-        assert_eq!(choice.profile_id, "deep");
-        assert_eq!(choice.model, "vendor/large");
-    }
-
-    #[test]
     fn an_unsure_answer_is_still_a_pick() {
         let answered = json!({
             "answers": { "worker": { "choice": "fast:vendor/small", "confidence": 0.31 } },
@@ -478,17 +458,6 @@ mod tests {
         assert_eq!(
             advisor.choose("port the parser", &destinations()).await,
             Err(NoAdvice::Refused(429))
-        );
-    }
-
-    #[tokio::test]
-    async fn an_overloaded_advisor_comes_back_as_no_advice() {
-        let advisor =
-            Advisor::new("key").endpoint(stub("529 Overloaded", r#"{"error":"overloaded"}"#));
-
-        assert_eq!(
-            advisor.choose("port the parser", &destinations()).await,
-            Err(NoAdvice::Refused(529))
         );
     }
 

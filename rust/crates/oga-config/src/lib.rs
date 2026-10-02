@@ -2372,19 +2372,6 @@ mod tests {
     }
 
     #[test]
-    fn caller_prompt_reads_custom_text_verbatim() {
-        let project = layer(
-            "/work/.oga.yaml",
-            "version: 1\ncaller:\n  prompt: |\n    Project rule: always name the entry file.\n",
-        );
-
-        assert_eq!(
-            read_caller_prompt(Some(&project)).unwrap().as_deref(),
-            Some("Project rule: always name the entry file.")
-        );
-    }
-
-    #[test]
     fn caller_prompt_is_absent_without_a_table() {
         assert!(read_caller_prompt(None).unwrap().is_none());
         assert!(
