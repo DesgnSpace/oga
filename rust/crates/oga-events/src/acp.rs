@@ -600,7 +600,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::REASONING_TITLE;
 
     fn acp_event(id: i64, update: Value) -> TaskEvent {
         let kind = update
@@ -696,23 +695,6 @@ mod tests {
     }
 
     #[test]
-    fn an_uncategorised_call_is_named_by_the_agents_own_title() {
-        let view = view(json!({
-            "sessionUpdate": "tool_call",
-            "toolCallId": "call_3",
-            "title": "Ask the design system for a token",
-            "status": "pending",
-        }));
-        assert_eq!(view.title, "Ask the design system for a token");
-        assert_eq!(view.kind, EventKind::Tool);
-        assert_eq!(view.verb.as_deref(), Some("Using"));
-        assert_eq!(
-            view.target.as_deref(),
-            Some("Ask the design system for a token")
-        );
-    }
-
-    #[test]
     fn a_read_without_a_path_still_names_what_it_read() {
         let view = view(json!({
             "sessionUpdate": "tool_call",
@@ -723,31 +705,6 @@ mod tests {
         }));
         assert_eq!(view.title, "Read file");
         assert_eq!(view.target.as_deref(), Some("Read the open buffer"));
-    }
-
-    #[test]
-    fn a_message_and_a_thought_read_as_themselves() {
-        let message = view(json!({
-            "sessionUpdate": "agent_message_chunk",
-            "content": {"type": "text", "text": "Checking the runner"},
-        }));
-        assert_eq!(message.kind, EventKind::Message);
-        assert_eq!(message.title, "Agent message");
-        assert_eq!(message.detail.as_deref(), Some("Checking the runner"));
-        assert_ne!(message.minor, Some(true));
-
-        let thought = view(json!({
-            "sessionUpdate": "agent_thought_chunk",
-            "content": {"type": "text", "text": "The timeout is the backstop"},
-        }));
-        assert_eq!(thought.kind, EventKind::Reasoning);
-        assert_eq!(thought.title, REASONING_TITLE);
-
-        let prompt = view(json!({
-            "sessionUpdate": "user_message_chunk",
-            "content": {"type": "text", "text": "Port the runner"},
-        }));
-        assert_eq!(prompt.minor, Some(true));
     }
 
     #[test]

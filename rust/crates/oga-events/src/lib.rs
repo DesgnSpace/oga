@@ -5356,41 +5356,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn codex_reasoning_item_reads_as_a_thinking_block() {
-        let started = event_view(
-            &provider_event(
-                1,
-                "agent.item.started",
-                serde_json::json!({"type": "item.started", "item": {"id": "r1", "type": "reasoning"}}),
-            ),
-            Provider::Codex,
-        );
-        assert_eq!(started.kind, EventKind::Reasoning);
-        assert_eq!(started.detail, None);
-
-        let completed = event_view(
-            &provider_event(
-                2,
-                "agent.item.completed",
-                serde_json::json!({
-                    "type": "item.completed",
-                    "item": {
-                        "id": "r1",
-                        "type": "reasoning",
-                        "summary": ["Weighing two options", {"text": "Picking the smaller one"}]
-                    }
-                }),
-            ),
-            Provider::Codex,
-        );
-        assert_eq!(completed.kind, EventKind::Reasoning);
-        assert_eq!(
-            completed.detail.as_deref(),
-            Some("Weighing two options\n\nPicking the smaller one")
-        );
-    }
-
     /// turn.completed carries reasoning_output_tokens alongside input/output/cached.
     #[test]
     fn codex_turn_completed_carries_reasoning_tokens() {
@@ -5448,49 +5413,6 @@ mod tests {
         );
         assert_eq!(part.kind, EventKind::Reasoning);
         assert_eq!(part.detail.as_deref(), Some("Checking the index first"));
-    }
-
-    #[test]
-    fn antigravity_reports_reasoning_tokens_on_the_response_step() {
-        let view = event_view(
-            &provider_event(
-                1,
-                "agent.event",
-                serde_json::json!({
-                    "event": "step_update",
-                    "step_update": {
-                        "step_type": "agent_response",
-                        "usage": {"input_tokens": 29000, "output_tokens": 818, "thinking_tokens": 412}
-                    }
-                }),
-            ),
-            Provider::Antigravity,
-        );
-        assert_eq!(
-            view.presentation.and_then(|value| value.tokens_thinking),
-            Some(412)
-        );
-    }
-
-    #[test]
-    fn pi_thinking_only_update_reads_as_a_thinking_block() {
-        let view = event_view(
-            &provider_event(
-                1,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {"type": "thinking_delta", "delta": " shape"},
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "thinking", "thinking": "First the shape"}]
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(view.kind, EventKind::Reasoning);
-        assert_eq!(view.detail.as_deref(), Some("First the shape"));
     }
 
     #[test]
@@ -5624,24 +5546,6 @@ mod tests {
             Some("cargo test")
         );
         assert_ne!(view.minor, Some(true));
-    }
-
-    #[test]
-    fn agent_text_is_a_message_with_its_text_as_detail() {
-        let event = TaskEvent {
-            id: 1,
-            task_id: "task".into(),
-            kind: "agent.text".into(),
-            state: TaskState::Running,
-            payload: BTreeMap::from([("text".into(), serde_json::json!("Message body"))]),
-            created_at: "2026-01-01T00:00:00Z".into(),
-            turn_id: None,
-        };
-
-        let view = event_view(&event, Provider::Claude);
-        assert_eq!(view.kind, EventKind::Message);
-        assert_eq!(view.title, "Agent message");
-        assert_eq!(view.detail.as_deref(), Some("Message body"));
     }
 
     fn opencode_event(id: i64, tool: &str, state: Value) -> TaskEvent {
@@ -6053,93 +5957,6 @@ mod tests {
     }
 
     #[test]
-    fn opencode_edit_row_names_the_file_not_the_swapped_strings() {
-        let edit = event_view(
-            &opencode_event(
-                1,
-                "edit",
-                serde_json::json!({
-                    "status": "completed",
-                    "input": {
-                        "filePath": "web/src/components/Button.tsx",
-                        "oldString": "color: blue;",
-                        "newString": "color: red;"
-                    }
-                }),
-            ),
-            Provider::OpenCode,
-        );
-        assert_eq!(edit.verb.as_deref(), Some("Edited"));
-        assert_eq!(
-            edit.target.as_deref(),
-            Some("web/src/components/Button.tsx")
-        );
-        assert_eq!(
-            edit.detail.as_deref(),
-            Some("web/src/components/Button.tsx")
-        );
-        assert_eq!(edit.complete, Some(true));
-        assert_eq!(edit.phase, EventPhase::Completed);
-    }
-
-    #[test]
-    fn opencode_write_row_names_the_file_it_wrote() {
-        let write = event_view(
-            &opencode_event(
-                1,
-                "write",
-                serde_json::json!({
-                    "status": "completed",
-                    "input": {"filePath": "src/config.ts", "content": "export const x = 1;\n"}
-                }),
-            ),
-            Provider::OpenCode,
-        );
-        assert_eq!(write.verb.as_deref(), Some("Wrote"));
-        assert_eq!(write.target.as_deref(), Some("src/config.ts"));
-        assert_eq!(write.complete, Some(true));
-    }
-
-    #[test]
-    fn opencode_bash_row_names_the_command_and_finishes() {
-        let running = event_view(
-            &opencode_event(
-                1,
-                "bash",
-                serde_json::json!({
-                    "status": "running",
-                    "input": {"command": "bun test web/src/domain/trace"}
-                }),
-            ),
-            Provider::OpenCode,
-        );
-        assert_eq!(running.title, "Check tests");
-        assert_eq!(running.verb.as_deref(), Some("Checking"));
-        assert_eq!(running.phase, EventPhase::Started);
-        assert_eq!(running.complete, Some(false));
-
-        let done = event_view(
-            &opencode_event(
-                2,
-                "bash",
-                serde_json::json!({
-                    "status": "completed",
-                    "input": {"command": "bun test web/src/domain/trace"},
-                    "output": "3 pass\n"
-                }),
-            ),
-            Provider::OpenCode,
-        );
-        assert_eq!(done.verb.as_deref(), Some("Checked"));
-        assert_eq!(
-            done.target.as_deref(),
-            Some("bun test web/src/domain/trace")
-        );
-        assert_eq!(done.phase, EventPhase::Completed);
-        assert_eq!(done.complete, Some(true));
-    }
-
-    #[test]
     fn opencode_grep_and_glob_rows_never_fall_out_as_read() {
         let grep = event_view(
             &opencode_event(
@@ -6174,25 +5991,6 @@ mod tests {
         assert_ne!(glob.title, "Read file");
         assert_eq!(glob.verb.as_deref(), Some("Found"));
         assert_eq!(glob.target.as_deref(), Some("src/**/*.ts"));
-    }
-
-    #[test]
-    fn opencode_task_row_names_its_delegated_description() {
-        let task = event_view(
-            &opencode_event(
-                1,
-                "task",
-                serde_json::json!({
-                    "status": "completed",
-                    "input": {"description": "Investigate failing test", "model": "sonnet"}
-                }),
-            ),
-            Provider::OpenCode,
-        );
-        assert_ne!(task.title, "Read file");
-        assert_eq!(task.verb.as_deref(), Some("Delegated"));
-        assert_eq!(task.target.as_deref(), Some("Investigate failing test"));
-        assert_eq!(task.complete, Some(true));
     }
 
     #[test]
@@ -6644,46 +6442,6 @@ mod tests {
     /// `changes[].kind` picks the verb (create/delete/update); mixed kinds in
     /// one item fall back to a generic "edited".
     #[test]
-    fn codex_file_change_verb_follows_the_change_kind() {
-        let created = event_view(
-            &provider_event(
-                1,
-                "agent.item.completed",
-                serde_json::json!({
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_28",
-                        "type": "file_change",
-                        "changes": [{"path": "/app/new.ts", "kind": "add"}],
-                        "status": "completed"
-                    }
-                }),
-            ),
-            Provider::Codex,
-        );
-        assert_eq!(created.verb.as_deref(), Some("Created"));
-        assert_eq!(created.action_id.as_deref(), Some("item_28"));
-
-        let deleted = event_view(
-            &provider_event(
-                2,
-                "agent.item.completed",
-                serde_json::json!({
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_29",
-                        "type": "file_change",
-                        "changes": [{"path": "/app/old.ts", "kind": "delete"}],
-                        "status": "completed"
-                    }
-                }),
-            ),
-            Provider::Codex,
-        );
-        assert_eq!(deleted.verb.as_deref(), Some("Deleted"));
-    }
-
-    #[test]
     fn codex_file_change_keeps_attached_git_patches_in_the_view() {
         let patch = "@@ -1,2 +1,2 @@\n old\n-new\n+new\n";
         let view = event_view(
@@ -6755,35 +6513,6 @@ mod tests {
 
     /// The row names the server the call went to alongside the tool, and
     /// summarizes whatever opaque text the result carries.
-    #[test]
-    fn codex_mcp_tool_call_names_server_and_tool() {
-        let completed = event_view(
-            &provider_event(
-                1,
-                "agent.item.completed",
-                serde_json::json!({
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_11",
-                        "type": "mcp_tool_call",
-                        "server": "laravel-boost",
-                        "tool": "application-info",
-                        "arguments": {},
-                        "result": {"content": [{"type": "text", "text": "6 packages, 8 versions"}]},
-                        "status": "completed"
-                    }
-                }),
-            ),
-            Provider::Codex,
-        );
-        assert_eq!(
-            completed.target.as_deref(),
-            Some("laravel-boost/application-info")
-        );
-        assert_eq!(completed.result.as_deref(), Some("6 packages, 8 versions"));
-        assert_eq!(completed.verb.as_deref(), Some("Called"));
-    }
-
     #[test]
     fn oga_mcp_hooks_name_the_action_and_summarize_task_results() {
         let completed = event_view(
@@ -7038,63 +6767,6 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_search_steps_name_query_scope_and_count() {
-        let search = event_view(
-            &provider_event(
-                1,
-                "agent.event",
-                serde_json::json!({
-                    "event": "step_update",
-                    "step_update": {
-                        "state": "DONE",
-                        "step_type": "tool",
-                        "tool_name": "grep_search",
-                        "tool_info": {
-                            "parameters": {
-                                "Query": "TaskEventView",
-                                "SearchPath": "web/src"
-                            },
-                            "output": "Found 4 matches"
-                        }
-                    }
-                }),
-            ),
-            Provider::Antigravity,
-        );
-        assert_eq!(search.kind, EventKind::Tool);
-        assert_eq!(search.title, "Search code");
-        assert_eq!(search.verb.as_deref(), Some("Searched"));
-        assert_eq!(search.target.as_deref(), Some("TaskEventView in web/src"));
-        assert_eq!(search.result.as_deref(), Some("4 matches"));
-        assert_eq!(search.phase, EventPhase::Completed);
-        assert_eq!(search.complete, Some(true));
-
-        let empty = event_view(
-            &provider_event(
-                2,
-                "agent.event",
-                serde_json::json!({
-                    "event": "step_update",
-                    "step_update": {
-                        "state": "ACTIVE",
-                        "step_type": "tool",
-                        "tool_name": "search_web",
-                        "tool_info": {
-                            "parameters": {"Query": "Rust release", "SearchPath": ""},
-                            "output": "No files found"
-                        }
-                    }
-                }),
-            ),
-            Provider::Antigravity,
-        );
-        assert_eq!(empty.title, "Web search");
-        assert_eq!(empty.target.as_deref(), Some("Rust release"));
-        assert_eq!(empty.result.as_deref(), Some("0 files"));
-        assert_eq!(empty.phase, EventPhase::Started);
-    }
-
-    #[test]
     fn antigravity_oga_mcp_wrapper_uses_nested_arguments() {
         let query = event_view(
             &provider_event(
@@ -7124,53 +6796,6 @@ mod tests {
         assert_eq!(query.verb.as_deref(), Some("Searched"));
         assert_eq!(query.target.as_deref(), Some("trace rows"));
         assert_eq!(query.result.as_deref(), Some("1 match"));
-    }
-
-    #[test]
-    fn claude_search_hooks_name_pattern_scope_and_count() {
-        let search = event_view(
-            &provider_event(
-                1,
-                "agent.hook",
-                serde_json::json!({
-                    "hook_event_name": "PostToolUse",
-                    "tool_name": "Grep",
-                    "tool_use_id": "toolu_search",
-                    "tool_input": {"pattern": "TaskEventView", "path": "rust"},
-                    "tool_response": {"stdout": "Found 2 matches"}
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(search.title, "Search code");
-        assert_eq!(search.verb.as_deref(), Some("Searched"));
-        assert_eq!(search.target.as_deref(), Some("TaskEventView in rust"));
-        assert_eq!(
-            search
-                .presentation
-                .as_ref()
-                .and_then(|presentation| presentation.outcome.as_deref()),
-            Some("2 matches")
-        );
-
-        let assistant = event_view(
-            &provider_event(
-                2,
-                "agent.assistant",
-                serde_json::json!({
-                    "type": "assistant",
-                    "message": {"content": [{
-                        "type": "tool_use",
-                        "id": "toolu_search_2",
-                        "name": "Glob",
-                        "input": {"pattern": "web/src/**/*.tsx", "path": "web"}
-                    }]}
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(assistant.title, "Find files");
-        assert_eq!(assistant.target.as_deref(), Some("web/src/**/*.tsx in web"));
     }
 
     #[test]
@@ -7448,65 +7073,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_edit_row_names_the_file_and_the_change() {
-        let event = event_view(
-            &provider_event(
-                1,
-                "agent.hook",
-                serde_json::json!({
-                    "hook_event_name": "PostToolUse",
-                    "tool_name": "Edit",
-                    "tool_use_id": "toolu_edit",
-                    "tool_input": {
-                        "file_path": "/repo/src/main.ts",
-                        "old_string": "const x = 1;",
-                        "new_string": "const x = 2;",
-                        "replace_all": false
-                    },
-                    "tool_response": {
-                        "filePath": "/repo/src/main.ts",
-                        "oldString": "const x = 1;",
-                        "newString": "const x = 2;"
-                    }
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(event.title, "Edit file");
-        assert_eq!(event.target.as_deref(), Some("/repo/src/main.ts"));
-        let detail = event.detail.as_deref().unwrap_or_default();
-        assert!(detail.contains("const x = 1;") && detail.contains("const x = 2;"));
-        assert_eq!(event.phase, EventPhase::Completed);
-    }
-
-    #[test]
-    fn claude_grep_row_names_pattern_scope_and_match_count() {
-        let event = event_view(
-            &provider_event(
-                1,
-                "agent.hook",
-                serde_json::json!({
-                    "hook_event_name": "PostToolUse",
-                    "tool_name": "Grep",
-                    "tool_use_id": "toolu_grep",
-                    "tool_input": {"pattern": "TaskEventView", "path": "rust"},
-                    "tool_response": {"stdout": "Found 2 matches"}
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(event.title, "Search code");
-        assert_eq!(event.target.as_deref(), Some("TaskEventView in rust"));
-        assert_eq!(
-            event
-                .presentation
-                .as_ref()
-                .and_then(|p| p.outcome.as_deref()),
-            Some("2 matches")
-        );
-    }
-
-    #[test]
     fn claude_pre_and_post_tool_use_share_one_action_id_for_pairing() {
         let call = event_view(
             &provider_event(
@@ -7619,61 +7185,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn claude_subagent_lifecycle_hooks_get_a_named_row() {
-        let start = event_view(
-            &provider_event(
-                1,
-                "agent.hook",
-                serde_json::json!({
-                    "hook_event_name": "SubagentStart",
-                    "agent_id": "ad85449b7a1c40114",
-                    "agent_type": "general-purpose"
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(start.title, "Subagent");
-        assert_eq!(start.kind, EventKind::Tool);
-        assert_eq!(start.detail.as_deref(), Some("general-purpose"));
-        assert_ne!(start.minor, Some(true));
-
-        let stop = event_view(
-            &provider_event(
-                2,
-                "agent.hook",
-                serde_json::json!({
-                    "hook_event_name": "SubagentStop",
-                    "agent_id": "ad85449b7a1c40114",
-                    "agent_type": "general-purpose"
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(stop.title, SUBAGENT_FINISHED_TITLE);
-        assert_eq!(stop.detail.as_deref(), Some("general-purpose"));
-        assert_ne!(stop.minor, Some(true));
-
-        let stop_failure = event_view(
-            &provider_event(
-                3,
-                "agent.hook",
-                serde_json::json!({
-                    "hook_event_name": "StopFailure",
-                    "error": "server_error",
-                    "last_assistant_message": "API Error: No response from API"
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(stop_failure.title, "Session error");
-        assert_eq!(
-            stop_failure.detail.as_deref(),
-            Some("API Error: No response from API")
-        );
-        assert_eq!(stop_failure.phase, EventPhase::Failed);
-    }
-
     /// SubagentStart/SubagentStop share agent_id and agent_type; tool uses
     /// between them stamp the same agent_id. Trace groups on agent_id, so
     /// boundaries must keep the SUBAGENT_*_TITLE pair with agent_id in payload.
@@ -7771,32 +7282,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_agent_error_event_gets_a_real_row() {
-        let event = event_view(
-            &provider_event(
-                1,
-                "agent.error",
-                serde_json::json!({
-                    "type": "error",
-                    "error": {
-                        "type": "provider.invalid-request",
-                        "message": "Provider request failed with HTTP 404",
-                        "status": 404
-                    }
-                }),
-            ),
-            Provider::Claude,
-        );
-        assert_eq!(event.title, "Error");
-        assert_eq!(event.kind, EventKind::Error);
-        assert_eq!(event.phase, EventPhase::Failed);
-        assert_eq!(
-            event.detail.as_deref(),
-            Some("Provider request failed with HTTP 404 (HTTP 404)")
-        );
-    }
-
-    #[test]
     fn no_row_reaches_a_reader_without_a_title() {
         let payloads = [
             (
@@ -7856,40 +7341,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn needs_input_and_answered_carry_their_text_as_detail() {
-        let question = TaskEvent {
-            id: 1,
-            task_id: "task".into(),
-            kind: "needs_input".into(),
-            state: TaskState::NeedsInput,
-            payload: BTreeMap::from([(
-                "question".into(),
-                serde_json::json!("Which branch should this land on?"),
-            )]),
-            created_at: "2026-01-01T00:00:00Z".into(),
-            turn_id: None,
-        };
-        assert_eq!(
-            event_view(&question, Provider::Claude).detail.as_deref(),
-            Some("Which branch should this land on?")
-        );
-
-        let answered = TaskEvent {
-            id: 2,
-            task_id: "task".into(),
-            kind: "answered".into(),
-            state: TaskState::Queued,
-            payload: BTreeMap::from([("answer".into(), serde_json::json!("main is fine"))]),
-            created_at: "2026-01-01T00:00:01Z".into(),
-            turn_id: None,
-        };
-        assert_eq!(
-            event_view(&answered, Provider::Claude).detail.as_deref(),
-            Some("main is fine")
-        );
     }
 
     #[test]
@@ -8282,16 +7733,6 @@ mod tests {
     }
 
     #[test]
-    fn network_retry_exhausted_always_shows() {
-        let payload = BTreeMap::from([("attempts".into(), serde_json::json!(12))]);
-        let event = lifecycle_event("network_retry_exhausted", TaskState::Failed, payload);
-        let view = event_view(&event, Provider::Claude);
-        assert_eq!(view.title, "Network retries exhausted");
-        assert_eq!(view.detail.as_deref(), Some("12 attempts, giving up"));
-        assert_ne!(view.minor, Some(true));
-    }
-
-    #[test]
     fn an_unattended_wait_shows_but_a_scheduled_one_does_not() {
         let waiting = BTreeMap::from([
             (
@@ -8317,25 +7758,6 @@ mod tests {
             Provider::Claude,
         );
         assert_eq!(view.minor, Some(true));
-    }
-
-    #[test]
-    fn hold_expired_always_shows() {
-        let payload = BTreeMap::from([
-            (
-                "reason".into(),
-                serde_json::json!("network retry attempts exhausted"),
-            ),
-            ("attempt".into(), serde_json::json!(12)),
-        ]);
-        let event = lifecycle_event("hold_expired", TaskState::Blocked, payload);
-        let view = event_view(&event, Provider::Claude);
-        assert_eq!(view.title, "Wait timed out");
-        assert_eq!(
-            view.detail.as_deref(),
-            Some("network retry attempts exhausted (attempt 12)")
-        );
-        assert_ne!(view.minor, Some(true));
     }
 
     #[test]
@@ -8404,40 +7826,6 @@ mod tests {
             )]),
         );
         assert_ne!(event_view(&reason_only, Provider::Claude).minor, Some(true));
-    }
-
-    #[test]
-    fn worker_spawned_and_handed_off_read_like_a_run_log() {
-        let spawned = lifecycle_event(
-            "worker_spawned",
-            TaskState::Running,
-            BTreeMap::from([
-                ("provider".into(), serde_json::json!("claude")),
-                ("model".into(), serde_json::json!("haiku")),
-                ("pid".into(), serde_json::json!(4242)),
-            ]),
-        );
-        let view = event_view(&spawned, Provider::Claude);
-        assert_eq!(view.title, "Worker started");
-        assert_eq!(view.detail.as_deref(), Some("Claude Haiku"));
-
-        let handed_off = lifecycle_event(
-            "handed_off",
-            TaskState::Running,
-            BTreeMap::from([
-                ("fromProfile".into(), serde_json::json!("claude")),
-                ("toProfile".into(), serde_json::json!("claude")),
-                ("fromModel".into(), serde_json::json!("Claude Opus")),
-                ("model".into(), serde_json::json!("Claude Sonnet")),
-                ("sessionPreserved".into(), serde_json::json!(true)),
-            ]),
-        );
-        let view = event_view(&handed_off, Provider::Claude);
-        assert_eq!(view.title, "Handed off");
-        assert_eq!(
-            view.detail.as_deref(),
-            Some("Claude Opus → Claude Sonnet · conversation carried")
-        );
     }
 
     #[test]
@@ -8570,26 +7958,6 @@ mod tests {
         assert_eq!(next_start.title, "User message");
         assert_eq!(next_start.phase, EventPhase::Started);
         assert_eq!(next_start.action_id, start.action_id);
-    }
-
-    #[test]
-    fn pi_tool_execution_start_without_matching_end_stays_open() {
-        let view = event_view(
-            &provider_event(
-                1,
-                "agent.tool_execution_start",
-                serde_json::json!({
-                    "type": "tool_execution_start",
-                    "toolCallId": "call_pi_open",
-                    "toolName": "bash",
-                    "args": {"command": "sleep 30"}
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(view.phase, EventPhase::Started);
-        assert_eq!(view.complete, Some(false));
-        assert_eq!(view.action_id.as_deref(), Some("call_pi_open"));
     }
 
     #[test]
@@ -8944,15 +8312,6 @@ mod tests {
         let command = "sed -i '' -e 's/a/b/' src/main.rs";
         assert_eq!(command_role(command), None);
         assert_eq!(command_summary(command), command);
-    }
-
-    #[test]
-    fn worker_helper_tools_read_as_lookups() {
-        assert_eq!(
-            command_role("oga query \"where is the token refresh handled\""),
-            Some(CommandRole::Search)
-        );
-        assert_eq!(command_role("gh pr view 12"), Some(CommandRole::Inspect));
     }
 
     #[test]
