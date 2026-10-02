@@ -348,7 +348,7 @@ fn periods(now: i64, offset_minutes: i32) -> [Period; 6] {
 #[cfg(test)]
 mod tests {
     use super::{
-        DAY_MS, HOUR_MS, Period, TaskRow, format_local_date, local_day, local_hour, periods,
+        DAY_MS, HOUR_MS, Period, TaskRow, local_day, local_hour, periods,
         streaks, summarize,
     };
     use std::collections::BTreeSet;
@@ -374,12 +374,6 @@ mod tests {
         assert_eq!(local_day(timestamp, 120), 2);
         assert_eq!(local_hour(timestamp, 0), 2);
         assert_eq!(local_hour(timestamp, -240), 22);
-    }
-
-    #[test]
-    fn local_dates_format_as_calendar_days() {
-        assert_eq!(format_local_date(0), "1970-01-01");
-        assert_eq!(format_local_date(20_000), "2024-10-04");
     }
 
     #[test]

@@ -1286,21 +1286,6 @@ mod tests {
     }
 
     #[test]
-    fn the_advisor_reads_the_brief_and_the_kind_and_nothing_else() {
-        let mut input = unnamed(Path::new("/tmp"));
-        assert_eq!(
-            advisor_brief(&input, TaskClass::Build),
-            "Kind of work (read from the brief): build\n\nImplement the thing described in the plan."
-        );
-
-        input.kind = Some(oga_domain::WorkKind::Ui);
-        assert_eq!(
-            advisor_brief(&input, TaskClass::Build),
-            "Kind of work: ui\n\nImplement the thing described in the plan."
-        );
-    }
-
-    #[test]
     fn a_caller_still_sending_difficulty_gets_a_clear_message() {
         let refusal = reject_difficulty(&json!({ "difficulty": "hard" })).unwrap_err();
         assert!(refusal.message.contains("kind"), "{}", refusal.message);

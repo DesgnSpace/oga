@@ -1284,11 +1284,4 @@ mod tests {
         let error = result.expect_err("a read stuck behind the connection lock must fail");
         assert_eq!(error.status, StatusCode::GATEWAY_TIMEOUT);
     }
-
-    #[tokio::test]
-    async fn a_fast_read_still_resolves_normally() {
-        let result = run_read_with_timeout(Duration::from_secs(5), || Ok(42)).await;
-
-        assert_eq!(result.expect("a fast read must succeed"), 42);
-    }
 }

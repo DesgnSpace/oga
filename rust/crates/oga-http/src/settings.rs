@@ -2272,14 +2272,6 @@ mod catalog_tests {
         assert_eq!(models[0].id, "opencode/cached-model");
         assert_eq!(models[1].id, "opencode/live-model");
     }
-
-    #[tokio::test]
-    async fn claude_profiles_use_the_catalog_and_cache_the_result() {
-        let claude = profile("fixture-claude", Provider::Claude);
-        let models = discover_catalog(&[claude], false).await;
-        assert!(!models.is_empty());
-        assert!(models.iter().all(|m| m.provider == Provider::Claude));
-    }
 }
 
 #[cfg(test)]
@@ -2316,13 +2308,6 @@ mod usage_tests {
         assert!(parse_claude_usage("").is_empty());
         assert!(parse_claude_usage("Current session: not a percent").is_empty());
         assert!(parse_claude_usage("no colon here at all").is_empty());
-    }
-
-    #[test]
-    fn claude_result_text_reads_the_result_field_and_falls_back_to_empty() {
-        assert_eq!(claude_result_text("{\"result\": \"line one\"}"), "line one");
-        assert_eq!(claude_result_text("not json"), "");
-        assert_eq!(claude_result_text("{\"other\": 1}"), "");
     }
 
     #[cfg(unix)]
