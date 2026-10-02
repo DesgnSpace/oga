@@ -1687,6 +1687,15 @@ h1 {
     white-space: nowrap;
 }
 
+.changed-files-reviewed-progress {
+    flex: 0 0 auto;
+    margin: 0;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+}
+
 .changed-files-header-actions {
     display: flex;
     align-items: center;
@@ -1988,10 +1997,19 @@ h1 {
     border-bottom: 1px solid var(--color-border);
 }
 
+/* A flex row, because a mark inside the button that opens the diff would be a
+   button inside a button. */
+.changed-file-head {
+    display: flex;
+    align-items: center;
+}
+
 .changed-file-heading {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
+    flex: 1 1 auto;
     width: 100%;
+    min-width: 0; /* a flex item will not shrink below its content without this */
     min-height: 32px;
     align-items: center;
     gap: var(--space-1);
@@ -2005,12 +2023,28 @@ h1 {
     cursor: pointer;
 }
 
+.changed-file-reviewed {
+    width: var(--control-height-small);
+    height: var(--control-height-small);
+    min-height: var(--control-height-small);
+    margin-inline-end: var(--space-1);
+}
+
 .changed-file-heading:hover {
     background: color-mix(in srgb, var(--color-text) 5%, transparent);
 }
 
 .changed-file-row-active .changed-file-heading {
     background: var(--color-selection);
+}
+
+.changed-file-row-reviewed .changed-file-reviewed {
+    color: var(--color-accent);
+}
+
+.changed-file-row-reviewed .changed-file-path,
+.changed-files-tree-file-reviewed .changed-files-tree-name {
+    color: var(--color-text-muted);
 }
 
 .changed-file-disclosure,

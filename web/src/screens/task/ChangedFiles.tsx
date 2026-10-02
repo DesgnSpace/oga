@@ -7,7 +7,7 @@ import { runChangeSetAdded, runChangeSetRemoved } from "@/domain/changes";
 import type { ChangeTurn, ChangeTurnSet } from "@/domain/changes/grouped";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
-import { CheckIcon, ChevronIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
+import { CheckCircleIcon, CheckIcon, ChevronIcon, CircleIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
 import { EmptyState, LoadingState } from "@/components/atoms/ListState";
 import { CodeDiff } from "@/components/CodeDiff";
 import { Modal } from "@/components/primitives/Modal";
@@ -17,6 +17,7 @@ import {
   CHANGED_FILES_MIN_WIDTH,
   type ChangesSource,
 } from "@/state/changed-files-preferences";
+import { useReviewedFiles, type ReviewedFiles } from "@/state/reviewed-files";
 import { patchFromBlocks } from "@/lib/unified-patch";
 import { DiffHeader } from "@/components/DiffHeader";
 
@@ -70,10 +71,25 @@ function fileCount(files: number): string {
   return `${files} file${files === 1 ? "" : "s"}`;
 }
 
+function toggled(previous: Set<string>, key: string): Set<string> {
+  const next = new Set(previous);
+  if (!next.delete(key)) next.add(key);
+  return next;
+}
+
+function without(previous: Set<string>, key: string): Set<string> {
+  if (!previous.has(key)) return previous;
+  const next = new Set(previous);
+  next.delete(key);
+  return next;
+}
+
 function ChangedFileRow({
   file,
   expanded,
   onToggle,
+  onToggleReviewed,
+  reviewed,
   active,
   registerRow,
   showDiffHeader,
@@ -81,6 +97,8 @@ function ChangedFileRow({
   file: ChangedFileView;
   expanded: boolean;
   onToggle: () => void;
+  onToggleReviewed: () => void;
+  reviewed: ReviewedFiles;
   active: boolean;
   registerRow: (path: string, element: HTMLElement | null) => void;
   showDiffHeader: boolean;
@@ -90,27 +108,40 @@ function ChangedFileRow({
     [file.patch, file.path, file.change.blocks],
   );
   const status = file.status === undefined || file.status === "modified" ? undefined : STATUS_LABELS[file.status];
+  const isReviewed = reviewed.isReviewed(file);
   return (
     <section
-      className={`changed-file-row${active ? " changed-file-row-active" : ""}`}
+      className={`changed-file-row${active ? " changed-file-row-active" : ""}${isReviewed ? " changed-file-row-reviewed" : ""}`}
       ref={(element) => registerRow(file.path, element)}
     >
-      <button
-        className="changed-file-heading"
-        type="button"
-        aria-expanded={expanded}
-        onClick={onToggle}
-      >
-        <span className="changed-file-disclosure" aria-hidden="true">
-          <DisclosureIcon open={expanded} />
-        </span>
-        <span className="changed-file-path" title={file.path}>{file.path}</span>
-        <span className="changed-file-count">
-          {status !== undefined && <span className="changed-file-status">{status}</span>}
-          <span className="diff-stat-added">{`+${file.added}`}</span>{" "}
-          <span className="diff-stat-removed">{`-${file.removed}`}</span>
-        </span>
-      </button>
+      <div className="changed-file-head">
+        <button
+          className="changed-file-heading"
+          type="button"
+          aria-expanded={expanded}
+          onClick={onToggle}
+        >
+          <span className="changed-file-disclosure" aria-hidden="true">
+            <DisclosureIcon open={expanded} />
+          </span>
+          <span className="changed-file-path" title={file.path}>{file.path}</span>
+          <span className="changed-file-count">
+            {status !== undefined && <span className="changed-file-status">{status}</span>}
+            <span className="diff-stat-added">{`+${file.added}`}</span>{" "}
+            <span className="diff-stat-removed">{`-${file.removed}`}</span>
+          </span>
+        </button>
+        <button
+          className="icon-button changed-file-reviewed"
+          type="button"
+          aria-pressed={isReviewed}
+          aria-label={`Mark ${file.path} reviewed`}
+          title="Mark reviewed"
+          onClick={onToggleReviewed}
+        >
+          {isReviewed ? <CheckCircleIcon /> : <CircleIcon />}
+        </button>
+      </div>
       {expanded && (
         <div className="changed-file-diff">
           {showDiffHeader && <DiffHeader />}
@@ -135,12 +166,14 @@ function ChangedFileRow({
 interface FileRowProps {
   expandedPaths: Set<string>;
   onToggleFile: (path: string) => void;
+  reviewed: ReviewedFiles;
+  onToggleReviewed: (file: ChangedFileView) => void;
   activePath?: string;
   registerRow: (path: string, element: HTMLElement | null) => void;
   showDiffHeader: boolean;
 }
 
-function ChangedFileList({ files, expandedPaths, onToggleFile, activePath, registerRow, showDiffHeader }: FileRowProps & { files: ChangedFileView[] }) {
+function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, activePath, registerRow, showDiffHeader }: FileRowProps & { files: ChangedFileView[] }) {
   return (
     <div className="changed-files-list">
       {files.map((file) => (
@@ -149,6 +182,8 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, activePath, regis
           key={file.path}
           expanded={expandedPaths.has(file.path)}
           onToggle={() => onToggleFile(file.path)}
+          onToggleReviewed={() => onToggleReviewed(file)}
+          reviewed={reviewed}
           active={activePath === file.path}
           registerRow={registerRow}
           showDiffHeader={showDiffHeader}
@@ -184,12 +219,14 @@ function ChangeTurnGroup({
 function FileTreeNodes({
   nodes,
   activePath,
+  reviewed,
   collapsedDirs,
   onToggleDir,
   onSelectFile,
 }: {
   nodes: TreeNode[];
   activePath?: string;
+  reviewed: ReviewedFiles;
   collapsedDirs: Set<string>;
   onToggleDir: (path: string) => void;
   onSelectFile: (path: string) => void;
@@ -214,6 +251,7 @@ function FileTreeNodes({
               <FileTreeNodes
                 nodes={node.children}
                 activePath={activePath}
+                reviewed={reviewed}
                 collapsedDirs={collapsedDirs}
                 onToggleDir={onToggleDir}
                 onSelectFile={onSelectFile}
@@ -224,7 +262,7 @@ function FileTreeNodes({
           <li key={node.path}>
             <button
               type="button"
-              className={`changed-files-tree-file${activePath === node.path ? " changed-files-tree-file-active" : ""}`}
+              className={`changed-files-tree-file${activePath === node.path ? " changed-files-tree-file-active" : ""}${reviewed.isReviewed(node.file) ? " changed-files-tree-file-reviewed" : ""}`}
               onClick={() => onSelectFile(node.path)}
             >
               {node.file.status !== undefined && (
@@ -317,6 +355,8 @@ function SourcePicker({
 
 /** The files and their state, shared by both chromes. */
 export interface ChangedFilesProps {
+  /** Marks are kept per task, so two tasks never share them. */
+  taskId: string;
   source: ChangesSource;
   onSourceChange: (source: ChangesSource) => void;
   /** The branch the checkout is compared with, while one is selected. */
@@ -354,6 +394,7 @@ interface ChangedFilesViewProps extends ChangedFilesProps {
 
 function ChangedFilesView({
   layout,
+  taskId,
   source,
   onSourceChange,
   base,
@@ -380,6 +421,7 @@ function ChangedFilesView({
   const grouped = turns !== undefined && groupByTurn;
   const empty = grouped ? turns.turns.length === 0 : changes.files.length === 0;
   const tree = React.useMemo(() => buildFileTree(changes.files), [changes.files]);
+  const reviewed = useReviewedFiles(taskId);
 
   const [filePopoverOpen, setFilePopoverOpen] = React.useState(false);
   const filePopoverRef = React.useRef<HTMLDivElement>(null);
@@ -458,31 +500,33 @@ function ChangedFilesView({
   }, []);
 
   const toggleDir = (path: string) => {
-    setCollapsedDirs((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+    setCollapsedDirs((prev) => toggled(prev, path));
   };
 
   const toggleFile = (path: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+    setExpandedPaths((prev) => toggled(prev, path));
   };
 
   const toggleTurn = (key: string) => {
-    setExpandedTurns((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setExpandedTurns((prev) => toggled(prev, key));
   };
+
+  // Marking a file retires it: the diff closes, so the next one is the only one left open.
+  const toggleReviewed = (file: ChangedFileView) => {
+    if (!reviewed.isReviewed(file)) {
+      setExpandedPaths((prev) => without(prev, file.path));
+      setActivePath((previous) => (previous === file.path ? undefined : previous));
+    }
+    reviewed.toggle(file);
+  };
+
+  const openAll = () => {
+    setExpandedPaths(new Set(changes.files.map((file) => file.path)));
+    // Grouped, a file stays out of sight until its turn is open.
+    if (grouped) setExpandedTurns(new Set(turns.turns.map(turnKey)));
+  };
+
+  const closeAll = () => setExpandedPaths(new Set());
 
   const selectFile = (path: string) => {
     if (turns) {
@@ -524,9 +568,13 @@ function ChangedFilesView({
     });
   };
 
+  const allOpen = changes.files.every((file) => expandedPaths.has(file.path));
+
   const fileRowProps: FileRowProps = {
     expandedPaths,
     onToggleFile: toggleFile,
+    reviewed,
+    onToggleReviewed: toggleReviewed,
     activePath,
     registerRow,
     showDiffHeader: !full,
@@ -536,6 +584,7 @@ function ChangedFilesView({
     <FileTreeNodes
       nodes={tree}
       activePath={activePath}
+      reviewed={reviewed}
       collapsedDirs={collapsedDirs}
       onToggleDir={toggleDir}
       onSelectFile={(path) => {
@@ -594,6 +643,11 @@ function ChangedFilesView({
                 </p>
               )
             )}
+            {changes.files.length > 0 && (
+              <p className="changed-files-reviewed-progress">
+                {`${reviewed.count(changes.files)} of ${changes.files.length} reviewed`}
+              </p>
+            )}
           </div>
           <div className="changed-files-header-actions">
             {full && <DiffHeader />}
@@ -603,6 +657,16 @@ function ChangedFilesView({
                 Group by turn
               </label>
             ) : null}
+            {full && !empty && (
+              <>
+                <button className="text-button" type="button" disabled={allOpen} onClick={openAll}>
+                  Open all
+                </button>
+                <button className="text-button" type="button" disabled={expandedPaths.size === 0} onClick={closeAll}>
+                  Close all
+                </button>
+              </>
+            )}
             <button
               className="icon-button"
               type="button"

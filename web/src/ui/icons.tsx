@@ -139,6 +139,25 @@ export function CheckIcon({ size = 16, className }: IconProps) {
   );
 }
 
+/** A ring: an outer circle and an inner one drawn the other way round, leaving a hole. */
+const RING = "M232,128A104,104,0,1,1,24,128A104,104,0,1,1,232,128Zm-12,0a92,92,0,1,0-184,0,92,92,0,1,0,184,0Z";
+
+export function CircleIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d={RING} />
+    </Svg>
+  );
+}
+
+export function CheckCircleIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d={`${RING}M98.95,119.05 89.05,128.95 118,157.9 166.95,108.95 157.05,99.05 118,138.1Z`} />
+    </Svg>
+  );
+}
+
 export function PauseIcon({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>

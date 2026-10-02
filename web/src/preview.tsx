@@ -48,6 +48,7 @@ document.documentElement.classList.add("platform-macos");
 
 createRoot(document.getElementById("root")!).render(
   <ChangedFilesFullScreen
+    taskId="preview"
     source="branch"
     base="main"
     onBaseChange={() => {}}

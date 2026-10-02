@@ -386,6 +386,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
   );
 
   const changedFiles: ChangedFilesProps | undefined = task ? {
+    taskId,
     source: changesSource,
     onSourceChange: chooseSource,
     base: changesSource === "branch" ? base : undefined,
