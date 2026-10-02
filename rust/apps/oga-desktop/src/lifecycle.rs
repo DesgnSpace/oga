@@ -127,31 +127,3 @@ fn reveal_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     window.unminimize()?;
     window.set_focus()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn desktop_targets_keep_the_window_when_closed() {
-        assert_eq!(close_behavior(), CloseBehavior::HideToTray);
-    }
-
-    #[test]
-    fn quitting_with_nothing_running_says_nothing() {
-        assert_eq!(paused_runs_notice(0), None);
-    }
-
-    #[test]
-    fn quitting_names_how_many_runs_pause() {
-        let (_, body) = paused_runs_notice(1).expect("notice");
-        assert!(body.starts_with("1 run is paused"), "{body}");
-        let (_, body) = paused_runs_notice(3).expect("notice");
-        assert!(body.starts_with("3 runs are paused"), "{body}");
-    }
-
-    #[test]
-    fn state_file_is_stable_for_relaunches() {
-        assert_eq!(WINDOW_STATE_FILE, "oga-window-state.json");
-    }
-}

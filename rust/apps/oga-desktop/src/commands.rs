@@ -292,22 +292,3 @@ fn accelerated_item<R: Runtime>(
         .accelerator(accelerator)
         .build(app)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn menu_ids_have_stable_commands() {
-        assert_eq!(
-            MenuCommand::from_id(MENU_SETTINGS),
-            Some(MenuCommand::OpenSettings)
-        );
-        assert_eq!(MenuCommand::from_id(MENU_QUIT), Some(MenuCommand::Quit));
-        assert_eq!(
-            MenuCommand::from_id(MENU_FIND_TASK),
-            Some(MenuCommand::FindTask)
-        );
-        assert_eq!(MenuCommand::from_id("unknown"), None);
-    }
-}

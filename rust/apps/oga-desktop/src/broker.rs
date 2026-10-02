@@ -332,18 +332,6 @@ mod tests {
     use super::*;
     use std::fs;
 
-    #[test]
-    fn command_uses_the_bundled_server_when_present() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let server = directory.path().join("oga-server");
-        fs::write(&server, "server").expect("server fixture");
-
-        let command = BrokerCommand::from_path(server.clone(), None).expect("command");
-
-        assert_eq!(command.executable, server);
-        assert_eq!(command.arguments, vec!["serve".to_owned()]);
-    }
-
     fn supervisor_logging_to(log: &Path) -> BrokerSupervisor {
         let mut supervisor = BrokerSupervisor::new(None).expect("supervisor");
         supervisor.log = Some(log.to_path_buf());

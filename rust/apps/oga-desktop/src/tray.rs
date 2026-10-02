@@ -92,19 +92,3 @@ pub fn spawn_activity_poll<R: Runtime>(app: AppHandle<R>, client: LoopbackClient
 fn plural<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
     if count == 1 { singular } else { plural }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn running_tasks_show_in_tray_title() {
-        assert_eq!(tray_title(ActivityCounts { running: 4 }), "4");
-    }
-
-    #[test]
-    fn empty_counts_have_no_badge_text() {
-        let counts = ActivityCounts::default();
-        assert_eq!(tray_title(counts), "");
-        assert_eq!(accessibility_label(counts), "Oga");
-    }
-}

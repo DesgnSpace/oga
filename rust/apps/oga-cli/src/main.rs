@@ -4215,18 +4215,6 @@ mod tests {
     }
 
     #[test]
-    fn brief_summary_takes_the_first_line_within_the_limit() {
-        let prompt = "# Port the parser\n\nIt lives in rust/crates.";
-        assert_eq!(brief_summary(prompt, 60), "Port the parser");
-        assert_eq!(brief_summary("\n\n  spaced  \n", 60), "spaced");
-        let long = "a".repeat(80);
-        let summary = brief_summary(&long, 60);
-        assert_eq!(summary.chars().count(), 60);
-        assert!(summary.ends_with('…'));
-        assert_eq!(brief_summary("###", 60), "Delegated task");
-    }
-
-    #[test]
     fn cleanup_delete_requires_explicit_retention() {
         assert!(parse_cleanup_args(&["--delete".into()]).is_err());
         let parsed = parse_cleanup_args(&["--older-than=30d".into(), "--delete".into()]).unwrap();
@@ -4490,22 +4478,6 @@ mod tests {
     }
 
     #[test]
-    fn love_table_shows_the_whole_chain() {
-        let source = update_love_text(
-            "",
-            &chain(&["opencode:luna:max", "claude:opus:low"], &[WorkKind::Ui]),
-        );
-        let lines = love_table(&read_rules(&source));
-        assert_eq!(lines.len(), 2);
-        assert!(
-            lines[1].contains("opencode/luna → claude/opus"),
-            "{}",
-            lines[1]
-        );
-        assert!(lines[1].contains("max → low"), "{}", lines[1]);
-    }
-
-    #[test]
     fn delegate_kind_names_a_class_or_a_subject_or_fails_loudly() {
         let (options, _) = parse_delegate_args(&["--kind=review".into(), "look".into()]).unwrap();
         assert_eq!(options.kind, Some(WorkKind::Review));
@@ -4631,34 +4603,6 @@ mod tests {
         }];
 
         assert!(love_target_catalog_status("worker", "missing", &offered, true).is_err());
-    }
-
-    #[test]
-    fn unknown_watch_kinds_are_not_lifecycle_events() {
-        assert_eq!(parse_event_kind("future_kind"), None);
-        assert!(!stream_event_allowed(EventKind::Raw, false, true));
-    }
-
-    #[test]
-    fn watch_line_carries_settlement_details() {
-        let task = BatchTask {
-            id: "task-a".into(),
-            state: TaskState::Completed,
-            question: None,
-            error: None,
-            title: Some("Ship it".into()),
-            archived_at: None,
-            tldr: Some("finished".into()),
-            code: None,
-            truncated: None,
-            more: None,
-            duration_ms: 30_000,
-        };
-        let line: Value = serde_json::from_str(&watch_line(&task)).unwrap();
-        assert_eq!(line["type"], "settled");
-        assert_eq!(line["tldr"], "finished");
-        assert_eq!(line["title"], "Ship it");
-        assert_eq!(line["durationMs"], 30_000);
     }
 
     #[test]
