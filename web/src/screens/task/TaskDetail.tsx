@@ -6,6 +6,7 @@ import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { RunChangeProjection, runChangeSetAdded, runChangeSetRemoved, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
+import type { ChangeSort } from "@/domain/changes/ordering";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { copyText } from "@/lib/identifiers";
@@ -20,10 +21,12 @@ import {
   clampChangedFilesWidth,
   loadChangesBase,
   loadChangesGrouped,
+  loadChangesSort,
   loadChangesSource,
   loadChangedFilesWidth,
   storeChangesBase,
   storeChangesGrouped,
+  storeChangesSort,
   storeChangesSource,
   storeChangedFilesWidth,
   type ChangesSource,
@@ -208,6 +211,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
   const [changesSource, setChangesSource] = React.useState<ChangesSource>(loadChangesSource);
   const [changesBase, setChangesBase] = React.useState<string | undefined>(loadChangesBase);
   const [groupByTurn, setGroupByTurn] = React.useState(loadChangesGrouped);
+  const [changesSort, setChangesSort] = React.useState<ChangeSort>(loadChangesSort);
   const [changedFilesWidth, setChangedFilesWidth] = React.useState(loadChangedFilesWidth);
   const [resizeStart, setResizeStart] = React.useState<{ x: number; width: number } | null>(null);
   const [profiles, setProfiles] = React.useState<ProfileView[] | undefined>(undefined);
@@ -368,6 +372,10 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     setGroupByTurn(grouped);
     storeChangesGrouped(grouped);
   };
+  const chooseSort = (sort: ChangeSort) => {
+    setChangesSort(sort);
+    storeChangesSort(sort);
+  };
   const cwd = task?.cwd;
   const reportedChanges = React.useMemo(
     () => (cwd !== undefined ? changeProjection.update(events, cwd) : RUN_CHANGES_EMPTY),
@@ -394,6 +402,8 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     branches: branches.branches,
     groupByTurn,
     onGroupByTurn: chooseGrouping,
+    sort: changesSort,
+    onSortChange: chooseSort,
     onReload: git.reload,
     changes: showingGit ? gitChanges : reportedChanges,
     turns: showingGit ? undefined : reportedTurns,

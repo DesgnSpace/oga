@@ -30,6 +30,8 @@ function panel(changes: ChangedFileSet): ChangedFilesPanelProps {
     branches: [],
     groupByTurn: false,
     onGroupByTurn: () => {},
+    sort: "folder",
+    onSortChange: () => {},
     onReload: () => {},
     changes,
     loading: false,
@@ -79,6 +81,11 @@ async function settle(): Promise<void> {
 async function press(key: string, init: KeyboardEventInit = {}): Promise<void> {
   fireEvent.keyDown(document.activeElement ?? document.body, { key, ...init });
   await settle();
+}
+
+/** The files the panel lists, top to bottom, wherever they sit. */
+function rowPaths(): (string | null)[] {
+  return [...document.querySelectorAll(".changed-file-path")].map((row) => row.textContent);
 }
 
 describe("reviewing changed files", () => {
@@ -164,5 +171,36 @@ describe("reviewing changed files", () => {
     screen.getByRole("checkbox").focus();
     await press("j");
     expect(onScreen()).toBe("web/src/one.ts");
+  });
+
+  it("puts the biggest change first on request and keeps generated files in a closed group", async () => {
+    const small = plainFile("web/src/one.ts", 2);
+    const large = plainFile("web/src/two.ts", 90);
+    const lock = plainFile("bun.lock", 400);
+    const set = changes([small, lock, large]);
+
+    const { rerender } = render(<ChangedFilesPanel {...panel(set)} sort="folder" />);
+
+    expect(rowPaths()).toEqual(["web/src/one.ts", "web/src/two.ts"]);
+    expect(screen.getByText("1 generated file, not part of the review")).toBeTruthy();
+    const group = screen.getByRole("button", { name: /Generated/ });
+    expect(group.getAttribute("aria-expanded")).toBe("false");
+
+    rerender(<ChangedFilesPanel {...panel(set)} sort="size" />);
+    expect(rowPaths()).toEqual(["web/src/two.ts", "web/src/one.ts"]);
+
+    heading("one.ts").focus();
+    await press("j");
+    expect(onScreen()).toBe("web/src/two.ts");
+    await press("j");
+    expect(onScreen()).toBe("web/src/one.ts");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark web/src/two.ts reviewed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark web/src/one.ts reviewed" }));
+    expect(screen.getByText("2 of 2 reviewed")).toBeTruthy();
+
+    fireEvent.click(group);
+    expect(rowPaths()).toEqual(["web/src/two.ts", "web/src/one.ts", "bun.lock"]);
+    expect(screen.queryByRole("button", { name: "Mark bun.lock reviewed" })).toBeNull();
   });
 });

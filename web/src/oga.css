@@ -1706,13 +1706,26 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-reviewed-progress {
+.changed-files-reviewed-progress,
+.changed-files-generated-count {
     flex: 0 0 auto;
     margin: 0;
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     white-space: nowrap;
+}
+
+.changed-files-sort {
+    position: relative;
+}
+
+.changed-files-sort-menu {
+    position: absolute;
+    z-index: var(--z-raised);
+    top: 100%;
+    right: 0;
+    margin-top: var(--space-1);
 }
 
 .changed-files-header-actions {
@@ -1740,7 +1753,8 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-source-chevron {
+.changed-files-source-chevron,
+.changed-files-sort-chevron {
     display: inline-flex;
     flex: 0 0 auto;
     color: var(--color-text-muted);
@@ -2027,7 +2041,12 @@ h1 {
     gap: var(--space-3);
 }
 
-.changed-files-turn-heading {
+.changed-files-generated {
+    margin-block-start: var(--space-3);
+}
+
+.changed-files-turn-heading,
+.changed-files-generated-heading {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     width: 100%;
@@ -2044,11 +2063,14 @@ h1 {
 }
 
 .changed-files-turn-heading:hover,
-.changed-files-turn-heading:focus-visible {
+.changed-files-turn-heading:focus-visible,
+.changed-files-generated-heading:hover,
+.changed-files-generated-heading:focus-visible {
     color: var(--color-accent);
 }
 
-.changed-files-turn-label {
+.changed-files-turn-label,
+.changed-files-generated-label {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2057,7 +2079,8 @@ h1 {
     font-weight: 600;
 }
 
-.changed-files-turn-meta {
+.changed-files-turn-meta,
+.changed-files-generated-meta {
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
@@ -3952,6 +3975,7 @@ select {
 .task-metadata,
 .task-detail-fact,
 .changed-files-summary,
+.changed-files-generated-count,
 .card-row dd {
     font-variant-numeric: tabular-nums;
 }

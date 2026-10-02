@@ -1,5 +1,6 @@
 // Changed-files panel preferences.
 
+import type { ChangeSort } from "@/domain/changes/ordering";
 import { readStorage, writeStorage } from "./storage";
 
 export const CHANGED_FILES_MIN_WIDTH = 280;
@@ -10,10 +11,13 @@ const CHANGED_FILES_WIDTH_KEY = "changedFilesPanelWidth";
 const CHANGES_SOURCE_KEY = "oga:changes-source";
 const CHANGES_BASE_KEY = "oga:changes-base-branch";
 const CHANGES_GROUP_KEY = "oga:changes-group-by-turn";
+const CHANGES_SORT_KEY = "oga:changes-sort";
 
 export type ChangesSource = "run" | "uncommitted" | "branch";
 
 const CHANGES_SOURCES: readonly ChangesSource[] = ["run", "uncommitted", "branch"];
+
+const CHANGE_SORTS: readonly ChangeSort[] = ["folder", "size"];
 
 export function clampChangedFilesWidth(width: number): number {
   return Math.min(Math.max(width, CHANGED_FILES_MIN_WIDTH), CHANGED_FILES_MAX_WIDTH);
@@ -55,4 +59,13 @@ export function loadChangesGrouped(): boolean {
 
 export function storeChangesGrouped(grouped: boolean): void {
   writeStorage(CHANGES_GROUP_KEY, grouped ? "1" : "0");
+}
+
+export function loadChangesSort(): ChangeSort {
+  const stored = readStorage(CHANGES_SORT_KEY);
+  return CHANGE_SORTS.find((sort) => sort === stored) ?? "folder";
+}
+
+export function storeChangesSort(sort: ChangeSort): void {
+  writeStorage(CHANGES_SORT_KEY, sort);
 }

@@ -8,7 +8,7 @@ function file(path: string): ChangedFileView {
 
 describe("buildFileTree", () => {
   it("nests files under shared directories, directories before files, alphabetically", () => {
-    const tree = buildFileTree([file("b.ts"), file("src/index.ts"), file("src/lib/a.ts"), file("src/lib/b.ts")]);
+    const tree = buildFileTree([file("b.ts"), file("src/index.ts"), file("src/lib/a.ts"), file("src/lib/b.ts")], [], "folder");
 
     expect(tree.map((node) => node.name)).toEqual(["src", "b.ts"]);
     const src = tree[0];

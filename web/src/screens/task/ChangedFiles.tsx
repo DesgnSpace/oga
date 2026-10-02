@@ -5,6 +5,15 @@ import type { TaskDiffFileStatus } from "@/bridge/types";
 import type { ChangedFileSet, ChangedFileView } from "@/domain/changes";
 import { runChangeSetAdded, runChangeSetRemoved } from "@/domain/changes";
 import type { ChangeTurn, ChangeTurnSet } from "@/domain/changes/grouped";
+import {
+  CHANGE_SORTS,
+  GENERATED_GROUP_KEY,
+  GENERATED_GROUP_NAME,
+  orderChangeFiles,
+  orderChangeTurns,
+  type ChangeSort,
+  type OrderedChangeTurn,
+} from "@/domain/changes/ordering";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
 import { CheckCircleIcon, CheckIcon, ChevronIcon, CircleIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, RefreshIcon } from "@/ui/icons";
@@ -36,6 +45,14 @@ function turnKey(turn: ChangeTurn): string {
   return turn.turnId !== undefined ? `t${turn.turnId}` : `e${turn.ordinal}`;
 }
 
+/**
+ * A turn's generated group is its own, so opening one turn's generated files
+ * leaves the next turn's closed.
+ */
+function generatedTurnKey(turn: ChangeTurn): string {
+  return `${turnKey(turn)}/${GENERATED_GROUP_KEY}`;
+}
+
 /** Which two sides the panel compares. */
 const CHANGES_SOURCES = ["run", "uncommitted", "branch"] as const;
 
@@ -54,6 +71,16 @@ const CHANGES_SOURCE_HINTS = {
   branch: "This checkout compared with another branch",
 } satisfies Record<ChangesSource, string>;
 
+const CHANGE_SORT_LABELS = {
+  folder: "By folder",
+  size: "By size",
+} satisfies Record<ChangeSort, string>;
+
+const CHANGE_SORT_HINTS = {
+  folder: "Folder by folder, in the order the changes came in",
+  size: "Biggest changes first",
+} satisfies Record<ChangeSort, string>;
+
 const STATUS_LABELS = {
   added: "New",
   modified: "Changed",
@@ -71,8 +98,8 @@ const STATUS_GLYPHS = {
   untracked: "U",
 } satisfies Record<TaskDiffFileStatus, string>;
 
-function fileCount(files: number): string {
-  return `${files} file${files === 1 ? "" : "s"}`;
+function fileCount(files: number, noun = "file"): string {
+  return `${files} ${noun}${files === 1 ? "" : "s"}`;
 }
 
 function toggled(previous: Set<string>, key: string): Set<string> {
@@ -86,6 +113,18 @@ function without(previous: Set<string>, key: string): Set<string> {
   const next = new Set(previous);
   next.delete(key);
   return next;
+}
+
+/** One row per path, first sighting wins, whichever list is walked. */
+function uniqueFiles(files: readonly ChangedFileView[]): ChangedFileView[] {
+  const seen = new Set<string>();
+  const unique: ChangedFileView[] = [];
+  for (const file of files) {
+    if (seen.has(file.path)) continue;
+    seen.add(file.path);
+    unique.push(file);
+  }
+  return unique;
 }
 
 /** Closes an open popover on Escape or on a press anywhere outside it. */
@@ -124,6 +163,7 @@ function ChangedFileRow({
   onToggle,
   onToggleReviewed,
   reviewed,
+  reviewable,
   active,
   registerRow,
   registerHeading,
@@ -134,6 +174,8 @@ function ChangedFileRow({
   onToggle: () => void;
   onToggleReviewed: () => void;
   reviewed: ReviewedFiles;
+  /** False for generated files, which the review does not count. */
+  reviewable: boolean;
   active: boolean;
   registerRow: (path: string, element: HTMLElement | null) => void;
   registerHeading: (path: string, element: HTMLElement | null) => void;
@@ -168,16 +210,18 @@ function ChangedFileRow({
             <span className="diff-stat-removed">{`-${file.removed}`}</span>
           </span>
         </button>
-        <button
-          className="icon-button changed-file-reviewed"
-          type="button"
-          aria-pressed={isReviewed}
-          aria-label={`Mark ${file.path} reviewed`}
-          title="Mark reviewed"
-          onClick={onToggleReviewed}
-        >
-          {isReviewed ? <CheckCircleIcon /> : <CircleIcon />}
-        </button>
+        {reviewable && (
+          <button
+            className="icon-button changed-file-reviewed"
+            type="button"
+            aria-pressed={isReviewed}
+            aria-label={`Mark ${file.path} reviewed`}
+            title="Mark reviewed"
+            onClick={onToggleReviewed}
+          >
+            {isReviewed ? <CheckCircleIcon /> : <CircleIcon />}
+          </button>
+        )}
       </div>
       {expanded && (
         <div className="changed-file-diff">
@@ -211,7 +255,7 @@ interface FileRowProps {
   showDiffHeader: boolean;
 }
 
-function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, activePath, registerRow, registerHeading, showDiffHeader }: FileRowProps & { files: ChangedFileView[] }) {
+function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, reviewable, activePath, registerRow, registerHeading, showDiffHeader }: FileRowProps & { files: ChangedFileView[]; reviewable: boolean }) {
   return (
     <div className="changed-files-list">
       {files.map((file) => (
@@ -222,6 +266,7 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggl
           onToggle={() => onToggleFile(file.path)}
           onToggleReviewed={() => onToggleReviewed(file)}
           reviewed={reviewed}
+          reviewable={reviewable}
           active={activePath === file.path}
           registerRow={registerRow}
           registerHeading={registerHeading}
@@ -233,11 +278,20 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggl
 }
 
 function ChangeTurnGroup({
-  turn,
+  entry,
   expanded,
   onToggleTurn,
+  generatedOpen,
+  onToggleGenerated,
   ...fileRowProps
-}: FileRowProps & { turn: ChangeTurn; expanded: boolean; onToggleTurn: () => void }) {
+}: FileRowProps & {
+  entry: OrderedChangeTurn;
+  expanded: boolean;
+  onToggleTurn: () => void;
+  generatedOpen: boolean;
+  onToggleGenerated: () => void;
+}) {
+  const { turn } = entry;
   return (
     <section className="changed-files-turn">
       <button className="changed-files-turn-heading" type="button" aria-expanded={expanded} onClick={onToggleTurn}>
@@ -250,7 +304,48 @@ function ChangeTurnGroup({
           {fileCount(turn.files.length)}
         </span>
       </button>
-      {expanded && <ChangedFileList files={turn.files} {...fileRowProps} />}
+      {expanded && (
+        <>
+          <ChangedFileList files={entry.files} reviewable {...fileRowProps} />
+          {entry.generated.length > 0 && (
+            <GeneratedGroup
+              files={entry.generated}
+              open={generatedOpen}
+              onToggle={onToggleGenerated}
+              {...fileRowProps}
+            />
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Lockfiles, snapshots and build output, closed until a reader opens them.
+ */
+function GeneratedGroup({
+  files,
+  open,
+  onToggle,
+  ...fileRowProps
+}: FileRowProps & { files: ChangedFileView[]; open: boolean; onToggle: () => void }) {
+  return (
+    <section className="changed-files-generated">
+      <button
+        className="changed-files-generated-heading"
+        type="button"
+        aria-expanded={open}
+        title="Lockfiles, snapshots and build output"
+        onClick={onToggle}
+      >
+        <span className="changed-file-disclosure" aria-hidden="true">
+          <DisclosureIcon open={open} />
+        </span>
+        <span className="changed-files-generated-label">{GENERATED_GROUP_NAME}</span>
+        <span className="changed-files-generated-meta">{fileCount(files.length)}</span>
+      </button>
+      {open && <ChangedFileList files={files} reviewable={false} {...fileRowProps} />}
     </section>
   );
 }
@@ -392,6 +487,51 @@ function SourcePicker({
   );
 }
 
+function SortPicker({
+  sort,
+  onSortChange,
+}: {
+  sort: ChangeSort;
+  onSortChange: (sort: ChangeSort) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const label = CHANGE_SORT_LABELS[sort];
+  const choices = CHANGE_SORTS.map((option) => ({
+    key: option,
+    label: CHANGE_SORT_LABELS[option],
+    icon: sort === option ? <CheckIcon /> : undefined,
+    onSelect: () => {
+      setOpen(false);
+      onSortChange(option);
+    },
+  }));
+  return (
+    <div className="changed-files-sort">
+      <button
+        className="text-button"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Order files ${CHANGE_SORT_LABELS[sort].toLowerCase()}`}
+        title={CHANGE_SORT_HINTS[sort]}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {label}
+        <span className="changed-files-sort-chevron" aria-hidden="true">
+          <ChevronIcon />
+        </span>
+      </button>
+      {open && (
+        <MenuPanel
+          className="changed-files-sort-menu"
+          sections={[choices]}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 /** The files and their state, shared by both chromes. */
 export interface ChangedFilesProps {
   /** Marks are kept per task, so two tasks never share them. */
@@ -405,6 +545,9 @@ export interface ChangedFilesProps {
   branches: string[];
   groupByTurn: boolean;
   onGroupByTurn: (grouped: boolean) => void;
+  /** Whether the panel lists files by folder or by size. */
+  sort: ChangeSort;
+  onSortChange: (sort: ChangeSort) => void;
   /** Reads the checkout again. Only offered for the two git comparisons. */
   onReload: () => void;
   /** The flat view of whichever comparison is showing. */
@@ -441,6 +584,8 @@ function ChangedFilesView({
   branches,
   groupByTurn,
   onGroupByTurn,
+  sort,
+  onSortChange,
   onReload,
   changes,
   turns,
@@ -457,16 +602,28 @@ function ChangedFilesView({
   const full = layout === "full";
   const added = runChangeSetAdded(changes);
   const removed = runChangeSetRemoved(changes);
-  const grouped = turns !== undefined && groupByTurn;
-  const empty = grouped ? turns.turns.length === 0 : changes.files.length === 0;
-  const tree = React.useMemo(() => buildFileTree(changes.files), [changes.files]);
+  // Both the list and the file tree read the same order: the files a reviewer
+  // reads, then the generated ones the panel keeps closed until they are asked for.
+  const listed = React.useMemo(() => orderChangeFiles(changes.files, sort), [changes.files, sort]);
+  const listedTurns = React.useMemo(
+    () => (turns !== undefined && groupByTurn ? orderChangeTurns(turns, sort) : undefined),
+    [turns, groupByTurn, sort],
+  );
+  const empty = listedTurns ? listedTurns.length === 0 : changes.files.length === 0;
+  const tree = React.useMemo(
+    () => buildFileTree(listed.files, listed.generated, sort),
+    [listed, sort],
+  );
   const reviewed = useReviewedFiles(taskId);
 
   const [filePopoverOpen, setFilePopoverOpen] = React.useState(false);
   const filePopoverRef = React.useRef<HTMLDivElement>(null);
   const [keysOpen, setKeysOpen] = React.useState(false);
   const keysRef = React.useRef<HTMLDivElement>(null);
-  const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(new Set());
+  // The generated group is closed in the tree until a reader opens it.
+  const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(() => new Set([GENERATED_GROUP_KEY]));
+  // In the list, a generated group opens only when a reader asks for it.
+  const [openGenerated, setOpenGenerated] = React.useState<Set<string>>(new Set());
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set());
   const [expandedTurns, setExpandedTurns] = React.useState<Set<string>>(new Set());
   const [activePath, setActivePath] = React.useState<string | undefined>(undefined);
@@ -550,20 +707,43 @@ function ChangedFilesView({
     setExpandedTurns((prev) => toggled(prev, key));
   };
 
+  const toggleGenerated = (key: string) => {
+    setOpenGenerated((prev) => toggled(prev, key));
+  };
+
+  // The files a reviewer reads, across turns: what the progress counts and what
+  // Open all opens. A generated file is in neither.
+  const toReview = React.useMemo(
+    () => (listedTurns ? uniqueFiles(listedTurns.flatMap((entry) => entry.files)) : listed.files),
+    [listedTurns, listed.files],
+  );
+
+  /** Which generated group holds a file, so a key that asks for one can open it. */
+  const generatedKeys = React.useMemo(() => {
+    const keys = new Map<string, string>();
+    for (const file of listed.generated) keys.set(file.path, GENERATED_GROUP_KEY);
+    for (const entry of listedTurns ?? []) {
+      for (const file of entry.generated) keys.set(file.path, generatedTurnKey(entry.turn));
+    }
+    return keys;
+  }, [listed.generated, listedTurns]);
+
   // Marking a file retires it: the diff closes, so the next one is the only one
   // left open. The file keeps the panel's place, so the next key moves off the
   // file just read rather than back onto it.
   const toggleReviewed = React.useCallback((file: ChangedFileView) => {
+    // A generated file is outside the review, so there is no mark to set on it.
+    if (generatedKeys.has(file.path)) return;
     if (!reviewed.isReviewed(file)) {
       setExpandedPaths((prev) => without(prev, file.path));
     }
     reviewed.toggle(file);
-  }, [reviewed]);
+  }, [reviewed, generatedKeys]);
 
   const openAll = () => {
-    setExpandedPaths(new Set(changes.files.map((file) => file.path)));
+    setExpandedPaths(new Set(toReview.map((file) => file.path)));
     // Grouped, a file stays out of sight until its turn is open.
-    if (grouped) setExpandedTurns(new Set(turns.turns.map(turnKey)));
+    if (listedTurns) setExpandedTurns(new Set(listedTurns.map((entry) => turnKey(entry.turn))));
   };
 
   const closeAll = () => setExpandedPaths(new Set());
@@ -578,8 +758,12 @@ function ChangedFilesView({
         return next;
       });
     }
+    // A generated file sits in a group the reader left closed, so asking for it
+    // opens the group too.
+    const group = generatedKeys.get(path);
+    if (group !== undefined) setOpenGenerated((prev) => new Set(prev).add(group));
     setExpandedPaths((prev) => new Set(prev).add(path));
-  }, [turns]);
+  }, [turns, generatedKeys]);
 
   // The file the reader picked holds the panel still for a moment, so the row
   // it asked for stays the one on screen while the list glides to it.
@@ -606,28 +790,31 @@ function ChangedFilesView({
     heldUntilRef.current = 0;
   };
 
-  // The files as the panel lists them: grouped, that is turn by turn, and a
+  // The files as the panel lists them, which is the order the keys walk: grouped
+  // means turn by turn, each turn's generated files just after its own, and a
   // file two turns touched is one file to move through.
   const order = React.useMemo(() => {
-    const listed = grouped ? turns.turns.flatMap((turn) => turn.files) : changes.files;
-    const seen = new Set<string>();
-    return listed.filter((file) => {
-      if (seen.has(file.path)) return false;
-      seen.add(file.path);
-      return true;
-    });
-  }, [grouped, turns, changes.files]);
+    if (!listedTurns) return [...listed.files, ...listed.generated];
+    return uniqueFiles(listedTurns.flatMap((entry) => [...entry.files, ...entry.generated]));
+  }, [listed, listedTurns]);
 
   const activeFile = React.useMemo(
     () => order.find((file) => file.path === activePath),
     [order, activePath],
   );
 
+  // A generated file needs no mark, so the key that skips to the next unread
+  // file steps over the group instead of landing on a lockfile.
+  const countsAsReviewed = React.useCallback(
+    (file: ChangedFileView) => generatedKeys.has(file.path) || reviewed.isReviewed(file),
+    [generatedKeys, reviewed],
+  );
+
   useReviewKeys({
     root: viewRoot,
     files: order,
     activeFile,
-    isReviewed: reviewed.isReviewed,
+    isReviewed: countsAsReviewed,
     goTo,
     toggleOpen: toggleFile,
     toggleReviewed,
@@ -663,10 +850,10 @@ function ChangedFilesView({
     });
   };
 
-  // Both counts read the files the panel lists, so a path left behind by a
+  // Both counts read the files the review asks about, so a path left behind by a
   // collapsed turn cannot make the header claim the wrong thing.
-  const allOpen = order.length > 0 && order.every((file) => expandedPaths.has(file.path));
-  const noneOpen = order.every((file) => !expandedPaths.has(file.path));
+  const allOpen = toReview.length > 0 && toReview.every((file) => expandedPaths.has(file.path));
+  const noneOpen = toReview.every((file) => !expandedPaths.has(file.path));
 
   const fileRowProps: FileRowProps = {
     expandedPaths,
@@ -693,6 +880,17 @@ function ChangedFilesView({
     />
   );
 
+  const generatedGroup = (files: ChangedFileView[], key: string) =>
+    files.length === 0 ? null : (
+      <GeneratedGroup
+        files={files}
+        key={key}
+        open={openGenerated.has(key)}
+        onToggle={() => toggleGenerated(key)}
+        {...fileRowProps}
+      />
+    );
+
   const diffs = (
     <div
       className="changed-files-diffs"
@@ -700,20 +898,25 @@ function ChangedFilesView({
       onWheel={endScrollHold}
       onTouchMove={endScrollHold}
     >
-      {grouped ? (
+      {listedTurns ? (
         <div className="changed-files-turns">
-          {turns.turns.map((turn) => (
+          {listedTurns.map((entry) => (
             <ChangeTurnGroup
-              key={turnKey(turn)}
-              turn={turn}
-              expanded={expandedTurns.has(turnKey(turn))}
-              onToggleTurn={() => toggleTurn(turnKey(turn))}
+              key={turnKey(entry.turn)}
+              entry={entry}
+              expanded={expandedTurns.has(turnKey(entry.turn))}
+              onToggleTurn={() => toggleTurn(turnKey(entry.turn))}
+              generatedOpen={openGenerated.has(generatedTurnKey(entry.turn))}
+              onToggleGenerated={() => toggleGenerated(generatedTurnKey(entry.turn))}
               {...fileRowProps}
             />
           ))}
         </div>
       ) : (
-        <ChangedFileList files={changes.files} {...fileRowProps} />
+        <>
+          <ChangedFileList files={listed.files} reviewable {...fileRowProps} />
+          {generatedGroup(listed.generated, GENERATED_GROUP_KEY)}
+        </>
       )}
     </div>
   );
@@ -740,21 +943,27 @@ function ChangedFilesView({
             ) : (
               changes.files.length > 0 && (
                 <p className="changed-files-summary">
-                  {`${fileCount(grouped ? turns.turns.reduce((count, turn) => count + turn.files.length, 0) : changes.files.length)} · `}
+                  {`${fileCount(listedTurns ? listedTurns.reduce((count, entry) => count + entry.files.length + entry.generated.length, 0) : changes.files.length)} · `}
                   <span className="diff-stat-added">{`+${added}`}</span>
                   {" · "}
                   <span className="diff-stat-removed">{`-${removed}`}</span>
                 </p>
               )
             )}
-            {changes.files.length > 0 && (
+            {toReview.length > 0 && (
               <p className="changed-files-reviewed-progress">
-                {`${reviewed.count(changes.files)} of ${changes.files.length} reviewed`}
+                {`${reviewed.count(toReview)} of ${toReview.length} reviewed`}
+              </p>
+            )}
+            {listed.generated.length > 0 && (
+              <p className="changed-files-generated-count">
+                {`${fileCount(listed.generated.length, "generated file")}, not part of the review`}
               </p>
             )}
           </div>
           <div className="changed-files-header-actions">
             {full && <DiffHeader />}
+            {!empty && error === undefined && <SortPicker sort={sort} onSortChange={onSortChange} />}
             {source === "run" ? (
               <label className="changed-files-group">
                 <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />

@@ -56,6 +56,8 @@ createRoot(document.getElementById("root")!).render(
     onSourceChange={() => {}}
     groupByTurn={false}
     onGroupByTurn={() => {}}
+    sort="size"
+    onSortChange={() => {}}
     onReload={() => {}}
     changes={changes}
     loading={false}
