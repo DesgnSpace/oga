@@ -425,7 +425,6 @@ pub struct WorkerSettings {
     pub label: String,
     pub provider: oga_domain::Provider,
     pub enabled: bool,
-    pub has_enabled_override: bool,
     pub configured: bool,
     pub models: Vec<ModelSettingsModel>,
 }
@@ -436,11 +435,8 @@ pub struct ModelSettingsModel {
     pub id: String,
     pub label: String,
     pub enabled: bool,
-    pub has_enabled_override: bool,
     pub preferred: bool,
-    pub has_preferred_override: bool,
     pub capabilities: Vec<String>,
-    pub has_capabilities_override: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
