@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { setTransport } from "@/bridge/transport";
 import type { ModelSettingsModel, ModelSettingsSnapshot, Task, WorkerSettings } from "@/bridge/types";
 import { TaskHeaderActions } from "./Actions";
@@ -45,38 +45,46 @@ const enabledModels: ModelSettingsSnapshot = {
   ],
 };
 
+function serve(calls: string[], requests: unknown[] = []) {
+  setTransport({
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+      if (command !== "broker_call") throw { message: `no handler for ${command}` };
+      const { call, request } = args?.call as { call: string; request?: unknown };
+      calls.push(call);
+      if (call === "handoffTask") {
+        requests.push(request);
+        return undefined as never;
+      }
+      if (call === "summary") {
+        return {
+          profiles: [
+            { id: "claude", label: "Claude", provider: "claude", model: "sonnet", enabled: true, env: {}, capabilities: [] },
+            { id: "codex", label: "Codex", provider: "codex", model: "gpt-5", enabled: true, env: {}, capabilities: [] },
+          ],
+          tasks: [],
+          tasksHasMore: false,
+          profileFailures: [],
+          grants: [],
+          memoryProjects: [],
+        } as never;
+      }
+      if (call === "enabledModels") return enabledModels as never;
+      throw { message: `no handler for ${call}` };
+    },
+    listen: () => {},
+  });
+}
+
 describe("the handoff dialog", () => {
   afterEach(cleanup);
 
   it("offers the workers and models from the enabled-model read", async () => {
     const calls: string[] = [];
-    setTransport({
-      invoke: async (command: string, args?: Record<string, unknown>) => {
-        if (command !== "broker_call") throw { message: `no handler for ${command}` };
-        const call = (args?.call as { call: string }).call;
-        calls.push(call);
-        if (call === "summary") {
-          return {
-            profiles: [
-              { id: "claude", label: "Claude", provider: "claude", model: "sonnet", enabled: true, env: {}, capabilities: [] },
-              { id: "codex", label: "Codex", provider: "codex", model: "gpt-5", enabled: true, env: {}, capabilities: [] },
-            ],
-            tasks: [],
-            tasksHasMore: false,
-            profileFailures: [],
-            grants: [],
-            memoryProjects: [],
-          } as never;
-        }
-        if (call === "enabledModels") return enabledModels as never;
-        throw { message: `no handler for ${call}` };
-      },
-      listen: () => {},
-    });
+    serve(calls);
 
     render(<TaskHeaderActions task={task} events={[]} onChanged={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-    fireEvent.click(await screen.findByText("Move to another worker"));
+    fireEvent.click(await screen.findByText("Handoff"));
 
     const workerSelect = await screen.findByLabelText("Worker");
     expect(within(workerSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
@@ -91,5 +99,25 @@ describe("the handoff dialog", () => {
     ]);
     expect(screen.getByText("Current: Claude / opus")).toBeTruthy();
     expect(calls).not.toContain("modelSettings");
+  });
+
+  it("hands off with the chosen effort, and with only a new effort on the same model", async () => {
+    const requests: unknown[] = [];
+    serve([], requests);
+
+    render(<TaskHeaderActions task={{ ...task, profileId: "codex", model: "gpt-5", effort: "low" } as Task} events={[]} onChanged={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await screen.findByText("Handoff"));
+
+    fireEvent.change(await screen.findByLabelText("Worker"), { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "gpt-5" } });
+    const submit = screen.getByRole("button", { name: "Hand off" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "high" } });
+    expect(submit.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(requests).toEqual([{ profile: "codex", model: "gpt-5", effort: "high" }]));
   });
 });

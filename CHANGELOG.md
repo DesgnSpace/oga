@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- "Move to another worker" in a task's menu is now called Handoff, and its window lets you pick the effort too. You can also hand a task to the same model at a different effort.
+
 - Your brief rules and the models you switch on are now one setting for the whole machine, so those pages no longer ask you to pick a project first. If you had set them for a single project, that choice now applies everywhere.
 - A task whose worker stops without ever replying is no longer marked completed. Oga first asks the worker once to finish and report; if it still says nothing, the task shows as unfinished with a reason, so you can resume it, and tasks waiting on it hold.
 - Search and filter now sit in the task list's top row. Usage moved into Settings, and Refresh tasks is in the filter menu.

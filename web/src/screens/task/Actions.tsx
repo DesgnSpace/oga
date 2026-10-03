@@ -52,8 +52,8 @@ export function executeQueue(taskId: string, instruction: string) {
   return broker.resumeTask(taskId, { instruction, queue: "add" });
 }
 
-export function executeHandoff(taskId: string, profile: string, model: string) {
-  return broker.handoffTask(taskId, { profile, model });
+export function executeHandoff(taskId: string, profile: string, model: string, effort?: string) {
+  return broker.handoffTask(taskId, { profile, model, effort });
 }
 
 export function executeComplete(taskId: string) {
@@ -226,10 +226,10 @@ export function removeFollowUpTitles(task: TaskToastSource): TaskToastTitles {
     { pending: "Removing follow-up", success: "Follow-up removed", failure: "remove the follow-up" });
 }
 
-export function moveTitles(task: TaskToastSource): TaskToastTitles {
+export function handoffTitles(task: TaskToastSource): TaskToastTitles {
   return taskToastTitles(task,
-    (name) => ({ pending: `Moving ${name}`, success: `${name} moved to another worker`, failure: `move ${name}` }),
-    { pending: "Moving task", success: "Task moved to another worker", failure: "move this task" });
+    (name) => ({ pending: `Handing off ${name}`, success: `${name} handed off`, failure: `hand off ${name}` }),
+    { pending: "Handing off task", success: "Task handed off", failure: "hand off this task" });
 }
 
 export interface BlockedExplanation {
@@ -558,7 +558,7 @@ export function TaskHeaderActions({
       ? [
           {
             key: "handoff",
-            label: "Move to another worker",
+            label: "Handoff",
             disabled: busy,
             onSelect: () => {
               setMenuOpen(false);
@@ -735,6 +735,19 @@ function TaskDetailsView({ task, events, onBack }: { task: Task; events: TaskEve
   );
 }
 
+const EFFORT_LEVELS = [
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+  { value: "max", label: "Max" },
+];
+
+function effortLabel(effort: string | undefined): string | undefined {
+  return EFFORT_LEVELS.find((level) => level.value === effort)?.label ?? effort;
+}
+
 interface HandoffWorker {
   profile: ProfileView;
   settings: ModelSettingsSnapshot["workers"][number];
@@ -754,16 +767,18 @@ function HandoffDialog({
   const [workers, setWorkers] = React.useState<HandoffWorker[]>([]);
   const [workerId, setWorkerId] = React.useState("");
   const [modelId, setModelId] = React.useState("");
+  const [effort, setEffort] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [noOtherWorker, setNoOtherWorker] = React.useState(false);
+  const [noWorker, setNoWorker] = React.useState(false);
   const [currentLabels, setCurrentLabels] = React.useState<{ profile?: string; model?: string }>({});
 
   React.useEffect(() => {
     if (!open) return;
     let disposed = false;
     setLoading(true);
-    setNoOtherWorker(false);
+    setNoWorker(false);
+    setEffort(task.effort ?? "");
     void Promise.all([
       broker.summary({ compact: true, limit: 1 }),
       broker.enabledModels(),
@@ -791,34 +806,34 @@ function HandoffDialog({
       });
       setWorkers(available);
       const firstWorker = available.find(({ profile }) => profile.id !== task.profileId) ?? available[0];
-      const firstModel = firstWorker?.settings.models.find((model) => model.enabled && (
-        firstWorker.profile.id !== task.profileId || model.id !== task.model
-      ));
+      const enabledModels = firstWorker?.settings.models.filter((model) => model.enabled) ?? [];
+      const firstModel = enabledModels.find((model) => firstWorker?.profile.id !== task.profileId || model.id !== task.model)
+        ?? enabledModels[0];
       setWorkerId(firstWorker?.profile.id ?? "");
       setModelId(firstModel?.id ?? "");
-      setNoOtherWorker(!firstWorker || !firstModel);
+      setNoWorker(!firstWorker || !firstModel);
     }).finally(() => {
       if (!disposed) setLoading(false);
     });
     return () => {
       disposed = true;
     };
-  }, [open, task.model, task.profileId]);
+  }, [open, task.model, task.profileId, task.effort]);
 
   const selectedWorker = workers.find(({ profile }) => profile.id === workerId);
   const models = selectedWorker?.settings.models.filter((model) => model.enabled) ?? [];
   const canSubmit = !loading && !busy && selectedWorker !== undefined && modelId !== "" && (
-    workerId !== task.profileId || modelId !== task.model
+    workerId !== task.profileId || modelId !== task.model || effort !== (task.effort ?? "")
   );
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
-    const titles = moveTitles(task);
+    const titles = handoffTitles(task);
     const lifecycle = toast.pending(titles.pending);
     try {
-      const result = await executeHandoff(task.id, workerId, modelId);
+      const result = await executeHandoff(task.id, workerId, modelId, effort || undefined);
       setBusy(false);
       if (result.ok) {
         lifecycle.success(titles.success);
@@ -837,13 +852,13 @@ function HandoffDialog({
   return (
     <Modal open={open} onClose={onClose} labelledBy="handoff-dialog-title" className="modal-dialog-handoff">
       <form className="handoff-form" onSubmit={submit}>
-        <h2 id="handoff-dialog-title">Move this task</h2>
-        <p className="handoff-description">Keep this task&apos;s history while changing its worker.</p>
+        <h2 id="handoff-dialog-title">Hand off this task</h2>
+        <p className="handoff-description">Keep this task&apos;s history while changing its worker, model, or effort.</p>
         {loading ? <p role="status">Loading workers…</p> : null}
-        {!loading && noOtherWorker ? (
-          <p className="handoff-description">No other worker is set up yet.</p>
+        {!loading && noWorker ? (
+          <p className="handoff-description">No worker is turned on. Turn one on in Settings, then try again.</p>
         ) : null}
-        {!loading && workers.length > 0 && !noOtherWorker ? (
+        {!loading && workers.length > 0 && !noWorker ? (
           <>
             <label>
               Worker
@@ -864,17 +879,24 @@ function HandoffDialog({
                 {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </select>
             </label>
+            <label>
+              Effort
+              <select value={effort} onChange={(event) => setEffort(event.target.value)}>
+                {task.effort ? null : <option value="">Worker default</option>}
+                {EFFORT_LEVELS.map((level) => <option key={level.value} value={level.value}>{level.label}</option>)}
+              </select>
+            </label>
             <p className="handoff-current">
               Current: {currentLabels.profile && currentLabels.model
-                ? `${currentLabels.profile} / ${currentLabels.model}`
+                ? [currentLabels.profile, currentLabels.model, effortLabel(task.effort)].filter(Boolean).join(" / ")
                 : "Current worker"}
             </p>
           </>
         ) : null}
         <div className="handoff-actions">
-          <button className="settings-button" type="button" onClick={onClose} disabled={busy}>Keep worker</button>
+          <button className="settings-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="settings-button settings-button-primary" type="submit" disabled={!canSubmit}>
-            {busy ? "Moving…" : "Move task"}
+            {busy ? "Handing off…" : "Hand off"}
           </button>
         </div>
       </form>
