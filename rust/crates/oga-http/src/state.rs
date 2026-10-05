@@ -798,8 +798,23 @@ fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Res
     if let Some(task) = &mut task {
         attach_task_read_fields(connection, std::slice::from_mut(task))?;
         attach_task_timing(connection, task)?;
+        task.queued_follow_up_items = follow_up_items(connection, &task.id)?;
     }
     Ok(task)
+}
+
+/// The instructions waiting behind one task, oldest first. The task view shows
+/// them; the list view carries only the count.
+fn follow_up_items(
+    connection: &Connection,
+    task_id: &str,
+) -> rusqlite::Result<Option<Vec<String>>> {
+    let mut statement = connection
+        .prepare("SELECT instruction FROM task_follow_ups WHERE task_id=? ORDER BY id")?;
+    let items = statement
+        .query_map([task_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((!items.is_empty()).then_some(items))
 }
 
 /// `TASK_COLUMNS` with output, shipped prompt, attempts, transport, and

@@ -392,6 +392,41 @@ export function expansionLabel(expansion: EventExpansion, expanded: boolean): st
   return `${verb} ${noun}`;
 }
 
+/** A todo list as the tray reads it: the steps, how many are done, and the
+ * one being worked on. */
+export interface TodoProgress {
+  items: TodoItem[];
+  done: number;
+  total: number;
+  /** The step marked as in progress, when the list names one. */
+  current?: string;
+}
+
+/**
+ * The list the run is working from now: the newest one its events carry, so a
+ * plan the worker rewrote replaces the one before it. Nothing when the run
+ * never wrote a list, and nothing once every step is done on a run that has
+ * settled — that plan is finished, and the transcript still holds it.
+ */
+export function latestTodoProgress(events: TaskEventView[], live: boolean): TodoProgress | undefined {
+  const items = newestTodoItems(events);
+  if (items === undefined) return undefined;
+  const done = items.filter((item) => item.status === "completed").length;
+  if (done === items.length && !live) return undefined;
+  const current = items.find((item) => item.status === "in_progress")?.text;
+  return { items, done, total: items.length, current };
+}
+
+function newestTodoItems(events: TaskEventView[]): TodoItem[] | undefined {
+  for (let at = events.length - 1; at >= 0; at -= 1) {
+    const event = events[at];
+    if (event?.presentation?.type !== "todo" || event.rawText === undefined) continue;
+    const items = todoItems(event.rawText);
+    if (items !== undefined) return items;
+  }
+  return undefined;
+}
+
 export interface TraceRow {
   id: number;
   /** The composing node's own stable id (`turn:<n>`, `call:<turn>:<action>`, …),
@@ -418,6 +453,13 @@ export interface TraceRow {
   handoff?: HandoffPresentation;
 }
 
+/** A request to bring one row into view: its stable node id, with a nonce so
+ * asking twice still runs twice. */
+export interface RevealRequest {
+  nodeId: string;
+  nonce: number;
+}
+
 export function traceRowWeight(row: TraceRow): number {
   return 1 + row.children.reduce((sum, child) => sum + traceRowWeight(child), 0);
 }
@@ -437,6 +479,30 @@ export function withoutThinking(rows: TraceRow[]): TraceRow[] {
   return rows
     .filter((row) => row.isThinking !== true)
     .map((row) => (row.children.length > 0 ? { ...row, children: withoutThinking(row.children) } : row));
+}
+
+/**
+ * Where a reveal request lands: the top-level row holding it, and the keys to
+ * open from that row down to it — empty when the row itself is the target.
+ */
+export function findRevealTarget(
+  rows: TraceRow[],
+  nodeId: string,
+): { index: number; ancestors: string[] } | undefined {
+  for (let index = 0; index < rows.length; index += 1) {
+    const ancestors = revealPath(rows[index], nodeId);
+    if (ancestors !== undefined) return { index, ancestors };
+  }
+  return undefined;
+}
+
+function revealPath(row: TraceRow, nodeId: string): string[] | undefined {
+  if (row.nodeId === nodeId) return [];
+  for (const child of row.children) {
+    const path = revealPath(child, nodeId);
+    if (path !== undefined) return [row.nodeId ?? String(row.id), ...path];
+  }
+  return undefined;
 }
 
 export function traceRowIsEmpty(row: TraceRow): boolean {

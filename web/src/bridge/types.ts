@@ -483,6 +483,11 @@ export interface SteerRequest {
   model?: string;
 }
 
+export interface SteerTaskResult {
+  /** True when the run couldn't take the instruction and it was queued instead. */
+  queued?: boolean;
+}
+
 export interface HandoffRequest {
   profile?: string;
   model?: string;
@@ -809,7 +814,7 @@ export interface BrokerCallResult {
   cancelTask: void;
   resumeTask: void;
   replyTask: void;
-  steerTask: void;
+  steerTask: SteerTaskResult;
   handoffTask: void;
   completeTask: void;
   removeFollowUp: void;

@@ -93,6 +93,26 @@ export function buildTranscript(task: Task, events: TaskEventView[], cache = new
 }
 
 /**
+ * The events of the run the task is on, oldest first: the work since the last
+ * instruction or question, since one of those opens a new run. A plan the
+ * worker wrote in an earlier run does not belong to this one.
+ */
+export function currentRunEvents(items: TranscriptItem[]): TaskEventView[] {
+  const events: TaskEventView[] = [];
+  for (let at = items.length - 1; at >= 0; at -= 1) {
+    const item = items[at];
+    if (item?.type === "bubble" || item?.type === "question") break;
+    if (item?.type !== "work") continue;
+    events.unshift(...turnEvents(item.segment.composition));
+  }
+  return events;
+}
+
+function turnEvents(composition: ActivityComposition): TaskEventView[] {
+  return composition.blocks.flatMap((block) => (block.type === "turn" ? block.turn.events : []));
+}
+
+/**
  * Keeps the work segments a previous build produced, so a build that follows
  * new activity re-composes only the turns that activity touched. A segment is
  * reused whole, which is also what lets the view skip re-deriving its rows.

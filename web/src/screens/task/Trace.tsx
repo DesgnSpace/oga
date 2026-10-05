@@ -9,6 +9,7 @@ import { MarkdownContent } from "@/domain/markdown";
 import { parseBlocks, parseInline } from "@/domain/markdown/parse";
 import {
   expansionLabel,
+  findRevealTarget,
   stripTransportMarkup,
   subagentIndicatorLabel,
   subagentIndicatorState,
@@ -16,6 +17,7 @@ import {
   turnMarkerLabel,
   type EventExpansion,
   type HandoffPresentation,
+  type RevealRequest,
   type TodoItem,
   type TraceRow,
   type TurnMarkerKind,
@@ -498,6 +500,8 @@ interface TraceRowViewProps {
   rowRef?: (node: HTMLElement | null) => void;
   traceIndex?: number;
   traceSetSize?: number;
+  /** The node id a reveal request just landed on — that one row highlights. */
+  flashNodeId?: string;
 }
 
 const TraceRowView = React.memo(function TraceRowView({
@@ -511,6 +515,7 @@ const TraceRowView = React.memo(function TraceRowView({
   rowRef,
   traceIndex,
   traceSetSize,
+  flashNodeId,
 }: TraceRowViewProps) {
   const isOpen = expanded.get(rowKey) ?? row.startsExpanded;
   const hasControl = traceRowOffersExpansion(row);
@@ -523,7 +528,9 @@ const TraceRowView = React.memo(function TraceRowView({
   const ownsRunningAnimation = running && (!insideGroup || row.children.length > 0);
   const rowClass = `trace-row trace-row-${row.style} trace-state-${row.state}${
     row.isStepStart ? " trace-row-step-start" : ""
-  }${row.marker !== undefined ? " trace-row-turn-boundary" : ""}`;
+  }${row.marker !== undefined ? " trace-row-turn-boundary" : ""}${
+    flashNodeId !== undefined && row.nodeId === flashNodeId ? " trace-row-flash" : ""
+  }`;
   // Matches both a lone card's `subagent:` id and a batch's `subagents:` id.
   const isSubagentRow = row.nodeId?.startsWith("subagent") ?? false;
 
@@ -556,6 +563,7 @@ const TraceRowView = React.memo(function TraceRowView({
       ref={rowRef}
       className={rowClass}
       data-state={row.state}
+      data-node-id={row.nodeId}
       data-running={ownsRunningAnimation ? "true" : undefined}
       data-trace-index={traceIndex}
       role="listitem"
@@ -598,6 +606,7 @@ const TraceRowView = React.memo(function TraceRowView({
                 onOpenPreview={onOpenPreview}
                 cwd={cwd}
                 insideGroup
+                flashNodeId={flashNodeId}
                 key={childKey}
               />
             );
@@ -703,6 +712,7 @@ interface TraceVirtualization {
   getRowRef: (key: string) => (node: HTMLElement | null) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => void;
   onFocusCapture: (event: React.FocusEvent<HTMLElement>) => void;
+  scrollToIndex: (index: number) => void;
 }
 
 function traceKeys(rows: TraceRow[]): string[] {
@@ -967,8 +977,21 @@ function useTraceVirtualization(
     focusIndex(next);
   }, [focusIndex, range.start, rows.length, viewport.height]);
 
-  return { range, layout, getRowRef, onKeyDown, onFocusCapture };
+  return { range, layout, getRowRef, onKeyDown, onFocusCapture, scrollToIndex };
 }
+
+/** The row a reveal request landed on, read off the stable node ids the rows carry. */
+function findRowElement(root: ParentNode | null, nodeId: string): HTMLElement | null {
+  if (!root) return null;
+  const candidates = root.querySelectorAll("[data-node-id]");
+  for (const candidate of candidates) {
+    if (candidate instanceof HTMLElement && candidate.dataset.nodeId === nodeId) return candidate;
+  }
+  return null;
+}
+
+/** How long a revealed row keeps its highlight. */
+const REVEAL_FLASH_MS = 1800;
 
 /** The flat activity trace: every row the run produced, with expand/collapse. */
 export function TraceRows({
@@ -978,6 +1001,7 @@ export function TraceRows({
   live = false,
   expansionState,
   onExpansionChange,
+  reveal,
 }: {
   rows: TraceRow[];
   cwd?: string;
@@ -985,8 +1009,10 @@ export function TraceRows({
   live?: boolean;
   expansionState?: ReadonlyMap<string, boolean>;
   onExpansionChange?: (rowKey: string, expanded: boolean) => void;
+  reveal?: RevealRequest;
 }) {
   const [expanded, setExpanded] = React.useState<Map<string, boolean>>(() => new Map(expansionState));
+  const [flashNodeId, setFlashNodeId] = React.useState<string | undefined>(undefined);
   const [openPreview, setOpenPreview] = React.useState<OpenFilePreview | null>(null);
   const panelRef = React.useRef<HTMLElement>(null);
   const toggle = React.useCallback((rowKey: string, startsExpanded: boolean) => {
@@ -998,7 +1024,56 @@ export function TraceRows({
       return next;
     });
   }, [onExpansionChange]);
-  const { range, layout, getRowRef, onKeyDown, onFocusCapture } = useTraceVirtualization(rows, panelRef, scrollRoot);
+  const { range, layout, getRowRef, onKeyDown, onFocusCapture, scrollToIndex } = useTraceVirtualization(rows, panelRef, scrollRoot);
+  const revealNonce = reveal?.nonce;
+  // A reveal opens the rows down to the target, scrolls it into view, and
+  // highlights it. Rows outside the virtualized window are not in the DOM
+  // yet, so the highlight retries until the scroll brings the row along.
+  React.useEffect(() => {
+    if (reveal === undefined) return;
+    const target = findRevealTarget(rows, reveal.nodeId);
+    if (target === undefined) return;
+    if (target.ancestors.length > 0) {
+      setExpanded((current) => {
+        const next = new Map(current);
+        let changed = false;
+        for (const ancestor of target.ancestors) {
+          if (next.get(ancestor) !== true) {
+            next.set(ancestor, true);
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+      for (const ancestor of target.ancestors) onExpansionChange?.(ancestor, true);
+    }
+    scrollToIndex(target.index);
+    let cancelled = false;
+    let remaining = 12;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const highlight = () => {
+      if (cancelled) return;
+      const element = findRowElement(panelRef.current, reveal.nodeId);
+      if (element !== null) {
+        element.scrollIntoView?.({ block: "nearest" });
+        setFlashNodeId(reveal.nodeId);
+        return;
+      }
+      remaining -= 1;
+      if (remaining > 0) timer = setTimeout(highlight, 50);
+    };
+    timer = setTimeout(highlight, 0);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+    // The request carries its own nonce; the rows it read stay as asked.
+  }, [revealNonce]);
+  React.useEffect(() => {
+    if (flashNodeId === undefined) return;
+    const timer = setTimeout(() => setFlashNodeId(undefined), REVEAL_FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [flashNodeId]);
   const openPreviewFile = React.useCallback(
     (expansion: ContentExpansion, filePath: string | undefined, imageDataUrl?: string) => {
       setOpenPreview({ cwd, path: filePath, expansion, imageDataUrl });
@@ -1040,6 +1115,7 @@ export function TraceRows({
                 rowRef={getRowRef(key)}
                 traceIndex={index}
                 traceSetSize={rows.length}
+                flashNodeId={flashNodeId}
                 key={key}
               />
             );

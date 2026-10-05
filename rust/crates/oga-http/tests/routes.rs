@@ -406,6 +406,47 @@ async fn read_routes() {
 }
 
 #[tokio::test]
+async fn the_task_read_carries_queued_follow_ups_in_order() {
+    let fixture = Fixture::new();
+    let now = "2026-01-01T00:02:00.000Z";
+    oga_service::queue_follow_up(
+        &fixture.store,
+        "task",
+        TaskState::Running,
+        "first follow-up",
+        None,
+        now,
+    )
+    .expect("queue first");
+    oga_service::queue_follow_up(
+        &fixture.store,
+        "task",
+        TaskState::Running,
+        "second follow-up",
+        None,
+        now,
+    )
+    .expect("queue second");
+
+    let (status, task) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/tasks/task",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task["queuedFollowUps"], 2);
+    assert_eq!(
+        task["queuedFollowUpItems"],
+        json!(["first follow-up", "second follow-up"])
+    );
+}
+
+#[tokio::test]
 async fn summary_group_counts_cover_the_filter_not_just_the_page() {
     let fixture = Fixture::new();
     let here = fixture.cwd.clone();

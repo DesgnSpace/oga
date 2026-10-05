@@ -4,6 +4,8 @@ import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
+import { runningSubagents } from "@/domain/activity";
+import { latestTodoProgress, type RevealRequest } from "@/domain/trace";
 import { RunChangeProjection, runChangeSetAdded, runChangeSetRemoved, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import type { ChangeSort } from "@/domain/changes/ordering";
@@ -38,7 +40,7 @@ import { usageTotals } from "./contextUsage";
 import { effortDisplay, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
-import { activityIsSettled, buildTranscript, WorkSegmentCache } from "./transcriptModel";
+import { activityIsSettled, buildTranscript, currentRunEvents, WorkSegmentCache } from "./transcriptModel";
 
 export const REFRESH_TASK_DETAIL_EVENT = "oga-refresh-task-detail";
 
@@ -320,6 +322,21 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
   );
   const [showThinking, toggleThinking] = useShowThinking();
   const hasThinking = React.useMemo(() => transcriptHasThinking(transcriptItems), [transcriptItems]);
+  // The tray above the composer reads the same work the transcript already
+  // composed, so a subagent shows while it runs and leaves once it reports.
+  const runningAgents = React.useMemo(
+    () =>
+      transcriptItems.flatMap((item) =>
+        item.type === "work" ? runningSubagents(item.segment.composition) : [],
+      ),
+    [transcriptItems],
+  );
+  // The todo list, likewise, comes from the run the task is on rather than the
+  // whole stream, so a plan a past run left behind does not sit above the box.
+  const todos = React.useMemo(
+    () => latestTodoProgress(currentRunEvents(transcriptItems), task !== undefined && !activityIsSettled(task.state)),
+    [task, transcriptItems],
+  );
   React.useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
@@ -339,6 +356,14 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     (key: string, expanded: boolean) => watched.controller.setRowExpansion(key, expanded),
     [watched],
   );
+  // Selecting a subagent in the composer tray reveals its row in the
+  // transcript. The nonce re-runs the reveal when the same row is picked twice.
+  const revealNonce = React.useRef(0);
+  const [reveal, setReveal] = React.useState<RevealRequest | undefined>(undefined);
+  const revealSubagent = React.useCallback((nodeId: string) => {
+    revealNonce.current += 1;
+    setReveal({ nodeId, nonce: revealNonce.current });
+  }, []);
 
   const retry = React.useCallback(() => {
     void watched.controller.loadInitial().then(forceUpdate);
@@ -525,6 +550,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
                 onExpansionChange={setWorkExpansion}
                 rowExpansionState={viewState.rowExpansion}
                 onRowExpansionChange={setRowExpansion}
+                reveal={reveal}
               />
             </div>
           </>
@@ -533,7 +559,10 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
           <TaskControls
             task={task}
             events={events}
+            subagents={runningAgents}
+            todos={todos}
             onChanged={refreshDetail}
+            onSelectSubagent={revealSubagent}
             focusRequest={focusRequest}
             onFocusRequestConsumed={onFocusRequestConsumed}
           />
