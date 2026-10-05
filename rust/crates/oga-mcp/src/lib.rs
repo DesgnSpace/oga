@@ -640,7 +640,10 @@ impl McpServer {
                     false
                 }
                 "clear" => {
-                    follow_ups.clear(&task_id, current.state, "removed on request")?;
+                    self.state
+                        .dispatcher
+                        .clear_follow_ups(&task_id, "removed on request")
+                        .map_err(McpError::from)?;
                     true
                 }
                 _ => return Err(McpError::InvalidParams("queue must be add or clear".into())),

@@ -985,6 +985,10 @@ pub(crate) fn settle_task(
     }
     let completion = encode(&worker.completion)?;
     let session_id = run.and_then(|run| run.session_id.as_deref());
+    // A clean run with instructions waiting behind it stays running: the next
+    // instruction starts in its place, and only an empty queue settles it.
+    let continuing = worker.state == TaskState::Completed
+        && crate::follow_ups::count_follow_ups(store, &task.id)? > 0;
     store.transaction(|tx| {
         append_provider_events(
             tx,
@@ -997,10 +1001,15 @@ pub(crate) fn settle_task(
             live_events.is_some_and(|events| events.session_event_written),
         )?;
         record_run_totals(tx, &task.id, usage, session_id, &now)?;
+        let state = if continuing {
+            TaskState::Running
+        } else {
+            worker.state
+        };
         let updated = tx.execute(
             "UPDATE tasks SET state=?,output=?,error=?,question=?,completion_json=?,worker_json=NULL WHERE id=? AND state='running' AND EXISTS (SELECT 1 FROM task_turns WHERE task_turns.id=? AND task_turns.task_id=tasks.id AND task_turns.status='running')",
             params![
-                worker.state.as_str(),
+                state.as_str(),
                 worker.output,
                 worker.error,
                 worker.question,
@@ -1014,11 +1023,19 @@ pub(crate) fn settle_task(
         if updated != 1 {
             return Ok(());
         }
-        let turn_status = turn_status(worker.state);
+        // The run completed, even though the task has not.
+        let turn_status = if continuing {
+            "completed"
+        } else {
+            turn_status(worker.state)
+        };
         tx.execute(
             "UPDATE task_turns SET status=?,ended_at=? WHERE id=? AND status='running'",
             params![turn_status, now, turn_id],
         )?;
+        if continuing {
+            return Ok(());
+        }
         let mut completion_payload = json!({"completion": worker.completion});
         if worker.state == TaskState::Completed {
             let attempt = task.attempts.len() + 1;
@@ -1049,6 +1066,51 @@ pub(crate) fn settle_task(
         LifecycleError::Refusal(format!("task disappeared after settlement: {}", task.id))
     })?;
     Ok(settled)
+}
+
+/// Settles a task left running only by a follow-up queue that has since been
+/// dropped. Dependents are released by the caller.
+pub(crate) fn complete_held_run(store: &Store, task_id: &str) -> Result<Task, LifecycleError> {
+    let task = load_task(store, task_id)?.ok_or_else(|| {
+        LifecycleError::Refusal(format!("task disappeared before completion: {task_id}"))
+    })?;
+    let now = now_iso();
+    store.transaction(|tx| {
+        let changed = tx.execute(
+            "UPDATE tasks SET state='completed',worker_json=NULL,updated_at=? WHERE id=? AND state='running'",
+            params![now, task_id],
+        )?;
+        if changed != 1 {
+            return Ok(());
+        }
+        close_running_turn(tx, task_id, TaskState::Completed, &now)?;
+        let mut payload = json!({"completion": task.completion});
+        let attempt = task.attempts.len() + 1;
+        let recorded = has_learned_routes(tx, task_id, attempt)?;
+        payload["learnRoutes"] = json!({
+            "status": if recorded { "recorded" } else { "missing" },
+            "attempt": attempt,
+        });
+        if let Some(error) = &task.error {
+            payload["error"] = json!(error);
+        }
+        if let Some(question) = &task.question {
+            payload["question"] = json!(question);
+        }
+        append_event(
+            tx,
+            task_id,
+            "completed",
+            TaskState::Completed,
+            &payload,
+            &now,
+            None,
+        )?;
+        Ok(())
+    })?;
+    load_task(store, task_id)?.ok_or_else(|| {
+        LifecycleError::Refusal(format!("task disappeared after completion: {task_id}"))
+    })
 }
 
 /// Adds a run's session and spend to its task.
