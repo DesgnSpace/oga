@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- While a task is running, each message offers Send now and Queue: Send now reaches the run straight away, Queue waits until the run finishes, and if the run can't take a send-now message the app says it was queued instead.
 - "Move to another worker" in a task's menu is now called Handoff, and its window lets you pick the effort too. You can also hand a task to the same model at a different effort.
 
 - Your brief rules and the models you switch on are now one setting for the whole machine, so those pages no longer ask you to pick a project first. If you had set them for a single project, that choice now applies everywhere.

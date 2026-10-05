@@ -8,6 +8,8 @@ import { taskStatusLabel } from "./format";
 
 export type ComposerSendMode = "primary" | "steer";
 
+export type ComposerSendChoice = "now" | "queue";
+
 export type ConversationInputRouting =
   | { type: "reply"; question: string }
   | { type: "steer" }
@@ -18,14 +20,14 @@ export type ConversationInputRouting =
 
 export function routingForState(
   state: string,
-  steerable: boolean,
+  offerSteer: boolean,
   question: string | undefined,
 ): ConversationInputRouting {
   switch (state) {
     case "needs_input":
       return { type: "reply", question: question ?? "" };
     case "running":
-      return steerable ? { type: "steer-and-queue" } : { type: "queue" };
+      return offerSteer ? { type: "steer-and-queue" } : { type: "queue" };
     case "queued":
     case "answered":
       return { type: "queue" };
@@ -82,9 +84,35 @@ function routingsEqual(a: ConversationInputRouting, b: ConversationInputRouting)
   return true;
 }
 
-function submitShortcut(): string {
+function isMac(): boolean {
   const platform = typeof navigator === "undefined" ? "" : `${navigator.platform} ${navigator.userAgent}`;
-  return /Mac/.test(platform) ? "⌘↵" : "Ctrl+↵";
+  return /Mac/.test(platform);
+}
+
+function submitShortcut(): string {
+  return isMac() ? "⌘↵" : "Ctrl+↵";
+}
+
+function alternateShortcut(): string {
+  return isMac() ? "⌥↵" : "Alt+↵";
+}
+
+export function modeForChoice(choice: ComposerSendChoice): ComposerSendMode {
+  return choice === "now" ? "steer" : "primary";
+}
+
+function otherChoice(choice: ComposerSendChoice): ComposerSendChoice {
+  return choice === "now" ? "queue" : "now";
+}
+
+function choiceLabel(choice: ComposerSendChoice): string {
+  return choice === "now" ? "Send now" : "Queue";
+}
+
+function choiceHelp(choice: ComposerSendChoice): string {
+  return choice === "now"
+    ? "The run picks it up straight away"
+    : "Goes when this run finishes";
 }
 
 export function isSendDisabled(routing: ConversationInputRouting, draft: string): boolean {
@@ -118,6 +146,7 @@ export interface ConversationComposerProps {
   routing: ConversationInputRouting;
   scope?: TaskScope;
   queued: string[];
+  notice?: string | null;
   onSend: ComposerSend;
   onRemoveQueued: (index: number) => void;
   task: Task;
@@ -132,6 +161,7 @@ export function ConversationComposer({
   routing,
   scope,
   queued,
+  notice,
   onSend,
   onRemoveQueued,
   task,
@@ -140,10 +170,18 @@ export function ConversationComposer({
 }: ConversationComposerProps) {
   const [draft, setDraft] = React.useState("");
   const [sending, setSending] = React.useState(false);
+  // The send choice while a run is active. Send now is the default, and the
+  // last choice sticks for this view only.
+  const [choice, setChoice] = React.useState<ComposerSendChoice>("now");
+  const dualSend = routing.type === "steer-and-queue";
+  const mode = dualSend ? modeForChoice(choice) : "primary";
   const disabled = isSendDisabled(routing, draft) || sending;
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
-  const label = actionLabel(routing);
+  const label = dualSend ? choiceLabel(choice) : actionLabel(routing);
   const shortcut = submitShortcut();
+  const alternate = alternateShortcut();
+  const hint =
+    dualSend && choice === "now" ? "Send a message…" : placeholder(routing);
 
   React.useEffect(() => {
     if (!focusRequest || focusRequest.taskId !== task.id) return;
@@ -210,14 +248,14 @@ export function ConversationComposer({
         className="composer-card"
         onSubmit={(event) => {
           event.preventDefault();
-          submit("primary");
+          submit(mode);
         }}
       >
         <textarea
           ref={inputRef}
           className="composer-input"
           rows={1}
-          placeholder={placeholder(routing)}
+          placeholder={hint}
           value={draft}
           readOnly={sending}
           aria-busy={sending}
@@ -225,7 +263,12 @@ export function ConversationComposer({
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
-              void submit("primary");
+              void submit(mode);
+              return;
+            }
+            if (dualSend && event.key === "Enter" && event.altKey) {
+              event.preventDefault();
+              void submit(modeForChoice(otherChoice(choice)));
               return;
             }
             if (event.key === "Escape" && draft !== "") {
@@ -233,7 +276,7 @@ export function ConversationComposer({
               setDraft("");
             }
           }}
-          aria-label={placeholder(routing)}
+          aria-label={hint}
         />
         <button
           className={`composer-send${draft.trim() !== "" ? " composer-send-active" : ""}`}
@@ -259,23 +302,35 @@ export function ConversationComposer({
           )}
         </div>
         <div className="composer-controls-right">
-          {routing.type === "steer-and-queue" && (
-            <button
-              className="composer-send-now"
-              type="button"
-              disabled={disabled}
-              aria-label="Send now — interrupts the running worker"
-              title="Send now — interrupts the running worker"
-              onClick={() => void submit("steer")}
-            >
-              Send now
-            </button>
+          {dualSend && (
+            <div className="composer-send-choice" role="group" aria-label="Choose when your message goes">
+              {(["now", "queue"] as const).map((option) => {
+                const selected = option === choice;
+                const key = selected ? shortcut : alternate;
+                return (
+                  <button
+                    key={option}
+                    className="composer-send-choice-option"
+                    type="button"
+                    disabled={sending}
+                    aria-pressed={selected}
+                    aria-label={`${choiceLabel(option)} — ${choiceHelp(option)}`}
+                    title={`${choiceLabel(option)} — ${choiceHelp(option)} (${key})`}
+                    onClick={() => setChoice(option)}
+                  >
+                    {choiceLabel(option)}
+                  </button>
+                );
+              })}
+            </div>
           )}
           <TaskStatusDot state={task.state} label={taskStatusLabel(task)} />
         </div>
       </div>
       <p className="composer-note">
-        {routingsEqual(routing, { type: "resume", textRequired: false }) && "Leave the message empty to continue the run."}
+        {notice ??
+          (routingsEqual(routing, { type: "resume", textRequired: false }) &&
+            "Leave the message empty to continue the run.")}
       </p>
     </section>
   );

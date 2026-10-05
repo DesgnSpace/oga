@@ -2464,25 +2464,39 @@ h1 {
     line-height: 1.5;
 }
 
-.composer-send-now {
+.composer-send-choice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.composer-send-choice-option {
     min-height: var(--control-height-small);
     padding: calc(var(--space-1) / 2) var(--control-padding-inline-small);
-    border: 1px solid var(--color-border);
+    border: 1px solid transparent;
     border-radius: var(--radius-control);
     background: transparent;
-    color: inherit;
+    color: var(--color-text-muted);
     font: inherit;
     font-size: var(--text-sm);
     line-height: var(--control-line-height);
+    white-space: nowrap;
     cursor: pointer;
 }
 
-.composer-send-now:not(:disabled):hover {
-    background: var(--color-hover);
+.composer-send-choice-option:not(:disabled):hover {
+    color: inherit;
 }
 
-.composer-send-now:not(:disabled):active {
-    background: var(--color-bg);
+.composer-send-choice-option[aria-pressed="true"] {
+    border-color: var(--color-border);
+    background: var(--color-selection);
+    color: inherit;
+}
+
+.composer-send-choice-option:disabled {
+    cursor: default;
+    opacity: 0.4;
 }
 
 /* The header menu's details view, swapped in for the menu's own items. */
@@ -5812,7 +5826,7 @@ textarea:disabled {
     .toast-close,
     .toast-more,
     .toast-clear-all,
-    .composer-send-now,
+    .composer-send-choice-option,
     .trace-text-card-scroll-bottom {
         min-height: var(--control-height);
     }

@@ -12,7 +12,7 @@ use axum::{
 use oga_domain::{OnBlockerFailure, Task, TaskKind, TaskScope, WorktreeOption};
 use oga_service::{
     ArchiveRequest, CompletionAssertion, DispatchRequest, EditRequest, FollowUpQueue,
-    HandoffRequest, ReplyRequest, ResumeRequest, SteerRequest, WorktreeRemoveRequest,
+    HandoffRequest, ReplyRequest, ResumeRequest, SteerOutcome, SteerRequest, WorktreeRemoveRequest,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -471,18 +471,19 @@ pub async fn steer(
     body: Bytes,
 ) -> Result<impl IntoResponse, HttpError> {
     let body: SteerBody = parse_optional_json(&body)?;
-    let task = steer_task(&state, id, body).await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(response_view(&state, &task, false)?),
-    ))
+    let outcome = steer_task(&state, id, body).await?;
+    let mut view = response_view(&state, &outcome.task, false)?;
+    view.as_object_mut()
+        .expect("task view is an object")
+        .insert("queued".into(), json!(outcome.queued));
+    Ok((StatusCode::ACCEPTED, Json(view)))
 }
 
 pub(crate) async fn steer_task(
     state: &HttpState,
     id: String,
     body: SteerBody,
-) -> Result<Task, HttpError> {
+) -> Result<SteerOutcome, HttpError> {
     let mut request = SteerRequest::new(id);
     if let Some(instruction) = body.instruction {
         request = request.instruction(instruction);
@@ -490,7 +491,7 @@ pub(crate) async fn steer_task(
     if let Some(model) = body.model {
         request = request.model(model);
     }
-    Ok(state.dispatcher.steer(request).await?.task)
+    Ok(state.dispatcher.steer(request).await?)
 }
 
 pub async fn handoff(

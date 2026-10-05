@@ -88,11 +88,12 @@ pub async fn steer(
 ) -> Result<impl IntoResponse, HttpError> {
     load_orchestrator_for_mutation(&state, &id)?;
     let body: SteerBody = parse_optional_json(&body)?;
-    let task = tasks::steer_task(&state, id, body).await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(tasks::response_view(&state, &task, false)?),
-    ))
+    let outcome = tasks::steer_task(&state, id, body).await?;
+    let mut view = tasks::response_view(&state, &outcome.task, false)?;
+    view.as_object_mut()
+        .expect("task view is an object")
+        .insert("queued".into(), json!(outcome.queued));
+    Ok((StatusCode::ACCEPTED, Json(view)))
 }
 
 /// Mutating the oga lane reports a missing orchestrator the way every other

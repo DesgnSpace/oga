@@ -9,6 +9,7 @@ import type {
   CompletionCode,
   ModelSettingsSnapshot,
   ProfileView,
+  SteerTaskResult,
   Task,
   TaskCompletion,
   TaskEventView,
@@ -200,6 +201,17 @@ export function archiveBranchSuccess(task: TaskToastSource, response: ArchiveTas
       : `${subject} archived; branch kept`;
   }
   return `${subject} archived`;
+}
+
+export interface TaskRunOptions<T> {
+  /** Picks the success toast from the action's reply. */
+  successTitle?: (value: T) => string;
+  /** Sees the action's reply on success. */
+  onValue?: (value: T) => void;
+}
+
+export function wasQueued(value: SteerTaskResult | undefined): boolean {
+  return value?.queued === true;
 }
 
 export function replyTitles(task: TaskToastSource): TaskToastTitles {
@@ -982,8 +994,15 @@ export function TaskControls({
   onFocusRequestConsumed: (nonce: number) => void;
 }) {
   const [busy, setBusy] = React.useState(false);
-  const routing = routingForState(task.state, false, task.question);
+  // Names a steer the run couldn't take, until the next send or state change.
+  const [sendNotice, setSendNotice] = React.useState<string | null>(null);
+  // Every run offers both send actions: the backend delivers Send now when
+  // the worker takes instructions and queues it otherwise, reporting which.
+  const routing = routingForState(task.state, task.state === "running", task.question);
   const queued = task.queuedFollowUpItems ?? [];
+  React.useEffect(() => {
+    setSendNotice(null);
+  }, [routing.type]);
   const pinnedQuestionRef = React.useRef<HTMLDivElement>(null);
   const pinnedQuestion = routing.type === "reply" ? routing.question : undefined;
   React.useEffect(() => {
@@ -995,9 +1014,10 @@ export function TaskControls({
     if (pinnedQuestion !== undefined) pinnedQuestionRef.current?.scrollIntoView({ block: "nearest" });
   }, [pinnedQuestion]);
 
-  const run = async (
-    action: () => Promise<{ ok: true; value: unknown } | { ok: false; error: BridgeError }>,
+  const run = async <T,>(
+    action: () => Promise<{ ok: true; value: T } | { ok: false; error: BridgeError }>,
     titles: TaskToastTitles,
+    options?: TaskRunOptions<T>,
   ): Promise<boolean> => {
     if (busy) return false;
     setBusy(true);
@@ -1006,7 +1026,8 @@ export function TaskControls({
       const result = await action();
       setBusy(false);
       if (result.ok) {
-        lifecycle.success(titles.success);
+        options?.onValue?.(result.value);
+        lifecycle.success(options?.successTitle?.(result.value) ?? titles.success);
         onChanged();
         return true;
       }
@@ -1022,6 +1043,7 @@ export function TaskControls({
   };
 
   const handleSend = (request: ComposerRequest): Promise<boolean> => {
+    setSendNotice(null);
     if (request.instruction === undefined) {
       if (isResume(routing)) return run(() => executeResume(task.id), resumeTitles(task));
       return Promise.resolve(true);
@@ -1034,7 +1056,15 @@ export function TaskControls({
       (routing.type === "steer-and-queue" && request.mode === "steer") ||
       (routing.type === "steer" && request.mode === "steer")
     ) {
-      return run(() => executeSteer(task.id, instruction), instructionTitles(task));
+      return run(() => executeSteer(task.id, instruction), instructionTitles(task), {
+        successTitle: (value) =>
+          wasQueued(value) ? followUpTitles(task).success : instructionTitles(task).success,
+        onValue: (value) => {
+          setSendNotice(
+            wasQueued(value) ? "Couldn't reach the run — queued until it finishes." : null,
+          );
+        },
+      });
     }
     if ((routing.type === "steer-and-queue" && request.mode === "primary") || routing.type === "queue") {
       return run(() => executeQueue(task.id, instruction), followUpTitles(task));
@@ -1111,6 +1141,7 @@ export function TaskControls({
           routing={routing}
           scope={task.scope}
           queued={queued}
+          notice={sendNotice}
           onSend={handleSend}
           onRemoveQueued={removeQueued}
           task={task}

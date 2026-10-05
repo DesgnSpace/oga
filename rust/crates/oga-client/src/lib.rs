@@ -325,6 +325,8 @@ pub struct TaskActionResponse {
     pub attempt_count: Option<u64>,
     #[serde(default)]
     pub queued_follow_ups: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<bool>,
     #[serde(default)]
     pub archived_at: Option<String>,
     #[serde(default)]
