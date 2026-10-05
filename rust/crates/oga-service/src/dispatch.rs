@@ -1012,11 +1012,14 @@ impl Dispatcher {
     }
 
     pub(crate) fn drain_follow_ups(&self, task: &Task) {
-        let store = self.store.clone();
         let task_id = task.id.clone();
         let state = task.state;
+        if state == TaskState::Running {
+            self.start_continuation(task);
+            return;
+        }
         let now = lifecycle::now_iso();
-        let feed = match crate::follow_ups::feed_follow_up(&store, &task_id, state, &now) {
+        let feed = match crate::follow_ups::feed_follow_up(&self.store, &task_id, state, &now) {
             Ok(feed) => feed,
             Err(error) => {
                 eprintln!("follow-up drain failed for {}: {error}", task.id);
@@ -1025,39 +1028,96 @@ impl Dispatcher {
         };
         if let Some(instruction) = feed.instruction {
             let dispatcher = self.clone();
-            let store_clone = store.clone();
-            let task_id_clone = task_id.clone();
-            let instruction_for_error = instruction.clone();
             tokio::spawn(async move {
-                let request = crate::resume::ResumeRequest::new(task_id_clone.clone())
+                let request = crate::resume::ResumeRequest::new(task_id.clone())
                     .instruction(instruction.clone());
                 if let Err(error) = dispatcher.resume(request).await {
-                    let now = lifecycle::now_iso();
-                    let _ = store_clone.transaction(|tx| {
-                        let waiting: i64 = tx.query_row(
-                            "SELECT COUNT(*) FROM task_follow_ups WHERE task_id=?",
-                            [&task_id_clone],
-                            |row| row.get(0),
-                        )?;
-                        append_event(
-                            tx,
-                            &task_id_clone,
-                            "follow_ups_paused",
-                            oga_domain::TaskState::Completed,
-                            &serde_json::json!({
-                                "instruction": instruction_for_error,
-                                "waiting": waiting,
-                                "error": error.to_string()
-                            }),
-                            &now,
-                            None,
-                        )?;
-                        Ok(())
-                    });
-                    eprintln!("follow-up resume failed for {}: {error}", task_id_clone);
+                    dispatcher.pause_follow_ups(
+                        &task_id,
+                        &instruction,
+                        oga_domain::TaskState::Completed,
+                        &error.to_string(),
+                    );
                 }
             });
         }
+    }
+
+    /// Starts the next queued instruction for a task whose clean run ended.
+    fn start_continuation(&self, task: &Task) {
+        let task_id = task.id.clone();
+        let now = lifecycle::now_iso();
+        let instruction = match crate::follow_ups::take_continuation(&self.store, &task_id, &now) {
+            Ok(Some(instruction)) => instruction,
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("follow-up drain failed for {}: {error}", task.id);
+                return;
+            }
+        };
+        let dispatcher = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                crate::resume::continue_follow_up(&dispatcher, &task_id, instruction.clone()).await
+            {
+                dispatcher.pause_follow_ups(
+                    &task_id,
+                    &instruction,
+                    oga_domain::TaskState::Running,
+                    &error.to_string(),
+                );
+            }
+        });
+    }
+
+    /// Records that a queued instruction could not start, leaving the rest of
+    /// the queue in place.
+    fn pause_follow_ups(&self, task_id: &str, instruction: &str, state: TaskState, error: &str) {
+        let now = lifecycle::now_iso();
+        let _ = self.store.transaction(|tx| {
+            let waiting: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM task_follow_ups WHERE task_id=?",
+                [task_id],
+                |row| row.get(0),
+            )?;
+            append_event(
+                tx,
+                task_id,
+                "follow_ups_paused",
+                state,
+                &serde_json::json!({
+                    "instruction": instruction,
+                    "waiting": waiting,
+                    "error": error,
+                }),
+                &now,
+                None,
+            )?;
+            Ok(())
+        });
+        eprintln!("follow-up resume failed for {task_id}: {error}");
+    }
+
+    /// Drops a task's queued follow-ups. A task left running only by its queue
+    /// settles once the queue is empty, releasing the dependents it held.
+    pub fn clear_follow_ups(&self, task_id: &str, reason: &str) -> Result<Task, DispatchError> {
+        let task = self.task(task_id)?;
+        let cleared = crate::follow_ups::clear_follow_ups(
+            &self.store,
+            task_id,
+            task.state,
+            reason,
+            &lifecycle::now_iso(),
+        )?;
+        if cleared > 0
+            && task.state == TaskState::Running
+            && self.active_runs().get(task_id).is_none()
+            && !self.active_runs().is_starting(task_id)
+        {
+            let completed = lifecycle::complete_held_run(&self.store, task_id)?;
+            self.settle_dependents(&completed);
+        }
+        self.task(task_id)
     }
 
     pub fn reconcile(

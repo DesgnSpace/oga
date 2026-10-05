@@ -1880,6 +1880,198 @@ async fn a_queued_follow_up_starts_on_a_task_that_has_dependents() {
     panic!("the queued follow-up never started");
 }
 
+/// Each run N touches `counter` with N, then waits for `counter-gate-N`.
+fn hold_runs_by_number(store: &Store, profile_id: &str, counter: &Path) {
+    let current = store
+        .repositories()
+        .profiles()
+        .get(profile_id)
+        .expect("profile lookup")
+        .expect("profile");
+    let mut numbered = current.clone();
+    numbered.command = Some(vec![
+        "sh".into(),
+        "-c".into(),
+        format!(
+            r#"count=0; [ -f '{counter}' ] && count=$(cat '{counter}'); count=$((count+1)); printf '%s' "$count" > '{counter}'; while [ ! -e '{counter}-gate-'$count ]; do sleep 0.02; done; printf 'finished\nOGA_RESULT: completed\n'"#,
+            counter = counter.display()
+        ),
+    ]);
+    assert!(
+        store
+            .repositories()
+            .profiles()
+            .update_if_unchanged(profile_id, &current, &numbered, "2026-01-01T00:00:01.000Z")
+            .expect("update numbered profile")
+    );
+}
+
+async fn wait_for_counter(counter: &Path, wanted: &str) {
+    for _ in 0..1_000 {
+        if fs::read_to_string(counter).ok().as_deref() == Some(wanted) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!(
+        "run {wanted} never started: {:?}",
+        fs::read_to_string(counter)
+    );
+}
+
+#[tokio::test]
+async fn a_finished_run_with_a_queued_follow_up_holds_its_dependents() {
+    use oga_service::FollowUpQueue;
+    let (directory, store, dispatcher) = service();
+    let counter = directory.path().join("run-count");
+    hold_runs_by_number(&store, "one", &counter);
+    let blocker = dispatcher
+        .dispatch(oga_service::DispatchRequest::new(
+            "one",
+            "first work",
+            directory.path(),
+        ))
+        .await
+        .expect("dispatch blocker")
+        .task;
+    let dependent = dispatch_after(&dispatcher, "two", directory.path(), &blocker.id).await;
+
+    wait_for_counter(&counter, "1").await;
+    let queue = FollowUpQueue::new(store.clone());
+    queue
+        .queue(&blocker.id, TaskState::Running, "second instruction")
+        .expect("queue follow-up");
+
+    // The first run ends clean; the follow-up continues and the dependent stays held.
+    fs::write(counter.with_file_name("run-count-gate-1"), "").expect("open first gate");
+    wait_for_counter(&counter, "2").await;
+    for _ in 0..200 {
+        let blocker = dispatcher.task(&blocker.id).expect("blocker");
+        let dependent = dispatcher.task(&dependent).expect("dependent");
+        assert!(
+            !blocker.state.settled(),
+            "the blocker must not settle while a follow-up waits: {blocker:?}"
+        );
+        assert_eq!(
+            dependent.state,
+            TaskState::Pending,
+            "the dependent waits until the queue drains"
+        );
+        let events = store
+            .repositories()
+            .events()
+            .list(&blocker.id)
+            .expect("events");
+        assert!(
+            !events.iter().any(|event| event.kind == "completed"),
+            "a completed event must not be written while a follow-up waits"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    // The last run ends; the blocker settles once and the dependent starts.
+    fs::write(counter.with_file_name("run-count-gate-2"), "").expect("open second gate");
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &blocker.id).await,
+        TaskState::Completed
+    );
+    assert_eq!(
+        wait_for_settlement(&dispatcher, &dependent).await,
+        TaskState::Completed
+    );
+    let events = store
+        .repositories()
+        .events()
+        .list(&blocker.id)
+        .expect("events");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "completed")
+            .count(),
+        1,
+        "the task settles exactly once"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "follow_up_started")
+            .count(),
+        1,
+        "the queued follow-up ran"
+    );
+}
+
+#[tokio::test]
+async fn clearing_the_queue_of_a_finished_run_settles_it() {
+    use oga_service::FollowUpQueue;
+    let (directory, store, dispatcher) = service();
+    let cwd = directory.path().to_str().expect("cwd");
+    let mut blocker = task("parked", cwd, TaskState::Running);
+    blocker.output = "the run finished".into();
+    blocker.completion = Some(TaskCompletion {
+        exit_code: Some(0),
+        blocked: false,
+        code: CompletionCode::Completed,
+        reason: None,
+        stop_reason: None,
+        suggested_scope: None,
+        resets_at: None,
+        asserted_completion: None,
+        dependency_blocked: None,
+    });
+    store
+        .repositories()
+        .tasks()
+        .insert(&blocker)
+        .expect("parked blocker");
+    seed(&store, "waiter", cwd, TaskState::Queued);
+    let now = "2026-01-01T00:00:00.000Z";
+    oga_service::add_dependencies(&store, "waiter", &["parked".into()], now)
+        .expect("dependency edge");
+    let hold = oga_service::dependency_hold(
+        "waiter",
+        &[dispatcher.task("parked").expect("blocker")],
+        oga_domain::OnBlockerFailure::Hold,
+        None,
+        now,
+    );
+    oga_service::arm_hold(&store, &hold).expect("hold armed");
+    assert_eq!(
+        dispatcher.task("waiter").expect("waiter").state,
+        TaskState::Pending,
+        "the dependent waits on the parked blocker"
+    );
+
+    let queue = FollowUpQueue::new(store.clone());
+    queue
+        .queue("parked", TaskState::Running, "never mind")
+        .expect("queue follow-up");
+    let settled = dispatcher
+        .clear_follow_ups("parked", "removed on request")
+        .expect("clear follow-ups");
+
+    assert_eq!(settled.state, TaskState::Completed);
+    assert_eq!(queue.count("parked").expect("count"), 0);
+    assert_eq!(
+        wait_for_settlement(&dispatcher, "waiter").await,
+        TaskState::Completed,
+        "clearing the queue releases the dependent"
+    );
+    let events = store
+        .repositories()
+        .events()
+        .list("parked")
+        .expect("events");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "completed")
+            .count(),
+        1
+    );
+}
+
 /// Profile `one` becomes a worker that reports some work, then waits; stopped,
 /// it reports what it spent and exits.
 fn run_until_stopped(store: &Store, started: &Path) {

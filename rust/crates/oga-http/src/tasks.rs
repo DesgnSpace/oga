@@ -361,11 +361,9 @@ pub async fn resume(
     let current = state.dispatcher.task(&id)?;
     if matches!(body.queue, Some(QueueAction::Clear)) {
         let view = run_blocking(move || {
-            FollowUpQueue::new(state.store.clone()).clear(
-                &id,
-                current.state,
-                "removed on request",
-            )?;
+            state
+                .dispatcher
+                .clear_follow_ups(&id, "removed on request")?;
             started_task(&state, &state.dispatcher.task(&id)?, false)
         })
         .await?;
