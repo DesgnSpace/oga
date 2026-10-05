@@ -1,6 +1,6 @@
 //! Resume and fresh-session reseed transitions.
 
-use oga_domain::{HoldArgs, HoldVerb, Task, TaskHold, TaskScope, TaskState};
+use oga_domain::{HoldArgs, HoldVerb, Profile, Task, TaskHold, TaskScope, TaskState};
 use oga_store::append_event;
 use serde_json::json;
 
@@ -100,31 +100,7 @@ pub async fn resume(
             old.id
         )));
     }
-    let mut recreated_worktree = false;
-    if let Some(worktree) = old
-        .worktree
-        .as_ref()
-        .filter(|worktree| !worktree.deferred())
-    {
-        if !std::path::Path::new(&worktree.path).join(".git").exists() {
-            if old.archived_at.is_some() {
-                oga_worktree::recreate_task_worktree(worktree).await?;
-                recreated_worktree = true;
-            } else {
-                require_existing_worktree(&old)?;
-            }
-        } else {
-            require_existing_worktree(&old)?;
-        }
-    }
-    let profile = require_profile(dispatcher.store(), &old.profile_id)?;
-    let session = old.continuable_session().map(str::to_owned);
-    if session.is_some() && profile.command.is_some() {
-        return Err(ContinuationError::Refusal(format!(
-            "profile {} runs a custom command; provider sessions are never captured, so resume cannot continue this task",
-            profile.id
-        )));
-    }
+    let (profile, session, recreated_worktree) = prepare_reopen(dispatcher, &old).await?;
     let model = request
         .model
         .as_deref()
@@ -166,22 +142,165 @@ pub async fn resume(
         }
         return hold_until(dispatcher, &old, instruction, start_at);
     }
+    let previous_state = old.state;
+    let scope_updated = request.scope.is_some();
+    let scope = request.scope.unwrap_or_else(|| old.scope.clone());
+    reopen(
+        dispatcher,
+        old,
+        Reopen {
+            profile,
+            session,
+            instruction,
+            scope,
+            scope_updated,
+            model,
+            model_updated: request.model.is_some(),
+            effort,
+            effort_updated: request.effort.is_some(),
+            timeout_ms: request.timeout_ms,
+            previous_state,
+            allow_running: false,
+            recreated_worktree,
+        },
+    )
+    .await
+}
+
+/// Starts the next instruction queued behind a task whose clean run ended,
+/// reopening its provider session or rebuilding the brief when none was
+/// captured.
+pub(crate) async fn continue_follow_up(
+    dispatcher: &Dispatcher,
+    task_id: &str,
+    instruction: String,
+) -> Result<Task, ContinuationError> {
+    let old = require_task(dispatcher.store(), task_id)?;
+    if old.state != TaskState::Running {
+        return Err(ContinuationError::Refusal(format!(
+            "task {} is not waiting to continue; it is {}",
+            old.id,
+            old.state.as_str()
+        )));
+    }
+    let (profile, session, recreated_worktree) = prepare_reopen(dispatcher, &old).await?;
+    let model = old.model.clone();
+    let effort = old.effort.clone();
+    let scope = old.scope.clone();
+    reopen(
+        dispatcher,
+        old,
+        Reopen {
+            profile,
+            session,
+            instruction: Some(instruction),
+            scope,
+            scope_updated: false,
+            model,
+            model_updated: false,
+            effort,
+            effort_updated: false,
+            timeout_ms: None,
+            previous_state: TaskState::Completed,
+            allow_running: true,
+            recreated_worktree,
+        },
+    )
+    .await
+}
+
+/// The profile and session a reopen runs on, and whether its checkout had to
+/// be recreated. A follow-up and a resume share every check here.
+async fn prepare_reopen(
+    dispatcher: &Dispatcher,
+    old: &Task,
+) -> Result<(Profile, Option<String>, bool), ContinuationError> {
+    let mut recreated_worktree = false;
+    if let Some(worktree) = old
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.deferred())
+    {
+        if !std::path::Path::new(&worktree.path).join(".git").exists() {
+            if old.archived_at.is_some() {
+                oga_worktree::recreate_task_worktree(worktree).await?;
+                recreated_worktree = true;
+            } else {
+                require_existing_worktree(old)?;
+            }
+        } else {
+            require_existing_worktree(old)?;
+        }
+    }
+    let profile = require_profile(dispatcher.store(), &old.profile_id)?;
+    let session = old.continuable_session().map(str::to_owned);
+    if session.is_some() && profile.command.is_some() {
+        return Err(ContinuationError::Refusal(format!(
+            "profile {} runs a custom command; provider sessions are never captured, so it cannot be continued",
+            profile.id
+        )));
+    }
+    Ok((profile, session, recreated_worktree))
+}
+
+struct Reopen {
+    profile: Profile,
+    session: Option<String>,
+    instruction: Option<String>,
+    scope: TaskScope,
+    scope_updated: bool,
+    model: String,
+    model_updated: bool,
+    effort: Option<String>,
+    effort_updated: bool,
+    timeout_ms: Option<u64>,
+    previous_state: TaskState,
+    allow_running: bool,
+    recreated_worktree: bool,
+}
+
+/// Moves a task out of its ending and launches it with the given instruction.
+async fn reopen(
+    dispatcher: &Dispatcher,
+    old: Task,
+    request: Reopen,
+) -> Result<Task, ContinuationError> {
+    let Reopen {
+        profile,
+        session,
+        instruction,
+        scope,
+        scope_updated,
+        model,
+        model_updated,
+        effort,
+        effort_updated,
+        timeout_ms,
+        previous_state,
+        allow_running,
+        recreated_worktree,
+    } = request;
     let now = now_iso();
     let attempts = close_attempt(&old, &now, false);
     let attempts_json = encode_store(&attempts)?;
-    let scope_updated = request.scope.is_some();
-    let scope = request.scope.unwrap_or_else(|| old.scope.clone());
     let scope_json = encode_store(&scope)?;
     let was_archived = old.archived_at.is_some();
     let launch_instruction = instruction
         .clone()
         .unwrap_or_else(|| crate::dispatch::CONTINUE_INSTRUCTION.to_owned());
+    let states = if allow_running {
+        "'failed','cancelled','blocked','completed','pending','running'"
+    } else {
+        "'failed','cancelled','blocked','completed','pending'"
+    };
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,timeout_ms=COALESCE(?,timeout_ms),scope_json=?,model=?,effort=?,archived_at=NULL,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','completed','pending')",
+            &format!(
+                "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,timeout_ms=COALESCE(?,timeout_ms),scope_json=?,model=?,effort=?,archived_at=NULL,updated_at=? WHERE id=? AND state IN ({states})"
+            ),
             rusqlite::params![
                 attempts_json,
-                request.timeout_ms,
+                timeout_ms,
                 scope_json,
                 model,
                 effort,
@@ -239,10 +358,10 @@ pub async fn resume(
         if scope_updated {
             resumed_payload["scopeUpdated"] = json!(true);
         }
-        if let Some(model) = &request.model {
+        if model_updated {
             resumed_payload["model"] = json!(model);
         }
-        if let Some(effort) = &request.effort {
+        if effort_updated {
             resumed_payload["effort"] = json!(effort);
         }
         if let Some(instruction) = &instruction {
@@ -317,7 +436,7 @@ pub async fn resume(
         })?;
         fresh.prompt
     } else {
-        resume_prompt(old.state, &launch_instruction, true)
+        resume_prompt(previous_state, &launch_instruction, true)
     };
     dispatcher.launch_continuation(
         task.clone(),

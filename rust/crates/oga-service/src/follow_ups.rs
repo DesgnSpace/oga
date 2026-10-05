@@ -283,6 +283,32 @@ pub fn settling_clears_follow_ups(state: TaskState) -> bool {
     state == TaskState::Cancelled
 }
 
+/// Takes the next instruction for a task left running by its queue. A missing
+/// row means another drain got there first.
+pub fn take_continuation(
+    store: &Store,
+    task_id: &str,
+    now: &str,
+) -> Result<Option<String>, StoreError> {
+    let Some(follow_up) = take_next_follow_up(store, task_id)? else {
+        return Ok(None);
+    };
+    let waiting = count_follow_ups(store, task_id)?;
+    store.transaction(|tx| {
+        append_event(
+            tx,
+            task_id,
+            "follow_up_started",
+            TaskState::Running,
+            &json!({"instruction": follow_up.instruction, "waiting": waiting}),
+            now,
+            None,
+        )?;
+        Ok(())
+    })?;
+    Ok(Some(follow_up.instruction))
+}
+
 pub fn feed_follow_up(
     store: &Store,
     task_id: &str,
