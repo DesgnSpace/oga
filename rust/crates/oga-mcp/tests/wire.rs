@@ -351,7 +351,7 @@ async fn models_honor_the_switches_set_for_the_whole_machine() {
             "method": "tools/call",
             "params": {
                 "name": "models",
-                "arguments": { "cwd": cwd, "onlyPreferred": false }
+                "arguments": { "cwd": cwd }
             }
         }),
     )
@@ -362,6 +362,10 @@ async fn models_honor_the_switches_set_for_the_whole_machine() {
     let catalog: Value = serde_json::from_str(text).expect("model rows JSON");
     let rows = catalog["models"].as_array().expect("model rows");
     assert!(rows.iter().all(|row| row["model"] != "sonnet"));
+    assert!(
+        rows.iter()
+            .all(|row| row.get("enabled").is_none() && row.get("preferred").is_none())
+    );
 }
 
 #[tokio::test]
@@ -388,6 +392,24 @@ async fn models_report_usage_once_per_profile_and_cap_the_rows() {
             )
             .expect("profile");
     }
+    server
+        .state()
+        .store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            "models",
+            r#"{"profiles":{
+                "capped-a":{"models":{"capped-a-model":true}},
+                "capped-b":{"models":{"capped-b-model":true}},
+                "capped-c":{"models":{"capped-c-model":true}}
+            }}"#,
+            TIMESTAMP,
+        )
+        .expect("model settings");
     let models = |arguments: Value| {
         let server = &server;
         async move {
@@ -411,11 +433,11 @@ async fn models_report_usage_once_per_profile_and_cap_the_rows() {
     let cwd = directory.path().display().to_string();
 
     let (capped, text) = models(json!({
-        "cwd": cwd, "onlyPreferred": false, "onlyEnabled": false, "provider": "fx", "limit": 2
+        "cwd": cwd, "provider": "fx", "limit": 2
     }))
     .await;
     let (all, _) = models(json!({
-        "cwd": cwd, "onlyPreferred": false, "onlyEnabled": false, "provider": "fx", "limit": 10
+        "cwd": cwd, "provider": "fx", "limit": 10
     }))
     .await;
 

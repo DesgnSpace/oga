@@ -414,6 +414,17 @@ pub fn usage_by_profile(rows: &mut [ModelSettingsRow]) -> Map<String, Value> {
     shared
 }
 
+/// A model row without `enabled` and `preferred`: the listing only holds
+/// enabled models, so both flags would repeat on every row.
+pub fn model_view(row: &ModelSettingsRow) -> Value {
+    let mut view = json!(row);
+    if let Some(object) = view.as_object_mut() {
+        object.remove("enabled");
+        object.remove("preferred");
+    }
+    view
+}
+
 pub fn with_next(mut value: Value, task: &Task, action: hints::Move) -> Value {
     let next = hints::next(task, action);
     if !next.is_empty()

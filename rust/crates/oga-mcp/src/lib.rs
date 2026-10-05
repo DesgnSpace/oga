@@ -409,14 +409,6 @@ impl McpServer {
     }
 
     async fn models(&self, args: &Value) -> Result<(Value, Option<String>), McpError> {
-        let only_preferred = args
-            .get("onlyPreferred")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let only_enabled = args
-            .get("onlyEnabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
         let profile_filter = optional_string(args, "profile");
         let provider_filter = optional_string(args, "provider")
             .map(|provider| parse_provider(&provider))
@@ -435,9 +427,9 @@ impl McpServer {
                 provider: provider_filter.map(|provider| provider.as_str().to_owned()),
                 refresh: optional_bool(args, "refresh"),
                 cwd: Some(cwd.clone()),
-                include_disabled: Some(!only_enabled),
-                only_preferred: Some(only_preferred),
-                only_enabled: Some(only_enabled),
+                include_disabled: Some(false),
+                only_preferred: Some(false),
+                only_enabled: Some(true),
                 query,
             },
             include_usage,
@@ -454,7 +446,7 @@ impl McpServer {
         if include_usage {
             body["usage"] = Value::Object(shaping::usage_by_profile(&mut rows));
         }
-        body["models"] = json!(rows);
+        body["models"] = Value::Array(rows.iter().map(shaping::model_view).collect());
         if more_rows > 0 {
             body["moreRows"] = json!(more_rows);
         }
