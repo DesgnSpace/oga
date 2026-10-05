@@ -9,17 +9,18 @@ export interface ComposerTrayProps {
   queued: string[];
   subagents: ActivitySubagent[];
   onRemoveQueued: (index: number) => void;
+  onSelectSubagent: (nodeId: string) => void;
 }
 
 const QUEUED_PREVIEW = 3;
 const SUBAGENT_PREVIEW = 3;
 
-export function ComposerTray({ queued, subagents, onRemoveQueued }: ComposerTrayProps) {
+export function ComposerTray({ queued, subagents, onRemoveQueued, onSelectSubagent }: ComposerTrayProps) {
   const empty = queued.length === 0 && subagents.length === 0;
   return (
     <div className="composer-tray" data-empty={empty || undefined}>
       {queued.length > 0 && <QueuedSection queued={queued} onRemoveQueued={onRemoveQueued} />}
-      {subagents.length > 0 && <SubagentsSection subagents={subagents} />}
+      {subagents.length > 0 && <SubagentsSection subagents={subagents} onSelectSubagent={onSelectSubagent} />}
     </div>
   );
 }
@@ -90,7 +91,7 @@ function QueuedSection({ queued, onRemoveQueued }: Pick<ComposerTrayProps, "queu
   );
 }
 
-function SubagentsSection({ subagents }: Pick<ComposerTrayProps, "subagents">) {
+function SubagentsSection({ subagents, onSelectSubagent }: Pick<ComposerTrayProps, "subagents" | "onSelectSubagent">) {
   const [expanded, setExpanded] = React.useState(false);
   const collapsible = subagents.length > SUBAGENT_PREVIEW;
   const shown = collapsible && !expanded ? subagents.slice(0, SUBAGENT_PREVIEW) : subagents;
@@ -110,13 +111,21 @@ function SubagentsSection({ subagents }: Pick<ComposerTrayProps, "subagents">) {
         {shown.map((subagent) => {
           const text = subagent.label ?? "Subagent";
           return (
-            <li className="composer-tray-item" key={subagent.id}>
-              <span className="composer-tray-item-icon" aria-hidden="true">
-                <TaskStatusDot state="running" label="Running" decorative />
-              </span>
-              <span className="composer-tray-item-text" title={text}>
-                {text}
-              </span>
+            <li key={subagent.id}>
+              <button
+                className="composer-tray-item composer-tray-select"
+                type="button"
+                aria-label={`Show ${text} in the transcript`}
+                title={`Show ${text} in the transcript`}
+                onClick={() => onSelectSubagent(subagent.id)}
+              >
+                <span className="composer-tray-item-icon" aria-hidden="true">
+                  <TaskStatusDot state="running" label="Running" decorative />
+                </span>
+                <span className="composer-tray-item-text" title={text}>
+                  {text}
+                </span>
+              </button>
             </li>
           );
         })}

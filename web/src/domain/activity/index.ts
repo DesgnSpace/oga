@@ -178,6 +178,28 @@ export function runningSubagents(composition: ActivityComposition): ActivitySuba
   );
 }
 
+/** Whether any row composed from this composition carries this node id. */
+export function compositionContainsNode(composition: ActivityComposition, nodeId: string): boolean {
+  const inCall = (call: ActivityCall): boolean => call.id === nodeId || call.children.some(inCall);
+  const inNodes = (nodes: ActivityNode[]): boolean =>
+    nodes.some((node) => {
+      switch (node.type) {
+        case "call":
+          return inCall(node.call);
+        case "message":
+        case "notice":
+        case "thinking":
+          return node.id === nodeId;
+        case "subagents":
+          return node.id === nodeId
+            || node.subagents.some((subagent) => subagent.id === nodeId || inNodes(subagent.nodes));
+      }
+    });
+  return composition.blocks.some(
+    (block) => block.type === "turn" && block.turn.segments.some((segment) => inNodes(segment.nodes)),
+  );
+}
+
 /** How much work a stretch holds: the tool calls a reader would have counted. */
 export function nodesCallCount(nodes: ActivityNode[]): number {
   const countCall = (call: ActivityCall): number => 1 + call.children.reduce((sum, child) => sum + countCall(child), 0);

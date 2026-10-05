@@ -5,6 +5,7 @@ import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { runningSubagents } from "@/domain/activity";
+import type { RevealRequest } from "@/domain/trace";
 import { RunChangeProjection, runChangeSetAdded, runChangeSetRemoved, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import type { ChangeSort } from "@/domain/changes/ordering";
@@ -349,6 +350,14 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
     (key: string, expanded: boolean) => watched.controller.setRowExpansion(key, expanded),
     [watched],
   );
+  // Selecting a subagent in the composer tray reveals its row in the
+  // transcript. The nonce re-runs the reveal when the same row is picked twice.
+  const revealNonce = React.useRef(0);
+  const [reveal, setReveal] = React.useState<RevealRequest | undefined>(undefined);
+  const revealSubagent = React.useCallback((nodeId: string) => {
+    revealNonce.current += 1;
+    setReveal({ nodeId, nonce: revealNonce.current });
+  }, []);
 
   const retry = React.useCallback(() => {
     void watched.controller.loadInitial().then(forceUpdate);
@@ -535,6 +544,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
                 onExpansionChange={setWorkExpansion}
                 rowExpansionState={viewState.rowExpansion}
                 onRowExpansionChange={setRowExpansion}
+                reveal={reveal}
               />
             </div>
           </>
@@ -545,6 +555,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
             events={events}
             subagents={runningAgents}
             onChanged={refreshDetail}
+            onSelectSubagent={revealSubagent}
             focusRequest={focusRequest}
             onFocusRequestConsumed={onFocusRequestConsumed}
           />

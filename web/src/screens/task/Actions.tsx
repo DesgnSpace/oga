@@ -988,6 +988,7 @@ export function TaskControls({
   onChanged,
   focusRequest,
   onFocusRequestConsumed,
+  onSelectSubagent,
 }: {
   task: Task;
   events: TaskEventView[];
@@ -995,6 +996,7 @@ export function TaskControls({
   onChanged: () => void;
   focusRequest?: { taskId: string; nonce: number };
   onFocusRequestConsumed: (nonce: number) => void;
+  onSelectSubagent: (nodeId: string) => void;
 }) {
   const [busy, setBusy] = React.useState(false);
   // Names a steer the run couldn't take, until the next send or state change.
@@ -1148,6 +1150,7 @@ export function TaskControls({
           notice={sendNotice}
           onSend={handleSend}
           onRemoveQueued={removeQueued}
+          onSelectSubagent={onSelectSubagent}
           task={task}
           focusRequest={focusRequest?.taskId === task.id ? focusRequest : undefined}
           onFocusRequestConsumed={onFocusRequestConsumed}

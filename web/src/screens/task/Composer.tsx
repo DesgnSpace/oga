@@ -152,6 +152,7 @@ export interface ConversationComposerProps {
   notice?: string | null;
   onSend: ComposerSend;
   onRemoveQueued: (index: number) => void;
+  onSelectSubagent: (nodeId: string) => void;
   task: Task;
   focusRequest?: { taskId: string; nonce: number };
   onFocusRequestConsumed: (nonce: number) => void;
@@ -168,6 +169,7 @@ export function ConversationComposer({
   notice,
   onSend,
   onRemoveQueued,
+  onSelectSubagent,
   task,
   focusRequest,
   onFocusRequestConsumed,
@@ -229,7 +231,7 @@ export function ConversationComposer({
   return (
     <section className="conversation-composer" aria-label="Task conversation">
       <div className="composer-stack">
-        <ComposerTray queued={queued} subagents={subagents} onRemoveQueued={onRemoveQueued} />
+        <ComposerTray queued={queued} subagents={subagents} onRemoveQueued={onRemoveQueued} onSelectSubagent={onSelectSubagent} />
         <form
           className="composer-card"
           onSubmit={(event) => {

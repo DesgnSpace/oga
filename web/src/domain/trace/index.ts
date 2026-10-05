@@ -418,6 +418,13 @@ export interface TraceRow {
   handoff?: HandoffPresentation;
 }
 
+/** A request to bring one row into view: its stable node id, with a nonce so
+ * asking twice still runs twice. */
+export interface RevealRequest {
+  nodeId: string;
+  nonce: number;
+}
+
 export function traceRowWeight(row: TraceRow): number {
   return 1 + row.children.reduce((sum, child) => sum + traceRowWeight(child), 0);
 }
@@ -437,6 +444,30 @@ export function withoutThinking(rows: TraceRow[]): TraceRow[] {
   return rows
     .filter((row) => row.isThinking !== true)
     .map((row) => (row.children.length > 0 ? { ...row, children: withoutThinking(row.children) } : row));
+}
+
+/**
+ * Where a reveal request lands: the top-level row holding it, and the keys to
+ * open from that row down to it — empty when the row itself is the target.
+ */
+export function findRevealTarget(
+  rows: TraceRow[],
+  nodeId: string,
+): { index: number; ancestors: string[] } | undefined {
+  for (let index = 0; index < rows.length; index += 1) {
+    const ancestors = revealPath(rows[index], nodeId);
+    if (ancestors !== undefined) return { index, ancestors };
+  }
+  return undefined;
+}
+
+function revealPath(row: TraceRow, nodeId: string): string[] | undefined {
+  if (row.nodeId === nodeId) return [];
+  for (const child of row.children) {
+    const path = revealPath(child, nodeId);
+    if (path !== undefined) return [row.nodeId ?? String(row.id), ...path];
+  }
+  return undefined;
 }
 
 export function traceRowIsEmpty(row: TraceRow): boolean {

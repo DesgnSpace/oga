@@ -2392,6 +2392,23 @@ h1 {
     margin-top: 0;
 }
 
+.composer-tray-select {
+    width: 100%;
+    padding: var(--space-1);
+    border: 0;
+    border-radius: var(--radius-row);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.composer-tray-select:hover,
+.composer-tray-select:focus-visible {
+    background: var(--color-selection);
+}
+
 .composer-tray-item-text {
     min-width: 0;
     flex: 1;
@@ -3584,6 +3601,13 @@ h1 {
 .trace-row-main-toggle:hover .trace-disclosure,
 .trace-row-main-toggle:focus-visible .trace-disclosure {
     color: var(--color-accent);
+}
+
+/* A reveal from the composer tray lands here: a brief outline, then gone. */
+.trace-row-flash > .trace-row-main {
+    border-radius: var(--radius-row);
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
 }
 
 

@@ -24,6 +24,7 @@ function composer(onSend: (request: ComposerRequest) => void) {
         return true;
       }}
       onRemoveQueued={() => {}}
+      onSelectSubagent={() => {}}
       task={task}
       onFocusRequestConsumed={() => {}}
     />,
@@ -102,6 +103,7 @@ describe("the composer send choice while a run is active", () => {
         subagents={[]}
         onSend={() => true}
         onRemoveQueued={() => {}}
+        onSelectSubagent={() => {}}
         task={{ ...task, state: "queued" }}
         onFocusRequestConsumed={() => {}}
       />,
@@ -130,6 +132,7 @@ function controls() {
       subagents={[]}
       onChanged={() => {}}
       onFocusRequestConsumed={() => {}}
+      onSelectSubagent={() => {}}
     />,
   );
 }

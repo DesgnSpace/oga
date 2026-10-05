@@ -4,8 +4,8 @@ import * as React from "react";
 import { useShowTechnicalDetails } from "@/appearance";
 import { CopyButton } from "@/components/atoms/CopyButton";
 import { InlineMarkdown, MarkdownContent } from "@/domain/markdown";
-import { compositionHasThinking, type ActivityComposition } from "@/domain/activity";
-import { TraceVisibility, stripTransportMarkup, turnMarkerLabel, withoutThinking, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
+import { compositionContainsNode, compositionHasThinking, type ActivityComposition } from "@/domain/activity";
+import { TraceVisibility, findRevealTarget, stripTransportMarkup, turnMarkerLabel, withoutThinking, type RevealRequest, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
 import { ChevronIcon, FollowUpIcon, ReplyIcon, ResponseIcon, SteerIcon } from "@/ui/icons";
 import { AttachmentsRow } from "./Attachments";
 import { ReviewContent } from "./CodeReview";
@@ -264,6 +264,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
   scrollRoot,
   rowExpansion,
   onRowExpansionChange,
+  reveal,
 }: {
   segment: WorkSegment;
   open: boolean;
@@ -272,6 +273,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
   scrollRoot?: React.RefObject<HTMLElement | null>;
   rowExpansion?: ReadonlyMap<string, boolean>;
   onRowExpansionChange?: (key: string, expanded: boolean) => void;
+  reveal?: RevealRequest;
 }) {
   const rows = React.useMemo(() => {
     const all = TraceVisibility.interleavedRows(segment.composition, segment.cwd, segment.live).filter(
@@ -279,6 +281,12 @@ const TranscriptWork = React.memo(function TranscriptWork({
     );
     return showThinking ? all : withoutThinking(all);
   }, [segment.composition, segment.cwd, segment.live, showThinking]);
+  // A reveal from the composer tray opens the run holding its row.
+  React.useEffect(() => {
+    if (reveal === undefined || open) return;
+    if (!compositionContainsNode(segment.composition, reveal.nodeId)) return;
+    onToggle(segment.id, segment.startsExpanded);
+  }, [reveal, open, segment, onToggle]);
   if (rows.length === 0) return null;
   const summary = workSummary(segment, rows);
   const fullTitle = `${workLabel(segment)}${summary ? ` · ${summary}` : ""}`;
@@ -304,7 +312,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
       {open && (
         <div className="transcript-work-body">
           {entries.map((entry) => entry.type === "message" ? (
-            <TraceRows rows={[entry.row]} cwd={segment.cwd} scrollRoot={scrollRoot} live={segment.live} key={`message:${entry.row.nodeId ?? entry.row.id}`} />
+            <TraceRows rows={[entry.row]} cwd={segment.cwd} scrollRoot={scrollRoot} live={segment.live} reveal={reveal} key={`message:${entry.row.nodeId ?? entry.row.id}`} />
           ) : (
             <TranscriptCallGroup
               key={`calls:${entry.key}`}
@@ -313,6 +321,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
               scrollRoot={scrollRoot}
               rowExpansion={rowExpansion}
               onRowExpansionChange={onRowExpansionChange}
+              reveal={reveal}
             />
           ))}
         </div>
@@ -327,12 +336,14 @@ function TranscriptCallGroup({
   scrollRoot,
   rowExpansion,
   onRowExpansionChange,
+  reveal,
 }: {
   entry: Extract<WorkEntry, { type: "calls" }>;
   segment: WorkSegment;
   scrollRoot?: React.RefObject<HTMLElement | null>;
   rowExpansion?: ReadonlyMap<string, boolean>;
   onRowExpansionChange?: (key: string, expanded: boolean) => void;
+  reveal?: RevealRequest;
 }) {
   const key = `transcript-call-group:${segment.id}:${entry.key}`;
   // The saved map only seeds the first render: the controller does not
@@ -342,6 +353,13 @@ function TranscriptCallGroup({
     setExpanded(!expanded);
     onRowExpansionChange?.(key, !expanded);
   };
+  // A reveal from the composer tray opens the group holding its row.
+  React.useEffect(() => {
+    if (reveal === undefined || expanded) return;
+    if (findRevealTarget(entry.rows, reveal.nodeId) === undefined) return;
+    setExpanded(true);
+    onRowExpansionChange?.(key, true);
+  }, [reveal, expanded, entry.rows, key, onRowExpansionChange]);
   return (
     <div className="transcript-call-group">
       <button
@@ -360,6 +378,7 @@ function TranscriptCallGroup({
         live={segment.live}
         expansionState={rowExpansion}
         onExpansionChange={onRowExpansionChange}
+        reveal={reveal}
       />}
     </div>
   );
@@ -411,6 +430,7 @@ export function Transcript({
   onExpansionChange,
   rowExpansionState,
   onRowExpansionChange,
+  reveal,
 }: {
   items: TranscriptItem[];
   showThinking?: boolean;
@@ -419,6 +439,7 @@ export function Transcript({
   onExpansionChange?: (id: number, expanded: boolean) => void;
   rowExpansionState?: ReadonlyMap<string, boolean>;
   onRowExpansionChange?: (key: string, expanded: boolean) => void;
+  reveal?: RevealRequest;
 }) {
   const [manualExpansion, setManualExpansion] = React.useState<Map<number, boolean>>(
     () => new Map(expansionState),
@@ -445,6 +466,7 @@ export function Transcript({
             scrollRoot={scrollRoot}
             rowExpansion={rowExpansionState}
             onRowExpansionChange={onRowExpansionChange}
+            reveal={reveal}
             key={itemKey(item)}
           />
         ) : (
