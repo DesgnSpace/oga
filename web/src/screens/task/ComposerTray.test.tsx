@@ -5,7 +5,7 @@ import { ComposerTray } from "./ComposerTray";
 function tray(queued: string[]) {
   const removed: number[] = [];
   const view = render(
-    <ComposerTray queued={queued} onRemoveQueued={(index) => removed.push(index)} />,
+    <ComposerTray queued={queued} subagents={[]} onRemoveQueued={(index) => removed.push(index)} />,
   );
   return { ...view, removed };
 }

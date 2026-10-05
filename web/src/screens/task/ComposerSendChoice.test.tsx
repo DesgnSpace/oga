@@ -18,6 +18,7 @@ function composer(onSend: (request: ComposerRequest) => void) {
     <ConversationComposer
       routing={{ type: "steer-and-queue" }}
       queued={[]}
+      subagents={[]}
       onSend={(request) => {
         onSend(request);
         return true;
@@ -98,6 +99,7 @@ describe("the composer send choice while a run is active", () => {
       <ConversationComposer
         routing={{ type: "queue" }}
         queued={[]}
+        subagents={[]}
         onSend={() => true}
         onRemoveQueued={() => {}}
         task={{ ...task, state: "queued" }}
@@ -125,6 +127,7 @@ function controls() {
     <TaskControls
       task={task}
       events={[]}
+      subagents={[]}
       onChanged={() => {}}
       onFocusRequestConsumed={() => {}}
     />,

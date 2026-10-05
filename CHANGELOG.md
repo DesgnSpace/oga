@@ -4,6 +4,7 @@
 
 - While a task is running, each message offers Send now and Queue: Send now reaches the run straight away, Queue waits until the run finishes, and if the run can't take a send-now message the app says it was queued instead.
 - Messages you queue for a running task now stack just above the box, in the order they will go, so you can see what is waiting and remove one before it is sent.
+- Subagents the run starts now appear just above the reply box while they run, so you can see what is still going without scrolling back through the transcript.
 - "Move to another worker" in a task's menu is now called Handoff, and its window lets you pick the effort too. You can also hand a task to the same model at a different effort.
 
 - Your brief rules and the models you switch on are now one setting for the whole machine, so those pages no longer ask you to pick a project first. If you had set them for a single project, that choice now applies everywhere.

@@ -2388,6 +2388,10 @@ h1 {
     color: var(--color-text-muted);
 }
 
+.composer-tray-item-icon .task-dot {
+    margin-top: 0;
+}
+
 .composer-tray-item-text {
     min-width: 0;
     flex: 1;

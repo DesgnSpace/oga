@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { Task, TaskScope } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
+import type { ActivitySubagent } from "@/domain/activity";
 import { ReturnIcon } from "@/ui/icons";
 import { ComposerTray } from "./ComposerTray";
 import { taskStatusLabel } from "./format";
@@ -147,6 +148,7 @@ export interface ConversationComposerProps {
   routing: ConversationInputRouting;
   scope?: TaskScope;
   queued: string[];
+  subagents: ActivitySubagent[];
   notice?: string | null;
   onSend: ComposerSend;
   onRemoveQueued: (index: number) => void;
@@ -162,6 +164,7 @@ export function ConversationComposer({
   routing,
   scope,
   queued,
+  subagents,
   notice,
   onSend,
   onRemoveQueued,
@@ -226,7 +229,7 @@ export function ConversationComposer({
   return (
     <section className="conversation-composer" aria-label="Task conversation">
       <div className="composer-stack">
-        <ComposerTray queued={queued} onRemoveQueued={onRemoveQueued} />
+        <ComposerTray queued={queued} subagents={subagents} onRemoveQueued={onRemoveQueued} />
         <form
           className="composer-card"
           onSubmit={(event) => {

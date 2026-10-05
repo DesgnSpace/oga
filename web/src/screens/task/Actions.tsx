@@ -19,6 +19,7 @@ import type {
 import { MenuPanel, type MenuAction } from "@/components/menu/Menu";
 import { Modal } from "@/components/primitives/Modal";
 import { ArchiveIcon, CancelIcon, CheckIcon, ChevronIcon, RestoreIcon } from "@/ui/icons";
+import type { ActivitySubagent } from "@/domain/activity";
 import { MarkdownContent } from "@/domain/markdown";
 import { ComposerRequest, ConversationComposer, isResume, routingForState } from "./Composer";
 import { isExplainedWait, nextTryLabel } from "./format";
@@ -983,12 +984,14 @@ export function WaitNotice({ task, onChanged }: { task: Task; onChanged: () => v
 export function TaskControls({
   task,
   events,
+  subagents,
   onChanged,
   focusRequest,
   onFocusRequestConsumed,
 }: {
   task: Task;
   events: TaskEventView[];
+  subagents: ActivitySubagent[];
   onChanged: () => void;
   focusRequest?: { taskId: string; nonce: number };
   onFocusRequestConsumed: (nonce: number) => void;
@@ -1141,6 +1144,7 @@ export function TaskControls({
           routing={routing}
           scope={task.scope}
           queued={queued}
+          subagents={subagents}
           notice={sendNotice}
           onSend={handleSend}
           onRemoveQueued={removeQueued}

@@ -1,20 +1,25 @@
 // The waiting sections that stack attached to the top of the composer.
 
 import * as React from "react";
+import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
+import type { ActivitySubagent } from "@/domain/activity";
 import { CloseIcon, FollowUpIcon } from "@/ui/icons";
 
 export interface ComposerTrayProps {
   queued: string[];
+  subagents: ActivitySubagent[];
   onRemoveQueued: (index: number) => void;
 }
 
 const QUEUED_PREVIEW = 3;
+const SUBAGENT_PREVIEW = 3;
 
-export function ComposerTray({ queued, onRemoveQueued }: ComposerTrayProps) {
-  const empty = queued.length === 0;
+export function ComposerTray({ queued, subagents, onRemoveQueued }: ComposerTrayProps) {
+  const empty = queued.length === 0 && subagents.length === 0;
   return (
     <div className="composer-tray" data-empty={empty || undefined}>
-      {!empty && <QueuedSection queued={queued} onRemoveQueued={onRemoveQueued} />}
+      {queued.length > 0 && <QueuedSection queued={queued} onRemoveQueued={onRemoveQueued} />}
+      {subagents.length > 0 && <SubagentsSection subagents={subagents} />}
     </div>
   );
 }
@@ -44,7 +49,7 @@ export function ComposerTraySection({
   );
 }
 
-function QueuedSection({ queued, onRemoveQueued }: ComposerTrayProps) {
+function QueuedSection({ queued, onRemoveQueued }: Pick<ComposerTrayProps, "queued" | "onRemoveQueued">) {
   const [expanded, setExpanded] = React.useState(false);
   const collapsible = queued.length > QUEUED_PREVIEW;
   const shown = collapsible && !expanded ? queued.slice(0, QUEUED_PREVIEW) : queued;
@@ -80,6 +85,41 @@ function QueuedSection({ queued, onRemoveQueued }: ComposerTrayProps) {
             </button>
           </li>
         ))}
+      </ul>
+    </ComposerTraySection>
+  );
+}
+
+function SubagentsSection({ subagents }: Pick<ComposerTrayProps, "subagents">) {
+  const [expanded, setExpanded] = React.useState(false);
+  const collapsible = subagents.length > SUBAGENT_PREVIEW;
+  const shown = collapsible && !expanded ? subagents.slice(0, SUBAGENT_PREVIEW) : subagents;
+  const action = collapsible ? (
+    <button
+      className="composer-tray-toggle"
+      type="button"
+      aria-expanded={expanded}
+      onClick={() => setExpanded((value) => !value)}
+    >
+      {expanded ? "Show fewer" : `Show all ${subagents.length}`}
+    </button>
+  ) : undefined;
+  return (
+    <ComposerTraySection label="Subagents" count={subagents.length} action={action}>
+      <ul className="composer-tray-list">
+        {shown.map((subagent) => {
+          const text = subagent.label ?? "Subagent";
+          return (
+            <li className="composer-tray-item" key={subagent.id}>
+              <span className="composer-tray-item-icon" aria-hidden="true">
+                <TaskStatusDot state="running" label="Running" decorative />
+              </span>
+              <span className="composer-tray-item-text" title={text}>
+                {text}
+              </span>
+            </li>
+          );
+        })}
       </ul>
     </ComposerTraySection>
   );

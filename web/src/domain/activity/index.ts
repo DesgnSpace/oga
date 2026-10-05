@@ -157,6 +157,27 @@ export function compositionCalls(blocks: ActivityBlock[]): ActivityCall[] {
   return blocks.flatMap((block) => (block.type === "turn" ? turnCalls(block.turn) : []));
 }
 
+/**
+ * Every subagent still running, in the order it launched, wherever it sits —
+ * including a run another subagent started. A subagent leaves once its report
+ * arrives, and one whose turn closed without reporting reads as interrupted
+ * rather than running, so neither lingers here.
+ */
+export function runningSubagents(composition: ActivityComposition): ActivitySubagent[] {
+  const inNodes = (nodes: ActivityNode[]): ActivitySubagent[] =>
+    nodes.flatMap((node) =>
+      node.type === "subagents"
+        ? [
+            ...node.subagents.filter((subagent) => subagent.status === "running"),
+            ...node.subagents.flatMap((subagent) => inNodes(subagent.nodes)),
+          ]
+        : [],
+    );
+  return composition.blocks.flatMap((block) =>
+    block.type === "turn" ? block.turn.segments.flatMap((segment) => inNodes(segment.nodes)) : [],
+  );
+}
+
 /** How much work a stretch holds: the tool calls a reader would have counted. */
 export function nodesCallCount(nodes: ActivityNode[]): number {
   const countCall = (call: ActivityCall): number => 1 + call.children.reduce((sum, child) => sum + countCall(child), 0);

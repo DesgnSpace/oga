@@ -4,6 +4,7 @@ import * as React from "react";
 import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
+import { runningSubagents } from "@/domain/activity";
 import { RunChangeProjection, runChangeSetAdded, runChangeSetRemoved, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import type { ChangeSort } from "@/domain/changes/ordering";
@@ -320,6 +321,15 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
   );
   const [showThinking, toggleThinking] = useShowThinking();
   const hasThinking = React.useMemo(() => transcriptHasThinking(transcriptItems), [transcriptItems]);
+  // The tray above the composer reads the same work the transcript already
+  // composed, so a subagent shows while it runs and leaves once it reports.
+  const runningAgents = React.useMemo(
+    () =>
+      transcriptItems.flatMap((item) =>
+        item.type === "work" ? runningSubagents(item.segment.composition) : [],
+      ),
+    [transcriptItems],
+  );
   React.useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
@@ -533,6 +543,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
           <TaskControls
             task={task}
             events={events}
+            subagents={runningAgents}
             onChanged={refreshDetail}
             focusRequest={focusRequest}
             onFocusRequestConsumed={onFocusRequestConsumed}
