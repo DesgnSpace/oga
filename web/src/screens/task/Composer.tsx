@@ -3,7 +3,8 @@
 import * as React from "react";
 import type { Task, TaskScope } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
-import { ChevronIcon, ReturnIcon } from "@/ui/icons";
+import { ReturnIcon } from "@/ui/icons";
+import { ComposerTray } from "./ComposerTray";
 import { taskStatusLabel } from "./format";
 
 export type ComposerSendMode = "primary" | "steer";
@@ -224,70 +225,53 @@ export function ConversationComposer({
 
   return (
     <section className="conversation-composer" aria-label="Task conversation">
-      {queued.length > 0 && (
-        <div className="queued-follow-ups" aria-label="Queued follow-ups">
-          {queued.map((text, index) => (
-            <div className="queued-follow-up" key={index}>
-              <span className="queued-follow-up-marker" aria-hidden="true">
-                <ChevronIcon size={11} />
-              </span>
-              <span className="queued-follow-up-text">{text}</span>
-              <button
-                className="text-button queued-follow-up-remove"
-                type="button"
-                aria-label={`Remove follow-up ${index + 1}`}
-                onClick={() => onRemoveQueued(index)}
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <form
-        className="composer-card"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit(mode);
-        }}
-      >
-        <textarea
-          ref={inputRef}
-          className="composer-input"
-          rows={1}
-          placeholder={hint}
-          value={draft}
-          readOnly={sending}
-          aria-busy={sending}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              void submit(mode);
-              return;
-            }
-            if (dualSend && event.key === "Enter" && event.altKey) {
-              event.preventDefault();
-              void submit(modeForChoice(otherChoice(choice)));
-              return;
-            }
-            if (event.key === "Escape" && draft !== "") {
-              event.preventDefault();
-              setDraft("");
-            }
+      <div className="composer-stack">
+        <ComposerTray queued={queued} onRemoveQueued={onRemoveQueued} />
+        <form
+          className="composer-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit(mode);
           }}
-          aria-label={hint}
-        />
-        <button
-          className={`composer-send${draft.trim() !== "" ? " composer-send-active" : ""}`}
-          type="submit"
-          disabled={disabled}
-          aria-label={sending ? "Sending…" : `${label} — ${shortcut}`}
-          title={sending ? "Sending…" : `${label} — ${shortcut}`}
         >
-          <ReturnIcon size={15} />
-        </button>
-      </form>
+          <textarea
+            ref={inputRef}
+            className="composer-input"
+            rows={1}
+            placeholder={hint}
+            value={draft}
+            readOnly={sending}
+            aria-busy={sending}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                void submit(mode);
+                return;
+              }
+              if (dualSend && event.key === "Enter" && event.altKey) {
+                event.preventDefault();
+                void submit(modeForChoice(otherChoice(choice)));
+                return;
+              }
+              if (event.key === "Escape" && draft !== "") {
+                event.preventDefault();
+                setDraft("");
+              }
+            }}
+            aria-label={hint}
+          />
+          <button
+            className={`composer-send${draft.trim() !== "" ? " composer-send-active" : ""}`}
+            type="submit"
+            disabled={disabled}
+            aria-label={sending ? "Sending…" : `${label} — ${shortcut}`}
+            title={sending ? "Sending…" : `${label} — ${shortcut}`}
+          >
+            <ReturnIcon size={15} />
+          </button>
+        </form>
+      </div>
       <div className="composer-controls">
         <div className="composer-controls-left">
           {scopeLabel && (
