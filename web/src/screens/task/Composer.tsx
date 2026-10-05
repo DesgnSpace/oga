@@ -4,6 +4,7 @@ import * as React from "react";
 import type { Task, TaskScope } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import type { ActivitySubagent } from "@/domain/activity";
+import type { TodoProgress } from "@/domain/trace";
 import { ReturnIcon } from "@/ui/icons";
 import { ComposerTray } from "./ComposerTray";
 import { taskStatusLabel } from "./format";
@@ -149,6 +150,7 @@ export interface ConversationComposerProps {
   scope?: TaskScope;
   queued: string[];
   subagents: ActivitySubagent[];
+  todos: TodoProgress | undefined;
   notice?: string | null;
   onSend: ComposerSend;
   onRemoveQueued: (index: number) => void;
@@ -166,6 +168,7 @@ export function ConversationComposer({
   scope,
   queued,
   subagents,
+  todos,
   notice,
   onSend,
   onRemoveQueued,
@@ -231,7 +234,7 @@ export function ConversationComposer({
   return (
     <section className="conversation-composer" aria-label="Task conversation">
       <div className="composer-stack">
-        <ComposerTray queued={queued} subagents={subagents} onRemoveQueued={onRemoveQueued} onSelectSubagent={onSelectSubagent} />
+        <ComposerTray queued={queued} subagents={subagents} todos={todos} onRemoveQueued={onRemoveQueued} onSelectSubagent={onSelectSubagent} />
         <form
           className="composer-card"
           onSubmit={(event) => {

@@ -5,7 +5,7 @@ import { broker } from "@/bridge/client";
 import type { ProfileView, TaskDiff, TaskEventView } from "@/bridge/types";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import { runningSubagents } from "@/domain/activity";
-import type { RevealRequest } from "@/domain/trace";
+import { latestTodoProgress, type RevealRequest } from "@/domain/trace";
 import { RunChangeProjection, runChangeSetAdded, runChangeSetRemoved, RUN_CHANGES_EMPTY } from "@/domain/changes";
 import { gitChangeSet, RunChangeByTurnProjection } from "@/domain/changes/grouped";
 import type { ChangeSort } from "@/domain/changes/ordering";
@@ -40,7 +40,7 @@ import { usageTotals } from "./contextUsage";
 import { effortDisplay, taskStatusLabel } from "./format";
 import { useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
-import { activityIsSettled, buildTranscript, WorkSegmentCache } from "./transcriptModel";
+import { activityIsSettled, buildTranscript, currentRunEvents, WorkSegmentCache } from "./transcriptModel";
 
 export const REFRESH_TASK_DETAIL_EVENT = "oga-refresh-task-detail";
 
@@ -331,6 +331,12 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
       ),
     [transcriptItems],
   );
+  // The todo list, likewise, comes from the run the task is on rather than the
+  // whole stream, so a plan a past run left behind does not sit above the box.
+  const todos = React.useMemo(
+    () => latestTodoProgress(currentRunEvents(transcriptItems), task !== undefined && !activityIsSettled(task.state)),
+    [task, transcriptItems],
+  );
   React.useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
@@ -554,6 +560,7 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
             task={task}
             events={events}
             subagents={runningAgents}
+            todos={todos}
             onChanged={refreshDetail}
             onSelectSubagent={revealSubagent}
             focusRequest={focusRequest}

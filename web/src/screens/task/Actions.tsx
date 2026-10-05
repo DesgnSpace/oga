@@ -21,6 +21,7 @@ import { Modal } from "@/components/primitives/Modal";
 import { ArchiveIcon, CancelIcon, CheckIcon, ChevronIcon, RestoreIcon } from "@/ui/icons";
 import type { ActivitySubagent } from "@/domain/activity";
 import { MarkdownContent } from "@/domain/markdown";
+import type { TodoProgress } from "@/domain/trace";
 import { ComposerRequest, ConversationComposer, isResume, routingForState } from "./Composer";
 import { isExplainedWait, nextTryLabel } from "./format";
 import { TaskMetadata } from "./TaskMetadata";
@@ -985,6 +986,7 @@ export function TaskControls({
   task,
   events,
   subagents,
+  todos,
   onChanged,
   focusRequest,
   onFocusRequestConsumed,
@@ -993,6 +995,7 @@ export function TaskControls({
   task: Task;
   events: TaskEventView[];
   subagents: ActivitySubagent[];
+  todos: TodoProgress | undefined;
   onChanged: () => void;
   focusRequest?: { taskId: string; nonce: number };
   onFocusRequestConsumed: (nonce: number) => void;
@@ -1147,6 +1150,7 @@ export function TaskControls({
           scope={task.scope}
           queued={queued}
           subagents={subagents}
+          todos={todos}
           notice={sendNotice}
           onSend={handleSend}
           onRemoveQueued={removeQueued}

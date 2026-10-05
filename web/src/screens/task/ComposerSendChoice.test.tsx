@@ -19,6 +19,7 @@ function composer(onSend: (request: ComposerRequest) => void) {
       routing={{ type: "steer-and-queue" }}
       queued={[]}
       subagents={[]}
+      todos={undefined}
       onSend={(request) => {
         onSend(request);
         return true;
@@ -101,6 +102,7 @@ describe("the composer send choice while a run is active", () => {
         routing={{ type: "queue" }}
         queued={[]}
         subagents={[]}
+        todos={undefined}
         onSend={() => true}
         onRemoveQueued={() => {}}
         onSelectSubagent={() => {}}
@@ -130,6 +132,7 @@ function controls() {
       task={task}
       events={[]}
       subagents={[]}
+      todos={undefined}
       onChanged={() => {}}
       onFocusRequestConsumed={() => {}}
       onSelectSubagent={() => {}}

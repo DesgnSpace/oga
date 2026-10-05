@@ -2419,6 +2419,49 @@ h1 {
     white-space: nowrap;
 }
 
+.composer-tray-todo-line {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0 var(--space-1);
+}
+
+.composer-tray-todo-count {
+    flex: 0 0 auto;
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+    font-variant-numeric: tabular-nums;
+}
+
+.composer-tray-todo-track {
+    width: var(--space-7);
+    height: var(--space-1);
+    flex: 0 0 auto;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
+}
+
+.composer-tray-todo-fill {
+    display: block;
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+}
+
+.composer-tray-todo-fill.is-done {
+    background: var(--color-success);
+}
+
+.composer-tray-todo-done .composer-tray-item-icon {
+    color: var(--color-success);
+}
+
+.composer-tray-todo-doing .composer-tray-item-icon {
+    color: var(--color-accent);
+}
+
 .composer-tray-remove {
     width: var(--control-height-small);
     height: var(--control-height-small);

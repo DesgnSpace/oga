@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Task, TaskAttempt, TaskEventView } from "@/bridge/types";
-import { buildTranscript, REQUEST_ID, WorkSegmentCache } from "./transcriptModel";
+import { buildTranscript, currentRunEvents, REQUEST_ID, WorkSegmentCache } from "./transcriptModel";
 
 /**
  * Turn ids below mirror what the broker's database actually stores: real
@@ -198,6 +198,27 @@ describe("buildTranscript across resumed attempts", () => {
     expect(bubble.bubble.id).toBe(REQUEST_ID);
     expect(work.segment.id).toBe(1);
     expect(response.block.text).toBe("Only reply.");
+  });
+});
+
+describe("currentRunEvents", () => {
+  it("reads the run the task is on, oldest event first", () => {
+    const items = buildTranscript(task({ state: "running" }), [event(1, 10), event(2, 11)]);
+
+    expect(currentRunEvents(items).map((event) => event.id)).toEqual([1, 2]);
+  });
+
+  it("leaves a past run's work out once a follow-up opens a new one", () => {
+    const followUp: TaskEventView = { ...event(2, undefined, "Follow-up queued"), detail: "and the tests" };
+    const items = buildTranscript(task({ state: "running" }), [event(1, 10), followUp, event(3, 11)]);
+
+    expect(currentRunEvents(items).map((event) => event.id)).toEqual([3]);
+  });
+
+  it("still reads the run that ended, once its reply follows it", () => {
+    const items = buildTranscript(task({ output: "All done." }), [event(1, 10), event(2, 11)]);
+
+    expect(currentRunEvents(items).map((event) => event.id)).toEqual([1, 2]);
   });
 });
 
