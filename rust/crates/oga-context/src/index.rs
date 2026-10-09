@@ -476,7 +476,8 @@ impl<'a> ContextIndex<'a> {
         Ok(reachable)
     }
 
-    /// Save the routes a worker learned while running a task.
+    /// Save the routes a worker learned while running a task. Invalid
+    /// proposals come back rejected without holding back the valid ones.
     pub fn learn_routes(
         &self,
         task: &Task,
@@ -514,7 +515,7 @@ impl<'a> ContextIndex<'a> {
                 Err(reason) => rejected.push(LearnRouteRejection { index, reason }),
             }
         }
-        if !rejected.is_empty() {
+        if prepared.is_empty() {
             return Ok(LearnRoutesResult {
                 accepted: 0,
                 rejected,
