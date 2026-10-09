@@ -1139,6 +1139,52 @@ fn a_route_rejects_a_symbol_that_is_not_there() {
 }
 
 #[test]
+fn one_save_takes_every_file_a_large_task_touched() {
+    let fixture = Fixture::new();
+    for n in 0..65 {
+        fs::write(
+            fixture.project.path().join(format!("src/part{n}.ts")),
+            format!("export function part{n}() {{ return {n}; }}\n"),
+        )
+        .expect("part fixture writes");
+    }
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+    let proposals = (0..65)
+        .map(|n| LearnRouteProposal {
+            hints: vec![format!("piece number {n}")],
+            path: format!("src/part{n}.ts"),
+            symbol: Some(format!("part{n}")),
+        })
+        .collect::<Vec<_>>();
+
+    let learned = index
+        .learn_routes(&fixture.task(), &proposals[..25])
+        .expect("routes learn");
+    assert_eq!(learned.accepted, 25);
+    assert!(learned.rejected.is_empty());
+    let answer = index
+        .question(&fixture.target(), "piece number 24")
+        .expect("the last route answers");
+    assert_eq!(answer.candidates[0].symbol.as_deref(), Some("part24"));
+
+    let refused = index
+        .learn_routes(&fixture.task(), &proposals)
+        .expect("oversized save is judged");
+    assert_eq!(refused.accepted, 0);
+    assert_eq!(refused.rejected[0].index, 64);
+    assert!(
+        refused.rejected[0]
+            .reason
+            .contains("pass only the 64 files a later search most needs"),
+        "{}",
+        refused.rejected[0].reason
+    );
+}
+
+#[test]
 fn learned_routes_follow_symbol_renames() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth(token: string): boolean { return !!token; }\n");

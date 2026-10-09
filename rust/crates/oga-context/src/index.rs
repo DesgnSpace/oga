@@ -30,7 +30,9 @@ const MAX_BUILD_FILES: usize = 20_000;
 /// symbols are not what anyone is looking for.
 const MAX_FILE_BYTES: u64 = 512 * 1024;
 const MAX_SYMBOLS_PER_CWD: usize = 200_000;
-const MAX_LEARNED_ROUTES: usize = 12;
+/// How many routes one save takes. A worker saves once per run, so this
+/// covers every file a large task touched.
+const MAX_LEARNED_ROUTES: usize = 64;
 const MAX_FILE_BODY_LINES: usize = 120;
 /// How many files one written-out path may resolve to before the answer is
 /// the list rather than the file.
@@ -485,7 +487,10 @@ impl<'a> ContextIndex<'a> {
                 accepted: 0,
                 rejected: vec![LearnRouteRejection {
                     index: MAX_LEARNED_ROUTES,
-                    reason: format!("at most {MAX_LEARNED_ROUTES} routes are allowed"),
+                    reason: format!(
+                        "at most {MAX_LEARNED_ROUTES} routes are allowed in one call; \
+                         pass only the {MAX_LEARNED_ROUTES} files a later search most needs"
+                    ),
                 }],
             });
         }

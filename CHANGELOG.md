@@ -7,6 +7,7 @@
 - Subagents the run starts now appear just above the reply box while they run — select one to jump to its work in the transcript.
 - When a run keeps a list of steps, its latest one now sits just above the reply box: the step in hand with how far along it is, and opening it shows every step with whether it is done, being done, or still to do.
 - A task with instructions still queued behind it is no longer shown as done, so tasks waiting on it hold until that queue has run.
+- Search now learns the files a task worked in even when it touched more than twelve. Before, a task that changed many files taught search nothing.
 - "Move to another worker" in a task's menu is now called Handoff, and its window lets you pick the effort too. You can also hand a task to the same model at a different effort.
 
 - Your brief rules and the models you switch on are now one setting for the whole machine, so those pages no longer ask you to pick a project first. If you had set them for a single project, that choice now applies everywhere.
