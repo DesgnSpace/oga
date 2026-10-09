@@ -550,6 +550,7 @@ async fn run_relearn_worker(args: &[String]) -> CliResult<i32> {
     }
     let attempt = task.attempts.len() + 1;
     let store = Store::open_writable(database_path())?;
+    // A save that left routes out lets the worker send the fixed ones again.
     let duplicate = store
         .repositories()
         .events()
@@ -558,6 +559,12 @@ async fn run_relearn_worker(args: &[String]) -> CliResult<i32> {
         .any(|event| {
             event.kind == "learn_routes"
                 && event.payload.get("attempt").and_then(Value::as_u64) == Some(attempt as u64)
+                && event
+                    .payload
+                    .get("rejected")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    == 0
         });
     if duplicate {
         append_task_event(
@@ -572,11 +579,6 @@ async fn run_relearn_worker(args: &[String]) -> CliResult<i32> {
     }
     let result = ContextIndex::new(&store).learn_routes(&task, &routes)?;
     if !result.rejected.is_empty() {
-        let rejected = result
-            .rejected
-            .iter()
-            .map(|item| format!("route {}: {}", item.index + 1, item.reason))
-            .collect::<Vec<_>>();
         append_task_event(
             &store,
             &task,
@@ -590,27 +592,41 @@ async fn run_relearn_worker(args: &[String]) -> CliResult<i32> {
                     .collect::<Vec<_>>(),
             }),
         )?;
-        return Err(CliError::new(rejected.join("; ")));
     }
-    append_task_event(
-        &store,
-        &task,
-        "learn_routes",
-        json!({ "attempt": attempt, "accepted": result.accepted, "empty": result.accepted == 0 }),
-    )?;
-    println!(
-        "{}",
-        if result.accepted == 0 {
-            "No reusable source routes to save.".to_owned()
-        } else {
-            format!(
-                "Saved {} source route{}.",
-                result.accepted,
-                if result.accepted == 1 { "" } else { "s" }
-            )
-        }
-    );
-    Ok(0)
+    if result.accepted > 0 || result.rejected.is_empty() {
+        append_task_event(
+            &store,
+            &task,
+            "learn_routes",
+            json!({
+                "attempt": attempt,
+                "accepted": result.accepted,
+                "rejected": result.rejected.len(),
+                "empty": result.accepted == 0,
+            }),
+        )?;
+        println!(
+            "{}",
+            match result.accepted {
+                0 => "No reusable source routes to save.".to_owned(),
+                1 => "Saved 1 source route.".to_owned(),
+                accepted => format!("Saved {accepted} source routes."),
+            }
+        );
+    }
+    if result.rejected.is_empty() {
+        return Ok(0);
+    }
+    let rejected = result
+        .rejected
+        .iter()
+        .map(|item| format!("route {}: {}", item.index + 1, item.reason))
+        .collect::<Vec<_>>();
+    let mut message = rejected.join("; ");
+    if result.accepted > 0 {
+        message.push_str(". Fix these and run relearn again with only them.");
+    }
+    Err(CliError::new(message))
 }
 
 async fn run_relearn(args: &[String]) -> CliResult<i32> {
