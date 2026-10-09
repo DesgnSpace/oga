@@ -51,7 +51,7 @@ pub struct WorkerOutcome {
 /// Asks the worker to teach `oga query` the places it worked in, so the
 /// next lookup lands there. Settlement records whether it did.
 const RELEARN_SECTION: &str = r#"## Before you finish
-When the work is done and before your final answer, run `oga relearn` once with every file you found or changed that a later search should land on: `oga relearn '[{"hints":["<words someone would search>"],"path":"<file>","symbol":"<optional symbol>"}]'`."#;
+When the work is done and before your final answer, run `oga relearn` once with every file you found or changed that a later search should land on: `oga relearn '[{"hints":["<words someone would search>"],"path":"<file>","symbol":"<optional symbol>"}]'`. List source, config, Markdown, and CSS files; leave out SQL, images, lockfiles, and generated output, which the index doesn't read."#;
 
 /// Oga settles a run when the worker ends its turn, and whatever the worker
 /// left running in the background ends with it.

@@ -5,6 +5,7 @@ mod c;
 mod c_sharp;
 mod config;
 mod cpp;
+mod css;
 mod go;
 mod java;
 mod json;
@@ -118,6 +119,7 @@ pub fn adapters() -> &'static [&'static dyn LanguageAdapter] {
                 &json::Json,
                 &toml::Toml,
                 &yaml::Yaml,
+                &css::Css,
             ]
         })
         .as_slice()

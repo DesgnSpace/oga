@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Lookups now find CSS: custom properties like design tokens, class rules, and animations. When a worker tries to teach a lookup about a file, the reason it's refused now says whether the file is outside the task's scope or a type lookups don't read.
 - While a task is running, each message offers Send now and Queue: Send now reaches the run straight away, Queue waits until the run finishes, and if the run can't take a send-now message the app says it was queued instead.
 - Messages you queue for a running task now stack just above the box, in the order they will go, so you can see what is waiting and remove one before it is sent.
 - Subagents the run starts now appear just above the reply box while they run — select one to jump to its work in the transcript.

@@ -753,8 +753,11 @@ impl<'a> ContextIndex<'a> {
         let path = proposal.path.trim().replace('\\', "/");
         let relative = safe_relative(read_cwd, &path)
             .ok_or("path must name a mapped source file inside the task cwd")?;
-        if !walk::is_indexable(&relative) || !scope_covers_path(scope, read_cwd, &relative) {
-            return Err("path is outside the task scope or not mapped".into());
+        if !scope_covers_path(scope, read_cwd, &relative) {
+            return Err(format!("{relative} is outside this task's scope"));
+        }
+        if !walk::is_indexable(&relative) {
+            return Err(unindexed_reason(&relative));
         }
         let unreadable = || format!("{relative} is missing, oversized, or not indexable");
         let source = fs::read_to_string(read_cwd.join(&relative)).map_err(|_| unreadable())?;
@@ -1189,6 +1192,29 @@ fn safe_relative(cwd: &Path, raw: &str) -> Option<String> {
     }
     let relative = path.to_string_lossy().replace('\\', "/");
     relative_inside(cwd, &cwd.join(&relative))
+}
+
+/// Why the index keeps no file at `path`, worded so a worker drops the entry
+/// instead of retrying it.
+fn unindexed_reason(path: &str) -> String {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let extension = file
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .filter(|extension| !extension.is_empty());
+    let Some(extension) = extension else {
+        return format!("{path} isn't an indexed file type; leave it out of relearn");
+    };
+    let read_type = crate::lang::adapters()
+        .iter()
+        .any(|adapter| adapter.extensions().contains(&extension.as_str()));
+    if read_type {
+        format!(
+            "{path} is generated, vendored, or a lockfile, so the index skips it; leave it out of relearn"
+        )
+    } else {
+        format!("{path} isn't an indexed file type (.{extension}); leave it out of relearn")
+    }
 }
 
 fn scope_covers_path(rules: &[String], cwd: &Path, target: &str) -> bool {
