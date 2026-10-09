@@ -1514,3 +1514,121 @@ fn reconcile_reparses_only_what_changed() {
     assert_eq!(changed.file_count, 2);
     assert_eq!(changed.symbol_count, 3);
 }
+
+#[test]
+fn a_question_about_a_design_token_lands_on_the_stylesheet() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.project.path().join("src/styles.css"),
+        [
+            ":root {",
+            "  --color-accent: #3b5bdb;",
+            "  --space-2: 8px;",
+            "}",
+            "",
+            ".card-row {",
+            "  padding: var(--space-2);",
+            "}",
+            "",
+            "@keyframes fade-in {",
+            "  from { opacity: 0; }",
+            "}",
+        ]
+        .join("\n"),
+    )
+    .expect("stylesheet writes");
+    fixture.write_other();
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+
+    for (question, symbol) in [
+        ("color accent token", "--color-accent"),
+        ("card row", "card-row"),
+        ("fade in animation", "fade-in"),
+    ] {
+        let answer = index
+            .question(&fixture.target(), question)
+            .expect("question answers");
+        assert_eq!(answer.candidates[0].path, "src/styles.css", "{question}");
+        assert_eq!(
+            answer.candidates[0].symbol.as_deref(),
+            Some(symbol),
+            "{question}"
+        );
+    }
+
+    let learned = index
+        .learn_routes(
+            &fixture.task(),
+            &[LearnRouteProposal {
+                hints: vec!["design tokens".into()],
+                path: "src/styles.css".into(),
+                symbol: Some("--color-accent".into()),
+            }],
+        )
+        .expect("route proposal is judged");
+    assert_eq!(learned.accepted, 1, "{:?}", learned.rejected);
+}
+
+#[test]
+fn a_route_says_why_its_file_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write_auth("export function checkAuth() { return true; }\n");
+    fs::create_dir_all(fixture.project.path().join("migrations")).expect("migrations dir");
+    fs::write(
+        fixture
+            .project
+            .path()
+            .join("migrations/0013_colorful_patch.sql"),
+        "CREATE TABLE patch (id INTEGER);\n",
+    )
+    .expect("migration writes");
+    fs::create_dir_all(fixture.project.path().join("dist")).expect("dist dir");
+    fs::write(
+        fixture.project.path().join("dist/bundle.ts"),
+        "export const x = 1;\n",
+    )
+    .expect("bundle writes");
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+    let task = Task {
+        scope: TaskScope {
+            read: vec![],
+            write: vec!["migrations/**".into(), "dist/**".into()],
+        },
+        ..fixture.task()
+    };
+    let proposal = |path: &str| LearnRouteProposal {
+        hints: vec!["patch table".into()],
+        path: path.into(),
+        symbol: None,
+    };
+
+    let result = index
+        .learn_routes(
+            &task,
+            &[
+                proposal("migrations/0013_colorful_patch.sql"),
+                proposal("src/auth.ts"),
+                proposal("dist/bundle.ts"),
+            ],
+        )
+        .expect("route proposals are judged");
+    let reasons = result
+        .rejected
+        .iter()
+        .map(|rejection| rejection.reason.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasons,
+        [
+            "migrations/0013_colorful_patch.sql isn't an indexed file type (.sql); leave it out of relearn",
+            "src/auth.ts is outside this task's scope",
+            "dist/bundle.ts is generated, vendored, or a lockfile, so the index skips it; leave it out of relearn",
+        ]
+    );
+}

@@ -95,7 +95,7 @@ anything declared inside a function body is dropped as local. Signatures stop
 at the node's `body` field, or at the end of the first line when there is none.
 
 Shipping today: Rust, TypeScript/TSX/JavaScript, Swift, Python, Go, PHP,
-Markdown, JSON, TOML, YAML.
+Markdown, JSON, TOML, YAML, CSS.
 
 ## Kinds
 
@@ -114,3 +114,10 @@ that holds a scalar is a `field`, and an entry in a list is known by its
 position. Values are not indexed; a value shorter than 64 characters rides
 along in the signature so a question can be asked with the value and land on
 the key that holds it. Lockfiles are skipped whatever their format.
+
+## Stylesheets
+
+CSS keeps the names a question asks for: each custom property (`--space-2`)
+as a constant, each rule whose selector names a class (`.card-row`) as a class,
+and each `@keyframes` as a module. Plain properties and other selectors are
+left out, and so are minified `.min.css` files.
