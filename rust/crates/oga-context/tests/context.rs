@@ -1254,6 +1254,72 @@ fn learned_routes_follow_a_file_and_symbol_rename_together() {
 }
 
 #[test]
+fn a_route_that_follows_its_code_onto_a_relearned_target_merges_into_it() {
+    let fixture = Fixture::new();
+    fixture.write_auth(
+        "export function checkAuth(token: string) { return token.length > 8; }\n\
+         export const realm = 'app';\n",
+    );
+    let index = ContextIndex::new(&fixture.store);
+    index
+        .build(fixture.project.path(), BuildOptions::default())
+        .expect("index builds");
+    index
+        .learn_user_route(
+            fixture.project.path(),
+            &LearnRouteProposal {
+                hints: vec!["auth check".into()],
+                path: "src/auth.ts".into(),
+                symbol: Some("checkAuth".into()),
+            },
+        )
+        .expect("route learns");
+
+    fixture.write_auth("export const realm = 'app';\n");
+    fs::write(
+        fixture.project.path().join("src/session.ts"),
+        "export function checkAuth(token: string) { return token.length > 8; }\n",
+    )
+    .expect("moved function writes");
+    index
+        .learn_user_route(
+            fixture.project.path(),
+            &LearnRouteProposal {
+                hints: vec!["session token".into()],
+                path: "src/session.ts".into(),
+                symbol: Some("checkAuth".into()),
+            },
+        )
+        .expect("new location learns before any query reconciles");
+
+    index
+        .reconcile(fixture.project.path(), BuildOptions::default())
+        .expect("reconcile follows the route onto the relearned one");
+    for question in ["auth check", "session token"] {
+        let answer = index
+            .question(&fixture.target(), question)
+            .expect("question answers");
+        assert_eq!(answer.candidates[0].path, "src/session.ts", "{question}");
+        assert_eq!(
+            answer.candidates[0].symbol.as_deref(),
+            Some("checkAuth"),
+            "{question}"
+        );
+    }
+    let count: i64 = fixture
+        .store
+        .with_connection(|connection| {
+            Ok(
+                connection.query_row("SELECT COUNT(*) FROM context_learned_routes", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .expect("route count reads");
+    assert_eq!(count, 1);
+}
+
+#[test]
 fn learned_routes_match_synonyms_and_keep_one_row_per_target() {
     let fixture = Fixture::new();
     fixture.write_auth("export function checkAuth() { return true; }\n");

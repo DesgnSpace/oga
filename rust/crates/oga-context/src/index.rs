@@ -205,7 +205,7 @@ impl<'a> ContextIndex<'a> {
         index_store::replace_files(self.store, cwd, &updates, &now)?;
         let (file_count, symbol_count) = index_store::counts(self.store, cwd)?;
         index_store::save_index(self.store, cwd, partial, file_count, symbol_count, &now)?;
-        let (routes_confirmed, routes_dropped, _) = routes::heal(self.store, cwd, &[], &now)?;
+        let (routes_confirmed, routes_dropped, _) = follow_routes(self.store, cwd, &[], &now);
         Ok(BuildResult {
             partial,
             file_count,
@@ -363,7 +363,7 @@ impl<'a> ContextIndex<'a> {
         // Routes resolve against the index alone, so an unchanged index
         // leaves every route where the last reconcile put it.
         let (confirmed, dropped, route_moves) = if changed {
-            routes::heal(self.store, cwd, &moved, &now)?
+            follow_routes(self.store, cwd, &moved, &now)
         } else {
             (0, 0, Vec::new())
         };
@@ -1176,6 +1176,23 @@ fn relative_inside(cwd: &Path, path: &Path) -> Option<String> {
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/")
         })
+}
+
+/// Follow saved routes to wherever their targets now are. Routes sit on top of
+/// the index, so a failure here is logged and the index still answers.
+fn follow_routes(
+    store: &Store,
+    cwd: &Path,
+    moves: &[(String, String)],
+    now: &str,
+) -> (usize, usize, Vec<RouteMove>) {
+    routes::heal(store, cwd, moves, now).unwrap_or_else(|error| {
+        eprintln!(
+            "following saved routes in {} failed: {error}",
+            cwd.display()
+        );
+        (0, 0, Vec::new())
+    })
 }
 
 fn safe_relative(cwd: &Path, raw: &str) -> Option<String> {
