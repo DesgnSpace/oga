@@ -375,9 +375,11 @@ pub fn parse_fx_models(raw: &str, profile: &Profile) -> Vec<ModelInfo> {
 }
 
 /// The models an ACP session offers, read from the answer that opened it.
-/// Each id carries its own thinking, context, and speed choices, so no
-/// effort ladder is offered beside it.
+/// Cursor's ids carry their own thinking, context, and speed choices, so it
+/// offers no effort ladder beside them. A session that lists an `effort`
+/// setting, as Command Code does, offers that ladder for every model.
 pub fn acp_session_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
+    let efforts = session_efforts(opened);
     opened["models"]["availableModels"]
         .as_array()
         .unwrap_or(&Vec::new())
@@ -385,9 +387,30 @@ pub fn acp_session_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
         .filter_map(|model| {
             let id = model["modelId"].as_str()?.to_owned();
             let label = model["name"].as_str().unwrap_or(&id).to_owned();
-            Some(ModelMeta::default().into_info(profile, id, label, ModelInfoSource::Discovered))
+            let meta = ModelMeta {
+                efforts: efforts.clone(),
+                ..ModelMeta::default()
+            };
+            Some(meta.into_info(profile, id, label, ModelInfoSource::Discovered))
         })
         .collect()
+}
+
+/// The levels the session's `effort` setting accepts. `default` is the
+/// session's own pick when none is set, which Oga already falls back to.
+fn session_efforts(opened: &Value) -> Option<Vec<String>> {
+    let setting = opened["configOptions"]
+        .as_array()?
+        .iter()
+        .find(|option| option["id"] == "effort")?;
+    let levels = setting["options"]
+        .as_array()?
+        .iter()
+        .filter_map(|option| option["value"].as_str().or_else(|| option.as_str()))
+        .filter(|level| *level != "default")
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    (!levels.is_empty()).then_some(levels)
 }
 
 static ANTIGRAVITY_ID: LazyLock<Regex> =

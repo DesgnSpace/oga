@@ -2313,7 +2313,7 @@ mod catalog_tests {
                 "    *'\"method\":\"authenticate\"'*'\"methodId\":\"command-code-cli\"'*)\n",
                 "      printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}' ;;\n",
                 "    *'\"method\":\"session/new\"'*)\n",
-                "      printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"sessionId\":\"ses_cc\",\"models\":{\"availableModels\":[{\"modelId\":\"deepseek/deepseek-v4-flash\",\"name\":\"DeepSeek V4 Flash\"},{\"modelId\":\"moonshotai/Kimi-K3\",\"name\":\"Kimi K3\"}]}}}'\n",
+                "      printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"sessionId\":\"ses_cc\",\"models\":{\"availableModels\":[{\"modelId\":\"deepseek/deepseek-v4-flash\",\"name\":\"DeepSeek V4 Flash\"},{\"modelId\":\"moonshotai/Kimi-K3\",\"name\":\"Kimi K3\"}]},\"configOptions\":[{\"id\":\"effort\",\"type\":\"select\",\"currentValue\":\"default\",\"options\":[{\"value\":\"default\",\"name\":\"Default\"},{\"value\":\"low\",\"name\":\"Low\"},{\"value\":\"medium\",\"name\":\"Medium\"},{\"value\":\"high\",\"name\":\"High\"}]}]}}'\n",
                 "      exit 0 ;;\n",
                 "    *) exit 1 ;;\n",
                 "  esac\n",
@@ -2341,6 +2341,13 @@ mod catalog_tests {
         assert!(models.iter().all(
             |m| m.provider == Provider::CommandCode && m.source == ModelInfoSource::Discovered
         ));
+        // The session's own `default` is not a level a run can ask for.
+        for model in &models {
+            assert_eq!(
+                model.efforts.as_deref(),
+                Some(&["low".to_owned(), "medium".to_owned(), "high".to_owned()][..])
+            );
+        }
     }
 }
 
