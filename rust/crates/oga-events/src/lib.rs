@@ -1677,18 +1677,7 @@ fn provider_event_view(event: &TaskEvent, provider: Provider) -> Option<TaskEven
                         minor: Some(true),
                     },
                 )),
-                Some("turn_end") => Some(provider_view(
-                    event,
-                    provider,
-                    EventKind::Lifecycle,
-                    EventPhase::Info,
-                    "Turn ended",
-                    ProviderViewOptions {
-                        detail: None,
-                        presentation: None,
-                        minor: Some(true),
-                    },
-                )),
+                Some("turn_end") => Some(pi_turn_end_view(event, provider, payload)),
                 Some("agent_start") => Some(provider_view(
                     event,
                     provider,
@@ -2841,6 +2830,9 @@ fn pi_message_view(
     } else {
         EventPhase::Started
     };
+    // The prompt is the request bubble and a tool's output is on the tool's own
+    // row, so neither earns a row of its own here.
+    let echo = matches!(role, "user" | "toolResult");
     let mut view = provider_view(
         event,
         provider,
@@ -2850,15 +2842,94 @@ fn pi_message_view(
         ProviderViewOptions {
             detail: text.map(str::to_owned),
             presentation: text.map(|value| message_presentation(value.to_owned())),
-            minor: (assistant && event_type == "message_start").then_some(true),
+            minor: (echo || (assistant && event_type == "message_start")).then_some(true),
         },
     );
     view.complete = Some(complete);
     if !assistant {
-        view.action_id = Some(PI_MESSAGE_ACTION_ID.to_owned());
+        let call_id = message
+            .and_then(|value| text_value(value.get("toolCallId")))
+            .map(str::to_owned);
+        view.action_id = call_id.or_else(|| Some(PI_MESSAGE_ACTION_ID.to_owned()));
         view.source_id = Some(view.action_id.clone());
     }
     Some(view)
+}
+
+/// A turn's end carries how it stopped and what it cost. A turn the provider
+/// failed shows its error message; any other turn is one usage reading, which
+/// the transcript adds up like every provider's per-turn readings.
+fn pi_turn_end_view(
+    event: &TaskEvent,
+    provider: Provider,
+    payload: &BTreeMap<String, Value>,
+) -> TaskEventView {
+    let message = payload.get("message").and_then(Value::as_object);
+    if message.and_then(|value| text_value(value.get("stopReason"))) == Some("error") {
+        let detail = message
+            .and_then(|value| text_value(value.get("errorMessage")))
+            .unwrap_or("The turn failed");
+        return provider_view(
+            event,
+            provider,
+            EventKind::Error,
+            EventPhase::Failed,
+            "Error",
+            ProviderViewOptions {
+                detail: Some(detail.to_owned()),
+                presentation: None,
+                minor: None,
+            },
+        );
+    }
+    let usage = message
+        .and_then(|value| value.get("usage"))
+        .and_then(Value::as_object);
+    let Some(usage) = usage else {
+        return provider_view(
+            event,
+            provider,
+            EventKind::Lifecycle,
+            EventPhase::Info,
+            "Turn ended",
+            ProviderViewOptions {
+                detail: None,
+                presentation: None,
+                minor: Some(true),
+            },
+        );
+    };
+    let cached = number_u64(usage.get("cacheRead")).filter(|value| *value > 0);
+    let output = number_u64(usage.get("output"));
+    let cost = usage
+        .get("cost")
+        .and_then(Value::as_object)
+        .and_then(|cost| number_f64(cost.get("total")));
+    let mut presentation = usage_presentation();
+    presentation.tokens_in = number_u64(usage.get("input"));
+    presentation.tokens_cached = cached;
+    presentation.tokens_out = output;
+    presentation.cost_usd = cost;
+    let detail = [
+        cost.map(format_cost),
+        output.map(|value| format_count(value) + " tokens out"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    provider_view(
+        event,
+        provider,
+        EventKind::Usage,
+        EventPhase::Completed,
+        "Turn completed",
+        ProviderViewOptions {
+            detail: (!detail.is_empty()).then_some(detail),
+            presentation: Some(presentation),
+            minor: None,
+        },
+    )
 }
 
 /// One `assistantMessageEvent` of a streaming reply. A text or thinking slice
@@ -7980,6 +8051,68 @@ mod tests {
             user(3, "agent.message_start").action_id,
             user(4, "agent.message_end").action_id
         );
+    }
+
+    #[test]
+    fn pi_failed_turn_shows_its_error_and_the_turn_usage_adds_up_to_the_task() {
+        let views = event_views(
+            vec![
+                provider_event(
+                    1,
+                    "agent.message_end",
+                    serde_json::json!({"type": "message_end", "message": {
+                        "role": "user", "content": [{"type": "text", "text": "write every page"}]}}),
+                ),
+                provider_event(
+                    2,
+                    "agent.tool_execution_end",
+                    serde_json::json!({"type": "tool_execution_end", "toolCallId": "call_1",
+                        "toolName": "bash", "args": {"command": "git log --oneline -20"},
+                        "result": {"content": [{"type": "text", "text": "971821c finish docs"}]}}),
+                ),
+                provider_event(
+                    3,
+                    "agent.message_end",
+                    serde_json::json!({"type": "message_end", "message": {
+                        "role": "toolResult", "toolCallId": "call_1",
+                        "content": [{"type": "text", "text": "971821c finish docs"}]}}),
+                ),
+                provider_event(
+                    4,
+                    "agent.turn_end",
+                    serde_json::json!({"type": "turn_end", "message": {
+                        "role": "assistant", "stopReason": "toolUse",
+                        "usage": {"input": 3135, "output": 247, "cacheRead": 12288,
+                            "cost": {"total": 0.0005424664}}}}),
+                ),
+                provider_event(
+                    5,
+                    "agent.turn_end",
+                    serde_json::json!({"type": "turn_end", "message": {
+                        "role": "assistant", "content": [], "stopReason": "error",
+                        "errorMessage": "403: FreeTierError",
+                        "usage": {"input": 0, "output": 0, "cost": {"total": 0}}}}),
+                ),
+            ],
+            Provider::Pi,
+        );
+
+        // The prompt and the tool output each already have a row elsewhere.
+        assert_eq!(views[0].minor, Some(true));
+        assert_eq!(views[1].action_id.as_deref(), Some("call_1"));
+        assert_eq!(views[2].action_id, views[1].action_id);
+        assert_eq!(views[2].minor, Some(true));
+
+        let usage = views[3].presentation.as_ref().unwrap();
+        assert_eq!(views[3].kind, EventKind::Usage);
+        assert_eq!(usage.tokens_in, Some(3135));
+        assert_eq!(usage.tokens_out, Some(247));
+        assert_eq!(usage.tokens_cached, Some(12288));
+        assert_eq!(usage.cost_usd, Some(0.0005424664));
+
+        assert_eq!(views[4].kind, EventKind::Error);
+        assert_eq!(views[4].phase, EventPhase::Failed);
+        assert_eq!(views[4].detail.as_deref(), Some("403: FreeTierError"));
     }
 
     #[test]

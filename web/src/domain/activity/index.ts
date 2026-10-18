@@ -419,6 +419,29 @@ interface SegmentDraft {
   nodes: ActivityNode[];
 }
 
+/**
+ * A worker that reports one usage row per turn has no run-level summary, so the
+ * receipt, which is the last of those rows, would show only the final turn.
+ * Its cost and output are the sum of every turn's. A worker whose usage row
+ * already covers the run (it names its turns or a running total) stands as is.
+ */
+function receiptWithRunTotals(receipt: TaskEventView, events: TaskEventView[]): TaskEventView {
+  const presentation = receipt.presentation;
+  if (!presentation || presentation.turns !== undefined || presentation.total !== undefined) return receipt;
+  let costUsd: number | undefined;
+  let tokensOut: number | undefined;
+  let turns = 0;
+  for (const event of events) {
+    const turn = event.presentation;
+    if (event.kind !== "usage" || !turn || turn.turns !== undefined || turn.total !== undefined) continue;
+    turns += 1;
+    if (turn.costUsd !== undefined) costUsd = (costUsd ?? 0) + turn.costUsd;
+    if (turn.tokensOut !== undefined) tokensOut = (tokensOut ?? 0) + turn.tokensOut;
+  }
+  if (turns < 2) return receipt;
+  return { ...receipt, presentation: { ...presentation, costUsd, tokensOut, turns } };
+}
+
 function composeTimeline(
   rawEvents: TaskEventView[],
   settled: boolean,
@@ -518,7 +541,9 @@ function composeTimeline(
     .map((draft, index) => finishTurn(draft, settled || index + 1 < drafts.length))
     .filter((turn): turn is ActivityTurn => turn !== undefined)
     .map((turn) => ({ type: "turn" as const, turn }));
-  if (receipt) blocks.push({ type: "receipt", event: receipt, thinkingTokens, usageWindow });
+  if (receipt) {
+    blocks.push({ type: "receipt", event: receiptWithRunTotals(receipt, events), thinkingTokens, usageWindow });
+  }
   return { blocks, technical };
 }
 

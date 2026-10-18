@@ -109,7 +109,8 @@
     "createdAt": "2026-09-24T19:15:25.333Z",
     "actionId": "pi:message-stream",
     "sourceId": "pi:message-stream",
-    "complete": false
+    "complete": false,
+    "minor": true
   },
   {
     "id": 499740,
@@ -128,7 +129,8 @@
     "createdAt": "2026-09-24T19:15:25.333Z",
     "actionId": "pi:message-stream",
     "sourceId": "pi:message-stream",
-    "complete": true
+    "complete": true,
+    "minor": true
   },
   {
     "id": 499761,
@@ -4169,12 +4171,18 @@
     "taskId": "subagent-fixture",
     "source": "pi",
     "type": "agent.turn_end",
-    "kind": "lifecycle",
-    "phase": "info",
-    "title": "Turn ended",
+    "kind": "usage",
+    "phase": "completed",
+    "title": "Turn completed",
+    "detail": "$0.0020 · 525 tokens out",
+    "presentation": {
+      "type": "usage",
+      "costUsd": 0.0020360200000000004,
+      "tokensIn": 13493,
+      "tokensOut": 525
+    },
     "rawText": "{\n  \"message\": {\n    \"api\": \"openai-completions\",\n    \"content\": [\n      {\n        \"thinking\": \"The user wants me to do a read-only survey of the repo using subagents. However, looking at my available tools, I don't have a dedicated \\\"subagent\\\" or \\\"spawn_agent\\\" or \\\"task\\\" tool that lets me spawn separate agents that run in parallel.\\n\\nLet me check what tools I have available:\\n- read: Read file contents\\n- bash: Execute bash commands\\n- edit: Edit files\\n- write: Write files\\n- mcp_script: Run JavaScript MCP scripts\\n- mcp: MCP gateway\\n\\nI don't have a native subagent/spawn_agent tool in my harness. The mcp_script tool can run multiple MCP calls in one request, but that's not the same as spawning parallel subagents.\\n\\nThe task specifically says:\\n> using your harness's native subagent tool. Do not do their work yourself and do not use Oga to delegate.\\n\\nSince I don't have a native subagent tool, I should report this as a blocker. The task is specifically about exercising the subagent feature, and I cannot do that without such a tool.\\n\\nLet me verify by checking if there's something in the available tools I'm missing... No, I don't see any subagent/spawn_agent/task tool.\\n\\nI should report:\\n1. I don't have a native subagent tool\\n2. I cannot spawn parallel subagents\\n3. This is the blocker for completing the task\\n\\nHowever, I could still try to complete the actual work (the survey) using the tools I have - reading files directly. But the task explicitly says \\\"using subagents is required, not optional\\\" and \\\"Do not do their work yourself\\\".\\n\\nSo I must report the blocker and stop.\",\n        \"thinkingSignature\": \"[{\\\"type\\\":\\\"reasoning.text\\\",\\\"text\\\":\\\"The user wants me to do a read-only survey of the repo using subagents. However, looking at my available tools, I don't have a dedicated \\\\\\\"subagent\\\\\\\" or \\\\\\\"spawn_agent\\\\\\\" or \\\\\\\"task\\\\\\\" tool that lets me spawn separate agents that run in parallel.\\\\n\\\\nLet me check what tools I have available:\\\\n- read: Read file contents\\\\n- bash: Execute bash commands\\\\n- edit: Edit files\\\\n- write: Write files\\\\n- mcp_script: Run JavaScript MCP scripts\\\\n- mcp: MCP gateway\\\\n\\\\nI don't have a native subagent/spawn_agent tool in my harness. The mcp_script tool can run multiple MCP calls in one request, but that's not the same as spawning parallel subagents.\\\\n\\\\nThe task specifically says:\\\\n> using your harness's native subagent tool. Do not do their work yourself and do not use Oga to delegate.\\\\n\\\\nSince I don't have a native subagent tool, I should report this as a blocker. The task is specifically about exercising the subagent feature, and I cannot do that without such a tool.\\\\n\\\\nLet me verify by checking if there's something in the available tools I'm missing... No, I don't see any subagent/spawn_agent/task tool.\\\\n\\\\nI should report:\\\\n1. I don't have a native subagent tool\\\\n2. I cannot spawn parallel subagents\\\\n3. This is the blocker for completing the task\\\\n\\\\nHowever, I could still try to complete the actual work (the survey) using the tools I have - reading files directly. But the task explicitly says \\\\\\\"using subagents is required, not optional\\\\\\\" and \\\\\\\"Do not do their work yourself\\\\\\\".\\\\n\\\\nSo I must report the blocker and stop.\\\",\\\"format\\\":\\\"unknown\\\",\\\"index\\\":0}]\",\n        \"type\": \"thinking\"\n      },\n      {\n        \"text\": \"I don't have a native subagent tool in my harness.\\n\\n## TL;DR\\n- **Blocker**: This harness provides `read`, `bash`, `edit`, `write`, `mcp_script`, and `mcp` — no `spawn_agent`, `task`, or equivalent subagent tool.\\n- **Impact**: Cannot spawn three parallel subagents as the task requires; \\\"subagents is required, not optional.\\\"\\n- **Decision needed**: Either run this with a harness that has a subagent tool, or tell me to do the survey myself using direct tool calls instead.\\n\\n## What I have\\n```\\nread, bash, edit, write, mcp_script, mcp\\n```\\n\\nNo agent-spawning capability exists here. The task's core requirement (parallel subagents exercising the CLI's own subagent feature) cannot be met with these tools.\",\n        \"type\": \"text\"\n      }\n    ],\n    \"model\": \"mimo-v2.5\",\n    \"provider\": \"opencode-go\",\n    \"rawStopReason\": \"stop\",\n    \"responseId\": \"gen-1790277326-CvlMU67Tnl4Us77Sjo2u\",\n    \"role\": \"assistant\",\n    \"stopReason\": \"stop\",\n    \"timestamp\": 1790277325429,\n    \"usage\": {\n      \"cacheRead\": 0,\n      \"cacheWrite\": 0,\n      \"cost\": {\n        \"cacheRead\": 0,\n        \"cacheWrite\": 0,\n        \"input\": 0.00188902,\n        \"output\": 0.00014700000000000002,\n        \"total\": 0.0020360200000000004\n      },\n      \"input\": 13493,\n      \"output\": 525,\n      \"reasoning\": 347,\n      \"totalTokens\": 14018\n    }\n  },\n  \"toolResults\": [],\n  \"type\": \"turn_end\"\n}",
-    "createdAt": "2026-09-24T19:15:53.714Z",
-    "minor": true
+    "createdAt": "2026-09-24T19:15:53.714Z"
   },
   {
     "id": 500270,
