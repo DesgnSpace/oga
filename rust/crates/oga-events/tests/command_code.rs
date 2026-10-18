@@ -17,7 +17,7 @@ fn views_as(provider: Provider) -> Vec<TaskEventView> {
         .lines()
         .map(|line| serde_json::from_str::<TaskEvent>(line).unwrap())
         .collect();
-    oga_events::event_views(events, provider)
+    oga_events::event_views(events, &oga_events::ProviderTimeline::single(provider))
 }
 
 fn call<'a>(views: &'a [TaskEventView], id: &str) -> Vec<&'a TaskEventView> {
