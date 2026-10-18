@@ -48,6 +48,7 @@ scratchpad/
 
 .agents/
 .claude/
+.commandcode/
 web/tsconfig.app.tsbuildinfo
 rust/apps/oga-desktop/binaries
 *.bun-build

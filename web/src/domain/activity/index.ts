@@ -1515,6 +1515,21 @@ function settleAgentCall(first: TaskEventView, later: TaskEventView): TaskEventV
   // was; a call that already finished never goes back to running.
   const settled = first.phase === "completed" || first.phase === "failed";
   const reverts = settled && later.phase === "started";
+  // A checklist's later row is the same list moved on, so it replaces the
+  // earlier one rather than adding to it.
+  if (first.presentation?.type === "todo" && later.presentation?.type === "todo") {
+    return {
+      ...first,
+      phase: later.phase,
+      complete: later.complete ?? first.complete,
+      verb: later.verb ?? first.verb,
+      target: later.target,
+      detail: later.detail,
+      result: later.result,
+      presentation: later.presentation,
+      rawText: later.rawText ?? first.rawText,
+    };
+  }
   return {
     ...first,
     phase: first.phase === "failed" || reverts ? first.phase : later.phase,

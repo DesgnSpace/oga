@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Command Code tasks now read clearly: the worker's todo list shows as one list that updates as it goes, a command that failed says so with the failing line, and skill loads, file reads, searches and edits name what they touched. Command Code models also offer low, medium and high effort.
 - A task moved to a different kind of worker now shows its earlier activity the way that worker recorded it, so subagents and their work from before the move appear in the right place.
 - You can now send work to Command Code. Sign in to Command Code once from your terminal, then pick it in Settings and choose from the models your account can reach.
 - While a task is running, each message offers Send now and Queue: Send now reaches the run straight away, Queue waits until the run finishes, and if the run can't take a send-now message the app says it was queued instead.
