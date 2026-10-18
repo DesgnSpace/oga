@@ -15,8 +15,8 @@ mod opencode2;
 pub mod worker_path;
 
 pub use acp::{
-    AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, CURSOR_LOGIN,
-    OPENCODE_ADAPTER,
+    AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, COMMAND_CODE_LOGIN,
+    CURSOR_LOGIN, OPENCODE_ADAPTER,
 };
 pub use opencode::{NoOpenCode1, OPENCODE_BIN, cannot_start, opencode_executable};
 pub use opencode2::{OPENCODE2_BIN, opencode2_executable};
@@ -238,6 +238,7 @@ pub fn command_for_with_options(
             }
             Provider::Fx => fx_ask(prompt, None),
             Provider::Cursor => return Err(ProviderError::NoCommandLine("cursor")),
+            Provider::CommandCode => return Err(ProviderError::NoCommandLine("command-code")),
         }
     };
     Ok(ProviderCommand {
@@ -436,6 +437,7 @@ pub fn resume_command_for_with_options(
         }
         Provider::Fx => fx_ask(prompt, Some(session)),
         Provider::Cursor => return Err(ProviderError::NoCommandLine("cursor")),
+        Provider::CommandCode => return Err(ProviderError::NoCommandLine("command-code")),
     };
     Ok(ProviderCommand {
         argv,
@@ -894,7 +896,8 @@ pub fn environment_for(profile: &Profile) -> BTreeMap<String, String> {
         | Provider::OpenCode2
         | Provider::Antigravity
         | Provider::Fx
-        | Provider::Cursor => {}
+        | Provider::Cursor
+        | Provider::CommandCode => {}
     }
     env
 }

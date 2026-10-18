@@ -3835,6 +3835,150 @@ async fn a_cursor_sign_in_oga_cannot_claim_never_opens_a_session() {
     assert!(harness.cli_runs().is_empty());
 }
 
+const COMMAND_CODE_SESSION: &str = "7a4f2c1b-9e8d-4c3a-b6f5-1d2e3f4a5b6c";
+
+fn command_code_harness(mode: &str) -> Harness {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cwd = directory.path().join("project");
+    let bin = directory.path().join("bin");
+    let home = directory.path().join("home");
+    fs::create_dir_all(cwd.join("src")).expect("project");
+    fs::create_dir_all(&bin).expect("bin");
+    fs::create_dir_all(home.join(".commandcode")).expect("commandcode home");
+    fs::write(home.join(".commandcode/auth.json"), "{}").expect("auth.json");
+    let log = directory.path().join("agent.log");
+    let agent = bin.join("command-code");
+    fs::write(
+        &agent,
+        format!(
+            "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
+            env!("CARGO_BIN_EXE_fake-acp-agent"),
+            log.display()
+        ),
+    )
+    .expect("fake agent");
+    fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).expect("executable");
+
+    let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
+    let profile = Profile {
+        id: "work".into(),
+        label: "Work".into(),
+        provider: Provider::CommandCode,
+        default_model: "moonshotai/Kimi-K3".into(),
+        enabled: true,
+        env: BTreeMap::from([
+            ("HOME".into(), home.display().to_string()),
+            ("PATH".into(), bin.display().to_string()),
+        ]),
+        capabilities: vec![],
+        command: None,
+    };
+    store
+        .repositories()
+        .profiles()
+        .insert(&profile, NOW)
+        .expect("profile");
+    store
+        .repositories()
+        .settings()
+        .put(
+            &oga_config::canonical_cwd(oga_config::global_cwd())
+                .display()
+                .to_string(),
+            oga_config::MODEL_SETTINGS_KEY,
+            &serde_json::json!({"profiles": {"work": {"modelEnabled": {
+                "moonshotai/Kimi-K3": true,
+                "deepseek/deepseek-v4-flash": true,
+            }}}})
+            .to_string(),
+            NOW,
+        )
+        .expect("model settings");
+    let dispatcher = Dispatcher::new(store.clone(), oga_runner::ProviderRunner::default());
+    Harness {
+        _directory: directory,
+        cwd,
+        log,
+        store,
+        dispatcher,
+    }
+}
+
+#[tokio::test]
+async fn command_code_runs_over_acp_with_its_sign_in_claimed_and_records_its_session() {
+    let harness = command_code_harness("command-code");
+
+    let dispatched = harness
+        .dispatcher
+        .dispatch({
+            let mut request = DispatchRequest::new("work", "summarise the readme", &harness.cwd);
+            request.effort = Some("high".into());
+            request
+        })
+        .await
+        .expect("dispatched");
+    let task = harness.settle(&dispatched.task.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(task.output.contains("Done."), "{task:?}");
+    let recorded = transport(&task);
+    assert_eq!(recorded.kind, Transport::Acp);
+    assert_eq!(
+        recorded.agent.as_ref().expect("agent identity").adapter,
+        "command-code-acp"
+    );
+    assert_eq!(
+        recorded.acp_session_id.as_deref(),
+        Some(COMMAND_CODE_SESSION)
+    );
+    assert_eq!(recorded.restore, Some(AcpRestore::Resume));
+    assert_eq!(
+        task.session_id.as_deref(),
+        Some(COMMAND_CODE_SESSION),
+        "Command Code ACP sessions share the terminal's session namespace"
+    );
+    assert_eq!(
+        methods(&harness),
+        [
+            "initialize",
+            "authenticate",
+            "session/new",
+            "session/set_config_option",
+            "session/set_config_option",
+            "session/prompt",
+        ],
+    );
+    assert_eq!(
+        harness.received("authenticate")[0]["methodId"],
+        "command-code-cli",
+    );
+    assert_eq!(
+        chosen_settings(&harness),
+        [
+            ("model".to_owned(), "moonshotai/Kimi-K3".to_owned()),
+            ("effort".to_owned(), "high".to_owned()),
+        ],
+    );
+    let opened = &harness.received("session/new")[0];
+    assert_eq!(opened["cwd"], task.cwd);
+    assert_eq!(opened["mcpServers"][0]["name"], "oga");
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&task.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let resumed = harness.settle(&task.id).await;
+
+    assert_eq!(resumed.state, TaskState::Completed, "{resumed:?}");
+    assert_eq!(
+        harness.received("session/resume")[0]["sessionId"],
+        COMMAND_CODE_SESSION
+    );
+    assert_eq!(harness.received("session/prompt").len(), 2);
+}
+
 #[tokio::test]
 async fn an_opencode_that_is_slow_to_report_its_version_once_still_runs_the_next_task() {
     let harness = opencode_harness("opencode");

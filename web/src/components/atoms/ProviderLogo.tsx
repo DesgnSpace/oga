@@ -13,6 +13,7 @@ const PROVIDER_MARKS = {
   pi: undefined,
   fx: undefined,
   cursor: undefined,
+  "command-code": undefined,
 } satisfies Record<Provider, string | undefined>;
 
 const PROVIDER_MONOGRAMS = {
@@ -24,6 +25,7 @@ const PROVIDER_MONOGRAMS = {
   pi: "π",
   fx: "ƒ",
   cursor: "C",
+  "command-code": "CC",
 } satisfies Record<Provider, string>;
 
 export function ProviderLogo({ provider, size = 20 }: { provider: Provider; size?: number }) {

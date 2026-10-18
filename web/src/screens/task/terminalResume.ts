@@ -33,6 +33,8 @@ function resumeArgv(provider: ProfileView["provider"], session: string): string[
       return ["pi", "--session", session];
     case "fx":
       return ["fx", "--resume", session];
+    case "command-code":
+      return ["command-code", "--resume", session];
     default:
       return null;
   }

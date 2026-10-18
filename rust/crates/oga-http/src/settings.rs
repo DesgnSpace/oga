@@ -25,8 +25,8 @@ use oga_domain::{
 };
 use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{
-    CURSOR_LOGIN, cannot_start, codex_home, environment_for, opencode_executable,
-    opencode2_executable, unset_environment_for,
+    COMMAND_CODE_LOGIN, CURSOR_LOGIN, cannot_start, codex_home, environment_for,
+    opencode_executable, opencode2_executable, unset_environment_for,
 };
 use oga_routing::{
     claude_models, claude_models_from_catalog, cursor_models, format_rfc3339_ms, now_ms,
@@ -968,6 +968,7 @@ fn parse_provider(value: &str) -> Result<Provider, HttpError> {
         "pi" => Ok(Provider::Pi),
         "fx" => Ok(Provider::Fx),
         "cursor" => Ok(Provider::Cursor),
+        "command-code" => Ok(Provider::CommandCode),
         _ => Err(HttpError::bad_request("invalid provider")),
     }
 }
@@ -1153,6 +1154,9 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
     if profile.provider == Provider::Cursor {
         return discover_cursor_models(profile).await;
     }
+    if profile.provider == Provider::CommandCode {
+        return discover_command_code_models(profile).await;
+    }
     let dir = tempfile::tempdir().map_err(|_| ())?;
     let cwd = dir.path().display().to_string();
     let argv: Vec<String> = match profile.provider {
@@ -1176,6 +1180,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         ],
         Provider::Claude => unreachable!("claude models come from models.dev"),
         Provider::Cursor => unreachable!("cursor models come from an ACP session"),
+        Provider::CommandCode => unreachable!("command-code models come from an ACP session"),
     };
     let mut command = Command::new(&argv[0]);
     command
@@ -1219,6 +1224,7 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
         Provider::OpenCode => parse_opencode_models(&raw, profile),
         Provider::Claude => unreachable!("claude models come from models.dev"),
         Provider::Cursor => unreachable!("cursor models come from an ACP session"),
+        Provider::CommandCode => unreachable!("command-code models come from an ACP session"),
     };
     Ok(parsed)
 }
@@ -1231,9 +1237,19 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
 /// throwaway directory, keeps what opening it answered, and drops the session
 /// without ever prompting it.
 async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
+    let opened = open_acp_session(profile, "cursor-agent", CURSOR_LOGIN).await?;
+    Ok(cursor_models(&opened, profile))
+}
+
+async fn discover_command_code_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
+    let opened = open_acp_session(profile, "command-code", COMMAND_CODE_LOGIN).await?;
+    Ok(cursor_models(&opened, profile))
+}
+
+async fn open_acp_session(profile: &Profile, binary: &str, method_id: &str) -> Result<Value, ()> {
     let dir = tempfile::tempdir().map_err(|_| ())?;
     let cwd = dir.path().display().to_string();
-    let mut command = Command::new("cursor-agent");
+    let mut command = Command::new(binary);
     command
         .arg("acp")
         .current_dir(&cwd)
@@ -1246,14 +1262,14 @@ async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()>
     let mut agent = command.spawn().map_err(|_| ())?;
     let mut stdin = agent.stdin.take().ok_or(())?;
     let mut stdout = BufReader::new(agent.stdout.take().ok_or(())?).lines();
-    let opened = timeout(PROVIDER_TIMEOUT, async {
+    timeout(PROVIDER_TIMEOUT, async {
         let handshake = [
             (
                 1,
                 "initialize",
                 json!({"protocolVersion": 1, "clientCapabilities": {}}),
             ),
-            (2, "authenticate", json!({"methodId": CURSOR_LOGIN})),
+            (2, "authenticate", json!({"methodId": method_id})),
         ];
         for (id, method, params) in handshake {
             ask(&mut stdin, &mut stdout, id, method, params).await?;
@@ -1270,8 +1286,7 @@ async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()>
     .await
     .ok()
     .flatten()
-    .ok_or(())?;
-    Ok(cursor_models(&opened, profile))
+    .ok_or(())
 }
 
 /// Sends one request and answers with the agent's `result` for it, skipping
@@ -1753,6 +1768,9 @@ async fn fetch_usage(profile: &Profile) -> ProfileUsage {
         Provider::Pi => unsupported_usage(profile, "usage tracking is not supported for pi"),
         Provider::Cursor => {
             unsupported_usage(profile, "usage tracking is not supported for cursor")
+        }
+        Provider::CommandCode => {
+            unsupported_usage(profile, "usage tracking is not supported for command-code")
         }
         Provider::Fx => unsupported_usage(profile, "usage tracking is not supported for fx"),
     }
@@ -2271,6 +2289,58 @@ mod catalog_tests {
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].id, "opencode/cached-model");
         assert_eq!(models[1].id, "opencode/live-model");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn command_code_catalog_reads_available_models_from_an_acp_session() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let bin = directory.path().join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        let program = bin.join("command-code");
+        fs::write(
+            &program,
+            concat!(
+                "#!/bin/sh\n",
+                "[ \"$1\" = acp ] || exit 1\n",
+                "while IFS= read -r line; do\n",
+                "  case \"$line\" in\n",
+                "    *'\"method\":\"initialize\"'*)\n",
+                "      printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}' ;;\n",
+                "    *'\"method\":\"authenticate\"'*'\"methodId\":\"command-code-cli\"'*)\n",
+                "      printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}' ;;\n",
+                "    *'\"method\":\"session/new\"'*)\n",
+                "      printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"sessionId\":\"ses_cc\",\"models\":{\"availableModels\":[{\"modelId\":\"deepseek/deepseek-v4-flash\",\"name\":\"DeepSeek V4 Flash\"},{\"modelId\":\"moonshotai/Kimi-K3\",\"name\":\"Kimi K3\"}]}}}'\n",
+                "      exit 0 ;;\n",
+                "    *) exit 1 ;;\n",
+                "  esac\n",
+                "done\n",
+            ),
+        )
+        .expect("fake command-code");
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("executable");
+
+        let mut cc = profile("fixture-command-code", Provider::CommandCode);
+        cc.env.insert("PATH".into(), bin.display().to_string());
+
+        let models = discover(&cc).await.expect("discovered command-code models");
+        let entries: Vec<(&str, &str)> = models
+            .iter()
+            .map(|m| (m.id.as_str(), m.label.as_str()))
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                ("deepseek/deepseek-v4-flash", "DeepSeek V4 Flash"),
+                ("moonshotai/Kimi-K3", "Kimi K3"),
+            ]
+        );
+        assert!(models.iter().all(
+            |m| m.provider == Provider::CommandCode && m.source == ModelInfoSource::Discovered
+        ));
     }
 }
 

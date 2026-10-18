@@ -101,6 +101,8 @@ function defaultModelFor(provider: Provider): string {
       return "fx";
     case "cursor":
       return "auto-smart[optimize_for=balanced]";
+    case "command-code":
+      return "deepseek/deepseek-v4-flash";
   }
 }
 

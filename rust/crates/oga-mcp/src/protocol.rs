@@ -469,7 +469,7 @@ fn shared_tools() -> Vec<Value> {
                 (
                     "provider".into(),
                     described(
-                        json!({ "type": "string", "enum": ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx", "cursor"] }),
+                        json!({ "type": "string", "enum": ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx", "cursor", "command-code"] }),
                         "Restrict to the accounts of one provider.",
                     ),
                 ),

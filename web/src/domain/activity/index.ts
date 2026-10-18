@@ -1871,6 +1871,8 @@ function providerLabel(value: string): string {
       return "fx";
     case "cursor":
       return "Cursor";
+    case "command-code":
+      return "Command Code";
     default:
       return value;
   }

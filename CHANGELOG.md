@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- You can now send work to Command Code. Sign in to Command Code once from your terminal, then pick it in Settings and choose from the models your account can reach.
 - While a task is running, each message offers Send now and Queue: Send now reaches the run straight away, Queue waits until the run finishes, and if the run can't take a send-now message the app says it was queued instead.
 - Messages you queue for a running task now stack just above the box, in the order they will go, so you can see what is waiting and remove one before it is sent.
 - Subagents the run starts now appear just above the reply box while they run — select one to jump to its work in the transcript.
