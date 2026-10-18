@@ -3035,6 +3035,7 @@ fn tool_family(tool: &str) -> ToolFamily {
         | "write"
         | "write_file"
         | "apply_patch"
+        | "patch"
         | "replace_file_content"
         | "write_to_file"
         | "list_dir" => ToolFamily::File,
@@ -3304,7 +3305,7 @@ fn tool_presentation(
     match tool_family(tool) {
         ToolFamily::Skill => {
             presentation.kind = PresentationType::Tool;
-            presentation.text = Some(string_value(input, &["name", "skill"])?);
+            presentation.text = Some(string_value(input, &["name", "skill", "id"])?);
         }
         ToolFamily::Command => {
             let command =
@@ -3477,11 +3478,16 @@ impl PatchSummary {
 }
 
 fn input_patch(tool: &str, input: Option<&Map<String, Value>>) -> Option<PatchSummary> {
-    if !tool.eq_ignore_ascii_case("apply_patch") {
+    if !(tool.eq_ignore_ascii_case("apply_patch") || tool.eq_ignore_ascii_case("patch")) {
         return None;
     }
+    patch_summary(input?)
+}
+
+/// The patch an input carries, whichever tool sent it.
+fn patch_summary(input: &Map<String, Value>) -> Option<PatchSummary> {
     let text = string_value(
-        input?,
+        input,
         &["patchText", "patch_text", "patch", "input", "diff"],
     )?;
     parse_patch(&text)
@@ -4767,7 +4773,7 @@ fn tool_title(tool: &str) -> String {
         "read" | "read_file" | "view_file" => "Read file".into(),
         "edit" | "multiedit" | "replace_file_content" => "Edit file".into(),
         "write" | "write_file" | "write_to_file" => "Write file".into(),
-        "apply_patch" => "Apply patch".into(),
+        "apply_patch" | "patch" => "Apply patch".into(),
         "bash" | "run_command" | "run command" => "Run command".into(),
         "grep" | "grep_search" | "code_search" => "Search code".into(),
         "glob" | "find_by_name" => "Find files".into(),

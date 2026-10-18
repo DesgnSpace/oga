@@ -9,9 +9,12 @@ use oga_domain::{
 use serde_json::{Map, Value};
 
 use crate::{
-    ProviderViewOptions, cap, compact_change, file_presentation, format_cost, message_presentation,
-    number_f64, number_u64, presentation_detail, presentation_kind, presentation_target,
-    provider_view, reasoning_view, string_value, text_value, usage_presentation,
+    ProviderViewOptions, cap, compact_change, compact_output, exit_code, file_presentation,
+    format_cost, humanize, mcp_result_text, message_presentation, number_f64, number_u64,
+    oga_operation, patch_summary, presentation_detail, presentation_kind, presentation_target,
+    provider_view, reasoning_view, string_value, text_value,
+    tool_presentation as tool_input_presentation, tool_title_with_input, tool_verb_with_input,
+    usage_presentation,
 };
 
 const CONTEXT_TITLE: &str = "Context";
@@ -275,7 +278,7 @@ fn tool_view(
     let kind = text_value(payload.get("kind"));
     let status = text_value(payload.get("status"));
     let complete = matches!(status, Some("completed" | "failed"));
-    let phase = match status {
+    let mut phase = match status {
         Some("failed") => EventPhase::Failed,
         Some("completed") => EventPhase::Completed,
         _ => EventPhase::Started,
@@ -301,8 +304,21 @@ fn tool_view(
         return view;
     }
 
+    if let Some(view) = named_tool_view(event, provider, payload, complete, phase) {
+        return view;
+    }
+
     let category = category(kind);
-    let presentation = tool_presentation(&category, payload, subject.clone());
+    let mut presentation = tool_presentation(&category, payload, subject.clone());
+    // A command that ran but exited non-zero is a failed call, whatever status
+    // the agent reports for the call itself.
+    if category.subject == Subject::Command
+        && let Some(code) = command_exit(payload).filter(|code| *code != 0)
+    {
+        phase = EventPhase::Failed;
+        presentation.exit_code = Some(code);
+        presentation.outcome = Some(exit_outcome(code, payload));
+    }
     // Nothing but the agent's own title says what an uncategorised call did,
     // so that title names the row.
     let uncategorised =
@@ -339,11 +355,282 @@ fn tool_view(
     view
 }
 
+fn meta_tool_name(payload: &BTreeMap<String, Value>) -> Option<String> {
+    let name = payload.get("_meta")?.get("claudeCode")?.get("toolName");
+    text_value(name).map(str::to_owned)
+}
+
+/// The tool a call ran: Claude names it in its metadata, the rest only in the
+/// call's title.
+fn tool_name(payload: &BTreeMap<String, Value>) -> Option<String> {
+    meta_tool_name(payload)
+        .or_else(|| text_value(payload.get(TOOL_NAME)).map(str::to_owned))
+        .or_else(|| text_value(payload.get("title")).map(str::to_owned))
+}
+
+/// The tools whose own title is no use to a reader, and whose input says what
+/// they did. Anything with a file, command, or diff of its own stays on the
+/// kind-driven path.
+fn is_named_tool(tool: &str) -> bool {
+    oga_operation(tool).is_some()
+        || tool.starts_with("mcp__")
+        || matches!(
+            tool.to_ascii_lowercase().as_str(),
+            "skill"
+                | "websearch"
+                | "webfetch"
+                | "glob"
+                | "grep"
+                | "execute"
+                | "question"
+                | "invalid"
+                | "sendmessage"
+                | "monitor"
+                | "schedulewakeup"
+                | "taskstop"
+                | "toolsearch"
+                | "listagents"
+                | "subagenthandback"
+        )
+}
+
+struct Named {
+    title: String,
+    verbs: (String, String),
+    presentation: TaskEventPresentation,
+    failed: bool,
+}
+
+fn first_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(|line| line.trim().trim_start_matches('#').trim())
+        .find(|line| !line.is_empty())
+        .map(|line| cap(line, SUBJECT_LIMIT).0)
+}
+
+fn tool_text(text: Option<String>) -> TaskEventPresentation {
+    let mut presentation = usage_presentation();
+    presentation.kind = PresentationType::Tool;
+    presentation.text = text;
+    presentation
+}
+
+fn wake_delay(seconds: u64) -> String {
+    let (count, unit) = if seconds >= 3600 && seconds.is_multiple_of(3600) {
+        (seconds / 3600, "hour")
+    } else if seconds >= 60 {
+        (seconds.div_ceil(60), "minute")
+    } else {
+        (seconds, "second")
+    };
+    format!("in {count} {unit}{}", if count == 1 { "" } else { "s" })
+}
+
+fn named_tool(
+    payload: &BTreeMap<String, Value>,
+    tool: &str,
+    input: Option<&Map<String, Value>>,
+    failed: bool,
+) -> Option<Named> {
+    let empty = Map::new();
+    let fields = input.unwrap_or(&empty);
+    let result = result_text(payload);
+    let lower = tool.to_ascii_lowercase();
+    let custom = |title: &str, verbs: (&str, &str), presentation| {
+        Some(Named {
+            title: title.to_owned(),
+            verbs: (verbs.0.to_owned(), verbs.1.to_owned()),
+            presentation,
+            failed,
+        })
+    };
+    match lower.as_str() {
+        "execute" => {
+            let code = string_value(fields, &["code"])?;
+            let mut presentation = usage_presentation();
+            presentation.kind = PresentationType::Command;
+            presentation.text = first_line(&code);
+            presentation.command = Some(code);
+            presentation.outcome = result.as_deref().and_then(compact_output);
+            return custom("Run code", ("Ran", "Running"), presentation);
+        }
+        "question" => {
+            let asked = fields
+                .get("questions")
+                .and_then(Value::as_array)
+                .and_then(|questions| questions.first())
+                .and_then(Value::as_object);
+            let text = asked.and_then(|asked| {
+                let question = string_value(asked, &["question"]);
+                match (string_value(asked, &["header"]), question) {
+                    (Some(header), Some(question)) => Some(format!("{header} — {question}")),
+                    (header, question) => question.or(header),
+                }
+            });
+            let mut presentation = tool_text(text.map(|text| cap(&text, SUBJECT_LIMIT).0));
+            // The agent's own line about an unanswered question is written for
+            // the agent, not for the person who never saw it.
+            presentation.outcome = if failed {
+                Some("No answer".to_owned())
+            } else {
+                result.as_deref().and_then(compact_output)
+            };
+            return custom("Ask question", ("Asked", "Asking"), presentation);
+        }
+        "invalid" => {
+            let mut presentation = tool_text(string_value(fields, &["tool"]));
+            presentation.outcome = string_value(fields, &["error"])
+                .as_deref()
+                .and_then(first_line)
+                .or_else(|| result.as_deref().and_then(first_line));
+            return Some(Named {
+                title: "Invalid tool".to_owned(),
+                verbs: ("Used".to_owned(), "Using".to_owned()),
+                presentation,
+                failed: true,
+            });
+        }
+        "sendmessage" => {
+            let text = string_value(fields, &["message", "summary"])
+                .as_deref()
+                .and_then(first_line);
+            return custom("Send message", ("Messaged", "Messaging"), tool_text(text));
+        }
+        "subagenthandback" => {
+            let text = string_value(fields, &["message"])
+                .as_deref()
+                .and_then(first_line);
+            return custom(
+                "Subagent report",
+                ("Received", "Receiving"),
+                tool_text(text),
+            );
+        }
+        "monitor" => {
+            let text = string_value(fields, &["description", "command"])
+                .map(|text| cap(&text, SUBJECT_LIMIT).0);
+            return custom("Watch command", ("Watched", "Watching"), tool_text(text));
+        }
+        "schedulewakeup" => {
+            let text = number_u64(fields.get("delaySeconds"))
+                .map(wake_delay)
+                .or_else(|| string_value(fields, &["reason"]));
+            return custom(
+                "Schedule wake-up",
+                ("Scheduled", "Scheduling"),
+                tool_text(text),
+            );
+        }
+        "taskstop" => {
+            return custom(
+                "Stop background task",
+                ("Stopped", "Stopping"),
+                tool_text(Some("background task".to_owned())),
+            );
+        }
+        "listagents" => {
+            return custom(
+                "List agents",
+                ("Listed", "Listing"),
+                tool_text(Some("running agents".to_owned())),
+            );
+        }
+        "toolsearch" => {
+            let query = string_value(fields, &["query"])?;
+            let text = match query.strip_prefix("select:") {
+                Some(names) => names
+                    .split(',')
+                    .map(|name| humanize(name.trim().rsplit("__").next().unwrap_or(name)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                None => query,
+            };
+            return custom(
+                "Load tools",
+                ("Loaded", "Loading"),
+                tool_text(Some(cap(&text, SUBJECT_LIMIT).0)),
+            );
+        }
+        _ => {}
+    }
+
+    let mut state = Map::new();
+    if let Some(text) = &result {
+        state.insert("output".to_owned(), Value::String(text.clone()));
+    }
+    if let Some(metadata) = payload
+        .get("rawOutput")
+        .and_then(|output| output.get("metadata"))
+    {
+        state.insert("metadata".to_owned(), metadata.clone());
+    }
+    if let Some(title) = payload.get("title") {
+        state.insert("title".to_owned(), title.clone());
+    }
+    let mut presentation =
+        tool_input_presentation(tool, fields, Some(&state)).unwrap_or_else(|| tool_text(None));
+    if presentation.outcome.is_none() && lower != "skill" {
+        presentation.outcome = result.as_deref().and_then(compact_output);
+    }
+    Some(Named {
+        title: tool_title_with_input(tool, input),
+        verbs: (
+            tool_verb_with_input(tool, input, true),
+            tool_verb_with_input(tool, input, false),
+        ),
+        presentation,
+        failed,
+    })
+}
+
+fn named_tool_view(
+    event: &TaskEvent,
+    provider: Provider,
+    payload: &BTreeMap<String, Value>,
+    complete: bool,
+    phase: EventPhase,
+) -> Option<TaskEventView> {
+    let tool = tool_name(payload).filter(|tool| is_named_tool(tool))?;
+    let input = payload.get("rawInput").and_then(Value::as_object);
+    let named = named_tool(payload, &tool, input, phase == EventPhase::Failed)?;
+    let presentation = named.presentation;
+    let phase = if named.failed {
+        EventPhase::Failed
+    } else {
+        phase
+    };
+    let mut view = provider_view(
+        event,
+        provider,
+        presentation_kind(&presentation),
+        phase,
+        &named.title,
+        ProviderViewOptions {
+            detail: presentation_detail(Some(&presentation)),
+            presentation: Some(presentation.clone()),
+            minor: None,
+        },
+    );
+    view.verb = Some(if complete {
+        named.verbs.0
+    } else {
+        named.verbs.1
+    });
+    view.target = presentation_target(Some(&presentation));
+    view.result = presentation.outcome.clone();
+    view.complete = Some(complete || named.failed);
+    view.action_id = tool_call_id(payload);
+    view.source_id = Some(tool_call_id(payload));
+    Some(view)
+}
+
 fn tool_call_id(payload: &BTreeMap<String, Value>) -> Option<String> {
     text_value(payload.get("toolCallId"))
         .map(str::to_owned)
         .filter(|id| !id.is_empty())
 }
+
+const TOOL_NAME: &str = "toolName";
 
 const CALL_FIELDS: [&str; 6] = ["kind", "status", "title", "name", "locations", "rawInput"];
 
@@ -364,6 +651,16 @@ impl AcpCalls {
         let known = self.known.entry((event.turn_id, id)).or_default();
         if update == Some("tool_call") {
             known.clear();
+        }
+        // An agent renames a call when it settles ("Loaded skill: ux"), so the
+        // name it first gave is the one that says which tool ran.
+        if let Some(name) = tool_name(&event.payload)
+            && (!known.contains_key(TOOL_NAME) || meta_tool_name(&event.payload).is_some())
+        {
+            known.insert(TOOL_NAME.to_owned(), Value::String(name));
+        }
+        if let Some(name) = known.get(TOOL_NAME) {
+            event.payload.insert(TOOL_NAME.to_owned(), name.clone());
         }
         for field in CALL_FIELDS {
             match event.payload.get(field) {
@@ -398,10 +695,19 @@ fn tool_presentation(
             .or_else(|| {
                 raw_input.and_then(|input| string_value(input, &["filePath", "file_path", "path"]))
             });
+        let patch = raw_input.and_then(patch_summary);
+        let path = path.or_else(|| patch.as_ref().map(|patch| patch.paths[0].clone()));
         if let Some(path) = path {
             let mut file = file_presentation(path);
             file.outcome = presentation.outcome;
-            file.change = diff.and_then(change_summary);
+            file.change = diff
+                .and_then(change_summary)
+                .or_else(|| patch.as_ref().and_then(|patch| patch.change()))
+                .or_else(|| {
+                    raw_input
+                        .and_then(|input| string_value(input, &["content"]))
+                        .map(|content| line_count(&content))
+                });
             return file;
         }
     }
@@ -443,16 +749,24 @@ fn change_summary(diff: &Map<String, Value>) -> Option<String> {
     let new_text = text_value(diff.get("newText"))?;
     match text_value(diff.get("oldText")) {
         Some(old_text) => Some(compact_change(old_text, new_text)),
-        None => {
-            let lines = new_text.lines().count().max(1);
-            Some(format!("{lines} line{}", if lines == 1 { "" } else { "s" }))
-        }
+        None => Some(line_count(new_text)),
     }
 }
 
+fn line_count(text: &str) -> String {
+    let lines = text.lines().count().max(1);
+    format!("{lines} line{}", if lines == 1 { "" } else { "s" })
+}
+
 fn outcome(payload: &BTreeMap<String, Value>) -> Option<String> {
-    let content = payload.get("content")?.as_array()?;
-    let text = content
+    let text = content_text(payload)?;
+    Some(cap(text.trim(), SUBJECT_LIMIT).0)
+}
+
+fn content_text(payload: &BTreeMap<String, Value>) -> Option<&str> {
+    payload
+        .get("content")?
+        .as_array()?
         .iter()
         .filter_map(Value::as_object)
         .filter(|entry| text_value(entry.get("type")) == Some("content"))
@@ -462,8 +776,43 @@ fn outcome(payload: &BTreeMap<String, Value>) -> Option<String> {
                 .then(|| text_value(block.get("text")))
                 .flatten()
         })
-        .find(|text| !text.trim().is_empty())?;
-    Some(cap(text.trim(), SUBJECT_LIMIT).0)
+        .find(|text| !text.trim().is_empty())
+}
+
+/// What a call returned: its content blocks, or the raw output an agent sends
+/// instead when it has no blocks to send.
+fn result_text(payload: &BTreeMap<String, Value>) -> Option<String> {
+    content_text(payload)
+        .map(str::to_owned)
+        .or_else(|| payload.get("rawOutput").and_then(mcp_result_text))
+}
+
+fn command_exit(payload: &BTreeMap<String, Value>) -> Option<i64> {
+    let from_output = payload
+        .get("rawOutput")
+        .and_then(Value::as_object)
+        .and_then(|output| {
+            exit_code(output).or_else(|| output.get("exitCode").and_then(Value::as_i64))
+        });
+    from_output.or_else(|| {
+        payload
+            .get("content")?
+            .as_array()?
+            .iter()
+            .filter_map(|entry| text_value(entry.get("content")?.get("text")))
+            .find_map(|text| text.strip_prefix("Exited with code ")?.trim().parse().ok())
+    })
+}
+
+fn exit_outcome(code: i64, payload: &BTreeMap<String, Value>) -> String {
+    let reason = content_text(payload)
+        .filter(|text| !text.starts_with("Exited with code "))
+        .and_then(|text| text.lines().find(|line| !line.trim().is_empty()))
+        .map(|line| cap(line.trim(), SUBJECT_LIMIT).0);
+    match reason {
+        Some(reason) => format!("Exited with code {code} · {reason}"),
+        None => format!("Exited with code {code}"),
+    }
 }
 
 fn plan_view(
@@ -944,5 +1293,221 @@ mod tests {
             "{} leaked its wire name",
             view.title
         );
+    }
+
+    /// The last row a call settles on, after every update has been folded in.
+    fn settled(updates: Vec<Value>) -> TaskEventView {
+        let events = updates
+            .into_iter()
+            .enumerate()
+            .map(|(index, update)| acp_event(index as i64 + 1, update))
+            .collect();
+        crate::event_views(events, Provider::OpenCode)
+            .pop()
+            .expect("a call has a row")
+    }
+
+    #[test]
+    fn an_oga_search_reads_as_what_was_asked_not_the_tool_id() {
+        let row = settled(vec![
+            json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "mcp__oga__query", "rawInput": {}}),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "t1", "kind": "other",
+                "title": "mcp__oga__query",
+                "rawInput": {"cwd": "/repo", "q": "existing auth code", "code": true},
+                "_meta": {"claudeCode": {"toolName": "mcp__oga__query"}},
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+                "content": [{"type": "content", "content": {"type": "text", "text": "a.rs:1#f\nb.rs:2#g"}}],
+            }),
+        ]);
+        assert_eq!(row.title, "Find code");
+        assert_eq!(row.verb.as_deref(), Some("Searched"));
+        assert_eq!(row.target.as_deref(), Some("existing auth code"));
+    }
+
+    #[test]
+    fn a_skill_keeps_its_name_after_the_agent_renames_the_call() {
+        let row = settled(vec![
+            json!({"sessionUpdate": "tool_call", "toolCallId": "s1", "title": "skill", "rawInput": {}}),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "s1", "kind": "other",
+                "status": "in_progress", "title": "skill", "rawInput": {"id": "refactor"},
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "s1", "status": "completed",
+                "title": "Loaded skill: refactor",
+                "content": [{"type": "content", "content": {"type": "text", "text": "<skill_content name=\"refactor\">\n# Skill"}}],
+            }),
+        ]);
+        assert_eq!(row.title, "Load skill");
+        assert_eq!(row.verb.as_deref(), Some("Loaded"));
+        assert_eq!(row.target.as_deref(), Some("refactor"));
+        assert_eq!(row.result, None, "the skill's body is not a result");
+    }
+
+    #[test]
+    fn an_unanswered_question_shows_what_was_asked() {
+        let row = settled(vec![json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "q1", "kind": "other",
+            "status": "failed", "title": "question",
+            "rawInput": {"questions": [{
+                "header": "Leftover work",
+                "question": "How should I proceed?",
+                "options": [{"label": "Stash it", "description": "…"}],
+            }]},
+            "content": [{"type": "content", "content": {"type": "text",
+                "text": "The question couldn't be shown to the user in this client."}}],
+        })]);
+        assert_eq!(row.title, "Ask question");
+        assert_eq!(row.phase, EventPhase::Failed);
+        assert_eq!(
+            row.target.as_deref(),
+            Some("Leftover work — How should I proceed?")
+        );
+        assert_eq!(row.result.as_deref(), Some("No answer"));
+    }
+
+    #[test]
+    fn a_command_that_exits_non_zero_reads_as_failed_with_its_code() {
+        let row = settled(vec![
+            json!({
+                "sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute",
+                "title": "bun run build", "rawInput": {"command": "bun run build"},
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
+                "content": [
+                    {"type": "content", "content": {"type": "text", "text": "ENOENT: no such file, scandir 'dist'\nBun v1.4.2"}},
+                    {"type": "content", "content": {"type": "text", "text": "Exited with code 1"}},
+                ],
+                "rawOutput": {"metadata": {"status": "completed", "exit": 1}},
+            }),
+        ]);
+        assert_eq!(row.phase, EventPhase::Failed);
+        assert_eq!(
+            row.result.as_deref(),
+            Some("Exited with code 1 · ENOENT: no such file, scandir 'dist'")
+        );
+        assert_eq!(row.presentation.and_then(|value| value.exit_code), Some(1));
+    }
+
+    #[test]
+    fn a_zero_exit_stays_a_finished_command() {
+        let row = settled(vec![json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "c2", "kind": "execute",
+            "status": "completed", "title": "ls", "rawInput": {"command": "ls"},
+            "content": [{"type": "content", "content": {"type": "text", "text": "a.txt"}}],
+            "rawOutput": {"metadata": {"exit": 0}},
+        })]);
+        assert_eq!(row.phase, EventPhase::Completed);
+        assert_eq!(row.result.as_deref(), Some("a.txt"));
+    }
+
+    #[test]
+    fn a_patch_names_the_files_it_touched_not_the_agents_success_message() {
+        let row = settled(vec![
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "p1", "kind": "edit",
+                "status": "in_progress", "title": "patch",
+                "rawInput": {"patchText": "*** Begin Patch\n*** Update File: landing/app/docs/page.tsx\n@@\n-old\n+new one\n+new two\n*** Add File: landing/app/x.tsx\n+x\n*** End Patch"},
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "p1", "status": "completed",
+                "title": "Success. Updated the following files:\nM landing/app/docs/page.tsx",
+                "content": [],
+            }),
+        ]);
+        assert_eq!(row.kind, EventKind::File);
+        assert_eq!(row.target.as_deref(), Some("landing/app/docs/page.tsx"));
+        assert_eq!(
+            row.presentation.and_then(|value| value.change).as_deref(),
+            Some("1 more file · +3 −1")
+        );
+    }
+
+    #[test]
+    fn a_write_says_how_many_lines_it_wrote() {
+        let row = settled(vec![json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "w1", "kind": "edit",
+            "status": "completed", "title": "db/0010.sql",
+            "locations": [{"path": "/repo/db/0010.sql"}],
+            "rawInput": {"content": "a\nb\nc\n"},
+            "content": [{"type": "content", "content": {"type": "text", "text": "Wrote file successfully."}}],
+        })]);
+        assert_eq!(row.target.as_deref(), Some("/repo/db/0010.sql"));
+        assert_eq!(
+            row.presentation.and_then(|value| value.change).as_deref(),
+            Some("3 lines")
+        );
+    }
+
+    #[test]
+    fn a_tool_the_agent_does_not_have_reads_as_a_failed_call() {
+        let row = settled(vec![
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "i1", "kind": "other",
+                "status": "in_progress", "title": "invalid",
+                "rawInput": {"tool": "rg", "error": "Model tried to call unavailable tool 'rg'. Available tools: bash"},
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": "i1", "status": "completed",
+                "title": "Invalid Tool",
+                "content": [{"type": "content", "content": {"type": "text", "text": "The arguments provided to the tool are invalid"}}],
+            }),
+        ]);
+        assert_eq!(row.title, "Invalid tool");
+        assert_eq!(row.phase, EventPhase::Failed);
+        assert_eq!(row.target.as_deref(), Some("rg"));
+        assert_eq!(
+            row.result.as_deref(),
+            Some("Model tried to call unavailable tool 'rg'. Available tools: bash")
+        );
+    }
+
+    #[test]
+    fn a_result_sent_only_as_raw_output_reaches_the_row() {
+        let row = settled(vec![json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "m1", "kind": "other",
+            "status": "completed", "title": "mcp__pitas__list",
+            "rawInput": {"query": "open items"},
+            "rawOutput": "3 items found",
+        })]);
+        assert_eq!(row.target.as_deref(), Some("open items"));
+        assert_eq!(row.result.as_deref(), Some("3 items found"));
+    }
+
+    #[test]
+    fn a_search_and_a_fetch_show_their_input() {
+        let grep = settled(vec![json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "g1", "kind": "search",
+            "status": "completed", "title": "grep",
+            "rawInput": {"pattern": "issue conflict", "path": "pwa/src"},
+            "rawOutput": {"output": "Found 4 matches\nx", "metadata": {"matches": 4}},
+        })]);
+        assert_eq!(grep.target.as_deref(), Some("issue conflict in pwa/src"));
+        assert_eq!(grep.result.as_deref(), Some("4 matches"));
+
+        let fetch = settled(vec![json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "f1", "kind": "fetch",
+            "status": "in_progress", "title": "webfetch",
+            "rawInput": {"url": "https://developers.cloudflare.com/pages/", "format": "markdown"},
+        })]);
+        assert_eq!(fetch.title, "Fetch page");
+        assert_eq!(
+            fetch.target.as_deref(),
+            Some("https://developers.cloudflare.com/pages/")
+        );
+    }
+
+    #[test]
+    fn a_subagent_report_leads_with_its_first_line() {
+        let row = settled(vec![json!({
+            "sessionUpdate": "tool_call", "toolCallId": "h1", "title": "SubagentHandback",
+            "rawInput": {"message": "## Caveat first\n- every page went through WebFetch"},
+        })]);
+        assert_eq!(row.title, "Subagent report");
+        assert_eq!(row.target.as_deref(), Some("Caveat first"));
     }
 }

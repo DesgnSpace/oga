@@ -292,7 +292,7 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
     const keys =
       event.kind === "file"
         ? ["content", "text", "file_text", "fileText", "output", "result"]
-        : ["stdout", "result", "output", "matches", "content"];
+        : ["stdout", "result", "output", "matches", "content", "message"];
     // A hook-driven tool call nests its output one level down, under
     // `tool_response`; only fall back to that wrapper itself once none of the
     // keys above turned up anywhere inside it.
@@ -792,7 +792,7 @@ function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
     style = "work";
     const path = event.presentation?.path ?? event.target ?? event.detail;
     target = path !== undefined ? relative(path, cwd) : undefined;
-    result = workResult(event, cwd, expansion);
+    result = workResult(event, cwd, expansion) ?? fileChange(event);
     preview = undefined;
   } else {
     style = "work";
@@ -1002,6 +1002,13 @@ function workResult(event: TaskEventView, cwd: string, expansion: EventExpansion
   return relativePaths(cleaned, cwd);
 }
 
+/** How big a file change was ("3 lines", "+4 −1"), once the call has landed. A before → after pair is the edit itself, not its size. */
+function fileChange(event: TaskEventView): string | undefined {
+  if (event.phase !== "completed") return undefined;
+  const change = event.presentation?.change;
+  return change !== undefined && !change.includes("→") ? change : undefined;
+}
+
 function defaultSuccess(value: string): boolean {
   const normalized = value.trim().replace(/\.+$/, "").toLowerCase();
   return [
@@ -1011,6 +1018,7 @@ function defaultSuccess(value: string): boolean {
     "succeeded",
     "ok",
     "edit applied successfully",
+    "wrote file successfully",
     "successfully edited",
     "done",
     "no result reported",
