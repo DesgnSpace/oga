@@ -579,9 +579,11 @@ function finishTurn(draft: TurnDraft, closed: boolean): ActivityTurn | undefined
 function turnTitle(segments: ActivitySegment[]): { title: string; id: number } | undefined {
   for (const segment of segments) {
     for (const node of segment.nodes) {
-      if (node.type !== "message") continue;
-      const title = titleFromMessage(node.event);
-      if (title !== undefined) return { title, id: node.event.id };
+      // Codex sends its messages with an item id, so they arrive as calls.
+      const event = node.type === "message" ? node.event : node.type === "call" ? node.call.event : undefined;
+      if (event?.kind !== "message") continue;
+      const title = titleFromMessage(event);
+      if (title !== undefined) return { title, id: event.id };
     }
   }
   return undefined;
