@@ -147,7 +147,13 @@ fn bookkeeping_view(event: &TaskEvent, provider: Provider, title: &str) -> TaskE
 
 fn retry_view(event: &TaskEvent, provider: Provider, retry: &Retry) -> TaskEventView {
     let (title, phase, detail) = match retry {
-        Retry::Cleared => ("Retry succeeded", EventPhase::Completed, None),
+        // The row the attempts shared keeps the last detail it was given, so the
+        // recovery has to state itself.
+        Retry::Cleared => (
+            "Retry succeeded",
+            EventPhase::Completed,
+            Some("Retry succeeded".to_owned()),
+        ),
         Retry::Waiting {
             attempt,
             next_try,

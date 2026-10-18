@@ -448,8 +448,8 @@ function composeTimeline(
   ending: ActivityEnding | undefined,
   showReceipt: boolean,
 ): ActivityComposition {
-  const events = mergeSkipNotices(
-    terminalOutcome(withoutRedundantTurnFailure(rawEvents.map(retryMessage)), ending),
+  const events = mergeHistoryNotices(
+    mergeSkipNotices(terminalOutcome(withoutRedundantTurnFailure(rawEvents.map(retryMessage)), ending)),
   );
   const usageWindow = usageWindowSummary(events);
   const receiptId = showReceipt ? findLast(events, (event) => event.kind === "usage")?.id : undefined;
@@ -925,6 +925,8 @@ function subagentStatus(launch: ActivityNode, reports: SubagentReport[], report:
 // What belongs in the story, and what is bookkeeping
 // ---------------------------------------------------------------------------
 
+const HISTORY_REMOVED_TYPE = "history_dropped";
+const HISTORY_REMOVED_TITLE = "Older activity removed";
 export const ACTIVITY_SKIPPED_TITLE = "Some activity was not recorded";
 /** Every provider's reasoning blocks share this title; it is how they fold. */
 export const REASONING_TITLE = "Thinking";
@@ -1042,6 +1044,24 @@ function mergeSkipNotices(events: TaskEventView[]): TaskEventView[] {
 function parseSkipped(detail: string | undefined): { count: number; noun: string } | undefined {
   const match = detail?.match(/^(\d+) (line|event)s? skipped$/);
   return match ? { count: Number(match[1]), noun: match[2] } : undefined;
+}
+
+/**
+ * History is trimmed in several passes, each leaving its own notice. A reader
+ * needs to know once, with how many updates went.
+ */
+function mergeHistoryNotices(events: TaskEventView[]): TaskEventView[] {
+  const first = events.findIndex((event) => event.type === HISTORY_REMOVED_TYPE);
+  if (first === -1) return events;
+  let removed = 0;
+  for (const event of events) {
+    if (event.type === HISTORY_REMOVED_TYPE) removed += Number(event.detail?.match(/(\d+) updates?$/)?.[1] ?? 0);
+  }
+  const detail = removed > 0 ? `${HISTORY_REMOVED_TITLE}: ${removed} update${removed === 1 ? "" : "s"}` : undefined;
+  return events.flatMap((event, index) => {
+    if (event.type !== HISTORY_REMOVED_TYPE) return [event];
+    return index === first ? [{ ...event, detail }] : [];
+  });
 }
 
 /**

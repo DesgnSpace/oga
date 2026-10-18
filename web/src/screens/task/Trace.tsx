@@ -344,15 +344,19 @@ function handoffContextText(handoff: HandoffPresentation): string | undefined {
   return `${handoff.context === "carried" ? "Continued" : "Started"} with ${parts.join(" and ")}`;
 }
 
+/** What the profiles list calls each account, by profile id. */
+export const ProfileLabels = React.createContext<ReadonlyMap<string, string>>(new Map());
+
 function TraceHandoffMarker({ handoff }: { handoff: HandoffPresentation }) {
+  const labels = React.useContext(ProfileLabels);
   const context = handoffContextText(handoff);
   return (
     <div className="trace-turn-marker trace-handoff-marker" style={HANDOFF_MARKER_STYLE}>
       <div className="trace-handoff-line" style={HANDOFF_MARKER_LINE_STYLE}>
         <HandoffIcon size={14} style={HANDOFF_ICON_STYLE} />
         <span>Handed off to</span>
-        <strong className="trace-handoff-destination" style={HANDOFF_ID_STYLE}>{handoff.toId}</strong>
-        <span className="trace-handoff-source" style={HANDOFF_SOURCE_STYLE}>from {handoff.fromId}</span>
+        <strong className="trace-handoff-destination" style={HANDOFF_ID_STYLE}>{labels.get(handoff.toId) ?? handoff.toId}</strong>
+        <span className="trace-handoff-source" style={HANDOFF_SOURCE_STYLE}>from {labels.get(handoff.fromId) ?? handoff.fromId}</span>
       </div>
       {context !== undefined && (
         <div className="trace-handoff-context" style={HANDOFF_CONTEXT_STYLE}>{context}</div>

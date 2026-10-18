@@ -4756,10 +4756,21 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
         "provider_retry" => Some(provider_retry_detail(payload)),
         "history_dropped" => {
             let count = number_u64(payload.get("dropped"))?;
-            (count > 0).then(|| format!("{count} update{}", if count == 1 { "" } else { "s" }))
+            (count > 0).then(|| {
+                format!(
+                    "Older activity removed: {count} update{}",
+                    if count == 1 { "" } else { "s" }
+                )
+            })
         }
         "checkout_kept" | "checkout_removal_failed" => {
-            tree_value(payload, &["reason", "error"]).map(|text| checkout_reason(&text))
+            let reason = checkout_reason(&tree_value(payload, &["reason", "error"])?);
+            let lead = if event_type == "checkout_kept" {
+                "Checkout kept"
+            } else {
+                "Checkout not removed"
+            };
+            Some(format!("{lead}: {reason}"))
         }
         "events_truncated" => skipped_detail(number_u64(payload.get("dropped"))?, "event"),
         "scope_auto_completed" => {
@@ -7718,6 +7729,7 @@ mod tests {
         assert_eq!(waiting.phase, EventPhase::Info, "a retry is not an error");
         assert_eq!(cleared.title, "Retry succeeded");
         assert_eq!(cleared.phase, EventPhase::Completed);
+        assert_eq!(cleared.detail.as_deref(), Some("Retry succeeded"));
         assert_eq!(
             waiting.action_id, cleared.action_id,
             "the recovery lands on the row the reader was watching"
@@ -7750,7 +7762,10 @@ mod tests {
     /// Recorded: the same trace carried tombstones of 2, 3, 1 and 573.
     #[test]
     fn removed_history_says_how_many_updates_went() {
-        for (dropped, detail) in [(573, "573 updates"), (1, "1 update")] {
+        for (dropped, detail) in [
+            (573, "Older activity removed: 573 updates"),
+            (1, "Older activity removed: 1 update"),
+        ] {
             let view = event_view(
                 &provider_event(
                     617065,
@@ -7776,7 +7791,7 @@ mod tests {
         );
         assert_eq!(
             kept.detail.as_deref(),
-            Some("it still has uncommitted changes")
+            Some("Checkout kept: it still has uncommitted changes")
         );
 
         let failed = event_view(
@@ -7787,7 +7802,10 @@ mod tests {
             ),
             Provider::Claude,
         );
-        assert_eq!(failed.detail.as_deref(), Some("it has uncommitted work"));
+        assert_eq!(
+            failed.detail.as_deref(),
+            Some("Checkout not removed: it has uncommitted work")
+        );
     }
 
     /// Recorded: the update carries every model the provider offers, ~41 KB.
