@@ -22,8 +22,8 @@ const DELEGATE_DESCRIPTION: &str = concat!(
 
 const MODELS_DESCRIPTION: &str = concat!(
     "List the models this machine can send work to, and the routing rules (`love`) that pick one when delegate names none. ",
-    "Each row has the profile and model ids to pass to delegate, whether it is enabled or preferred, and the effort levels it accepts; `unavailable` says why a worker cannot start. `usage` holds each profile's quota use unless `usage` is false. ",
-    "Only preferred, enabled models by default: widen with `onlyPreferred: false` or `onlyEnabled: false`.",
+    "Only models switched on for the project are listed, since delegate refuses the rest. ",
+    "Each row has the profile and model ids to pass to delegate and the effort levels it accepts; `loved` marks where an unnamed delegate lands, and `unavailable` says why a worker cannot start. `usage` holds each profile's quota use unless `usage` is false.",
 );
 
 const INSPECT_DESCRIPTION: &str = concat!(
@@ -459,20 +459,6 @@ fn shared_tools() -> Vec<Value> {
         MODELS_DESCRIPTION,
         object_schema(
             Map::from_iter([
-                (
-                    "onlyPreferred".into(),
-                    described(
-                        json!({ "type": "boolean", "default": true }),
-                        "Answer with only the models marked preferred. False returns every model the enabled accounts offer.",
-                    ),
-                ),
-                (
-                    "onlyEnabled".into(),
-                    described(
-                        json!({ "type": "boolean", "default": true }),
-                        "Only models switched on for this project. False also lists the switched-off ones, which delegate refuses.",
-                    ),
-                ),
                 (
                     "profile".into(),
                     described(
