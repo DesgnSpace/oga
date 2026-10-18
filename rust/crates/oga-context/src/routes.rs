@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use oga_store::{Store, StoreError};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, Result as SqlResult, Transaction, params};
 
 use crate::store::{self};
 use crate::text::{fts_query, hint_key, hint_words, normalize_word};
@@ -321,17 +321,92 @@ pub fn heal(
             for id in &newly_missing {
                 mark_missing.execute(params![now, id])?;
             }
-            let mut confirm = transaction.prepare(
-                "UPDATE context_learned_routes SET learned_path=?,learned_symbol=?,\
-                 source_digest=?,missing_since=NULL WHERE id=?",
-            )?;
-            for (id, path, symbol, digest) in &healed {
-                confirm.execute(params![path, symbol, digest, id])?;
+            // A route can follow its code onto a target another route already
+            // holds, such as one relearned at the code's new home. Routes
+            // with a free target move first, so one that vacates a target
+            // makes room for the route behind it; what still collides folds
+            // into the route already there.
+            let cwd = cwd.display().to_string();
+            let mut blocked = Vec::new();
+            for route in &healed {
+                if holder(transaction, &cwd, route)?.is_some() {
+                    blocked.push(route);
+                } else {
+                    confirm(transaction, route)?;
+                }
+            }
+            for route in blocked {
+                match holder(transaction, &cwd, route)? {
+                    Some(holder) => fold(transaction, route, holder)?,
+                    None => confirm(transaction, route)?,
+                }
             }
             Ok(())
         })?;
     }
     Ok((confirmed, newly_missing.len(), route_moves))
+}
+
+/// One route's id and the path, symbol, and digest it now resolves to.
+type Healed = (i64, String, String, String);
+
+fn confirm(transaction: &Transaction<'_>, (id, path, symbol, digest): &Healed) -> SqlResult<()> {
+    transaction.execute(
+        "UPDATE context_learned_routes SET learned_path=?,learned_symbol=?,\
+         source_digest=?,missing_since=NULL WHERE id=?",
+        params![path, symbol, digest, id],
+    )?;
+    Ok(())
+}
+
+/// The other route that already points where `route` now resolves.
+fn holder(
+    transaction: &Transaction<'_>,
+    cwd: &str,
+    (id, path, symbol, _): &Healed,
+) -> SqlResult<Option<i64>> {
+    transaction
+        .query_row(
+            "SELECT id FROM context_learned_routes \
+             WHERE cwd=? AND learned_path=? AND learned_symbol=? AND id<>?",
+            params![cwd, path, symbol, id],
+            |row| row.get(0),
+        )
+        .optional()
+}
+
+/// Fold a route into the one already at its target: the holder keeps its own
+/// words first and answers to the folded route's as well.
+fn fold(transaction: &Transaction<'_>, route: &Healed, holder: i64) -> SqlResult<()> {
+    let (id, _, _, digest) = route;
+    let words = |id: i64| {
+        transaction.query_row(
+            "SELECT aliases,hint_keys,last_confirmed_at FROM context_learned_routes WHERE id=?",
+            [id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+    };
+    let (folded_aliases, folded_phrases, folded_at) = words(*id)?;
+    let (aliases, phrases, confirmed_at) = words(holder)?;
+    transaction.execute(
+        "UPDATE context_learned_routes SET aliases=?,hint_keys=?,source_digest=?,\
+         last_confirmed_at=?,missing_since=NULL WHERE id=?",
+        params![
+            merge(&folded_aliases, &aliases),
+            merge_phrases(&folded_phrases, &phrases),
+            digest,
+            confirmed_at.max(folded_at),
+            holder
+        ],
+    )?;
+    transaction.execute("DELETE FROM context_learned_routes WHERE id=?", [id])?;
+    Ok(())
 }
 
 /// The terms of `question` this route claims to answer.

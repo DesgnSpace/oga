@@ -10,6 +10,7 @@
 - A task with instructions still queued behind it is no longer shown as done, so tasks waiting on it hold until that queue has run.
 - Search now learns the files a task worked in even when it touched more than twelve, and one file it can't place no longer stops it learning the rest. Before, either case taught search nothing.
 - "Move to another worker" in a task's menu is now called Handoff, and its window lets you pick the effort too. You can also hand a task to the same model at a different effort.
+- Code search no longer fails after code you taught it moves to a place you have also taught it. The two are kept as one, and it answers to the words from both.
 
 - Your brief rules and the models you switch on are now one setting for the whole machine, so those pages no longer ask you to pick a project first. If you had set them for a single project, that choice now applies everywhere.
 - A task whose worker stops without ever replying is no longer marked completed. Oga first asks the worker once to finish and report; if it still says nothing, the task shows as unfinished with a reason, so you can resume it, and tasks waiting on it hold.
