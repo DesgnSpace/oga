@@ -1294,6 +1294,7 @@ fn event_view_base(
             .get("minor")
             .and_then(Value::as_bool)
             .or_else(|| is_minor_event(&event.kind, &event.payload)),
+        content_index: None,
         subagents: Vec::new(),
     }
 }
@@ -2782,42 +2783,32 @@ fn pi_result_text(payload: &BTreeMap<String, Value>) -> Option<&str> {
 }
 
 /// Pi carries no id across a message's `start`/`update`*/`end` triple, unlike
-/// its tool calls (`toolCallId`) — the payloads show no field that survives
-/// the whole stream. One message stream is open at a time, so a fixed key
-/// stands in for a real id: `foldCalls` merges same-key rows while the slot
-/// is still open and reopens a fresh row once a prior one has closed
-/// (`message_end` completes it), which is exactly the start/update/end
-/// lifecycle this collapses.
+/// its tool calls (`toolCallId`). A user or tool-result message is told twice,
+/// by its start and again by its end, so those two rows share this fixed key
+/// and `foldCalls` merges them into one row; it reopens a fresh row once a
+/// prior one has closed (`message_end` completes it).
 const PI_MESSAGE_ACTION_ID: &str = "pi:message-stream";
 
-/// `message_start`/`update`/`end` all carry the same `message.role`/`content`
-/// shape. A `message_update` may carry that shape in
-/// `assistantMessageEvent.partial` instead of the top-level `message`; a
-/// text-typed content item grows a little on each update and arrives complete
-/// on `message_end`. Deriving title/detail identically for all three, from the
-/// one field they share, means each later event's own fields safely overwrite
-/// the row's without ever needing special-case merge behaviour: role does not
-/// change mid-stream, so the title is stable, and an update with nothing new
-/// simply carries `detail: None`, which `settleAction` already treats as "keep
-/// what the row already has".
+/// `message_start` and `message_end` carry the whole `message`. An assistant
+/// message also streams as `message_update` events, which read through
+/// [`pi_stream_view`]; its end then holds the final text.
 fn pi_message_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
 ) -> Option<TaskEventView> {
     let event_type = text_value(payload.get("type")).unwrap_or_default();
-    let message = payload
-        .get("message")
-        .and_then(Value::as_object)
-        .or_else(|| {
-            payload
-                .get("assistantMessageEvent")
-                .and_then(|value| value.get("partial"))
-                .and_then(Value::as_object)
-        });
+    let update = payload.get("assistantMessageEvent");
+    let message = payload.get("message").and_then(Value::as_object);
     let role = message
         .and_then(|value| text_value(value.get("role")))
         .unwrap_or("assistant");
+    if event_type == "message_update"
+        && message.is_none()
+        && let Some(update) = update
+    {
+        return Some(pi_stream_view(event, provider, update));
+    }
     let content = message
         .and_then(|value| value.get("content"))
         .and_then(Value::as_array);
@@ -2841,6 +2832,9 @@ fn pi_message_view(
         "toolResult" => "Tool result",
         _ => "Agent message",
     };
+    // An assistant message is told through its streamed slices and its end, so
+    // its start has nothing to add and needs no row to fold into.
+    let assistant = role == "assistant";
     let complete = event_type == "message_end";
     let phase = if complete {
         EventPhase::Completed
@@ -2856,13 +2850,68 @@ fn pi_message_view(
         ProviderViewOptions {
             detail: text.map(str::to_owned),
             presentation: text.map(|value| message_presentation(value.to_owned())),
-            minor: None,
+            minor: (assistant && event_type == "message_start").then_some(true),
         },
     );
-    view.action_id = Some(PI_MESSAGE_ACTION_ID.to_owned());
-    view.source_id = Some(view.action_id.clone());
     view.complete = Some(complete);
+    if !assistant {
+        view.action_id = Some(PI_MESSAGE_ACTION_ID.to_owned());
+        view.source_id = Some(view.action_id.clone());
+    }
     Some(view)
+}
+
+/// One `assistantMessageEvent` of a streaming reply. A text or thinking slice
+/// carries only its own `delta`, so it ships as that slice and the trace joins
+/// the slices of one `contentIndex` back into a block until the message ends
+/// and replaces them with its final text. Everything else in the stream (block
+/// starts and ends, tool-call arguments) only brackets work that has its own
+/// rows.
+fn pi_stream_view(event: &TaskEvent, provider: Provider, update: &Value) -> TaskEventView {
+    let delta = update
+        .get("delta")
+        .and_then(Value::as_str)
+        .filter(|delta| !delta.is_empty())
+        .map(str::to_owned);
+    let content_index = update
+        .get("contentIndex")
+        .and_then(Value::as_u64)
+        .and_then(|index| u32::try_from(index).ok());
+    let mut view = match (text_value(update.get("type")), delta) {
+        (Some("thinking_delta"), Some(delta)) => reasoning_view(event, provider, Some(delta)),
+        (Some("text_delta"), Some(delta)) => {
+            let mut view = provider_view(
+                event,
+                provider,
+                EventKind::Message,
+                EventPhase::Info,
+                "Agent message",
+                ProviderViewOptions {
+                    detail: Some(delta.clone()),
+                    presentation: Some(message_presentation(delta)),
+                    minor: None,
+                },
+            );
+            view.complete = Some(true);
+            view
+        }
+        _ => {
+            return provider_view(
+                event,
+                provider,
+                EventKind::Message,
+                EventPhase::Info,
+                "Agent message",
+                ProviderViewOptions {
+                    detail: None,
+                    presentation: None,
+                    minor: Some(true),
+                },
+            );
+        }
+    };
+    view.content_index = content_index;
+    view
 }
 
 struct ProviderViewOptions {
@@ -2900,6 +2949,7 @@ fn provider_view(
         source_id: None,
         complete: None,
         minor: options.minor,
+        content_index: None,
         subagents: Vec::new(),
     }
 }
@@ -7408,6 +7458,7 @@ mod tests {
             source_id: None,
             complete: None,
             minor: None,
+            content_index: None,
             subagents: Vec::new(),
         };
         let views = mark_repeated_retries(vec![view(1), view(2), view(3)]);
@@ -7835,7 +7886,48 @@ mod tests {
     }
 
     #[test]
-    fn pi_message_stream_collapses_into_one_open_row() {
+    fn pi_streamed_slices_ship_with_their_text_and_slot() {
+        let update = |id: i64, update: serde_json::Value| {
+            event_view(
+                &provider_event(
+                    id,
+                    "agent.message_update",
+                    serde_json::json!({"type": "message_update", "assistantMessageEvent": update}),
+                ),
+                Provider::Pi,
+            )
+        };
+
+        let thinking = update(
+            1,
+            serde_json::json!({"type": "thinking_delta", "contentIndex": 0, "delta": " by understanding"}),
+        );
+        assert_eq!(thinking.kind, EventKind::Reasoning);
+        assert_eq!(thinking.detail.as_deref(), Some(" by understanding"));
+        assert_eq!(thinking.content_index, Some(0));
+        assert_eq!(thinking.action_id, None);
+
+        let text = update(
+            2,
+            serde_json::json!({"type": "text_delta", "contentIndex": 1, "delta": "I'll"}),
+        );
+        assert_eq!(text.kind, EventKind::Message);
+        assert_eq!(text.detail.as_deref(), Some("I'll"));
+        assert_eq!(text.content_index, Some(1));
+
+        for bracket in [
+            serde_json::json!({"type": "thinking_start", "contentIndex": 0}),
+            serde_json::json!({"type": "text_end", "contentIndex": 1, "content": "I'll look"}),
+            serde_json::json!({"type": "toolcall_delta", "contentIndex": 2, "delta": "git log"}),
+        ] {
+            let view = update(3, bracket);
+            assert_eq!(view.minor, Some(true));
+            assert_eq!(view.content_index, None);
+        }
+    }
+
+    #[test]
+    fn pi_assistant_message_ends_as_its_own_row_and_user_messages_still_fold() {
         let start = event_view(
             &provider_event(
                 1,
@@ -7847,88 +7939,12 @@ mod tests {
             ),
             Provider::Pi,
         );
-        assert_eq!(start.kind, EventKind::Message);
-        assert_eq!(start.title, "Agent message");
-        assert_eq!(start.phase, EventPhase::Started);
-        assert_eq!(start.complete, Some(false));
-        assert!(start.action_id.is_some());
-
-        // Shape observed in `~/.oga/oga.db` for pi tasks: a `message_update`
-        // repeats the growing `message` alongside `assistantMessageEvent`,
-        // thinking content first and the text block appended once the model
-        // starts responding.
-        let thinking_update = event_view(
-            &provider_event(
-                2,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {
-                        "type": "thinking_delta",
-                        "delta": "The",
-                        "partial": {
-                            "role": "assistant",
-                            "content": [{"type": "thinking", "thinking": "The"}]
-                        }
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(thinking_update.title, REASONING_TITLE);
-        assert_eq!(thinking_update.detail.as_deref(), Some("The"));
-
-        let text_update = event_view(
-            &provider_event(
-                3,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {
-                        "type": "text_delta",
-                        "delta": "## Resume",
-                        "partial": {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "thinking", "thinking": "The"},
-                                {"type": "text", "text": "## Resume"}
-                            ]
-                        }
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(text_update.detail.as_deref(), Some("## Resume"));
-        assert_eq!(text_update.action_id, start.action_id);
-
-        let text_update_again = event_view(
-            &provider_event(
-                4,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {
-                        "type": "text_delta",
-                        "delta": " flag",
-                        "partial": {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "thinking", "thinking": "The"},
-                                {"type": "text", "text": "## Resume flag"}
-                            ]
-                        }
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(text_update_again.detail.as_deref(), Some("## Resume flag"));
-        assert_eq!(text_update_again.action_id, start.action_id);
+        assert_eq!(start.minor, Some(true));
+        assert_eq!(start.action_id, None);
 
         let end = event_view(
             &provider_event(
-                5,
+                2,
                 "agent.message_end",
                 serde_json::json!({
                     "type": "message_end",
@@ -7942,28 +7958,28 @@ mod tests {
         );
         assert_eq!(end.title, "Agent message");
         assert_eq!(end.phase, EventPhase::Completed);
-        assert_eq!(end.complete, Some(true));
         assert_eq!(end.detail.as_deref(), Some("Hello there"));
-        // The three events share the one correlation key `foldCalls` (the
-        // web activity domain) needs to settle them into a single row.
-        assert_eq!(end.action_id, start.action_id);
+        assert_eq!(end.minor, None);
+        assert_eq!(end.action_id, None);
 
-        // A second message opens a fresh row under the same key rather than
-        // reopening the one `message_end` already closed.
-        let next_start = event_view(
-            &provider_event(
-                6,
-                "agent.message_start",
-                serde_json::json!({
-                    "type": "message_start",
-                    "message": {"role": "user", "content": [{"type": "text", "text": "and then?"}]}
-                }),
-            ),
-            Provider::Pi,
+        let user = |id: i64, kind: &str| {
+            event_view(
+                &provider_event(
+                    id,
+                    kind,
+                    serde_json::json!({
+                        "type": kind.strip_prefix("agent.").unwrap(),
+                        "message": {"role": "user", "content": [{"type": "text", "text": "and then?"}]}
+                    }),
+                ),
+                Provider::Pi,
+            )
+        };
+        assert!(user(3, "agent.message_start").action_id.is_some());
+        assert_eq!(
+            user(3, "agent.message_start").action_id,
+            user(4, "agent.message_end").action_id
         );
-        assert_eq!(next_start.title, "User message");
-        assert_eq!(next_start.phase, EventPhase::Started);
-        assert_eq!(next_start.action_id, start.action_id);
     }
 
     #[test]
