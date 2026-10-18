@@ -46,6 +46,7 @@ describe("terminalResumeCommand", () => {
       ["opencode-2", "ses_abc", "cd /repo && opencode2 --session ses_abc"],
       ["antigravity", "conv-1", "cd /repo && agy --conversation conv-1"],
       ["pi", "pi-1", "cd /repo && pi --session pi-1"],
+      ["command-code", "cc-1", "cd /repo && command-code --resume cc-1"],
     ];
     for (const [provider, session, expected] of cases) {
       expect(terminalResumeCommand(task({ sessionId: session }), profile({ id: "worker", provider }))).toBe(expected);

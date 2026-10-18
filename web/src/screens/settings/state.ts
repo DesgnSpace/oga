@@ -461,6 +461,8 @@ export function providerLabel(provider: Provider): string {
       return "fx";
     case "cursor":
       return "Cursor";
+    case "command-code":
+      return "Command Code";
   }
 }
 
@@ -482,13 +484,15 @@ export function providerFromString(raw: string): Provider | undefined {
       return "fx";
     case "cursor":
       return "cursor";
+    case "command-code":
+      return "command-code";
     default:
       return undefined;
   }
 }
 
 export function supportedProviders(): Provider[] {
-  return ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx", "cursor"];
+  return ["claude", "codex", "opencode", "opencode-2", "antigravity", "pi", "fx", "cursor", "command-code"];
 }
 
 export function isSecretKey(key: string): boolean {

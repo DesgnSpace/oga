@@ -11,7 +11,8 @@ export type Provider =
   | "antigravity"
   | "pi"
   | "fx"
-  | "cursor";
+  | "cursor"
+  | "command-code";
 
 export type TaskState =
   | "queued"
