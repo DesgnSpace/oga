@@ -1,6 +1,6 @@
 //! ACP `session/update` notifications as activity rows.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use oga_domain::{
     EventKind, EventPhase, PresentationType, Provider, TaskEvent, TaskEventPresentation,
@@ -10,11 +10,11 @@ use serde_json::{Map, Value};
 
 use crate::{
     ProviderViewOptions, cap, compact_change, compact_output, exit_code, exit_summary,
-    file_presentation, format_cost, humanize, mcp_result_text, message_presentation, number_f64,
-    number_u64, oga_operation, patch_summary, presentation_detail, presentation_kind,
-    presentation_target, provider_view, reasoning_view, string_value, text_value,
-    tool_presentation as tool_input_presentation, tool_title_with_input, tool_verb_with_input,
-    usage_presentation,
+    failed_summary, file_presentation, format_cost, humanize, mcp_result_text,
+    message_presentation, number_f64, number_u64, oga_operation, patch_summary,
+    presentation_detail, presentation_kind, presentation_target, provider_view, reasoning_view,
+    string_value, strip_terminal_codes, text_value, tool_presentation as tool_input_presentation,
+    tool_title_with_input, tool_verb_with_input, usage_presentation,
 };
 
 const CONTEXT_TITLE: &str = "Context";
@@ -22,6 +22,10 @@ const CONTEXT_TITLE: &str = "Context";
 const SUBJECT_LIMIT: usize = 120;
 
 pub(crate) const RECOVERY_ACTION_ID: &str = "model-response-recovery";
+
+/// The one row every call to Command Code's task tools lands on, so the list
+/// reads as a single checklist that moves on instead of one row per step.
+const TASK_LIST_ACTION_ID: &str = "task-list";
 
 /// Vendor-namespaced recovery metadata; unknown blocks are ignored.
 #[derive(Debug, Clone, PartialEq)]
@@ -422,8 +426,13 @@ fn tool_view(
     }
 
     if let Some(items) = todo_items(payload) {
-        let mut view = todo_view(event, provider, items, Some(complete));
-        view.action_id = tool_call_id(payload);
+        let task_call = is_task_call(payload);
+        let mut view = todo_view(event, provider, items, Some(complete || task_call));
+        view.action_id = if task_call {
+            Some(TASK_LIST_ACTION_ID.to_owned())
+        } else {
+            tool_call_id(payload)
+        };
         view.source_id = Some(tool_call_id(payload));
         return view;
     }
@@ -442,6 +451,16 @@ fn tool_view(
         phase = EventPhase::Failed;
         presentation.exit_code = Some(code);
         presentation.outcome = Some(exit_outcome(code, payload));
+    }
+    // Command Code sends no exit status, so a run that printed its own failure
+    // is the only sign it failed.
+    if category.subject == Subject::Command
+        && phase == EventPhase::Completed
+        && command_exit(payload).is_none()
+        && let Some(reason) = result_text(payload).as_deref().and_then(reported_failure)
+    {
+        phase = EventPhase::Failed;
+        presentation.outcome = Some(failed_summary(&reason));
     }
     // Nothing but the agent's own title says what an uncategorised call did,
     // so that title names the row.
@@ -501,6 +520,7 @@ fn is_named_tool(tool: &str) -> bool {
         || matches!(
             tool.to_ascii_lowercase().as_str(),
             "skill"
+                | "activate_skill"
                 | "websearch"
                 | "webfetch"
                 | "glob"
@@ -693,7 +713,7 @@ fn named_tool(
     }
     let mut presentation =
         tool_input_presentation(tool, fields, Some(&state)).unwrap_or_else(|| tool_text(None));
-    if presentation.outcome.is_none() && lower != "skill" {
+    if presentation.outcome.is_none() && !matches!(lower.as_str(), "skill" | "activate_skill") {
         presentation.outcome = result.as_deref().and_then(compact_output);
     }
     Some(Named {
@@ -761,18 +781,115 @@ const CALL_FIELDS: [&str; 6] = ["kind", "status", "title", "name", "locations", 
 #[derive(Default)]
 pub(crate) struct AcpCalls {
     known: HashMap<(Option<i64>, String), Map<String, Value>>,
+    tasks: TaskList,
+}
+
+/// The checklist Command Code builds one call at a time: `task_create` adds a
+/// step and `task_update` moves one, so the list only exists across calls.
+#[derive(Default)]
+struct TaskList {
+    steps: Vec<TaskStep>,
+    /// The calls already counted, so an update repeated after the call ended
+    /// does not move a step twice.
+    applied: HashSet<(Option<i64>, String)>,
+}
+
+struct TaskStep {
+    id: String,
+    subject: String,
+    status: String,
+}
+
+impl TaskList {
+    fn apply(&mut self, tool: &str, input: &Map<String, Value>, result: Option<&str>) {
+        match tool {
+            "task_create" => {
+                let Some(subject) = string_value(input, &["subject"]) else {
+                    return;
+                };
+                let id = result
+                    .and_then(created_task_id)
+                    .unwrap_or_else(|| (self.steps.len() + 1).to_string());
+                self.steps.retain(|step| step.id != id);
+                self.steps.push(TaskStep {
+                    id,
+                    subject,
+                    status: "pending".to_owned(),
+                });
+            }
+            _ => {
+                let Some(id) = task_id(input) else {
+                    return;
+                };
+                let Some(at) = self.steps.iter().position(|step| step.id == id) else {
+                    return;
+                };
+                match text_value(input.get("status")) {
+                    Some("deleted") => {
+                        self.steps.remove(at);
+                        return;
+                    }
+                    Some(status @ ("pending" | "in_progress" | "completed")) => {
+                        self.steps[at].status = status.to_owned();
+                    }
+                    _ => {}
+                }
+                if let Some(subject) = string_value(input, &["subject"]) {
+                    self.steps[at].subject = subject;
+                }
+            }
+        }
+    }
+
+    fn items(&self) -> Value {
+        Value::Array(
+            self.steps
+                .iter()
+                .map(|step| serde_json::json!({"content": step.subject, "status": step.status}))
+                .collect(),
+        )
+    }
+}
+
+/// The number Command Code gave a new step: "Task #3 created: …".
+fn created_task_id(result: &str) -> Option<String> {
+    let rest = result.trim_start().strip_prefix("Task #")?;
+    let id = rest
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .next()?;
+    (!id.is_empty()).then(|| id.to_owned())
+}
+
+fn task_id(input: &Map<String, Value>) -> Option<String> {
+    match input.get("taskId")? {
+        Value::String(id) => Some(id.trim_start_matches('#').to_owned()),
+        Value::Number(id) => Some(id.to_string()),
+        _ => None,
+    }
+}
+
+fn is_task_tool(tool: &str) -> bool {
+    matches!(tool, "task_create" | "task_update")
+}
+
+/// Whether the call is one of Command Code's task tools, whose rows carry the
+/// whole checklist rather than the step they touched.
+fn is_task_call(payload: &BTreeMap<String, Value>) -> bool {
+    tool_name(payload).is_some_and(|tool| is_task_tool(&tool))
 }
 
 impl AcpCalls {
-    pub(crate) fn patch(&mut self, event: &mut TaskEvent) {
+    /// Fills an update in from the call it belongs to. Returns whether the
+    /// event is a task-tool call that now carries the whole checklist.
+    pub(crate) fn patch(&mut self, event: &mut TaskEvent) -> bool {
         let update = text_value(event.payload.get("sessionUpdate"));
         if !matches!(update, Some("tool_call" | "tool_call_update")) {
-            return;
+            return false;
         }
         let Some(id) = tool_call_id(&event.payload) else {
-            return;
+            return false;
         };
-        let known = self.known.entry((event.turn_id, id)).or_default();
+        let known = self.known.entry((event.turn_id, id.clone())).or_default();
         if update == Some("tool_call") {
             known.clear();
         }
@@ -798,6 +915,30 @@ impl AcpCalls {
                 }
             }
         }
+        self.carry_task_list(event, &id)
+    }
+
+    fn carry_task_list(&mut self, event: &mut TaskEvent, id: &str) -> bool {
+        let Some(tool) = tool_name(&event.payload).filter(|tool| is_task_tool(tool)) else {
+            return false;
+        };
+        let Some(input) = event.payload.get("rawInput").and_then(Value::as_object) else {
+            return false;
+        };
+        let mut input = input.clone();
+        let call = (event.turn_id, id.to_owned());
+        if text_value(event.payload.get("status")) == Some("completed")
+            && !self.tasks.applied.contains(&call)
+        {
+            self.tasks
+                .apply(&tool, &input, result_text(&event.payload).as_deref());
+            self.tasks.applied.insert(call);
+        }
+        input.insert("todos".to_owned(), self.tasks.items());
+        event
+            .payload
+            .insert("rawInput".to_owned(), Value::Object(input));
+        true
     }
 }
 
@@ -821,9 +962,18 @@ fn tool_presentation(
             });
         let patch = raw_input.and_then(patch_summary);
         let path = path.or_else(|| patch.as_ref().map(|patch| patch.paths[0].clone()));
+        if path.is_none()
+            && let Some(files) = raw_input.and_then(|input| path_list(input, "paths"))
+        {
+            presentation.kind = PresentationType::Tool;
+            presentation.text = Some(cap(&files_summary(&files), SUBJECT_LIMIT).0);
+            return presentation;
+        }
         if let Some(path) = path {
-            let mut file = file_presentation(path);
-            file.outcome = presentation.outcome;
+            let mut file = file_presentation(path.clone());
+            file.outcome = content_text(payload)
+                .and_then(|text| outcome_beyond_path(text.trim(), &path))
+                .map(|outcome| cap(&outcome, SUBJECT_LIMIT).0);
             file.change = diff
                 .and_then(change_summary)
                 .or_else(|| patch.as_ref().and_then(|patch| patch.change()))
@@ -846,8 +996,92 @@ fn tool_presentation(
         return presentation;
     }
     presentation.kind = PresentationType::Tool;
-    presentation.text = subject.or_else(|| location_path(payload));
+    presentation.text = if category.title == "Search" {
+        raw_input
+            .and_then(search_subject)
+            .or_else(|| subject.map(|title| title.trim_start_matches("Search: ").to_owned()))
+    } else {
+        subject
+    }
+    .or_else(|| location_path(payload));
     presentation
+}
+
+/// What a search looked for and where: "pattern in path".
+fn search_subject(input: &Map<String, Value>) -> Option<String> {
+    let pattern = string_value(input, &["pattern", "query"])?;
+    let place = string_value(input, &["path", "glob"]);
+    Some(match place {
+        Some(place) => format!("{pattern} in {place}"),
+        None => pattern,
+    })
+}
+
+fn path_list(input: &Map<String, Value>, key: &str) -> Option<Vec<String>> {
+    let paths = input
+        .get(key)?
+        .as_array()?
+        .iter()
+        .filter_map(|path| path.as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then_some(paths)
+}
+
+/// Several files read in one call: how many, and the first few by name.
+fn files_summary(paths: &[String]) -> String {
+    const NAMED: usize = 3;
+    let names = paths
+        .iter()
+        .take(NAMED)
+        .map(|path| path.rsplit('/').next().unwrap_or(path))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match paths.len() {
+        1 => names,
+        count if count > NAMED => format!("{count} files \u{b7} {names} +{} more", count - NAMED),
+        count => format!("{count} files \u{b7} {names}"),
+    }
+}
+
+/// What an agent's note about a file change adds to the path the row already
+/// names: "Edited /repo/a.rs (1 replacement)" is "1 replacement".
+fn outcome_beyond_path(outcome: &str, path: &str) -> Option<String> {
+    let first = outcome.lines().next().unwrap_or(outcome).trim();
+    let Some((verb, rest)) = first.split_once(path) else {
+        return Some(outcome.to_owned());
+    };
+    let rest = rest.trim();
+    if verb.trim().contains(' ') {
+        return Some(outcome.to_owned());
+    }
+    if rest.is_empty() {
+        return None;
+    }
+    match rest
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        Some(note) => Some(note.to_owned()),
+        None => Some(outcome.to_owned()),
+    }
+}
+
+/// The line of a command's output that says it failed, for an agent that
+/// reports no exit status: a failing test run, or a compiler or bun error.
+fn reported_failure(output: &str) -> Option<String> {
+    let lines = output
+        .lines()
+        .map(|line| strip_terminal_codes(line).trim().to_owned())
+        .collect::<Vec<_>>();
+    lines
+        .iter()
+        .find(|line| line.starts_with("test result: FAILED"))
+        .or_else(|| {
+            lines
+                .iter()
+                .find(|line| line.starts_with("error[") || line.starts_with("error:"))
+        })
+        .map(|line| cap(line, 120).0)
 }
 
 fn location_path(payload: &BTreeMap<String, Value>) -> Option<String> {

@@ -670,8 +670,12 @@ pub fn event_views(events: Vec<TaskEvent>, timeline: &ProviderTimeline) -> Vec<T
             let provider = timeline.provider_for(&event);
             state.turn = event.turn_id.or(state.turn);
             // The row shows the payload as recorded, before the patch fills it in.
-            let raw_text = raw_text(&event);
-            state.calls.patch(&mut event);
+            let mut raw_text = raw_text(&event);
+            // A task-tool row expands into the whole checklist, which only the
+            // patched payload holds.
+            if state.calls.patch(&mut event) {
+                raw_text = self::raw_text(&event);
+            }
             let mut view = event_view_base(&event, provider, raw_text);
             annotate_subagents(
                 &mut view,
@@ -3191,7 +3195,7 @@ fn file_presentation(path: String) -> TaskEventPresentation {
 
 fn tool_family(tool: &str) -> ToolFamily {
     match tool.to_ascii_lowercase().as_str() {
-        "skill" => ToolFamily::Skill,
+        "skill" | "activate_skill" => ToolFamily::Skill,
         "bash" | "run_command" | "run command" => ToolFamily::Command,
         "read"
         | "read_file"
@@ -3471,7 +3475,11 @@ fn tool_presentation(
     match tool_family(tool) {
         ToolFamily::Skill => {
             presentation.kind = PresentationType::Tool;
-            presentation.text = Some(string_value(input, &["name", "skill", "id"])?);
+            let name = string_value(input, &["name", "skill", "id"])?;
+            presentation.text = Some(match string_value(input, &["arguments"]) {
+                Some(arguments) => format!("{name} \u{b7} {}", cap(arguments.trim(), 60).0),
+                None => name,
+            });
         }
         ToolFamily::Command => {
             let command =
@@ -4095,6 +4103,12 @@ pub(crate) fn exit_summary(code: i64, output: Option<&str>) -> String {
     }
 }
 
+/// How a command failed when the agent reports no exit code: the line of
+/// output that says so.
+pub(crate) fn failed_summary(reason: &str) -> String {
+    format!("Failed \u{b7} {reason}")
+}
+
 /// Words that mark a line of output as the failure rather than the setup before
 /// it: errors, failing tests, and the usual missing-file and permission
 /// messages.
@@ -4150,7 +4164,7 @@ fn failure_reason(output: &str) -> Option<String> {
     Some(cap(line, 120).0)
 }
 
-fn strip_terminal_codes(line: &str) -> String {
+pub(crate) fn strip_terminal_codes(line: &str) -> String {
     let mut plain = String::with_capacity(line.len());
     let mut characters = line.chars().peekable();
     while let Some(character) = characters.next() {
@@ -5105,7 +5119,7 @@ fn tool_title(tool: &str) -> String {
         "grep" | "grep_search" | "code_search" => "Search code".into(),
         "glob" | "find_by_name" => "Find files".into(),
         "list_dir" => "List directory".into(),
-        "skill" => "Load skill".into(),
+        "skill" | "activate_skill" => "Load skill".into(),
         "todowrite" | "todoread" => "Todo list".into(),
         "websearch" | "search_web" => "Web search".into(),
         "webfetch" | "read_url_content" => "Fetch page".into(),
@@ -5160,8 +5174,8 @@ fn tool_verb(tool: &str, complete: bool) -> String {
         ("glob" | "find_by_name", false) => "Finding".into(),
         ("list_dir", true) => "Listed".into(),
         ("list_dir", false) => "Listing".into(),
-        ("skill", true) => "Loaded".into(),
-        ("skill", false) => "Loading".into(),
+        ("skill" | "activate_skill", true) => "Loaded".into(),
+        ("skill" | "activate_skill", false) => "Loading".into(),
         ("websearch" | "search_web", true) => "Searched".into(),
         ("websearch" | "search_web", false) => "Searching".into(),
         ("webfetch" | "read_url_content", true) => "Fetched".into(),

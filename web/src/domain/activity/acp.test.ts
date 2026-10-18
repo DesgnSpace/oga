@@ -448,6 +448,46 @@ describe("whole runs, as the daemon served them", () => {
   });
 });
 
+describe("a Command Code run", () => {
+  async function rows(): Promise<TraceRow[]> {
+    // SAFETY: the fixture is the Rust mapper's `TaskEventView[]` for a recorded run.
+    const events = (await Bun.file(new URL("./fixtures/command-code.json", import.meta.url)).json()) as TaskEventView[];
+    const composition = ActivityStory.composeWithState(events, true, undefined, true);
+    return TraceVisibility.interleavedRows(composition, "/Users/malico/desgn/oga", false).filter(
+      (row) => !row.isTechnical,
+    );
+  }
+
+  it("reads its eighteen task calls as one list with every step done", async () => {
+    const lists = (await rows()).filter((row) => row.event?.presentation?.type === "todo");
+
+    expect(lists.length).toBe(1);
+    expect(lists[0].target).toBe("7 steps");
+    expect(lists[0].result).toBe("all done");
+    const expansion = lists[0].expansion;
+    expect(expansion?.type === "todo" && expansion.items.map((item) => item.status)).toEqual(
+      Array(7).fill("completed"),
+    );
+  });
+
+  it("reads a test run that printed its failure as failed, with the failing line", async () => {
+    const all = await rows();
+    const tests = all.filter((row) => row.target?.startsWith("cargo test -p oga-routing"));
+
+    expect(tests.map((row) => row.state)).toEqual(["failed"]);
+    expect(tests[0].result).toContain("test result: FAILED. 36 passed; 4 failed");
+    const passing = all.filter((row) => row.target?.startsWith("cargo test -p oga-http"));
+    expect(passing.map((row) => row.state)).toEqual(["done"]);
+  });
+
+  it("shows an edit's size once, not its path again", async () => {
+    const edits = (await rows()).filter((row) => row.event?.title === "Edit file");
+
+    expect(edits.length).toBeGreaterThan(0);
+    for (const row of edits) expect(row.result ?? "").not.toContain("/");
+  });
+});
+
 describe("a command named only by its update", () => {
   it("shows the command, not the output it printed", () => {
     const [row] = callRows([
