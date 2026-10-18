@@ -6,6 +6,10 @@ use serde_json::Value;
 /// A real Command Code run, trimmed to the calls that read badly: its task
 /// tools, a skill load, a multi-file read, searches, edits and shell runs.
 fn views() -> Vec<TaskEventView> {
+    views_as(Provider::CommandCode)
+}
+
+fn views_as(provider: Provider) -> Vec<TaskEventView> {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/command-code/events.jsonl");
     let events = fs::read_to_string(path)
@@ -13,7 +17,7 @@ fn views() -> Vec<TaskEventView> {
         .lines()
         .map(|line| serde_json::from_str::<TaskEvent>(line).unwrap())
         .collect();
-    oga_events::event_views(events, Provider::CommandCode)
+    oga_events::event_views(events, provider)
 }
 
 fn call<'a>(views: &'a [TaskEventView], id: &str) -> Vec<&'a TaskEventView> {
@@ -122,6 +126,21 @@ fn a_run_that_prints_its_failure_reads_as_failed_and_a_clean_one_does_not() {
             "{command}"
         );
     }
+}
+
+#[test]
+fn another_agents_output_is_not_read_for_failure() {
+    // Only Command Code lacks an exit status; for the rest, a line starting
+    // with `error:` in a command's output (a `cat` of a log) is just output.
+    let views = views_as(Provider::Claude);
+    let run = shell(&views, "cargo test -p oga-routing");
+    assert_eq!(run.phase, EventPhase::Completed);
+    assert!(
+        !run.result
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("Failed")
+    );
 }
 
 #[test]

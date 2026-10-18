@@ -453,8 +453,10 @@ fn tool_view(
         presentation.outcome = Some(exit_outcome(code, payload));
     }
     // Command Code sends no exit status, so a run that printed its own failure
-    // is the only sign it failed.
-    if category.subject == Subject::Command
+    // is the only sign it failed. Other agents report one, and their output
+    // is not read for it.
+    if provider == Provider::CommandCode
+        && category.subject == Subject::Command
         && phase == EventPhase::Completed
         && command_exit(payload).is_none()
         && let Some(reason) = result_text(payload).as_deref().and_then(reported_failure)
