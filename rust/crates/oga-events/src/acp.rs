@@ -1297,7 +1297,7 @@ mod tests {
                     }),
                 ),
             ],
-            Provider::Antigravity,
+            &crate::ProviderTimeline::single(Provider::Antigravity),
         );
 
         let settled = views.last().expect("the completion");
@@ -1443,7 +1443,7 @@ mod tests {
             .enumerate()
             .map(|(index, update)| acp_event(index as i64 + 1, update))
             .collect();
-        crate::event_views(events, Provider::OpenCode)
+        crate::event_views(events, &crate::ProviderTimeline::single(Provider::OpenCode))
             .pop()
             .expect("a call has a row")
     }

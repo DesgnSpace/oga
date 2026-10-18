@@ -11,7 +11,7 @@ use axum::{
     },
 };
 use oga_domain::{EventKind, EventPointer, Provider, TaskEvent, TaskKind, TaskState};
-use oga_events::{EventFeed, event_summary_view};
+use oga_events::{EventFeed, ProviderTimeline, event_summary_view, load_provider_timeline};
 use oga_store::{Store, StoreError};
 use rusqlite::{Row, ToSql, params_from_iter};
 use serde::Deserialize;
@@ -310,7 +310,7 @@ struct PointerTaskContext {
     kind: Option<TaskKind>,
     title: Option<String>,
     tldr: Option<String>,
-    provider: Provider,
+    timeline: ProviderTimeline,
     /// Where the task stands now. A reader folds a pointer into a list it
     /// already holds, so the frame names the task's current state rather than
     /// the one its event row was written under.
@@ -318,7 +318,7 @@ struct PointerTaskContext {
 }
 
 fn event_pointer(event: &TaskEvent, context: &PointerTaskContext) -> EventPointer {
-    let view = event_summary_view(event, context.provider);
+    let view = event_summary_view(event, context.timeline.provider_for(event));
     let kind = view.kind;
     let summary = if event.kind == "agent.system" {
         event
@@ -418,12 +418,9 @@ fn load_pointer_contexts(
     store: &Store,
     events: &[TaskEvent],
 ) -> Result<HashMap<String, PointerTaskContext>, HttpError> {
-    let mut task_ids = events
-        .iter()
-        .map(|event| event.task_id.as_str())
-        .collect::<Vec<_>>();
+    let first_events = oga_events::first_event_ids(events);
+    let mut task_ids = first_events.keys().copied().collect::<Vec<_>>();
     task_ids.sort_unstable();
-    task_ids.dedup();
     if task_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -448,13 +445,20 @@ fn load_pointer_contexts(
                     .transpose()?
                     .unwrap_or(Provider::Claude);
                 let state = decode_name::<TaskState>(&row.get::<_, String>(5)?, 5)?;
+                let id = row.get::<_, String>(0)?;
+                let timeline = load_provider_timeline(
+                    connection,
+                    &id,
+                    provider,
+                    first_events.get(id.as_str()).copied().unwrap_or(0),
+                )?;
                 Ok((
-                    row.get::<_, String>(0)?,
+                    id,
                     PointerTaskContext {
                         kind,
                         title: row.get(2)?,
                         tldr: row.get(3)?,
-                        provider,
+                        timeline,
                         state,
                     },
                 ))
