@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use oga_domain::{Profile, Provider, Task, TaskEvent, TaskKind, TaskScope, TaskState};
 use oga_events::EventFeed;
@@ -61,7 +57,6 @@ impl Fixture {
             store,
         }
     }
-
 }
 
 #[tokio::test]
@@ -89,4 +84,3 @@ async fn feed_reports_existing_task_events_after_startup() {
             .expect("feed read")
     );
 }
-

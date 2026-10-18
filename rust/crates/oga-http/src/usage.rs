@@ -348,8 +348,7 @@ fn periods(now: i64, offset_minutes: i32) -> [Period; 6] {
 #[cfg(test)]
 mod tests {
     use super::{
-        DAY_MS, HOUR_MS, Period, TaskRow, local_day, local_hour, periods,
-        streaks, summarize,
+        DAY_MS, HOUR_MS, Period, TaskRow, local_day, local_hour, periods, streaks, summarize,
     };
     use std::collections::BTreeSet;
 

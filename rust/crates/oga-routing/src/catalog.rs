@@ -390,6 +390,12 @@ pub fn cursor_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
         .collect()
 }
 
+/// The models a Command Code ACP session offers, read from the answer that
+/// opened it.
+pub fn command_code_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
+    cursor_models(opened, profile)
+}
+
 static ANTIGRAVITY_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("(?i)^[a-z0-9][a-z0-9._-]*$").expect("pattern"));
 static PI_COLUMN_SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s{2,}").expect("pattern"));

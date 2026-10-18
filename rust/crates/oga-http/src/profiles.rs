@@ -267,6 +267,7 @@ fn parse_provider(value: Option<&str>) -> Result<Provider, HttpError> {
         Some("antigravity") => Ok(Provider::Antigravity),
         Some("fx") => Ok(Provider::Fx),
         Some("cursor") => Ok(Provider::Cursor),
+        Some("command-code") => Ok(Provider::CommandCode),
         Some("pi") => Ok(Provider::Pi),
         _ => Err(HttpError::bad_request("invalid provider")),
     }

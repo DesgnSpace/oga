@@ -284,6 +284,7 @@ impl AcpAdapters {
             .register(Provider::Pi, pi())
             .register(Provider::Fx, fx())
             .register(Provider::Cursor, cursor())
+            .register(Provider::CommandCode, command_code())
     }
 
     pub fn register(mut self, provider: Provider, adapter: AcpAdapter) -> Self {
@@ -494,6 +495,61 @@ fn cursor() -> AcpAdapter {
 }
 
 pub const CURSOR_LOGIN: &str = "cursor_login";
+pub const COMMAND_CODE_LOGIN: &str = "command-code-cli";
+
+/// Command Code's ACP server requires the account's saved sign-in, reports a
+/// real session id, and takes the model and effort as config options.
+fn command_code() -> AcpAdapter {
+    AcpAdapter::new("command-code-acp", |_| {
+        ["command-code", "acp"].map(str::to_owned).to_vec()
+    })
+    .authentication(COMMAND_CODE_LOGIN)
+    .acp_only()
+    .oga_tools(true)
+    .native_sessions_from("Command Code")
+    .incompatibility(|launch| {
+        let home = command_code_home(launch.profile);
+        (!command_code_signed_in(launch.profile, &home)).then(|| {
+            format!(
+                "Command Code isn't signed in for {}; run `command-code login`",
+                home.display()
+            )
+        })
+    })
+    .settings(|launch| {
+        let mut settings = vec![AcpSetting {
+            id: "model".into(),
+            value: launch.model.to_owned(),
+            required: true,
+        }];
+        if let Some(effort) = launch.effort {
+            settings.push(AcpSetting {
+                id: "effort".into(),
+                value: effort.to_owned(),
+                required: false,
+            });
+        }
+        settings
+    })
+}
+
+fn command_code_home(profile: &Profile) -> PathBuf {
+    let home = environment_for(profile)
+        .get("HOME")
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .unwrap_or_else(home);
+    PathBuf::from(home).join(".commandcode")
+}
+
+fn command_code_signed_in(profile: &Profile, home: &Path) -> bool {
+    home.join("auth.json").is_file()
+        || environment_for(profile)
+            .get("COMMAND_CODE_API_KEY")
+            .cloned()
+            .or_else(|| std::env::var("COMMAND_CODE_API_KEY").ok())
+            .is_some_and(|key| !key.trim().is_empty())
+}
 
 fn fx_home(profile: &Profile) -> PathBuf {
     let home = environment_for(profile)
@@ -678,6 +734,9 @@ mod tests {
             Provider::OpenCode2,
             Provider::Antigravity,
             Provider::Pi,
+            Provider::Fx,
+            Provider::Cursor,
+            Provider::CommandCode,
         ] {
             assert!(adapters.get(provider).is_some(), "{provider:?}");
         }
@@ -1484,5 +1543,77 @@ mod tests {
                 ..cli
             }
         });
+    }
+
+    #[test]
+    fn command_code_requires_a_saved_sign_in_or_api_key_and_selects_model_and_effort() {
+        let adapters = AcpAdapters::builtin();
+        let adapter = adapters
+            .get(Provider::CommandCode)
+            .expect("command-code adapter");
+        let root = tempfile::tempdir().expect("root");
+        let unsigned = profile(
+            Provider::CommandCode,
+            BTreeMap::from([
+                ("HOME".into(), root.path().display().to_string()),
+                ("COMMAND_CODE_API_KEY".into(), String::new()),
+            ]),
+        );
+        let launch_for = |profile, effort| AcpLaunch {
+            profile,
+            model: "deepseek/deepseek-v4-flash",
+            effort,
+            cwd: "/repo",
+        };
+
+        assert!(
+            adapter
+                .incompatibility_for(&launch_for(&unsigned, None))
+                .as_deref()
+                .is_some_and(|reason| reason.contains("command-code login")),
+            "an account with neither auth.json nor COMMAND_CODE_API_KEY stops with the login command"
+        );
+
+        let keyed = profile(
+            Provider::CommandCode,
+            BTreeMap::from([
+                ("HOME".into(), root.path().display().to_string()),
+                ("COMMAND_CODE_API_KEY".into(), "cc-test-key".into()),
+            ]),
+        );
+        assert_eq!(adapter.incompatibility_for(&launch_for(&keyed, None)), None);
+
+        let config_dir = root.path().join(".commandcode");
+        std::fs::create_dir_all(&config_dir).expect("config dir");
+        std::fs::write(config_dir.join("auth.json"), "{}").expect("auth.json");
+        assert_eq!(
+            adapter.incompatibility_for(&launch_for(&unsigned, None)),
+            None
+        );
+
+        assert_eq!(
+            adapter.settings_for(&launch_for(&unsigned, None)),
+            [AcpSetting {
+                id: "model".into(),
+                value: "deepseek/deepseek-v4-flash".into(),
+                required: true,
+            }]
+        );
+        assert_eq!(
+            adapter.settings_for(&launch_for(&unsigned, Some("high"))),
+            [
+                AcpSetting {
+                    id: "model".into(),
+                    value: "deepseek/deepseek-v4-flash".into(),
+                    required: true,
+                },
+                AcpSetting {
+                    id: "effort".into(),
+                    value: "high".into(),
+                    required: false,
+                },
+            ],
+            "effort is optional because not every Command Code model exposes an effort option"
+        );
     }
 }

@@ -20,6 +20,7 @@ const DEFAULT_MODELS: &[(Provider, &str)] = &[
     (Provider::Pi, "opencode-go/deepseek-v4-flash"),
     (Provider::Fx, "openai/gpt-5.2"),
     (Provider::Cursor, "auto-smart[optimize_for=balanced]"),
+    (Provider::CommandCode, "deepseek/deepseek-v4-flash"),
 ];
 
 pub const EFFORT_LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
@@ -970,10 +971,11 @@ fn provider_value(value: &str, path: &Path, field: &str) -> Result<Provider, Con
         "pi" => Ok(Provider::Pi),
         "fx" => Ok(Provider::Fx),
         "cursor" => Ok(Provider::Cursor),
+        "command-code" => Ok(Provider::CommandCode),
         _ => Err(invalid(
             path,
             field,
-            "must be one of claude, codex, opencode, opencode-2, antigravity, pi, fx, cursor",
+            "must be one of claude, codex, opencode, opencode-2, antigravity, pi, fx, cursor, command-code",
         )),
     }
 }

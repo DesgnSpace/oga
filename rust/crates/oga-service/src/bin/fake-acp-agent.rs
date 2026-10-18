@@ -88,6 +88,8 @@ const ANTIGRAVITY_SESSION: &str = "5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c";
 const PI_SESSION: &str = "0b7d4a8e-5c1f-4d2a-9e3b-6f8c1a2d4e5f";
 /// Cursor's ACP server names a session with a UUID of its own.
 const CURSOR_SESSION: &str = "3c9a1d7e-4b2f-4a8c-91d6-7e5b3f2a8c04";
+/// Command Code's ACP server names a session with its native session id.
+const COMMAND_CODE_SESSION: &str = "7a4f2c1b-9e8d-4c3a-b6f5-1d2e3f4a5b6c";
 
 fn emit(value: &Value) {
     println!("{value}");
@@ -346,6 +348,37 @@ fn cursor_settings(mode: &str, model: &str, access: &str) -> Value {
             "options": models,
         },
     ])
+}
+
+/// Command Code's settings: model and effort config options, where a model
+/// without an effort knob omits the effort option.
+fn command_code_settings(mode: &str, model: &str, effort: &str) -> Value {
+    let mut options = vec![json!({
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": model,
+        "options": [
+            {"value": "deepseek/deepseek-v4-flash", "name": "DeepSeek V4 Flash"},
+            {"value": "moonshotai/Kimi-K3", "name": "Kimi K3"},
+        ],
+    })];
+    if !mode.ends_with("no-effort") {
+        options.push(json!({
+            "id": "effort",
+            "name": "Effort",
+            "category": "thought_level",
+            "type": "select",
+            "currentValue": effort,
+            "options": [
+                {"value": "low", "name": "Low"},
+                {"value": "medium", "name": "Medium"},
+                {"value": "high", "name": "High"},
+            ],
+        }));
+    }
+    Value::Array(options)
 }
 
 /// Records the session the way `pi-acp` does, keyed by its id, with the file
@@ -898,22 +931,33 @@ fn main() {
     let antigravity = mode.starts_with("antigravity");
     let pi = mode.starts_with("pi");
     let cursor = mode.starts_with("cursor");
-    let session_id = match (opencode, claude, codex, antigravity, pi, cursor) {
+    let command_code = mode.starts_with("command-code");
+    let session_id = match (
+        opencode,
+        claude,
+        codex,
+        antigravity,
+        pi,
+        cursor,
+        command_code,
+    ) {
         (true, ..) => "ses_acp1",
         (_, true, ..) => CLAUDE_SESSION,
         (_, _, true, ..) => CODEX_THREAD,
         (_, _, _, true, ..) => ANTIGRAVITY_SESSION,
-        (.., true, _) => PI_SESSION,
-        (.., true) => CURSOR_SESSION,
+        (_, _, _, _, true, ..) => PI_SESSION,
+        (.., true, _) => CURSOR_SESSION,
+        (.., true) => COMMAND_CODE_SESSION,
         _ => SESSION,
     };
     let renamed = mode.ends_with("renamed");
-    let agent_name = match (opencode, claude, codex, antigravity, pi) {
+    let agent_name = match (opencode, claude, codex, antigravity, pi, command_code) {
         (true, ..) if !renamed => "OpenCode",
         (_, true, ..) if !renamed => "@agentclientprotocol/claude-agent-acp",
         (_, _, true, ..) if !renamed => "@agentclientprotocol/codex-acp",
-        (.., true, _) if !renamed => "antigravity-acp",
-        (.., true) if !renamed => "pi-acp",
+        (_, _, _, true, ..) if !renamed => "antigravity-acp",
+        (.., true, _) if !renamed => "pi-acp",
+        (.., true) if !renamed => "Command Code",
         _ => "fake-acp-agent",
     };
     let opencode2 = mode.starts_with("opencode2");
@@ -928,6 +972,7 @@ fn main() {
         (.., true) if next => "0.0.34",
         (.., true) => "0.0.33",
         _ if opencode => "1.18.31",
+        _ if command_code => "1.84.0",
         _ => "2.1.0",
     };
     let turns = mode
@@ -938,6 +983,7 @@ fn main() {
         .or_else(|| mode.strip_prefix("antigravity-"))
         .or_else(|| mode.strip_prefix("pi-"))
         .or_else(|| mode.strip_prefix("cursor-"))
+        .or_else(|| mode.strip_prefix("command-code-"))
         .unwrap_or(&mode)
         .to_owned();
     let (mut model, mut effort) = ("opencode/big-pickle".to_owned(), "default".to_owned());
@@ -953,6 +999,10 @@ fn main() {
     if cursor {
         model = "auto-smart[optimize_for=balanced]".to_owned();
     }
+    if command_code {
+        model = "deepseek/deepseek-v4-flash".to_owned();
+        effort = "medium".to_owned();
+    }
     if codex {
         let config: Value = env::var("CODEX_CONFIG")
             .ok()
@@ -965,7 +1015,7 @@ fn main() {
             .to_owned();
     }
 
-    let mut signed_in = !cursor;
+    let mut signed_in = !cursor && !command_code;
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines().map_while(Result::ok);
     while let Some(line) = lines.next() {
@@ -1000,21 +1050,45 @@ fn main() {
                     },
                 }));
             }
+            "initialize" if command_code => {
+                emit(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": 1,
+                        "agentCapabilities": capabilities(&mode),
+                        "agentInfo": {"name": agent_name, "version": version},
+                        "authMethods": [{"id": "command-code-cli", "name": "Command Code CLI login"}],
+                    },
+                }));
+            }
             "authenticate" => {
                 signed_in = true;
                 emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}}));
             }
-            "session/new" | "session/load" if cursor && !signed_in => emit(&json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {"code": -32000, "message": "Authentication required"},
-            })),
+            "session/new" | "session/load" | "session/resume"
+                if (cursor || command_code) && !signed_in =>
+            {
+                emit(&json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {"code": -32000, "message": "Authentication required"},
+                }))
+            }
             "session/new" if cursor => emit(&json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {
                     "sessionId": session_id,
                     "configOptions": cursor_settings(&mode, &model, &access),
+                },
+            })),
+            "session/new" if command_code => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "sessionId": session_id,
+                    "configOptions": command_code_settings(&mode, &model, &effort),
                 },
             })),
             "initialize" => {
@@ -1093,6 +1167,8 @@ fn main() {
                 }
                 let offered = if cursor {
                     cursor_settings(&mode, &model, &access)
+                } else if command_code {
+                    command_code_settings(&mode, &model, &effort)
                 } else if pi {
                     pi_settings(&mode, &model, &effort)
                 } else if claude {
@@ -1155,6 +1231,11 @@ fn main() {
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": {"configOptions": codex_settings(&mode, &model, &effort, &access)},
+            })),
+            "session/resume" if command_code => emit(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"configOptions": command_code_settings(&mode, &model, &effort)},
             })),
             "session/resume" => emit(&json!({"jsonrpc": "2.0", "id": id, "result": {}})),
             "session/prompt" => prompt(&turns, &id, &params, &mut lines, &log_path),

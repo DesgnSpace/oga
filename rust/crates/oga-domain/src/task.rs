@@ -15,6 +15,8 @@ pub enum Provider {
     Pi,
     Fx,
     Cursor,
+    #[serde(rename = "command-code")]
+    CommandCode,
 }
 
 impl Provider {
@@ -28,6 +30,7 @@ impl Provider {
             Provider::Pi => "pi",
             Provider::Fx => "fx",
             Provider::Cursor => "cursor",
+            Provider::CommandCode => "command-code",
         }
     }
 }
