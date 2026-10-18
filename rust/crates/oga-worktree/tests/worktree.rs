@@ -6,10 +6,11 @@ use oga_domain::{
     BranchOutcome, Task, TaskDiffBasis, TaskDiffFileStatus, TaskScope, WorktreeRequest,
 };
 use oga_worktree::{
-    WorktreeError, WorktreeJoinCode, branch_exists, branch_recreatable, create_task_worktree_at,
-    joined_worktree_of, plan_released_checkout, plan_task_worktree_on_release_at,
-    prepare_task_worktree, recreate_task_worktree, remove_task_branch, remove_task_branch_safely,
-    remove_task_worktree, require_worktree_paths, worktree_has_uncommitted_work,
+    WorktreeError, WorktreeJoinCode, branch_exists, branch_recreatable,
+    create_task_worktree_at, joined_worktree_of, plan_released_checkout,
+    plan_task_worktree_on_release_at, prepare_task_worktree, recreate_task_worktree,
+    remove_task_branch, remove_task_branch_safely, remove_task_worktree, require_worktree_paths,
+    worktree_has_uncommitted_work,
 };
 use tempfile::TempDir;
 

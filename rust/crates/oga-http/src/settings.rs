@@ -29,10 +29,9 @@ use oga_providers::{
     opencode_executable, opencode2_executable, unset_environment_for,
 };
 use oga_routing::{
-    claude_models, claude_models_from_catalog, command_code_models, cursor_models,
-    format_rfc3339_ms, now_ms, parse_antigravity_models, parse_codex_models, parse_fx_models,
-    parse_opencode_models, parse_opencode_v2_models, parse_pi_models, select_model_rows,
-    summarize_usage,
+    claude_models, claude_models_from_catalog, cursor_models, format_rfc3339_ms, now_ms,
+    parse_antigravity_models, parse_codex_models, parse_fx_models, parse_opencode_models,
+    parse_opencode_v2_models, parse_pi_models, select_model_rows, summarize_usage,
 };
 use oga_runner::worker_path::worker_path;
 use oga_store::Store;
@@ -1242,10 +1241,9 @@ async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()>
     Ok(cursor_models(&opened, profile))
 }
 
-/// The models a Command Code account can reach, read from its ACP session.
 async fn discover_command_code_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
     let opened = open_acp_session(profile, "command-code", COMMAND_CODE_LOGIN).await?;
-    Ok(command_code_models(&opened, profile))
+    Ok(cursor_models(&opened, profile))
 }
 
 async fn open_acp_session(profile: &Profile, binary: &str, method_id: &str) -> Result<Value, ()> {

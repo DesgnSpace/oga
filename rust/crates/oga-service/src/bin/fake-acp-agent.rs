@@ -88,7 +88,6 @@ const ANTIGRAVITY_SESSION: &str = "5b8e2c4a-1f3d-4e6b-9a7c-2d4f6e8a0b1c";
 const PI_SESSION: &str = "0b7d4a8e-5c1f-4d2a-9e3b-6f8c1a2d4e5f";
 /// Cursor's ACP server names a session with a UUID of its own.
 const CURSOR_SESSION: &str = "3c9a1d7e-4b2f-4a8c-91d6-7e5b3f2a8c04";
-/// Command Code's ACP server names a session with its native session id.
 const COMMAND_CODE_SESSION: &str = "7a4f2c1b-9e8d-4c3a-b6f5-1d2e3f4a5b6c";
 
 fn emit(value: &Value) {
@@ -350,8 +349,6 @@ fn cursor_settings(mode: &str, model: &str, access: &str) -> Value {
     ])
 }
 
-/// Command Code's settings: model and effort config options, where a model
-/// without an effort knob omits the effort option.
 fn command_code_settings(mode: &str, model: &str, effort: &str) -> Value {
     let mut options = vec![json!({
         "id": "model",
