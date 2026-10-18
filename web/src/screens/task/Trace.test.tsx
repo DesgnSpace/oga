@@ -7,7 +7,7 @@ import type { TaskEventView } from "@/bridge/types";
 import type { FileChange } from "@/domain/changes";
 import type { TraceRow } from "@/domain/trace";
 import { expansionFromEvent } from "@/domain/trace";
-import { resolvePreviewPath, TraceRows } from "./Trace";
+import { ProfileLabels, resolvePreviewPath, TraceRows } from "./Trace";
 
 // Whether a message row wraps or truncates is a stylesheet decision, not a markup one.
 const stylesheet = document.createElement("style");
@@ -350,6 +350,30 @@ describe("TraceRows", () => {
     expect(marker?.textContent).not.toContain("verbatim");
     expect(marker?.textContent).not.toContain("chars");
     expect(marker?.textContent).not.toContain("events");
+  });
+
+  it("names a handoff's accounts by their label, not their id", () => {
+    const labels = new Map([
+      ["claude-work", "Claude (work)"],
+      ["claude", "Claude"],
+    ]);
+    const { container } = render(
+      <ProfileLabels.Provider value={labels}>
+        <TraceRows
+          rows={[
+            row({
+              style: "notice",
+              marker: "handoff",
+              handoff: { fromId: "claude-work", toId: "claude", earlierRunCount: 1, context: "carried" },
+            }),
+          ]}
+        />
+      </ProfileLabels.Provider>,
+    );
+
+    const marker = container.querySelector(".trace-handoff-marker");
+    expect(marker?.querySelector(".trace-handoff-destination")?.textContent).toBe("Claude");
+    expect(marker?.querySelector(".trace-handoff-source")?.textContent).toBe("from Claude (work)");
   });
 
   it("omits empty handoff context and zero counts", () => {

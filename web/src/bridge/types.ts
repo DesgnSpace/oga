@@ -280,6 +280,8 @@ export interface TaskEventView {
   sourceId?: string | null;
   complete?: boolean;
   minor?: boolean;
+  /** On a streamed slice of text or thinking: the block of its message it belongs to. */
+  contentIndex?: number;
   subagents?: SubagentLink[];
 }
 

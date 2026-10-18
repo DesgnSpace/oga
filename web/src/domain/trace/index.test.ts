@@ -737,3 +737,59 @@ describe("thinking rows", () => {
 function flatIds(row: TraceRow): number[] {
   return [row.id, ...row.children.flatMap(flatIds)];
 }
+
+describe("codex shell rows", () => {
+  const output = "src/Network.php:37:  $servers = [];\nsrc/Network.php:52:  return $servers;\n";
+  const raw = (aggregated: string, exit: number) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_27", type: "command_execution", aggregated_output: aggregated, exit_code: exit },
+    });
+
+  it("opens a command onto the output Codex recorded", () => {
+    const shell: TaskEventView = {
+      ...event(1, "command", "Run command"),
+      source: "codex",
+      verb: "Ran",
+      presentation: { type: "command", command: "cat README.md", text: "cat README.md" },
+      rawText: raw("# Cameroon number plan\n", 0),
+    };
+    expect(expansionFromEvent(shell)).toEqual({
+      type: "command",
+      command: "cat README.md",
+      output: "# Cameroon number plan\n",
+    });
+  });
+
+  it("opens a search onto its command and what it printed, not a 'No matches found.' stub", () => {
+    const search: TaskEventView = {
+      ...event(1, "tool", "Search code"),
+      source: "codex",
+      verb: "Searched",
+      result: "2 matches",
+      presentation: { type: "tool", text: "rg -n servers src", command: "rg -n servers src", exitCode: 0 },
+      rawText: raw(output, 0),
+    };
+    expect(expansionFromEvent(search)).toEqual({ type: "command", command: "rg -n servers src", output });
+    expect(traceRows([search])[0].result).toBe("2 matches");
+  });
+
+  it("names a turn by the message Codex opened it with, and shows that message once", () => {
+    const message = (id: number, turnId: number, text: string): TaskEventView => ({
+      ...event(id, "message", "Agent message"),
+      source: "codex",
+      type: "agent.item.completed",
+      detail: text,
+      actionId: `item_${id}`,
+      turnId,
+    });
+    const rows = traceRows([
+      message(1, 1, "I'll fix the release prefix."),
+      { ...event(2, "command", "Run command"), turnId: 1, actionId: "item_2", presentation: { type: "command", command: "ls" } },
+      message(3, 2, "Now the unused variables."),
+      { ...event(4, "command", "Run command"), turnId: 2, actionId: "item_4", presentation: { type: "command", command: "ls" } },
+    ]);
+    expect(rows.map((row) => row.target)).toEqual(["I'll fix the release prefix.", "Now the unused variables."]);
+    expect(rows[0].children).toHaveLength(1);
+  });
+});

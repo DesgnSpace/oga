@@ -563,6 +563,19 @@ describe("ActivityStory.compose", () => {
     );
   });
 
+  it("totals a per-turn worker's turns on the receipt instead of showing the last one", () => {
+    const turn = (id: number, costUsd: number, tokensOut: number): TaskEventView => ({
+      ...event(id, "usage", "Turn completed"),
+      presentation: { type: "usage", costUsd, tokensOut },
+    });
+    const composition = ActivityStory.compose([turn(1, 0.002, 195), turn(2, 0.003, 94), turn(3, 0.0001, 246)]);
+    const receipt = composition.blocks.find((block) => block.type === "receipt");
+    if (receipt?.type !== "receipt") throw new Error("expected a receipt");
+    expect(receipt.event.presentation?.costUsd).toBeCloseTo(0.0051);
+    expect(receipt.event.presentation?.tokensOut).toBe(535);
+    expect(receipt.event.presentation?.turns).toBe(3);
+  });
+
   it("puts the busiest usage window on the receipt instead of the trace", () => {
     const composition = ActivityStory.compose([
       usageWindowEvent(1, { five_hour: 0.02, seven_day: 0.13 }),

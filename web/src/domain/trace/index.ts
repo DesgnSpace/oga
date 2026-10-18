@@ -269,8 +269,11 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
     if (change) return { type: "changes", change };
   }
 
-  const command = event.presentation?.type === "command" ? event.presentation.command : undefined;
-  if (event.kind === "command" && raw) {
+  // A search that ran as a shell command keeps its line, so it opens onto the
+  // same terminal as any other command.
+  const command = event.presentation?.command;
+  const ranAsCommand = event.kind === "command" || (event.kind === "tool" && command !== undefined);
+  if (ranAsCommand && raw) {
     const output = commandOutput(raw);
     if (command !== undefined || output !== undefined) {
       return { type: "command", command, output };
@@ -292,7 +295,7 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
     const keys =
       event.kind === "file"
         ? ["content", "text", "file_text", "fileText", "output", "result"]
-        : ["stdout", "result", "output", "matches", "content"];
+        : ["stdout", "result", "output", "matches", "content", "message"];
     // A hook-driven tool call nests its output one level down, under
     // `tool_response`; only fall back to that wrapper itself once none of the
     // keys above turned up anywhere inside it.
@@ -557,7 +560,13 @@ function turnRows(turn: ActivityTurn, cwd: string, live: boolean, nested: boolea
   // The heading already says what the worker opened with; showing that same
   // message again underneath it would say it twice.
   const rows = turn.segments.flatMap((segment) =>
-    segmentRows(segment.lead?.id === turn.titleFrom ? { ...segment, lead: undefined, nodes: segment.nodes.slice(1) } : segment, cwd, live),
+    segmentRows(
+      segment.lead?.id === turn.titleFrom
+        ? { ...segment, lead: undefined, nodes: segment.nodes.slice(1) }
+        : { ...segment, nodes: segment.nodes.filter((node) => !(node.type === "call" && node.call.event.id === turn.titleFrom)) },
+      cwd,
+      live,
+    ),
   );
   const nodes = turn.segments.flatMap((segment) => segment.nodes);
   return [{
@@ -792,7 +801,7 @@ function workRow(event: TaskEventView, cwd: string, live: boolean): TraceRow {
     style = "work";
     const path = event.presentation?.path ?? event.target ?? event.detail;
     target = path !== undefined ? relative(path, cwd) : undefined;
-    result = workResult(event, cwd, expansion);
+    result = workResult(event, cwd, expansion) ?? fileChange(event);
     preview = undefined;
   } else {
     style = "work";
@@ -1002,6 +1011,13 @@ function workResult(event: TaskEventView, cwd: string, expansion: EventExpansion
   return relativePaths(cleaned, cwd);
 }
 
+/** How big a file change was ("3 lines", "+4 −1"), once the call has landed. A before → after pair is the edit itself, not its size. */
+function fileChange(event: TaskEventView): string | undefined {
+  if (event.phase !== "completed") return undefined;
+  const change = event.presentation?.change;
+  return change !== undefined && !change.includes("→") ? change : undefined;
+}
+
 function defaultSuccess(value: string): boolean {
   const normalized = value.trim().replace(/\.+$/, "").toLowerCase();
   return [
@@ -1011,6 +1027,7 @@ function defaultSuccess(value: string): boolean {
     "succeeded",
     "ok",
     "edit applied successfully",
+    "wrote file successfully",
     "successfully edited",
     "done",
     "no result reported",
@@ -1277,7 +1294,7 @@ function imageDataUrlFromRaw(raw: string): string | undefined {
 }
 
 function commandOutput(raw: string): string | undefined {
-  return findText(raw, ["stdout", "stderr", "output", "rawOutput"]) ?? acpContentText(raw) ?? findText(raw, ["tool_response"]);
+  return findText(raw, ["stdout", "stderr", "output", "rawOutput", "aggregated_output"]) ?? acpContentText(raw) ?? findText(raw, ["tool_response"]);
 }
 
 /**

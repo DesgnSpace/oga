@@ -38,7 +38,7 @@ import { terminalResumeCommand } from "./terminalResume";
 import { ChangedFilesFullScreen, ChangedFilesPanel, type ChangedFilesProps } from "./ChangedFiles";
 import { usageTotals } from "./contextUsage";
 import { effortDisplay, taskStatusLabel } from "./format";
-import { useShowThinking } from "./Trace";
+import { ProfileLabels, useShowThinking } from "./Trace";
 import { Transcript, transcriptHasThinking } from "./Transcript";
 import { activityIsSettled, buildTranscript, currentRunEvents, WorkSegmentCache } from "./transcriptModel";
 
@@ -456,6 +456,10 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
   }, [taskId, task?.profileId]);
 
   const profile = profiles?.find((candidate) => candidate.id === task?.profileId);
+  const profileLabels = React.useMemo(
+    () => new Map((profiles ?? []).map((candidate) => [candidate.id, candidate.label])),
+    [profiles],
+  );
   const terminalCommand = React.useMemo(
     () => (task ? (terminalResumeCommand(task, profile) ?? undefined) : undefined),
     [task, profile],
@@ -541,17 +545,19 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
                   )}
                 </div>
               )}
-              <Transcript
-                key={taskId}
-                items={transcriptItems}
-                showThinking={showThinking}
-                scrollRoot={contentRef}
-                expansionState={viewState.workExpansion}
-                onExpansionChange={setWorkExpansion}
-                rowExpansionState={viewState.rowExpansion}
-                onRowExpansionChange={setRowExpansion}
-                reveal={reveal}
-              />
+              <ProfileLabels.Provider value={profileLabels}>
+                <Transcript
+                  key={taskId}
+                  items={transcriptItems}
+                  showThinking={showThinking}
+                  scrollRoot={contentRef}
+                  expansionState={viewState.workExpansion}
+                  onExpansionChange={setWorkExpansion}
+                  rowExpansionState={viewState.rowExpansion}
+                  onRowExpansionChange={setRowExpansion}
+                  reveal={reveal}
+                />
+              </ProfileLabels.Provider>
             </div>
           </>
         )}

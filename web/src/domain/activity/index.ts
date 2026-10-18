@@ -297,7 +297,9 @@ export const ActivityStory = {
   },
   composeWithState,
   responseEvent(events: TaskEventView[]): TaskEventView | undefined {
-    return [...normalizeAntigravityEvents(events)].reverse().find((event) => event.kind === "message" && event.minor !== true);
+    return joinStreamedText(normalizeAntigravityEvents(events))
+      .reverse()
+      .find((event) => event.kind === "message" && event.minor !== true);
   },
   isTechnical,
 };
@@ -355,7 +357,7 @@ function composeWithState(
   ending: ActivityEnding | undefined,
   showReceipt = settled,
 ): ActivityComposition {
-  const events = deriveTurnIds(withoutDuplicateHookCalls(normalizeAntigravityEvents(rawEvents)));
+  const events = deriveTurnIds(joinStreamedText(withoutDuplicateHookCalls(normalizeAntigravityEvents(rawEvents))));
   const boundaries = events
     .map((event, index) => [index, event] as const)
     .filter(([, event]) => event.type === "handed_off");
@@ -417,14 +419,37 @@ interface SegmentDraft {
   nodes: ActivityNode[];
 }
 
+/**
+ * A worker that reports one usage row per turn has no run-level summary, so the
+ * receipt, which is the last of those rows, would show only the final turn.
+ * Its cost and output are the sum of every turn's. A worker whose usage row
+ * already covers the run (it names its turns or a running total) stands as is.
+ */
+function receiptWithRunTotals(receipt: TaskEventView, events: TaskEventView[]): TaskEventView {
+  const presentation = receipt.presentation;
+  if (!presentation || presentation.turns !== undefined || presentation.total !== undefined) return receipt;
+  let costUsd: number | undefined;
+  let tokensOut: number | undefined;
+  let turns = 0;
+  for (const event of events) {
+    const turn = event.presentation;
+    if (event.kind !== "usage" || !turn || turn.turns !== undefined || turn.total !== undefined) continue;
+    turns += 1;
+    if (turn.costUsd !== undefined) costUsd = (costUsd ?? 0) + turn.costUsd;
+    if (turn.tokensOut !== undefined) tokensOut = (tokensOut ?? 0) + turn.tokensOut;
+  }
+  if (turns < 2) return receipt;
+  return { ...receipt, presentation: { ...presentation, costUsd, tokensOut, turns } };
+}
+
 function composeTimeline(
   rawEvents: TaskEventView[],
   settled: boolean,
   ending: ActivityEnding | undefined,
   showReceipt: boolean,
 ): ActivityComposition {
-  const events = mergeSkipNotices(
-    terminalOutcome(withoutRedundantTurnFailure(rawEvents.map(retryMessage)), ending),
+  const events = mergeHistoryNotices(
+    mergeSkipNotices(terminalOutcome(withoutRedundantTurnFailure(rawEvents.map(retryMessage)), ending)),
   );
   const usageWindow = usageWindowSummary(events);
   const receiptId = showReceipt ? findLast(events, (event) => event.kind === "usage")?.id : undefined;
@@ -516,7 +541,9 @@ function composeTimeline(
     .map((draft, index) => finishTurn(draft, settled || index + 1 < drafts.length))
     .filter((turn): turn is ActivityTurn => turn !== undefined)
     .map((turn) => ({ type: "turn" as const, turn }));
-  if (receipt) blocks.push({ type: "receipt", event: receipt, thinkingTokens, usageWindow });
+  if (receipt) {
+    blocks.push({ type: "receipt", event: receiptWithRunTotals(receipt, events), thinkingTokens, usageWindow });
+  }
   return { blocks, technical };
 }
 
@@ -552,9 +579,11 @@ function finishTurn(draft: TurnDraft, closed: boolean): ActivityTurn | undefined
 function turnTitle(segments: ActivitySegment[]): { title: string; id: number } | undefined {
   for (const segment of segments) {
     for (const node of segment.nodes) {
-      if (node.type !== "message") continue;
-      const title = titleFromMessage(node.event);
-      if (title !== undefined) return { title, id: node.event.id };
+      // Codex sends its messages with an item id, so they arrive as calls.
+      const event = node.type === "message" ? node.event : node.type === "call" ? node.call.event : undefined;
+      if (event?.kind !== "message") continue;
+      const title = titleFromMessage(event);
+      if (title !== undefined) return { title, id: event.id };
     }
   }
   return undefined;
@@ -898,6 +927,8 @@ function subagentStatus(launch: ActivityNode, reports: SubagentReport[], report:
 // What belongs in the story, and what is bookkeeping
 // ---------------------------------------------------------------------------
 
+const HISTORY_REMOVED_TYPE = "history_dropped";
+const HISTORY_REMOVED_TITLE = "Older activity removed";
 export const ACTIVITY_SKIPPED_TITLE = "Some activity was not recorded";
 /** Every provider's reasoning blocks share this title; it is how they fold. */
 export const REASONING_TITLE = "Thinking";
@@ -1018,6 +1049,24 @@ function parseSkipped(detail: string | undefined): { count: number; noun: string
 }
 
 /**
+ * History is trimmed in several passes, each leaving its own notice. A reader
+ * needs to know once, with how many updates went.
+ */
+function mergeHistoryNotices(events: TaskEventView[]): TaskEventView[] {
+  const first = events.findIndex((event) => event.type === HISTORY_REMOVED_TYPE);
+  if (first === -1) return events;
+  let removed = 0;
+  for (const event of events) {
+    if (event.type === HISTORY_REMOVED_TYPE) removed += Number(event.detail?.match(/(\d+) updates?$/)?.[1] ?? 0);
+  }
+  const detail = removed > 0 ? `${HISTORY_REMOVED_TITLE}: ${removed} update${removed === 1 ? "" : "s"}` : undefined;
+  return events.flatMap((event, index) => {
+    if (event.type !== HISTORY_REMOVED_TYPE) return [event];
+    return index === first ? [{ ...event, detail }] : [];
+  });
+}
+
+/**
  * The window a run is closest to filling, read off the last notice the provider
  * sent, so the receipt says how much headroom is left before the next run.
  */
@@ -1087,6 +1136,87 @@ export function withoutDuplicateHookCalls(events: TaskEventView[]): TaskEventVie
     if (event.turnId !== undefined) return !agentTurns.has(event.turnId);
     return !agentCalls.has(`${turn}:${event.actionId}`);
   });
+}
+
+const CHUNK_TYPES = new Set(["agent.agent_message_chunk", "agent.agent_thought_chunk"]);
+
+/** A slice of one message or thought that a worker sends a piece at a time. */
+function isChunk(event: TaskEventView): boolean {
+  return (
+    (event.kind === "message" || event.kind === "reasoning") &&
+    (event.contentIndex !== undefined || CHUNK_TYPES.has(event.type))
+  );
+}
+
+/**
+ * Joins the slices of a streamed reply or thought into one row each.
+ *
+ * Slices are joined exactly as sent, so a piece that starts mid-word continues
+ * the word and a paragraph break appears only where the text has one. A run of
+ * slices stays open until something visible interrupts it, so a stretch of
+ * thinking still reads as one block when the worker sends a stray line break
+ * as a message between its pieces. The joined row keeps the first slice's id,
+ * so a reply that is still growing stays one row. When an assistant message
+ * ends, its final text replaces the slices streamed for it.
+ */
+export function joinStreamedText(rawEvents: TaskEventView[]): TaskEventView[] {
+  const events = withoutReplacedSlices(rawEvents);
+  const out: TaskEventView[] = [];
+  const pieces = new Map<number, string[]>();
+  let open: { kind: TaskEventView["kind"]; index: number } | undefined;
+  const continues = (event: TaskEventView): boolean => {
+    if (open === undefined || open.kind !== event.kind) return false;
+    const first = out[open.index];
+    return (
+      (event.turnId === undefined || first.turnId === undefined || event.turnId === first.turnId) &&
+      (event.contentIndex === undefined || event.contentIndex === first.contentIndex)
+    );
+  };
+
+  for (const event of events) {
+    if (!isChunk(event)) {
+      if (!isTechnical(event)) open = undefined;
+      out.push(event);
+      continue;
+    }
+    const text = event.detail ?? "";
+    if (open !== undefined && continues(event)) {
+      pieces.get(open.index)?.push(text);
+      continue;
+    }
+    // Whitespace between two stretches of another kind is only a gap in them.
+    if (text.trim() === "") continue;
+    out.push(event);
+    open = { kind: event.kind, index: out.length - 1 };
+    pieces.set(open.index, [text]);
+  }
+
+  for (const [index, parts] of pieces) {
+    if (parts.length === 1) continue;
+    const joined = parts.join("");
+    const event = out[index];
+    out[index] = {
+      ...event,
+      detail: joined,
+      presentation: event.presentation ? { ...event.presentation, text: joined } : undefined,
+    };
+  }
+  return out;
+}
+
+/** Drops the slices an assistant message's own end now says in full. */
+function withoutReplacedSlices(events: TaskEventView[]): TaskEventView[] {
+  const replaced = new Set<number>();
+  events.forEach((event, index) => {
+    if (event.type !== "agent.message_end" || (event.kind !== "message" && event.kind !== "reasoning")) return;
+    if (eventText(event) === undefined) return;
+    for (let before = index - 1; before >= 0; before--) {
+      const slice = events[before];
+      if (slice.type === "agent.message_start" || slice.type === "agent.message_end") break;
+      if (slice.kind === event.kind && slice.contentIndex !== undefined) replaced.add(before);
+    }
+  });
+  return replaced.size === 0 ? events : events.filter((_, index) => !replaced.has(index));
 }
 
 /** Converts Antigravity's raw step protocol into the same rows other providers use. */

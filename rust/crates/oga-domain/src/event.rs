@@ -205,6 +205,11 @@ pub struct TaskEventView {
     /// boundaries, duplicate tool results, hook bookkeeping, quiet heartbeats.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minor: Option<bool>,
+    /// Set on a streamed slice of text or thinking: the slot of the block it
+    /// belongs to within its message. Slices that share a slot read as one
+    /// block, and absent off streamed slices.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_index: Option<u32>,
     /// Links this row to one or more subagent runs without exposing provider
     /// payload shapes to consumers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

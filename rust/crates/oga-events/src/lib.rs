@@ -822,11 +822,30 @@ fn annotate_subagents(
                 Some("wait" | "close_agent") => {
                     view.kind = EventKind::Tool;
                     view.title = if tool == Some("wait") {
-                        "Waiting for subagents"
+                        "Wait for subagents"
                     } else {
                         "Closed subagent"
                     }
                     .into();
+                    if tool == Some("wait") {
+                        let complete = view.complete == Some(true);
+                        view.verb = Some(
+                            if complete {
+                                "Waited for"
+                            } else {
+                                "Waiting for"
+                            }
+                            .into(),
+                        );
+                        view.target = Some(match receiver_ids.len() {
+                            0 | 1 => "subagent".into(),
+                            count => format!("{count} subagents"),
+                        });
+                        // A wait that names no subagent says nothing a reader can use.
+                        if receiver_ids.is_empty() {
+                            view.minor = Some(true);
+                        }
+                    }
                     let states = item
                         .and_then(|item| item.get("agents_states"))
                         .and_then(Value::as_object);
@@ -1223,8 +1242,9 @@ fn event_view_base(
     .map(str::to_owned)
     .or_else(|| hook_tool.map(|tool| tool_title_with_input(tool, hook_input)))
     .unwrap_or_else(|| event_title(&event.kind, &event.payload));
-    let action_id =
-        hook_action.and_then(|_| tree_value(&event.payload, &["tool_use_id", "toolUseId"]));
+    let action_id = hook_action
+        .and_then(|_| tree_value(&event.payload, &["tool_use_id", "toolUseId"]))
+        .or_else(|| (event.kind == "provider_retry").then(|| acp::RECOVERY_ACTION_ID.to_owned()));
     let action_fields = hook_action.map(|(tool, phase)| {
         let complete = matches!(phase, EventPhase::Completed | EventPhase::Failed);
         let presentation = hook_presentation(&event.payload);
@@ -1294,6 +1314,7 @@ fn event_view_base(
             .get("minor")
             .and_then(Value::as_bool)
             .or_else(|| is_minor_event(&event.kind, &event.payload)),
+        content_index: None,
         subagents: Vec::new(),
     }
 }
@@ -1676,18 +1697,7 @@ fn provider_event_view(event: &TaskEvent, provider: Provider) -> Option<TaskEven
                         minor: Some(true),
                     },
                 )),
-                Some("turn_end") => Some(provider_view(
-                    event,
-                    provider,
-                    EventKind::Lifecycle,
-                    EventPhase::Info,
-                    "Turn ended",
-                    ProviderViewOptions {
-                        detail: None,
-                        presentation: None,
-                        minor: Some(true),
-                    },
-                )),
+                Some("turn_end") => Some(pi_turn_end_view(event, provider, payload)),
                 Some("agent_start") => Some(provider_view(
                     event,
                     provider,
@@ -2072,10 +2082,11 @@ fn item_event_view(
         });
         return Some(reasoning_view(event, provider, text));
     }
+    // An error item is a notice, not a call: it has no second phase to pair
+    // with, and as a call its message would print twice on one row.
     if item_type == "error" {
         let message = string_value(item, &["message", "error"]);
-        let target = message.as_deref().map(error_target);
-        let mut view = provider_view(
+        return Some(provider_view(
             event,
             provider,
             EventKind::Error,
@@ -2086,13 +2097,7 @@ fn item_event_view(
                 presentation: None,
                 minor: None,
             },
-        );
-        view.verb = Some("Failed".to_owned());
-        view.target = target;
-        view.complete = Some(true);
-        view.action_id = item_id.clone();
-        view.source_id = Some(item_id);
-        return Some(view);
+        ));
     }
 
     let (title, verb, presentation) = match item_type {
@@ -2104,6 +2109,7 @@ fn item_event_view(
             // tool call, so it shares their search-command detection instead
             // of always rendering as a generic command row.
             let search = search_command_subject(&command);
+            let output = string_value(item, &["aggregated_output"]);
             let mut presentation = usage_presentation();
             match &search {
                 Some(subject) => {
@@ -2113,30 +2119,21 @@ fn item_event_view(
                 None => {
                     presentation.kind = PresentationType::Command;
                     presentation.text = Some(command_summary(&command));
-                    presentation.command = Some(command);
-                    presentation.exit_code = exit_code;
                 }
             }
-            // A non-zero exit is definitive for failure; the first non-blank
-            // line of output is the only part of a long run worth showing. A
-            // clean search reports its own match count, same as every other
-            // provider's search row.
+            // A search keeps the line it ran so its expansion can show the
+            // output under it, same as any other command.
+            presentation.command = Some(command.clone());
+            presentation.exit_code = exit_code;
+            // A non-zero exit is definitive for failure, and the reason is the
+            // line of output that names the error. A clean search reports its
+            // own match count, or the number of result lines it printed.
             presentation.outcome = match exit_code.filter(|code| *code != 0) {
-                Some(code) => {
-                    let first_line =
-                        string_value(item, &["aggregated_output"]).and_then(|output| {
-                            output
-                                .lines()
-                                .find(|line| !line.trim().is_empty())
-                                .map(str::to_owned)
-                        });
-                    Some(match first_line {
-                        Some(line) => format!("exit {code}: {}", cap(line.trim(), 120).0),
-                        None => format!("exit {code}"),
-                    })
-                }
-                None if search.is_some() => string_value(item, &["aggregated_output"])
-                    .and_then(|output| search_outcome_from_text(&output)),
+                Some(code) => Some(exit_summary(code, output.as_deref())),
+                None if search.is_some() => output
+                    .as_deref()
+                    .and_then(search_outcome_from_text)
+                    .or_else(|| search_result_count(&command, output.as_deref())),
                 None => None,
             };
             (
@@ -2220,11 +2217,30 @@ fn item_event_view(
                 .or_else(|| string_value(item, &["query"]));
             presentation.outcome =
                 (queries.len() > 1).then(|| format!("{} queries", queries.len()));
-            (
-                "Web search".to_owned(),
-                tool_verb("websearch", complete),
-                Some(presentation),
-            )
+            // Codex runs a page fetch through this item too: an `other` action
+            // whose query is the address. The started event has no query yet,
+            // so it reads as a search until the address arrives.
+            let fetch = item
+                .get("action")
+                .and_then(|action| text_value(action.get("type")))
+                == Some("other")
+                && presentation
+                    .text
+                    .as_deref()
+                    .is_some_and(|query| query.starts_with("http"));
+            if fetch {
+                (
+                    "Fetch page".to_owned(),
+                    tool_verb("webfetch", complete),
+                    Some(presentation),
+                )
+            } else {
+                (
+                    "Web search".to_owned(),
+                    tool_verb("websearch", complete),
+                    Some(presentation),
+                )
+            }
         }
         "todo_list" => {
             let items = item.get("items").and_then(Value::as_array)?;
@@ -2326,9 +2342,9 @@ fn item_event_view(
     Some(view)
 }
 
-/// The most useful phrase in a Codex error item's message: the words after the
-/// last `: `, which is usually the underlying OS/permission reason rather than
-/// the "Failed to ..." framing around it.
+/// The most useful phrase in an error message: the words after the last `: `,
+/// which is usually the underlying OS/permission reason rather than the
+/// "Failed to ..." framing around it.
 fn error_target(message: &str) -> String {
     let message = message.trim();
     let phrase = message
@@ -2782,42 +2798,32 @@ fn pi_result_text(payload: &BTreeMap<String, Value>) -> Option<&str> {
 }
 
 /// Pi carries no id across a message's `start`/`update`*/`end` triple, unlike
-/// its tool calls (`toolCallId`) — the payloads show no field that survives
-/// the whole stream. One message stream is open at a time, so a fixed key
-/// stands in for a real id: `foldCalls` merges same-key rows while the slot
-/// is still open and reopens a fresh row once a prior one has closed
-/// (`message_end` completes it), which is exactly the start/update/end
-/// lifecycle this collapses.
+/// its tool calls (`toolCallId`). A user or tool-result message is told twice,
+/// by its start and again by its end, so those two rows share this fixed key
+/// and `foldCalls` merges them into one row; it reopens a fresh row once a
+/// prior one has closed (`message_end` completes it).
 const PI_MESSAGE_ACTION_ID: &str = "pi:message-stream";
 
-/// `message_start`/`update`/`end` all carry the same `message.role`/`content`
-/// shape. A `message_update` may carry that shape in
-/// `assistantMessageEvent.partial` instead of the top-level `message`; a
-/// text-typed content item grows a little on each update and arrives complete
-/// on `message_end`. Deriving title/detail identically for all three, from the
-/// one field they share, means each later event's own fields safely overwrite
-/// the row's without ever needing special-case merge behaviour: role does not
-/// change mid-stream, so the title is stable, and an update with nothing new
-/// simply carries `detail: None`, which `settleAction` already treats as "keep
-/// what the row already has".
+/// `message_start` and `message_end` carry the whole `message`. An assistant
+/// message also streams as `message_update` events, which read through
+/// [`pi_stream_view`]; its end then holds the final text.
 fn pi_message_view(
     event: &TaskEvent,
     provider: Provider,
     payload: &BTreeMap<String, Value>,
 ) -> Option<TaskEventView> {
     let event_type = text_value(payload.get("type")).unwrap_or_default();
-    let message = payload
-        .get("message")
-        .and_then(Value::as_object)
-        .or_else(|| {
-            payload
-                .get("assistantMessageEvent")
-                .and_then(|value| value.get("partial"))
-                .and_then(Value::as_object)
-        });
+    let update = payload.get("assistantMessageEvent");
+    let message = payload.get("message").and_then(Value::as_object);
     let role = message
         .and_then(|value| text_value(value.get("role")))
         .unwrap_or("assistant");
+    if event_type == "message_update"
+        && message.is_none()
+        && let Some(update) = update
+    {
+        return Some(pi_stream_view(event, provider, update));
+    }
     let content = message
         .and_then(|value| value.get("content"))
         .and_then(Value::as_array);
@@ -2841,12 +2847,18 @@ fn pi_message_view(
         "toolResult" => "Tool result",
         _ => "Agent message",
     };
+    // An assistant message is told through its streamed slices and its end, so
+    // its start has nothing to add and needs no row to fold into.
+    let assistant = role == "assistant";
     let complete = event_type == "message_end";
     let phase = if complete {
         EventPhase::Completed
     } else {
         EventPhase::Started
     };
+    // The prompt is the request bubble and a tool's output is on the tool's own
+    // row, so neither earns a row of its own here.
+    let echo = matches!(role, "user" | "toolResult");
     let mut view = provider_view(
         event,
         provider,
@@ -2856,13 +2868,147 @@ fn pi_message_view(
         ProviderViewOptions {
             detail: text.map(str::to_owned),
             presentation: text.map(|value| message_presentation(value.to_owned())),
-            minor: None,
+            minor: (echo || (assistant && event_type == "message_start")).then_some(true),
         },
     );
-    view.action_id = Some(PI_MESSAGE_ACTION_ID.to_owned());
-    view.source_id = Some(view.action_id.clone());
     view.complete = Some(complete);
+    if !assistant {
+        let call_id = message
+            .and_then(|value| text_value(value.get("toolCallId")))
+            .map(str::to_owned);
+        view.action_id = call_id.or_else(|| Some(PI_MESSAGE_ACTION_ID.to_owned()));
+        view.source_id = Some(view.action_id.clone());
+    }
     Some(view)
+}
+
+/// A turn's end carries how it stopped and what it cost. A turn the provider
+/// failed shows its error message; any other turn is one usage reading, which
+/// the transcript adds up like every provider's per-turn readings.
+fn pi_turn_end_view(
+    event: &TaskEvent,
+    provider: Provider,
+    payload: &BTreeMap<String, Value>,
+) -> TaskEventView {
+    let message = payload.get("message").and_then(Value::as_object);
+    if message.and_then(|value| text_value(value.get("stopReason"))) == Some("error") {
+        let detail = message
+            .and_then(|value| text_value(value.get("errorMessage")))
+            .unwrap_or("The turn failed");
+        return provider_view(
+            event,
+            provider,
+            EventKind::Error,
+            EventPhase::Failed,
+            "Error",
+            ProviderViewOptions {
+                detail: Some(detail.to_owned()),
+                presentation: None,
+                minor: None,
+            },
+        );
+    }
+    let usage = message
+        .and_then(|value| value.get("usage"))
+        .and_then(Value::as_object);
+    let Some(usage) = usage else {
+        return provider_view(
+            event,
+            provider,
+            EventKind::Lifecycle,
+            EventPhase::Info,
+            "Turn ended",
+            ProviderViewOptions {
+                detail: None,
+                presentation: None,
+                minor: Some(true),
+            },
+        );
+    };
+    let cached = number_u64(usage.get("cacheRead")).filter(|value| *value > 0);
+    let output = number_u64(usage.get("output"));
+    let cost = usage
+        .get("cost")
+        .and_then(Value::as_object)
+        .and_then(|cost| number_f64(cost.get("total")));
+    let mut presentation = usage_presentation();
+    presentation.tokens_in = number_u64(usage.get("input"));
+    presentation.tokens_cached = cached;
+    presentation.tokens_out = output;
+    presentation.cost_usd = cost;
+    let detail = [
+        cost.map(format_cost),
+        output.map(|value| format_count(value) + " tokens out"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    provider_view(
+        event,
+        provider,
+        EventKind::Usage,
+        EventPhase::Completed,
+        "Turn completed",
+        ProviderViewOptions {
+            detail: (!detail.is_empty()).then_some(detail),
+            presentation: Some(presentation),
+            minor: None,
+        },
+    )
+}
+
+/// One `assistantMessageEvent` of a streaming reply. A text or thinking slice
+/// carries only its own `delta`, so it ships as that slice and the trace joins
+/// the slices of one `contentIndex` back into a block until the message ends
+/// and replaces them with its final text. Everything else in the stream (block
+/// starts and ends, tool-call arguments) only brackets work that has its own
+/// rows.
+fn pi_stream_view(event: &TaskEvent, provider: Provider, update: &Value) -> TaskEventView {
+    let delta = update
+        .get("delta")
+        .and_then(Value::as_str)
+        .filter(|delta| !delta.is_empty())
+        .map(str::to_owned);
+    let content_index = update
+        .get("contentIndex")
+        .and_then(Value::as_u64)
+        .and_then(|index| u32::try_from(index).ok());
+    let mut view = match (text_value(update.get("type")), delta) {
+        (Some("thinking_delta"), Some(delta)) => reasoning_view(event, provider, Some(delta)),
+        (Some("text_delta"), Some(delta)) => {
+            let mut view = provider_view(
+                event,
+                provider,
+                EventKind::Message,
+                EventPhase::Info,
+                "Agent message",
+                ProviderViewOptions {
+                    detail: Some(delta.clone()),
+                    presentation: Some(message_presentation(delta)),
+                    minor: None,
+                },
+            );
+            view.complete = Some(true);
+            view
+        }
+        _ => {
+            return provider_view(
+                event,
+                provider,
+                EventKind::Message,
+                EventPhase::Info,
+                "Agent message",
+                ProviderViewOptions {
+                    detail: None,
+                    presentation: None,
+                    minor: Some(true),
+                },
+            );
+        }
+    };
+    view.content_index = content_index;
+    view
 }
 
 struct ProviderViewOptions {
@@ -2900,6 +3046,7 @@ fn provider_view(
         source_id: None,
         complete: None,
         minor: options.minor,
+        content_index: None,
         subagents: Vec::new(),
     }
 }
@@ -2913,8 +3060,11 @@ fn agent_error_view(
     payload: &BTreeMap<String, Value>,
 ) -> TaskEventView {
     let error = payload.get("error").and_then(Value::as_object);
+    // Codex sends a transport error's text at the top level, other agents nest
+    // it under `error`.
     let message = error
         .and_then(|value| text_value(value.get("message")))
+        .or_else(|| text_value(payload.get("message")))
         .map(str::to_owned);
     let error_type = error.and_then(|value| text_value(value.get("type")));
     let status = error.and_then(|value| number_u64(value.get("status")));
@@ -3035,6 +3185,7 @@ fn tool_family(tool: &str) -> ToolFamily {
         | "write"
         | "write_file"
         | "apply_patch"
+        | "patch"
         | "replace_file_content"
         | "write_to_file"
         | "list_dir" => ToolFamily::File,
@@ -3304,7 +3455,7 @@ fn tool_presentation(
     match tool_family(tool) {
         ToolFamily::Skill => {
             presentation.kind = PresentationType::Tool;
-            presentation.text = Some(string_value(input, &["name", "skill"])?);
+            presentation.text = Some(string_value(input, &["name", "skill", "id"])?);
         }
         ToolFamily::Command => {
             let command =
@@ -3477,11 +3628,16 @@ impl PatchSummary {
 }
 
 fn input_patch(tool: &str, input: Option<&Map<String, Value>>) -> Option<PatchSummary> {
-    if !tool.eq_ignore_ascii_case("apply_patch") {
+    if !(tool.eq_ignore_ascii_case("apply_patch") || tool.eq_ignore_ascii_case("patch")) {
         return None;
     }
+    patch_summary(input?)
+}
+
+/// The patch an input carries, whichever tool sent it.
+fn patch_summary(input: &Map<String, Value>) -> Option<PatchSummary> {
     let text = string_value(
-        input?,
+        input,
         &["patchText", "patch_text", "patch", "input", "diff"],
     )?;
     parse_patch(&text)
@@ -3912,6 +4068,103 @@ fn input_command(input: Option<&Map<String, Value>>) -> Option<String> {
 fn search_output_outcome(state: &Map<String, Value>) -> Option<String> {
     string_value(state, &["output", "stdout", "result", "summary"])
         .and_then(|output| search_outcome_from_text(&output))
+}
+
+/// How a failed command ended: its exit code and the line of output that
+/// names the error.
+pub(crate) fn exit_summary(code: i64, output: Option<&str>) -> String {
+    match output.and_then(failure_reason) {
+        Some(reason) => format!("Exited with code {code} \u{b7} {reason}"),
+        None => format!("Exited with code {code}"),
+    }
+}
+
+/// Words that mark a line of output as the failure rather than the setup before
+/// it: errors, failing tests, and the usual missing-file and permission
+/// messages.
+const FAILURE_MARKERS: [&str; 12] = [
+    "error",
+    "\u{d7}",
+    "fail",
+    "panic",
+    "fatal",
+    "exception",
+    "enoent",
+    "no such file",
+    "not found",
+    "denied",
+    "not permitted",
+    "timed out",
+];
+
+/// The most useful line of a failed command's output: the last one that names
+/// an error, else the last line printed. Terminal colour codes and the tree
+/// glyphs some tools draw in front of a cause are not part of the reason.
+fn failure_reason(output: &str) -> Option<String> {
+    let lines = output
+        .lines()
+        .map(|line| {
+            let plain = strip_terminal_codes(line);
+            plain
+                .trim_start_matches(|character: char| {
+                    character.is_whitespace()
+                        || matches!(
+                            character,
+                            '\u{2502}'
+                                | '\u{251c}'
+                                | '\u{2570}'
+                                | '\u{2500}'
+                                | '\u{25b6}'
+                                | '\u{2514}'
+                        )
+                })
+                .trim_end()
+                .to_owned()
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let line = lines
+        .iter()
+        .rev()
+        .find(|line| {
+            let lower = line.to_ascii_lowercase();
+            FAILURE_MARKERS.iter().any(|marker| lower.contains(marker))
+        })
+        .or_else(|| lines.last())?;
+    Some(cap(line, 120).0)
+}
+
+fn strip_terminal_codes(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\u{1b}' || characters.peek() != Some(&'[') {
+            plain.push(character);
+            continue;
+        }
+        characters.next();
+        for code in characters.by_ref() {
+            if code.is_ascii_alphabetic() {
+                break;
+            }
+        }
+    }
+    plain
+}
+
+/// What a search that printed no count of its own found: one result per output
+/// line, files when the command lists them and matches when it greps.
+fn search_result_count(command: &str, output: Option<&str>) -> Option<String> {
+    let found = output.map_or(0, |text| {
+        text.lines().filter(|line| !line.trim().is_empty()).count()
+    }) as u64;
+    let body = shell_body(command);
+    let lists_files = body.contains(" --files") || body.starts_with("find ");
+    Some(format_search_outcome(
+        found,
+        if lists_files { "file" } else { "match" },
+        false,
+    ))
 }
 
 fn search_outcome_from_text(output: &str) -> Option<String> {
@@ -4625,6 +4878,25 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
             skipped_detail(malformed + oversized, "line")
         }
         "event_dropped" => skipped_detail(1, "event"),
+        "provider_retry" => Some(provider_retry_detail(payload)),
+        "history_dropped" => {
+            let count = number_u64(payload.get("dropped"))?;
+            (count > 0).then(|| {
+                format!(
+                    "Older activity removed: {count} update{}",
+                    if count == 1 { "" } else { "s" }
+                )
+            })
+        }
+        "checkout_kept" | "checkout_removal_failed" => {
+            let reason = checkout_reason(&tree_value(payload, &["reason", "error"])?);
+            let lead = if event_type == "checkout_kept" {
+                "Checkout kept"
+            } else {
+                "Checkout not removed"
+            };
+            Some(format!("{lead}: {reason}"))
+        }
         "events_truncated" => skipped_detail(number_u64(payload.get("dropped"))?, "event"),
         "scope_auto_completed" => {
             let added = payload
@@ -4653,6 +4925,51 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
             })
             .or_else(|| tree_value(payload, &["provider", "model"])),
     }
+}
+
+/// What a retry the broker made on its own says: which attempt, and why the
+/// last one failed, without the transport's wording.
+fn provider_retry_detail(payload: &BTreeMap<String, Value>) -> String {
+    let stage = match (
+        number_u64(payload.get("attempt")),
+        number_u64(payload.get("maxAttempts")),
+    ) {
+        (Some(attempt), Some(limit)) => format!("retrying, attempt {attempt} of {limit}"),
+        _ => "retrying".to_owned(),
+    };
+    let reason = tree_value(payload, &["error"]).map(|error| {
+        let error = error
+            .strip_prefix("the agent answered session/prompt with an error: ")
+            .unwrap_or(&error);
+        error
+            .strip_prefix("Internal error: ")
+            .unwrap_or(error)
+            .to_owned()
+    });
+    match reason {
+        Some(reason) => format!("Provider error · {stage} · {reason}"),
+        None => format!("Provider error · {stage}"),
+    }
+}
+
+/// A checkout notice's reason without the broker's phrasing or the absolute
+/// path of a checkout the reader never sees.
+fn checkout_reason(text: &str) -> String {
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .filter(|word| !is_checkout_path(word))
+        .collect();
+    let text = words.join(" ");
+    let text = text.trim_end_matches([':', ' ']);
+    let text = text
+        .strip_prefix("kept because ")
+        .or_else(|| text.strip_prefix("kept: "))
+        .unwrap_or(text);
+    text.to_owned()
+}
+
+fn is_checkout_path(word: &str) -> bool {
+    word.trim_end_matches([':', ',', '.']).starts_with('/') && word.contains("/worktrees/")
 }
 
 fn skipped_detail(count: u64, noun: &str) -> Option<String> {
@@ -4732,7 +5049,7 @@ fn event_phase(
     }
     if matches!(
         event_type,
-        "agent.system" | "agent.assistant" | "transport_fallback"
+        "agent.system" | "agent.assistant" | "transport_fallback" | "provider_retry"
     ) || (event_type == "agent.hook" && !payload.contains_key("tool_name"))
     {
         EventPhase::Info
@@ -4767,7 +5084,7 @@ fn tool_title(tool: &str) -> String {
         "read" | "read_file" | "view_file" => "Read file".into(),
         "edit" | "multiedit" | "replace_file_content" => "Edit file".into(),
         "write" | "write_file" | "write_to_file" => "Write file".into(),
-        "apply_patch" => "Apply patch".into(),
+        "apply_patch" | "patch" => "Apply patch".into(),
         "bash" | "run_command" | "run command" => "Run command".into(),
         "grep" | "grep_search" | "code_search" => "Search code".into(),
         "glob" | "find_by_name" => "Find files".into(),
@@ -4880,7 +5197,8 @@ fn lifecycle_title(event_type: &str) -> String {
         "checkout_kept" => "Checkout kept",
         "checkout_removal_failed" => "Checkout removal failed",
         "line_dropped" | "event_dropped" | "events_truncated" => ACTIVITY_SKIPPED_TITLE,
-        "history_dropped" => "History removed",
+        "history_dropped" => "Older activity removed",
+        "provider_retry" => "Provider error",
         "handed_off" => "Handed off",
         "handoff_brief" => "Handoff brief",
         "run_interrupted" => "Run stopped",
@@ -5036,7 +5354,9 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
         "heartbeat"
             | "session_captured"
             | "session_reused"
-            | "provider_retry"
+            | "agent.turn.started"
+            | "agent.turn.completed"
+            | "agent.thread.started"
             | "broker_restarted"
             | "worktree_recreated"
             | "learn_routes"
@@ -6353,7 +6673,7 @@ mod tests {
         assert_eq!(completed.verb.as_deref(), Some("Read"));
         assert_eq!(
             completed.result.as_deref(),
-            Some("exit 1: sed: SKILL.md: No such file or directory")
+            Some("Exited with code 1 · sed: SKILL.md: No such file or directory")
         );
     }
 
@@ -6394,7 +6714,7 @@ mod tests {
             )
         );
         assert_eq!(search.phase, EventPhase::Completed);
-        assert_eq!(search.result, None);
+        assert_eq!(search.result.as_deref(), Some("6 files"));
     }
 
     /// Real payload (`~/.oga/oga.db` id 244241): a bare `rg` command that
@@ -6435,7 +6755,9 @@ mod tests {
         );
         assert_eq!(
             failed.result.as_deref(),
-            Some("exit 1: zsh:1: no matches found: pwa/src/app/a/[app]/content/content-list.tsx")
+            Some(
+                "Exited with code 1 · zsh:1: no matches found: pwa/src/app/a/[app]/content/content-list.tsx"
+            )
         );
     }
 
@@ -6758,12 +7080,156 @@ mod tests {
         );
         assert_eq!(error.kind, EventKind::Error);
         assert_eq!(error.phase, EventPhase::Failed);
-        assert_eq!(error.verb.as_deref(), Some("Failed"));
-        assert_eq!(error.target.as_deref(), Some("Operation not permitted"));
+        assert_eq!(error.action_id, None);
         assert_eq!(
             error.detail.as_deref(),
             Some("Failed to read global AGENTS.md: Operation not permitted")
         );
+    }
+
+    /// Recorded Codex events (`.oga_tmp/events.db` #562736, #599848, #599606,
+    /// #599720, #562833, #562737, #562652), trimmed.
+    fn codex_view(item: serde_json::Value) -> TaskEventView {
+        event_view(
+            &provider_event(
+                1,
+                "agent.item.completed",
+                serde_json::json!({"type": "item.completed", "item": item}),
+            ),
+            Provider::Codex,
+        )
+    }
+
+    /// Bug: a failed build showed its first output line ("Building ...") as the
+    /// reason instead of the line that names the failure.
+    #[test]
+    fn codex_failed_command_names_the_error_line_not_the_setup_line() {
+        let view = codex_view(serde_json::json!({
+            "id": "item_13",
+            "type": "command_execution",
+            "command": "/bin/zsh -lc 'uv run pytest'",
+            "aggregated_output": "   Building mobile-cm @ file:///python\nDownloading pygments (1.2MiB)\n  \u{d7} Failed to build `mobile-cm`\n  \u{251c}\u{2500}\u{25b6} Failed to fetch: `https://pypi.org/simple/setuptools/`\n  \u{2570}\u{2500}\u{25b6} operation timed out\n",
+            "exit_code": 1,
+            "status": "failed"
+        }));
+        assert_eq!(view.phase, EventPhase::Failed);
+        assert_eq!(
+            view.result.as_deref(),
+            Some("Exited with code 1 \u{b7} operation timed out")
+        );
+
+        let git = codex_view(serde_json::json!({
+            "id": "item_20",
+            "type": "command_execution",
+            "command": "/bin/zsh -lc 'git status --short'",
+            "aggregated_output": " D python/.gitkeep\n M src/lib.rs\n",
+            "exit_code": 1,
+            "status": "failed"
+        }));
+        assert_eq!(
+            git.result.as_deref(),
+            Some("Exited with code 1 \u{b7} M src/lib.rs")
+        );
+    }
+
+    /// Bug: a search lost its command and never said how many results it found.
+    #[test]
+    fn codex_search_keeps_its_command_and_counts_its_results() {
+        let view = codex_view(serde_json::json!({
+            "id": "item_27",
+            "type": "command_execution",
+            "command": "/bin/zsh -lc \"rg -n \\\"server\\\" app\"",
+            "aggregated_output": "app/A.php:1:server\napp/B.php:4:server\napp/C.php:9:server\n",
+            "exit_code": 0,
+            "status": "completed"
+        }));
+        assert_eq!(view.kind, EventKind::Tool);
+        assert_eq!(view.result.as_deref(), Some("3 matches"));
+        let presentation = view.presentation.expect("presentation");
+        assert_eq!(presentation.exit_code, Some(0));
+        assert!(presentation.command.unwrap_or_default().contains("rg -n"));
+    }
+
+    /// Bug: a page fetch was labelled "Web search".
+    #[test]
+    fn codex_web_fetch_is_a_fetch_and_a_search_stays_a_search() {
+        let fetch = codex_view(serde_json::json!({
+            "id": "exec-221c",
+            "type": "web_search",
+            "query": "https://github.com/spatie/scotty",
+            "action": {"type": "other"}
+        }));
+        assert_eq!(fetch.title, "Fetch page");
+        assert_eq!(fetch.verb.as_deref(), Some("Fetched"));
+        assert_eq!(
+            fetch.target.as_deref(),
+            Some("https://github.com/spatie/scotty")
+        );
+
+        let search = codex_view(serde_json::json!({
+            "id": "exec-2d87",
+            "type": "web_search",
+            "query": "site:github.com/spatie/scotty ...",
+            "action": {"type": "search", "queries": ["a", "b"]}
+        }));
+        assert_eq!(search.title, "Web search");
+        assert_eq!(search.result.as_deref(), Some("2 queries"));
+    }
+
+    /// Bug: a transport error carries its text at the top level, so it
+    /// rendered as nothing; an error item was a call that printed its message
+    /// twice.
+    #[test]
+    fn codex_errors_show_their_message_once() {
+        let transport = event_view(
+            &provider_event(
+                1,
+                "agent.error",
+                serde_json::json!({"type": "error", "message": "Reconnecting... 2/5 (request timed out)"}),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(transport.kind, EventKind::Error);
+        assert_eq!(
+            transport.detail.as_deref(),
+            Some("Reconnecting... 2/5 (request timed out)")
+        );
+
+        let item = codex_view(serde_json::json!({
+            "id": "item_0",
+            "type": "error",
+            "message": "Skill descriptions were shortened to fit the skills context budget."
+        }));
+        assert_eq!(item.action_id, None);
+        assert_eq!(item.target, None);
+        assert_eq!(item.result, None);
+    }
+
+    /// Bug: a wait that names no subagent rendered as "Used Waiting for
+    /// subagents".
+    #[test]
+    fn codex_wait_names_its_subagents_or_stays_out_of_the_way() {
+        let empty = codex_view(serde_json::json!({
+            "id": "item_23",
+            "type": "collab_tool_call",
+            "tool": "wait",
+            "receiver_thread_ids": [],
+            "agents_states": {},
+            "status": "completed"
+        }));
+        assert_eq!(empty.minor, Some(true));
+
+        let named = codex_view(serde_json::json!({
+            "id": "item_6",
+            "type": "collab_tool_call",
+            "tool": "wait",
+            "receiver_thread_ids": ["a", "b"],
+            "agents_states": {},
+            "status": "completed"
+        }));
+        assert_eq!(named.verb.as_deref(), Some("Waited for"));
+        assert_eq!(named.target.as_deref(), Some("2 subagents"));
+        assert_ne!(named.minor, Some(true));
     }
 
     #[test]
@@ -7402,6 +7868,7 @@ mod tests {
             source_id: None,
             complete: None,
             minor: None,
+            content_index: None,
             subagents: Vec::new(),
         };
         let views = mark_repeated_retries(vec![view(1), view(2), view(3)]);
@@ -7470,7 +7937,8 @@ mod tests {
             "heartbeat",
             "session_captured",
             "session_reused",
-            "provider_retry",
+            "agent.turn.started",
+            "agent.thread.started",
             "broker_restarted",
             "worktree_recreated",
             "learn_routes",
@@ -7485,6 +7953,147 @@ mod tests {
                 "{event_type} should never reach the trace as a row"
             );
         }
+    }
+
+    fn recorded(id: i64, kind: &str, at: &str, payload: Value) -> TaskEvent {
+        TaskEvent {
+            created_at: at.into(),
+            ..provider_event(id, kind, payload)
+        }
+    }
+
+    /// Recorded from an OpenCode run on a rate-limited free model: the retry
+    /// was set, then cleared when a request went through.
+    #[test]
+    fn a_rate_limited_opencode_run_shows_one_retry_row_that_ends_recovered() {
+        let waiting = event_view(
+            &recorded(
+                519387,
+                "agent.session_info_update",
+                "2026-09-25T17:00:31.085Z",
+                serde_json::json!({"sessionUpdate": "session_info_update", "_meta": {"opencode/retry": {
+                    "attempt": 2,
+                    "nextRetryAt": "2026-09-25T17:00:33.393Z",
+                    "error": {"type": "provider.rate-limit", "message": "Rate limit exceeded: free-models-per-day-stealth. ", "status": 429},
+                }}}),
+            ),
+            Provider::OpenCode2,
+        );
+        let cleared = event_view(
+            &recorded(
+                519388,
+                "agent.session_info_update",
+                "2026-09-25T17:00:34.052Z",
+                serde_json::json!({"sessionUpdate": "session_info_update", "_meta": {"opencode/retry": null}}),
+            ),
+            Provider::OpenCode2,
+        );
+
+        assert_eq!(waiting.title, "Rate limited");
+        assert_eq!(
+            waiting.detail.as_deref(),
+            Some(
+                "Rate limited · retrying, attempt 2 · next try in 2s · Rate limit exceeded: free-models-per-day-stealth"
+            )
+        );
+        assert_ne!(waiting.minor, Some(true), "a reader has to see this");
+        assert_eq!(waiting.phase, EventPhase::Info, "a retry is not an error");
+        assert_eq!(cleared.title, "Retry succeeded");
+        assert_eq!(cleared.phase, EventPhase::Completed);
+        assert_eq!(cleared.detail.as_deref(), Some("Retry succeeded"));
+        assert_eq!(
+            waiting.action_id, cleared.action_id,
+            "the recovery lands on the row the reader was watching"
+        );
+    }
+
+    /// Recorded from an OpenCode 2 task whose provider hit its usage limit.
+    #[test]
+    fn a_retry_the_broker_made_names_the_attempt_and_the_providers_reason() {
+        let view = event_view(
+            &provider_event(
+                1048477,
+                "provider_retry",
+                serde_json::json!({
+                    "provider": "opencode-2", "kind": "turn_error", "attempt": 1, "maxAttempts": 2,
+                    "error": "the agent answered session/prompt with an error: Internal error: The usage limit has been reached",
+                }),
+            ),
+            Provider::OpenCode2,
+        );
+
+        assert_ne!(view.minor, Some(true));
+        assert_eq!(view.phase, EventPhase::Info);
+        assert_eq!(
+            view.detail.as_deref(),
+            Some("Provider error · retrying, attempt 1 of 2 · The usage limit has been reached")
+        );
+    }
+
+    /// Recorded: the same trace carried tombstones of 2, 3, 1 and 573.
+    #[test]
+    fn removed_history_says_how_many_updates_went() {
+        for (dropped, detail) in [
+            (573, "Older activity removed: 573 updates"),
+            (1, "Older activity removed: 1 update"),
+        ] {
+            let view = event_view(
+                &provider_event(
+                    617065,
+                    "history_dropped",
+                    serde_json::json!({"dropped": dropped, "before": "2026-09-22T01:56:06.256Z"}),
+                ),
+                Provider::Claude,
+            );
+            assert_eq!(view.title, "Older activity removed");
+            assert_eq!(view.detail.as_deref(), Some(detail));
+        }
+    }
+
+    #[test]
+    fn checkout_notices_give_the_reason_without_the_checkouts_path() {
+        let kept = event_view(
+            &provider_event(
+                1033663,
+                "checkout_kept",
+                serde_json::json!({"reason": "kept: it still has uncommitted changes", "error": null}),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(
+            kept.detail.as_deref(),
+            Some("Checkout kept: it still has uncommitted changes")
+        );
+
+        let failed = event_view(
+            &provider_event(
+                629976,
+                "checkout_removal_failed",
+                serde_json::json!({"error": "kept because it has uncommitted work: /Users/malico/.oga/worktrees/4ae850eb-90d4-4893-868d-a29c4e315da6", "branchOutcome": null}),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(
+            failed.detail.as_deref(),
+            Some("Checkout not removed: it has uncommitted work")
+        );
+    }
+
+    /// Recorded: the update carries every model the provider offers, ~41 KB.
+    #[test]
+    fn a_config_option_update_stays_behind_the_technical_toggle() {
+        let view = event_view(
+            &provider_event(
+                1043017,
+                "agent.config_option_update",
+                serde_json::json!({"sessionUpdate": "config_option_update", "configOptions": [
+                    {"id": "effort", "name": "Effort", "currentValue": "high", "options": []},
+                ]}),
+            ),
+            Provider::OpenCode2,
+        );
+        assert_eq!(view.minor, Some(true));
+        assert_eq!(view.title, "Settings updated");
     }
 
     /// Recorded from Claude's ACP probe, where every write the worker made was
@@ -7829,7 +8438,48 @@ mod tests {
     }
 
     #[test]
-    fn pi_message_stream_collapses_into_one_open_row() {
+    fn pi_streamed_slices_ship_with_their_text_and_slot() {
+        let update = |id: i64, update: serde_json::Value| {
+            event_view(
+                &provider_event(
+                    id,
+                    "agent.message_update",
+                    serde_json::json!({"type": "message_update", "assistantMessageEvent": update}),
+                ),
+                Provider::Pi,
+            )
+        };
+
+        let thinking = update(
+            1,
+            serde_json::json!({"type": "thinking_delta", "contentIndex": 0, "delta": " by understanding"}),
+        );
+        assert_eq!(thinking.kind, EventKind::Reasoning);
+        assert_eq!(thinking.detail.as_deref(), Some(" by understanding"));
+        assert_eq!(thinking.content_index, Some(0));
+        assert_eq!(thinking.action_id, None);
+
+        let text = update(
+            2,
+            serde_json::json!({"type": "text_delta", "contentIndex": 1, "delta": "I'll"}),
+        );
+        assert_eq!(text.kind, EventKind::Message);
+        assert_eq!(text.detail.as_deref(), Some("I'll"));
+        assert_eq!(text.content_index, Some(1));
+
+        for bracket in [
+            serde_json::json!({"type": "thinking_start", "contentIndex": 0}),
+            serde_json::json!({"type": "text_end", "contentIndex": 1, "content": "I'll look"}),
+            serde_json::json!({"type": "toolcall_delta", "contentIndex": 2, "delta": "git log"}),
+        ] {
+            let view = update(3, bracket);
+            assert_eq!(view.minor, Some(true));
+            assert_eq!(view.content_index, None);
+        }
+    }
+
+    #[test]
+    fn pi_assistant_message_ends_as_its_own_row_and_user_messages_still_fold() {
         let start = event_view(
             &provider_event(
                 1,
@@ -7841,88 +8491,12 @@ mod tests {
             ),
             Provider::Pi,
         );
-        assert_eq!(start.kind, EventKind::Message);
-        assert_eq!(start.title, "Agent message");
-        assert_eq!(start.phase, EventPhase::Started);
-        assert_eq!(start.complete, Some(false));
-        assert!(start.action_id.is_some());
-
-        // Shape observed in `~/.oga/oga.db` for pi tasks: a `message_update`
-        // repeats the growing `message` alongside `assistantMessageEvent`,
-        // thinking content first and the text block appended once the model
-        // starts responding.
-        let thinking_update = event_view(
-            &provider_event(
-                2,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {
-                        "type": "thinking_delta",
-                        "delta": "The",
-                        "partial": {
-                            "role": "assistant",
-                            "content": [{"type": "thinking", "thinking": "The"}]
-                        }
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(thinking_update.title, REASONING_TITLE);
-        assert_eq!(thinking_update.detail.as_deref(), Some("The"));
-
-        let text_update = event_view(
-            &provider_event(
-                3,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {
-                        "type": "text_delta",
-                        "delta": "## Resume",
-                        "partial": {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "thinking", "thinking": "The"},
-                                {"type": "text", "text": "## Resume"}
-                            ]
-                        }
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(text_update.detail.as_deref(), Some("## Resume"));
-        assert_eq!(text_update.action_id, start.action_id);
-
-        let text_update_again = event_view(
-            &provider_event(
-                4,
-                "agent.message_update",
-                serde_json::json!({
-                    "type": "message_update",
-                    "assistantMessageEvent": {
-                        "type": "text_delta",
-                        "delta": " flag",
-                        "partial": {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "thinking", "thinking": "The"},
-                                {"type": "text", "text": "## Resume flag"}
-                            ]
-                        }
-                    }
-                }),
-            ),
-            Provider::Pi,
-        );
-        assert_eq!(text_update_again.detail.as_deref(), Some("## Resume flag"));
-        assert_eq!(text_update_again.action_id, start.action_id);
+        assert_eq!(start.minor, Some(true));
+        assert_eq!(start.action_id, None);
 
         let end = event_view(
             &provider_event(
-                5,
+                2,
                 "agent.message_end",
                 serde_json::json!({
                     "type": "message_end",
@@ -7936,28 +8510,90 @@ mod tests {
         );
         assert_eq!(end.title, "Agent message");
         assert_eq!(end.phase, EventPhase::Completed);
-        assert_eq!(end.complete, Some(true));
         assert_eq!(end.detail.as_deref(), Some("Hello there"));
-        // The three events share the one correlation key `foldCalls` (the
-        // web activity domain) needs to settle them into a single row.
-        assert_eq!(end.action_id, start.action_id);
+        assert_eq!(end.minor, None);
+        assert_eq!(end.action_id, None);
 
-        // A second message opens a fresh row under the same key rather than
-        // reopening the one `message_end` already closed.
-        let next_start = event_view(
-            &provider_event(
-                6,
-                "agent.message_start",
-                serde_json::json!({
-                    "type": "message_start",
-                    "message": {"role": "user", "content": [{"type": "text", "text": "and then?"}]}
-                }),
-            ),
+        let user = |id: i64, kind: &str| {
+            event_view(
+                &provider_event(
+                    id,
+                    kind,
+                    serde_json::json!({
+                        "type": kind.strip_prefix("agent.").unwrap(),
+                        "message": {"role": "user", "content": [{"type": "text", "text": "and then?"}]}
+                    }),
+                ),
+                Provider::Pi,
+            )
+        };
+        assert!(user(3, "agent.message_start").action_id.is_some());
+        assert_eq!(
+            user(3, "agent.message_start").action_id,
+            user(4, "agent.message_end").action_id
+        );
+    }
+
+    #[test]
+    fn pi_failed_turn_shows_its_error_and_the_turn_usage_adds_up_to_the_task() {
+        let views = event_views(
+            vec![
+                provider_event(
+                    1,
+                    "agent.message_end",
+                    serde_json::json!({"type": "message_end", "message": {
+                        "role": "user", "content": [{"type": "text", "text": "write every page"}]}}),
+                ),
+                provider_event(
+                    2,
+                    "agent.tool_execution_end",
+                    serde_json::json!({"type": "tool_execution_end", "toolCallId": "call_1",
+                        "toolName": "bash", "args": {"command": "git log --oneline -20"},
+                        "result": {"content": [{"type": "text", "text": "971821c finish docs"}]}}),
+                ),
+                provider_event(
+                    3,
+                    "agent.message_end",
+                    serde_json::json!({"type": "message_end", "message": {
+                        "role": "toolResult", "toolCallId": "call_1",
+                        "content": [{"type": "text", "text": "971821c finish docs"}]}}),
+                ),
+                provider_event(
+                    4,
+                    "agent.turn_end",
+                    serde_json::json!({"type": "turn_end", "message": {
+                        "role": "assistant", "stopReason": "toolUse",
+                        "usage": {"input": 3135, "output": 247, "cacheRead": 12288,
+                            "cost": {"total": 0.0005424664}}}}),
+                ),
+                provider_event(
+                    5,
+                    "agent.turn_end",
+                    serde_json::json!({"type": "turn_end", "message": {
+                        "role": "assistant", "content": [], "stopReason": "error",
+                        "errorMessage": "403: FreeTierError",
+                        "usage": {"input": 0, "output": 0, "cost": {"total": 0}}}}),
+                ),
+            ],
             Provider::Pi,
         );
-        assert_eq!(next_start.title, "User message");
-        assert_eq!(next_start.phase, EventPhase::Started);
-        assert_eq!(next_start.action_id, start.action_id);
+
+        // The prompt and the tool output each already have a row elsewhere.
+        assert_eq!(views[0].minor, Some(true));
+        assert_eq!(views[1].action_id.as_deref(), Some("call_1"));
+        assert_eq!(views[2].action_id, views[1].action_id);
+        assert_eq!(views[2].minor, Some(true));
+
+        let usage = views[3].presentation.as_ref().unwrap();
+        assert_eq!(views[3].kind, EventKind::Usage);
+        assert_eq!(usage.tokens_in, Some(3135));
+        assert_eq!(usage.tokens_out, Some(247));
+        assert_eq!(usage.tokens_cached, Some(12288));
+        assert_eq!(usage.cost_usd, Some(0.0005424664));
+
+        assert_eq!(views[4].kind, EventKind::Error);
+        assert_eq!(views[4].phase, EventPhase::Failed);
+        assert_eq!(views[4].detail.as_deref(), Some("403: FreeTierError"));
     }
 
     #[test]
