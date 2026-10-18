@@ -26,7 +26,9 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{EventFeed, event_summary_view};
+use crate::{
+    EventFeed, ProviderTimeline, event_summary_view, first_event_ids, load_provider_timeline,
+};
 
 pub const MAX_SOCK_PATH: usize = 103;
 pub const MAX_PENDING_BYTES: usize = 4 * 1024 * 1024;
@@ -297,7 +299,7 @@ async fn serve_connection(
                 .filter_map(|event| {
                     let context = contexts.get(&event.task_id)?;
                     Some(crate::event_to_batch(
-                        &waited_event(event, context.provider),
+                        &waited_event(event, context.timeline.provider_for(event)),
                         Some(&context.task),
                     ))
                 })
@@ -445,7 +447,7 @@ fn unknown_task_message(task_id: &str) -> String {
 #[derive(Debug)]
 struct TaskContext {
     task: Task,
-    provider: Provider,
+    timeline: ProviderTimeline,
 }
 
 /// Store work for a watcher runs on the blocking pool, so replaying a long
@@ -522,16 +524,25 @@ fn load_task_contexts(
         })?;
         Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
     })?;
-    Ok(tasks
-        .into_iter()
-        .map(|task| {
-            let provider = providers
-                .get(&task.profile_id)
-                .copied()
-                .unwrap_or(Provider::Claude);
-            (task.id.clone(), TaskContext { task, provider })
-        })
-        .collect())
+    let first_events = first_event_ids(events);
+    store.with_connection(|connection| {
+        tasks
+            .into_iter()
+            .map(|task| {
+                let provider = providers
+                    .get(&task.profile_id)
+                    .copied()
+                    .unwrap_or(Provider::Claude);
+                let timeline = load_provider_timeline(
+                    connection,
+                    &task.id,
+                    provider,
+                    first_events.get(task.id.as_str()).copied().unwrap_or(0),
+                )?;
+                Ok((task.id.clone(), TaskContext { task, timeline }))
+            })
+            .collect()
+    })
 }
 
 fn waited_event(event: &TaskEvent, provider: Provider) -> WaitedTaskEvent {

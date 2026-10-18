@@ -1,0 +1,141 @@
+{
+ "claude": [
+  {
+   "type": "agent.tool_call",
+   "state": "running",
+   "payload": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "toolu_015LGEXV5dYmQJo6V43KQsky",
+    "title": "Task",
+    "kind": "think",
+    "rawInput": {},
+    "_meta": {
+     "claudeCode": {
+      "toolName": "Agent",
+      "subagent": true
+     }
+    }
+   }
+  },
+  {
+   "type": "agent.tool_call_update",
+   "state": "running",
+   "payload": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_015LGEXV5dYmQJo6V43KQsky",
+    "kind": "think",
+    "title": "Audit console: apps & settings",
+    "rawInput": {
+     "description": "Audit console: apps & settings"
+    },
+    "_meta": {
+     "claudeCode": {
+      "toolName": "Agent",
+      "subagent": true
+     }
+    }
+   }
+  },
+  {
+   "type": "agent.tool_call_update",
+   "state": "running",
+   "payload": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "toolu_015LGEXV5dYmQJo6V43KQsky",
+    "status": "completed",
+    "content": [
+     {
+      "type": "content",
+      "content": {
+       "type": "text",
+       "text": "Async agent launched successfully. (This tool result is internal metadata \u2014 never quote or paste any part of it, including the agentId below, into a user-facing"
+      }
+     }
+    ],
+    "rawOutput": [
+     {
+      "type": "text",
+      "text": "Async agent launched successfully. (This tool result is internal metadata \u2014 never quote or paste any part of it, including the agentId below, into a user-facing"
+     }
+    ],
+    "_meta": {
+     "claudeCode": {
+      "toolName": "Agent"
+     }
+    }
+   }
+  }
+ ],
+ "handoff": [
+  {
+   "type": "handed_off",
+   "state": "queued",
+   "payload": {
+    "previousState": "running",
+    "fromProfile": "claude",
+    "toProfile": "opencode2",
+    "fromModel": "opus",
+    "model": "openai/gpt-6.1-sol",
+    "attempt": 1,
+    "sessionPreserved": false,
+    "scopeUpdated": false
+   }
+  }
+ ],
+ "opencode2": [
+  {
+   "type": "agent.tool_call",
+   "state": "running",
+   "payload": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "call_708cd4cff66d4b85a7b94e40ac5ed1e5",
+    "title": "subagent",
+    "kind": "think",
+    "rawInput": {}
+   }
+  },
+  {
+   "type": "agent.tool_call_update",
+   "state": "running",
+   "payload": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call_708cd4cff66d4b85a7b94e40ac5ed1e5",
+    "kind": "think",
+    "status": "in_progress",
+    "title": "subagent",
+    "locations": [],
+    "rawInput": {
+     "agent": "explore",
+     "description": "Audit apps and settings",
+     "background": true,
+     "prompt": "Read-only audit, very thorough. Task: small safe developer console polish, no new features or API changes. Read AGENTS.md. Sweep app/app/(console) apps/settings"
+    }
+   }
+  },
+  {
+   "type": "agent.tool_call_update",
+   "state": "running",
+   "payload": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call_708cd4cff66d4b85a7b94e40ac5ed1e5",
+    "status": "completed",
+    "content": [
+     {
+      "type": "content",
+      "content": {
+       "type": "text",
+       "text": "The subagent is working in the background (sessionID: ses_ec7cd2bb8ffeG9tyQajlIn77JV). You will be notified automatically when it finishes.\nDO NOT sleep, poll f"
+      }
+     }
+    ],
+    "rawOutput": {
+     "metadata": {
+      "sessionID": "ses_ec7cd2bb8ffeG9tyQajlIn77JV",
+      "status": "running",
+      "truncated": false
+     }
+    }
+   }
+  }
+ ]
+}

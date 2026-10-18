@@ -2,6 +2,7 @@
 
 mod acp;
 pub mod socket;
+mod timeline;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -25,6 +26,7 @@ pub use acp::ModelRecovery;
 pub use socket::{
     EventSocketHandle, EventSocketOptions, SocketError, event_socket_path, start_event_socket,
 };
+pub use timeline::{ProviderBoundary, ProviderTimeline, first_event_ids, load_provider_timeline};
 
 pub const MAX_EVENT_PAYLOAD_BYTES: usize = 8 * 1024;
 const MAX_REASONING_PAYLOAD_BYTES: usize = 32 * 1024;
@@ -653,33 +655,37 @@ pub fn task_to_batch(task: &Task) -> BatchTask {
 /// Claude transcript repeats a call its hooks reported first. A hook carries no
 /// turn of its own, so it belongs to the turn the task was last in, and a call
 /// id seen again in another turn is another call.
-pub fn event_views(events: Vec<TaskEvent>, provider: Provider) -> Vec<TaskEventView> {
-    let mut calls = acp::AcpCalls::default();
-    let mut ended = HashMap::<String, Option<i64>>::new();
-    let mut claude_stream_subagents = HashMap::<String, String>::new();
-    let mut claude_acp_subagents = HashMap::<String, SubagentLink>::new();
-    let mut turn = None;
+pub fn event_views(events: Vec<TaskEvent>, timeline: &ProviderTimeline) -> Vec<TaskEventView> {
+    let mut state = ReadState::default();
+    let mut segment = None;
     events
         .into_iter()
         .map(|mut event| {
-            turn = event.turn_id.or(turn);
+            // One provider's calls and subagents never pair with another's.
+            let event_segment = timeline.segment(event.id);
+            if segment != Some(event_segment) {
+                state = ReadState::default();
+                segment = Some(event_segment);
+            }
+            let provider = timeline.provider_for(&event);
+            state.turn = event.turn_id.or(state.turn);
             // The row shows the payload as recorded, before the patch fills it in.
             let raw_text = raw_text(&event);
-            calls.patch(&mut event);
+            state.calls.patch(&mut event);
             let mut view = event_view_base(&event, provider, raw_text);
             annotate_subagents(
                 &mut view,
                 &event,
                 provider,
-                &mut claude_stream_subagents,
-                &mut claude_acp_subagents,
+                &mut state.claude_stream_subagents,
+                &mut state.claude_acp_subagents,
             );
             if let Some(id) = &view.action_id {
                 match view.phase {
                     EventPhase::Completed | EventPhase::Failed => {
-                        ended.insert(id.clone(), turn);
+                        state.ended.insert(id.clone(), state.turn);
                     }
-                    EventPhase::Started if ended.get(id) == Some(&turn) => {
+                    EventPhase::Started if state.ended.get(id) == Some(&state.turn) => {
                         view.minor = Some(true);
                     }
                     _ => {}
@@ -688,6 +694,16 @@ pub fn event_views(events: Vec<TaskEvent>, provider: Provider) -> Vec<TaskEventV
             view
         })
         .collect()
+}
+
+/// What reading a task's events in order carries from one to the next.
+#[derive(Default)]
+struct ReadState {
+    calls: acp::AcpCalls,
+    ended: HashMap<String, Option<i64>>,
+    claude_stream_subagents: HashMap<String, String>,
+    claude_acp_subagents: HashMap<String, SubagentLink>,
+    turn: Option<i64>,
 }
 
 fn annotate_subagents(
@@ -8575,7 +8591,7 @@ mod tests {
                         "usage": {"input": 0, "output": 0, "cost": {"total": 0}}}}),
                 ),
             ],
-            Provider::Pi,
+            &ProviderTimeline::single(Provider::Pi),
         );
 
         // The prompt and the tool output each already have a row elsewhere.
@@ -8742,7 +8758,7 @@ mod tests {
             ),
         ];
 
-        let views = event_views(events.into(), Provider::OpenCode);
+        let views = event_views(events.into(), &ProviderTimeline::single(Provider::OpenCode));
         let ended = &views[2];
 
         assert_eq!(ended.title, "Read file");
@@ -8772,7 +8788,10 @@ mod tests {
             acp_update(3, 10, ended),
         ];
 
-        let views = event_views(events.into(), Provider::Antigravity);
+        let views = event_views(
+            events.into(),
+            &ProviderTimeline::single(Provider::Antigravity),
+        );
 
         assert_eq!(views[1].title, "Read file");
         assert_eq!(views[1].verb.as_deref(), Some("Read"));
@@ -8823,7 +8842,7 @@ mod tests {
             transcript(6, "toolu_A", 1294),
         ];
 
-        let views = event_views(events.into(), Provider::Claude);
+        let views = event_views(events.into(), &ProviderTimeline::single(Provider::Claude));
 
         assert_eq!(views[2].phase, EventPhase::Completed);
         assert_eq!(views[3].action_id.as_deref(), Some("toolu_A"));
