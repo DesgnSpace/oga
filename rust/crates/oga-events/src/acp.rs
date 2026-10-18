@@ -21,7 +21,7 @@ const CONTEXT_TITLE: &str = "Context";
 
 const SUBJECT_LIMIT: usize = 120;
 
-const RECOVERY_ACTION_ID: &str = "model-response-recovery";
+pub(crate) const RECOVERY_ACTION_ID: &str = "model-response-recovery";
 
 /// Vendor-namespaced recovery metadata; unknown blocks are ignored.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +63,36 @@ impl ModelRecovery {
     }
 }
 
+/// OpenCode's own retry state: set while it waits to try a failed request
+/// again, and set to null once a request goes through.
+enum Retry<'a> {
+    Waiting {
+        attempt: Option<u64>,
+        next_try: Option<&'a str>,
+        status: Option<u64>,
+        kind: Option<&'a str>,
+        message: Option<&'a str>,
+    },
+    Cleared,
+}
+
+impl<'a> Retry<'a> {
+    fn from_meta(meta: &'a Value) -> Option<Self> {
+        let retry = meta.get("opencode/retry")?;
+        if retry.is_null() {
+            return Some(Self::Cleared);
+        }
+        let error = retry.get("error");
+        Some(Self::Waiting {
+            attempt: number_u64(retry.get("attempt")),
+            next_try: text_value(retry.get("nextRetryAt")),
+            status: number_u64(error.and_then(|error| error.get("status"))),
+            kind: text_value(error.and_then(|error| error.get("type"))),
+            message: text_value(error.and_then(|error| error.get("message"))),
+        })
+    }
+}
+
 pub(crate) fn acp_event_view(
     event: &TaskEvent,
     provider: Provider,
@@ -87,9 +117,15 @@ pub(crate) fn acp_event_view(
         "session_info_update" => Some(
             match payload.get("_meta").and_then(ModelRecovery::from_meta) {
                 Some(recovery) => recovery_view(event, provider, &recovery),
-                None => bookkeeping_view(event, provider, "Session updated"),
+                None => match payload.get("_meta").and_then(Retry::from_meta) {
+                    Some(retry) => retry_view(event, provider, &retry),
+                    None => bookkeeping_view(event, provider, "Session updated"),
+                },
             },
         ),
+        // The agent restating its model, effort and mode, with the full list
+        // of everything each could be set to.
+        "config_option_update" => Some(bookkeeping_view(event, provider, "Settings updated")),
         _ => None,
     }
 }
@@ -107,6 +143,84 @@ fn bookkeeping_view(event: &TaskEvent, provider: Provider, title: &str) -> TaskE
             minor: Some(true),
         },
     )
+}
+
+fn retry_view(event: &TaskEvent, provider: Provider, retry: &Retry) -> TaskEventView {
+    let (title, phase, detail) = match retry {
+        Retry::Cleared => ("Retry succeeded", EventPhase::Completed, None),
+        Retry::Waiting {
+            attempt,
+            next_try,
+            status,
+            kind,
+            message,
+        } => {
+            let title =
+                if *status == Some(429) || kind.is_some_and(|kind| kind.contains("rate-limit")) {
+                    "Rate limited"
+                } else if *status == Some(503) {
+                    "Provider unavailable"
+                } else {
+                    "Provider error"
+                };
+            let wait = next_try
+                .and_then(|next| seconds_between(&event.created_at, next))
+                .map(|seconds| format!("next try in {seconds}s"));
+            let parts = [
+                Some(title.to_owned()),
+                Some(match attempt {
+                    Some(attempt) => format!("retrying, attempt {attempt}"),
+                    None => "retrying".to_owned(),
+                }),
+                wait,
+                message
+                    .map(|message| message.trim().trim_end_matches('.').to_owned())
+                    .filter(|message| !message.is_empty())
+                    .map(|message| cap(&message, SUBJECT_LIMIT).0),
+            ];
+            (
+                title,
+                EventPhase::Info,
+                Some(parts.into_iter().flatten().collect::<Vec<_>>().join(" · ")),
+            )
+        }
+    };
+    let mut view = provider_view(
+        event,
+        provider,
+        EventKind::Lifecycle,
+        phase,
+        title,
+        ProviderViewOptions {
+            detail,
+            presentation: None,
+            minor: None,
+        },
+    );
+    view.action_id = Some(RECOVERY_ACTION_ID.to_owned());
+    view.source_id = Some(Some(RECOVERY_ACTION_ID.to_owned()));
+    view
+}
+
+/// Whole seconds from one `YYYY-MM-DDTHH:MM:SS[.fff]Z` stamp to a later one.
+fn seconds_between(from: &str, to: &str) -> Option<u64> {
+    fn epoch(stamp: &str) -> Option<i64> {
+        let (date, time) = stamp.strip_suffix('Z')?.split_once('T')?;
+        let mut date = date.split('-').map(|part| part.parse::<i64>().ok());
+        let (year, month, day) = (date.next()??, date.next()??, date.next()??);
+        let mut time = time.split(':');
+        let hours: i64 = time.next()?.parse().ok()?;
+        let minutes: i64 = time.next()?.parse().ok()?;
+        let seconds: f64 = time.next()?.parse().ok()?;
+        let year = if month <= 2 { year - 1 } else { year };
+        let era = year.div_euclid(400);
+        let year_of_era = year - era * 400;
+        let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        let days = era * 146_097 + day_of_era - 719_468;
+        Some(days * 86_400 + hours * 3_600 + minutes * 60 + seconds.round() as i64)
+    }
+    u64::try_from(epoch(to)? - epoch(from)?).ok()
 }
 
 fn recovery_view(event: &TaskEvent, provider: Provider, recovery: &ModelRecovery) -> TaskEventView {

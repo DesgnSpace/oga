@@ -78,7 +78,8 @@
     "phase": "started",
     "title": "Turn started",
     "rawText": "{\n  \"type\": \"turn.started\"\n}",
-    "createdAt": "2026-09-24T19:15:07.427Z"
+    "createdAt": "2026-09-24T19:15:07.427Z",
+    "minor": true
   },
   {
     "id": 499675,

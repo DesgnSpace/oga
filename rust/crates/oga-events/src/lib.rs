@@ -1223,8 +1223,9 @@ fn event_view_base(
     .map(str::to_owned)
     .or_else(|| hook_tool.map(|tool| tool_title_with_input(tool, hook_input)))
     .unwrap_or_else(|| event_title(&event.kind, &event.payload));
-    let action_id =
-        hook_action.and_then(|_| tree_value(&event.payload, &["tool_use_id", "toolUseId"]));
+    let action_id = hook_action
+        .and_then(|_| tree_value(&event.payload, &["tool_use_id", "toolUseId"]))
+        .or_else(|| (event.kind == "provider_retry").then(|| acp::RECOVERY_ACTION_ID.to_owned()));
     let action_fields = hook_action.map(|(tool, phase)| {
         let complete = matches!(phase, EventPhase::Completed | EventPhase::Failed);
         let presentation = hook_presentation(&event.payload);
@@ -4752,6 +4753,14 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
             skipped_detail(malformed + oversized, "line")
         }
         "event_dropped" => skipped_detail(1, "event"),
+        "provider_retry" => Some(provider_retry_detail(payload)),
+        "history_dropped" => {
+            let count = number_u64(payload.get("dropped"))?;
+            (count > 0).then(|| format!("{count} update{}", if count == 1 { "" } else { "s" }))
+        }
+        "checkout_kept" | "checkout_removal_failed" => {
+            tree_value(payload, &["reason", "error"]).map(|text| checkout_reason(&text))
+        }
         "events_truncated" => skipped_detail(number_u64(payload.get("dropped"))?, "event"),
         "scope_auto_completed" => {
             let added = payload
@@ -4780,6 +4789,51 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
             })
             .or_else(|| tree_value(payload, &["provider", "model"])),
     }
+}
+
+/// What a retry the broker made on its own says: which attempt, and why the
+/// last one failed, without the transport's wording.
+fn provider_retry_detail(payload: &BTreeMap<String, Value>) -> String {
+    let stage = match (
+        number_u64(payload.get("attempt")),
+        number_u64(payload.get("maxAttempts")),
+    ) {
+        (Some(attempt), Some(limit)) => format!("retrying, attempt {attempt} of {limit}"),
+        _ => "retrying".to_owned(),
+    };
+    let reason = tree_value(payload, &["error"]).map(|error| {
+        let error = error
+            .strip_prefix("the agent answered session/prompt with an error: ")
+            .unwrap_or(&error);
+        error
+            .strip_prefix("Internal error: ")
+            .unwrap_or(error)
+            .to_owned()
+    });
+    match reason {
+        Some(reason) => format!("Provider error · {stage} · {reason}"),
+        None => format!("Provider error · {stage}"),
+    }
+}
+
+/// A checkout notice's reason without the broker's phrasing or the absolute
+/// path of a checkout the reader never sees.
+fn checkout_reason(text: &str) -> String {
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .filter(|word| !is_checkout_path(word))
+        .collect();
+    let text = words.join(" ");
+    let text = text.trim_end_matches([':', ' ']);
+    let text = text
+        .strip_prefix("kept because ")
+        .or_else(|| text.strip_prefix("kept: "))
+        .unwrap_or(text);
+    text.to_owned()
+}
+
+fn is_checkout_path(word: &str) -> bool {
+    word.trim_end_matches([':', ',', '.']).starts_with('/') && word.contains("/worktrees/")
 }
 
 fn skipped_detail(count: u64, noun: &str) -> Option<String> {
@@ -4859,7 +4913,7 @@ fn event_phase(
     }
     if matches!(
         event_type,
-        "agent.system" | "agent.assistant" | "transport_fallback"
+        "agent.system" | "agent.assistant" | "transport_fallback" | "provider_retry"
     ) || (event_type == "agent.hook" && !payload.contains_key("tool_name"))
     {
         EventPhase::Info
@@ -5007,7 +5061,8 @@ fn lifecycle_title(event_type: &str) -> String {
         "checkout_kept" => "Checkout kept",
         "checkout_removal_failed" => "Checkout removal failed",
         "line_dropped" | "event_dropped" | "events_truncated" => ACTIVITY_SKIPPED_TITLE,
-        "history_dropped" => "History removed",
+        "history_dropped" => "Older activity removed",
+        "provider_retry" => "Provider error",
         "handed_off" => "Handed off",
         "handoff_brief" => "Handoff brief",
         "run_interrupted" => "Run stopped",
@@ -5163,7 +5218,9 @@ fn is_minor_event(event_type: &str, payload: &BTreeMap<String, Value>) -> Option
         "heartbeat"
             | "session_captured"
             | "session_reused"
-            | "provider_retry"
+            | "agent.turn.started"
+            | "agent.turn.completed"
+            | "agent.thread.started"
             | "broker_restarted"
             | "worktree_recreated"
             | "learn_routes"
@@ -7598,7 +7655,8 @@ mod tests {
             "heartbeat",
             "session_captured",
             "session_reused",
-            "provider_retry",
+            "agent.turn.started",
+            "agent.thread.started",
             "broker_restarted",
             "worktree_recreated",
             "learn_routes",
@@ -7613,6 +7671,140 @@ mod tests {
                 "{event_type} should never reach the trace as a row"
             );
         }
+    }
+
+    fn recorded(id: i64, kind: &str, at: &str, payload: Value) -> TaskEvent {
+        TaskEvent {
+            created_at: at.into(),
+            ..provider_event(id, kind, payload)
+        }
+    }
+
+    /// Recorded from an OpenCode run on a rate-limited free model: the retry
+    /// was set, then cleared when a request went through.
+    #[test]
+    fn a_rate_limited_opencode_run_shows_one_retry_row_that_ends_recovered() {
+        let waiting = event_view(
+            &recorded(
+                519387,
+                "agent.session_info_update",
+                "2026-09-25T17:00:31.085Z",
+                serde_json::json!({"sessionUpdate": "session_info_update", "_meta": {"opencode/retry": {
+                    "attempt": 2,
+                    "nextRetryAt": "2026-09-25T17:00:33.393Z",
+                    "error": {"type": "provider.rate-limit", "message": "Rate limit exceeded: free-models-per-day-stealth. ", "status": 429},
+                }}}),
+            ),
+            Provider::OpenCode2,
+        );
+        let cleared = event_view(
+            &recorded(
+                519388,
+                "agent.session_info_update",
+                "2026-09-25T17:00:34.052Z",
+                serde_json::json!({"sessionUpdate": "session_info_update", "_meta": {"opencode/retry": null}}),
+            ),
+            Provider::OpenCode2,
+        );
+
+        assert_eq!(waiting.title, "Rate limited");
+        assert_eq!(
+            waiting.detail.as_deref(),
+            Some(
+                "Rate limited · retrying, attempt 2 · next try in 2s · Rate limit exceeded: free-models-per-day-stealth"
+            )
+        );
+        assert_ne!(waiting.minor, Some(true), "a reader has to see this");
+        assert_eq!(waiting.phase, EventPhase::Info, "a retry is not an error");
+        assert_eq!(cleared.title, "Retry succeeded");
+        assert_eq!(cleared.phase, EventPhase::Completed);
+        assert_eq!(
+            waiting.action_id, cleared.action_id,
+            "the recovery lands on the row the reader was watching"
+        );
+    }
+
+    /// Recorded from an OpenCode 2 task whose provider hit its usage limit.
+    #[test]
+    fn a_retry_the_broker_made_names_the_attempt_and_the_providers_reason() {
+        let view = event_view(
+            &provider_event(
+                1048477,
+                "provider_retry",
+                serde_json::json!({
+                    "provider": "opencode-2", "kind": "turn_error", "attempt": 1, "maxAttempts": 2,
+                    "error": "the agent answered session/prompt with an error: Internal error: The usage limit has been reached",
+                }),
+            ),
+            Provider::OpenCode2,
+        );
+
+        assert_ne!(view.minor, Some(true));
+        assert_eq!(view.phase, EventPhase::Info);
+        assert_eq!(
+            view.detail.as_deref(),
+            Some("Provider error · retrying, attempt 1 of 2 · The usage limit has been reached")
+        );
+    }
+
+    /// Recorded: the same trace carried tombstones of 2, 3, 1 and 573.
+    #[test]
+    fn removed_history_says_how_many_updates_went() {
+        for (dropped, detail) in [(573, "573 updates"), (1, "1 update")] {
+            let view = event_view(
+                &provider_event(
+                    617065,
+                    "history_dropped",
+                    serde_json::json!({"dropped": dropped, "before": "2026-09-22T01:56:06.256Z"}),
+                ),
+                Provider::Claude,
+            );
+            assert_eq!(view.title, "Older activity removed");
+            assert_eq!(view.detail.as_deref(), Some(detail));
+        }
+    }
+
+    #[test]
+    fn checkout_notices_give_the_reason_without_the_checkouts_path() {
+        let kept = event_view(
+            &provider_event(
+                1033663,
+                "checkout_kept",
+                serde_json::json!({"reason": "kept: it still has uncommitted changes", "error": null}),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(
+            kept.detail.as_deref(),
+            Some("it still has uncommitted changes")
+        );
+
+        let failed = event_view(
+            &provider_event(
+                629976,
+                "checkout_removal_failed",
+                serde_json::json!({"error": "kept because it has uncommitted work: /Users/malico/.oga/worktrees/4ae850eb-90d4-4893-868d-a29c4e315da6", "branchOutcome": null}),
+            ),
+            Provider::Claude,
+        );
+        assert_eq!(failed.detail.as_deref(), Some("it has uncommitted work"));
+    }
+
+    /// Recorded: the update carries every model the provider offers, ~41 KB.
+    #[test]
+    fn a_config_option_update_stays_behind_the_technical_toggle() {
+        let view = event_view(
+            &provider_event(
+                1043017,
+                "agent.config_option_update",
+                serde_json::json!({"sessionUpdate": "config_option_update", "configOptions": [
+                    {"id": "effort", "name": "Effort", "currentValue": "high", "options": []},
+                ]}),
+            ),
+            Provider::OpenCode2,
+        );
+        assert_eq!(view.minor, Some(true));
+        assert_eq!(view.title, "Settings updated");
     }
 
     /// Recorded from Claude's ACP probe, where every write the worker made was
