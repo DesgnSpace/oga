@@ -374,10 +374,10 @@ pub fn parse_fx_models(raw: &str, profile: &Profile) -> Vec<ModelInfo> {
         .collect()
 }
 
-/// The models a Cursor ACP session offers, read from the answer that opened
-/// it. Each id carries its own thinking, context, and speed choices, so no
+/// The models an ACP session offers, read from the answer that opened it.
+/// Each id carries its own thinking, context, and speed choices, so no
 /// effort ladder is offered beside it.
-pub fn cursor_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
+pub fn acp_session_models(opened: &Value, profile: &Profile) -> Vec<ModelInfo> {
     opened["models"]["availableModels"]
         .as_array()
         .unwrap_or(&Vec::new())

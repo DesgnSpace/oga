@@ -10,8 +10,8 @@ pub mod traits;
 pub mod usage;
 
 pub use catalog::{
-    CLAUDE_ALIASES, CLAUDE_EFFORTS, PI_EFFORTS, claude_models, claude_models_from_catalog,
-    cursor_models, model_capabilities, parse_antigravity_models, parse_codex_models,
+    CLAUDE_ALIASES, CLAUDE_EFFORTS, PI_EFFORTS, acp_session_models, claude_models,
+    claude_models_from_catalog, model_capabilities, parse_antigravity_models, parse_codex_models,
     parse_fx_models, parse_opencode_models, parse_opencode_v2_models, parse_pi_models,
     select_model_rows,
 };

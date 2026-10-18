@@ -29,7 +29,7 @@ use oga_providers::{
     opencode_executable, opencode2_executable, unset_environment_for,
 };
 use oga_routing::{
-    claude_models, claude_models_from_catalog, cursor_models, format_rfc3339_ms, now_ms,
+    acp_session_models, claude_models, claude_models_from_catalog, format_rfc3339_ms, now_ms,
     parse_antigravity_models, parse_codex_models, parse_fx_models, parse_opencode_models,
     parse_opencode_v2_models, parse_pi_models, select_model_rows, summarize_usage,
 };
@@ -1238,12 +1238,12 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
 /// without ever prompting it.
 async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
     let opened = open_acp_session(profile, "cursor-agent", CURSOR_LOGIN).await?;
-    Ok(cursor_models(&opened, profile))
+    Ok(acp_session_models(&opened, profile))
 }
 
 async fn discover_command_code_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
     let opened = open_acp_session(profile, "command-code", COMMAND_CODE_LOGIN).await?;
-    Ok(cursor_models(&opened, profile))
+    Ok(acp_session_models(&opened, profile))
 }
 
 async fn open_acp_session(profile: &Profile, binary: &str, method_id: &str) -> Result<Value, ()> {
