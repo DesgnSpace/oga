@@ -822,11 +822,30 @@ fn annotate_subagents(
                 Some("wait" | "close_agent") => {
                     view.kind = EventKind::Tool;
                     view.title = if tool == Some("wait") {
-                        "Waiting for subagents"
+                        "Wait for subagents"
                     } else {
                         "Closed subagent"
                     }
                     .into();
+                    if tool == Some("wait") {
+                        let complete = view.complete == Some(true);
+                        view.verb = Some(
+                            if complete {
+                                "Waited for"
+                            } else {
+                                "Waiting for"
+                            }
+                            .into(),
+                        );
+                        view.target = Some(match receiver_ids.len() {
+                            0 | 1 => "subagent".into(),
+                            count => format!("{count} subagents"),
+                        });
+                        // A wait that names no subagent says nothing a reader can use.
+                        if receiver_ids.is_empty() {
+                            view.minor = Some(true);
+                        }
+                    }
                     let states = item
                         .and_then(|item| item.get("agents_states"))
                         .and_then(Value::as_object);
@@ -2063,10 +2082,11 @@ fn item_event_view(
         });
         return Some(reasoning_view(event, provider, text));
     }
+    // An error item is a notice, not a call: it has no second phase to pair
+    // with, and as a call its message would print twice on one row.
     if item_type == "error" {
         let message = string_value(item, &["message", "error"]);
-        let target = message.as_deref().map(error_target);
-        let mut view = provider_view(
+        return Some(provider_view(
             event,
             provider,
             EventKind::Error,
@@ -2077,13 +2097,7 @@ fn item_event_view(
                 presentation: None,
                 minor: None,
             },
-        );
-        view.verb = Some("Failed".to_owned());
-        view.target = target;
-        view.complete = Some(true);
-        view.action_id = item_id.clone();
-        view.source_id = Some(item_id);
-        return Some(view);
+        ));
     }
 
     let (title, verb, presentation) = match item_type {
@@ -2095,6 +2109,7 @@ fn item_event_view(
             // tool call, so it shares their search-command detection instead
             // of always rendering as a generic command row.
             let search = search_command_subject(&command);
+            let output = string_value(item, &["aggregated_output"]);
             let mut presentation = usage_presentation();
             match &search {
                 Some(subject) => {
@@ -2104,30 +2119,21 @@ fn item_event_view(
                 None => {
                     presentation.kind = PresentationType::Command;
                     presentation.text = Some(command_summary(&command));
-                    presentation.command = Some(command);
-                    presentation.exit_code = exit_code;
                 }
             }
-            // A non-zero exit is definitive for failure; the first non-blank
-            // line of output is the only part of a long run worth showing. A
-            // clean search reports its own match count, same as every other
-            // provider's search row.
+            // A search keeps the line it ran so its expansion can show the
+            // output under it, same as any other command.
+            presentation.command = Some(command.clone());
+            presentation.exit_code = exit_code;
+            // A non-zero exit is definitive for failure, and the reason is the
+            // line of output that names the error. A clean search reports its
+            // own match count, or the number of result lines it printed.
             presentation.outcome = match exit_code.filter(|code| *code != 0) {
-                Some(code) => {
-                    let first_line =
-                        string_value(item, &["aggregated_output"]).and_then(|output| {
-                            output
-                                .lines()
-                                .find(|line| !line.trim().is_empty())
-                                .map(str::to_owned)
-                        });
-                    Some(match first_line {
-                        Some(line) => format!("exit {code}: {}", cap(line.trim(), 120).0),
-                        None => format!("exit {code}"),
-                    })
-                }
-                None if search.is_some() => string_value(item, &["aggregated_output"])
-                    .and_then(|output| search_outcome_from_text(&output)),
+                Some(code) => Some(exit_summary(code, output.as_deref())),
+                None if search.is_some() => output
+                    .as_deref()
+                    .and_then(search_outcome_from_text)
+                    .or_else(|| search_result_count(&command, output.as_deref())),
                 None => None,
             };
             (
@@ -2211,11 +2217,30 @@ fn item_event_view(
                 .or_else(|| string_value(item, &["query"]));
             presentation.outcome =
                 (queries.len() > 1).then(|| format!("{} queries", queries.len()));
-            (
-                "Web search".to_owned(),
-                tool_verb("websearch", complete),
-                Some(presentation),
-            )
+            // Codex runs a page fetch through this item too: an `other` action
+            // whose query is the address. The started event has no query yet,
+            // so it reads as a search until the address arrives.
+            let fetch = item
+                .get("action")
+                .and_then(|action| text_value(action.get("type")))
+                == Some("other")
+                && presentation
+                    .text
+                    .as_deref()
+                    .is_some_and(|query| query.starts_with("http"));
+            if fetch {
+                (
+                    "Fetch page".to_owned(),
+                    tool_verb("webfetch", complete),
+                    Some(presentation),
+                )
+            } else {
+                (
+                    "Web search".to_owned(),
+                    tool_verb("websearch", complete),
+                    Some(presentation),
+                )
+            }
         }
         "todo_list" => {
             let items = item.get("items").and_then(Value::as_array)?;
@@ -2317,9 +2342,9 @@ fn item_event_view(
     Some(view)
 }
 
-/// The most useful phrase in a Codex error item's message: the words after the
-/// last `: `, which is usually the underlying OS/permission reason rather than
-/// the "Failed to ..." framing around it.
+/// The most useful phrase in an error message: the words after the last `: `,
+/// which is usually the underlying OS/permission reason rather than the
+/// "Failed to ..." framing around it.
 fn error_target(message: &str) -> String {
     let message = message.trim();
     let phrase = message
@@ -3035,8 +3060,11 @@ fn agent_error_view(
     payload: &BTreeMap<String, Value>,
 ) -> TaskEventView {
     let error = payload.get("error").and_then(Value::as_object);
+    // Codex sends a transport error's text at the top level, other agents nest
+    // it under `error`.
     let message = error
         .and_then(|value| text_value(value.get("message")))
+        .or_else(|| text_value(payload.get("message")))
         .map(str::to_owned);
     let error_type = error.and_then(|value| text_value(value.get("type")));
     let status = error.and_then(|value| number_u64(value.get("status")));
@@ -4040,6 +4068,103 @@ fn input_command(input: Option<&Map<String, Value>>) -> Option<String> {
 fn search_output_outcome(state: &Map<String, Value>) -> Option<String> {
     string_value(state, &["output", "stdout", "result", "summary"])
         .and_then(|output| search_outcome_from_text(&output))
+}
+
+/// How a failed command ended: its exit code and the line of output that
+/// names the error.
+pub(crate) fn exit_summary(code: i64, output: Option<&str>) -> String {
+    match output.and_then(failure_reason) {
+        Some(reason) => format!("Exited with code {code} \u{b7} {reason}"),
+        None => format!("Exited with code {code}"),
+    }
+}
+
+/// Words that mark a line of output as the failure rather than the setup before
+/// it: errors, failing tests, and the usual missing-file and permission
+/// messages.
+const FAILURE_MARKERS: [&str; 12] = [
+    "error",
+    "\u{d7}",
+    "fail",
+    "panic",
+    "fatal",
+    "exception",
+    "enoent",
+    "no such file",
+    "not found",
+    "denied",
+    "not permitted",
+    "timed out",
+];
+
+/// The most useful line of a failed command's output: the last one that names
+/// an error, else the last line printed. Terminal colour codes and the tree
+/// glyphs some tools draw in front of a cause are not part of the reason.
+fn failure_reason(output: &str) -> Option<String> {
+    let lines = output
+        .lines()
+        .map(|line| {
+            let plain = strip_terminal_codes(line);
+            plain
+                .trim_start_matches(|character: char| {
+                    character.is_whitespace()
+                        || matches!(
+                            character,
+                            '\u{2502}'
+                                | '\u{251c}'
+                                | '\u{2570}'
+                                | '\u{2500}'
+                                | '\u{25b6}'
+                                | '\u{2514}'
+                        )
+                })
+                .trim_end()
+                .to_owned()
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let line = lines
+        .iter()
+        .rev()
+        .find(|line| {
+            let lower = line.to_ascii_lowercase();
+            FAILURE_MARKERS.iter().any(|marker| lower.contains(marker))
+        })
+        .or_else(|| lines.last())?;
+    Some(cap(line, 120).0)
+}
+
+fn strip_terminal_codes(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\u{1b}' || characters.peek() != Some(&'[') {
+            plain.push(character);
+            continue;
+        }
+        characters.next();
+        for code in characters.by_ref() {
+            if code.is_ascii_alphabetic() {
+                break;
+            }
+        }
+    }
+    plain
+}
+
+/// What a search that printed no count of its own found: one result per output
+/// line, files when the command lists them and matches when it greps.
+fn search_result_count(command: &str, output: Option<&str>) -> Option<String> {
+    let found = output.map_or(0, |text| {
+        text.lines().filter(|line| !line.trim().is_empty()).count()
+    }) as u64;
+    let body = shell_body(command);
+    let lists_files = body.contains(" --files") || body.starts_with("find ");
+    Some(format_search_outcome(
+        found,
+        if lists_files { "file" } else { "match" },
+        false,
+    ))
 }
 
 fn search_outcome_from_text(output: &str) -> Option<String> {
@@ -6548,7 +6673,7 @@ mod tests {
         assert_eq!(completed.verb.as_deref(), Some("Read"));
         assert_eq!(
             completed.result.as_deref(),
-            Some("exit 1: sed: SKILL.md: No such file or directory")
+            Some("Exited with code 1 · sed: SKILL.md: No such file or directory")
         );
     }
 
@@ -6589,7 +6714,7 @@ mod tests {
             )
         );
         assert_eq!(search.phase, EventPhase::Completed);
-        assert_eq!(search.result, None);
+        assert_eq!(search.result.as_deref(), Some("6 files"));
     }
 
     /// Real payload (`~/.oga/oga.db` id 244241): a bare `rg` command that
@@ -6630,7 +6755,9 @@ mod tests {
         );
         assert_eq!(
             failed.result.as_deref(),
-            Some("exit 1: zsh:1: no matches found: pwa/src/app/a/[app]/content/content-list.tsx")
+            Some(
+                "Exited with code 1 · zsh:1: no matches found: pwa/src/app/a/[app]/content/content-list.tsx"
+            )
         );
     }
 
@@ -6953,12 +7080,156 @@ mod tests {
         );
         assert_eq!(error.kind, EventKind::Error);
         assert_eq!(error.phase, EventPhase::Failed);
-        assert_eq!(error.verb.as_deref(), Some("Failed"));
-        assert_eq!(error.target.as_deref(), Some("Operation not permitted"));
+        assert_eq!(error.action_id, None);
         assert_eq!(
             error.detail.as_deref(),
             Some("Failed to read global AGENTS.md: Operation not permitted")
         );
+    }
+
+    /// Recorded Codex events (`.oga_tmp/events.db` #562736, #599848, #599606,
+    /// #599720, #562833, #562737, #562652), trimmed.
+    fn codex_view(item: serde_json::Value) -> TaskEventView {
+        event_view(
+            &provider_event(
+                1,
+                "agent.item.completed",
+                serde_json::json!({"type": "item.completed", "item": item}),
+            ),
+            Provider::Codex,
+        )
+    }
+
+    /// Bug: a failed build showed its first output line ("Building ...") as the
+    /// reason instead of the line that names the failure.
+    #[test]
+    fn codex_failed_command_names_the_error_line_not_the_setup_line() {
+        let view = codex_view(serde_json::json!({
+            "id": "item_13",
+            "type": "command_execution",
+            "command": "/bin/zsh -lc 'uv run pytest'",
+            "aggregated_output": "   Building mobile-cm @ file:///python\nDownloading pygments (1.2MiB)\n  \u{d7} Failed to build `mobile-cm`\n  \u{251c}\u{2500}\u{25b6} Failed to fetch: `https://pypi.org/simple/setuptools/`\n  \u{2570}\u{2500}\u{25b6} operation timed out\n",
+            "exit_code": 1,
+            "status": "failed"
+        }));
+        assert_eq!(view.phase, EventPhase::Failed);
+        assert_eq!(
+            view.result.as_deref(),
+            Some("Exited with code 1 \u{b7} operation timed out")
+        );
+
+        let git = codex_view(serde_json::json!({
+            "id": "item_20",
+            "type": "command_execution",
+            "command": "/bin/zsh -lc 'git status --short'",
+            "aggregated_output": " D python/.gitkeep\n M src/lib.rs\n",
+            "exit_code": 1,
+            "status": "failed"
+        }));
+        assert_eq!(
+            git.result.as_deref(),
+            Some("Exited with code 1 \u{b7} M src/lib.rs")
+        );
+    }
+
+    /// Bug: a search lost its command and never said how many results it found.
+    #[test]
+    fn codex_search_keeps_its_command_and_counts_its_results() {
+        let view = codex_view(serde_json::json!({
+            "id": "item_27",
+            "type": "command_execution",
+            "command": "/bin/zsh -lc \"rg -n \\\"server\\\" app\"",
+            "aggregated_output": "app/A.php:1:server\napp/B.php:4:server\napp/C.php:9:server\n",
+            "exit_code": 0,
+            "status": "completed"
+        }));
+        assert_eq!(view.kind, EventKind::Tool);
+        assert_eq!(view.result.as_deref(), Some("3 matches"));
+        let presentation = view.presentation.expect("presentation");
+        assert_eq!(presentation.exit_code, Some(0));
+        assert!(presentation.command.unwrap_or_default().contains("rg -n"));
+    }
+
+    /// Bug: a page fetch was labelled "Web search".
+    #[test]
+    fn codex_web_fetch_is_a_fetch_and_a_search_stays_a_search() {
+        let fetch = codex_view(serde_json::json!({
+            "id": "exec-221c",
+            "type": "web_search",
+            "query": "https://github.com/spatie/scotty",
+            "action": {"type": "other"}
+        }));
+        assert_eq!(fetch.title, "Fetch page");
+        assert_eq!(fetch.verb.as_deref(), Some("Fetched"));
+        assert_eq!(
+            fetch.target.as_deref(),
+            Some("https://github.com/spatie/scotty")
+        );
+
+        let search = codex_view(serde_json::json!({
+            "id": "exec-2d87",
+            "type": "web_search",
+            "query": "site:github.com/spatie/scotty ...",
+            "action": {"type": "search", "queries": ["a", "b"]}
+        }));
+        assert_eq!(search.title, "Web search");
+        assert_eq!(search.result.as_deref(), Some("2 queries"));
+    }
+
+    /// Bug: a transport error carries its text at the top level, so it
+    /// rendered as nothing; an error item was a call that printed its message
+    /// twice.
+    #[test]
+    fn codex_errors_show_their_message_once() {
+        let transport = event_view(
+            &provider_event(
+                1,
+                "agent.error",
+                serde_json::json!({"type": "error", "message": "Reconnecting... 2/5 (request timed out)"}),
+            ),
+            Provider::Codex,
+        );
+        assert_eq!(transport.kind, EventKind::Error);
+        assert_eq!(
+            transport.detail.as_deref(),
+            Some("Reconnecting... 2/5 (request timed out)")
+        );
+
+        let item = codex_view(serde_json::json!({
+            "id": "item_0",
+            "type": "error",
+            "message": "Skill descriptions were shortened to fit the skills context budget."
+        }));
+        assert_eq!(item.action_id, None);
+        assert_eq!(item.target, None);
+        assert_eq!(item.result, None);
+    }
+
+    /// Bug: a wait that names no subagent rendered as "Used Waiting for
+    /// subagents".
+    #[test]
+    fn codex_wait_names_its_subagents_or_stays_out_of_the_way() {
+        let empty = codex_view(serde_json::json!({
+            "id": "item_23",
+            "type": "collab_tool_call",
+            "tool": "wait",
+            "receiver_thread_ids": [],
+            "agents_states": {},
+            "status": "completed"
+        }));
+        assert_eq!(empty.minor, Some(true));
+
+        let named = codex_view(serde_json::json!({
+            "id": "item_6",
+            "type": "collab_tool_call",
+            "tool": "wait",
+            "receiver_thread_ids": ["a", "b"],
+            "agents_states": {},
+            "status": "completed"
+        }));
+        assert_eq!(named.verb.as_deref(), Some("Waited for"));
+        assert_eq!(named.target.as_deref(), Some("2 subagents"));
+        assert_ne!(named.minor, Some(true));
     }
 
     #[test]

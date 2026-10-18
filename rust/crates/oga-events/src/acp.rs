@@ -9,10 +9,10 @@ use oga_domain::{
 use serde_json::{Map, Value};
 
 use crate::{
-    ProviderViewOptions, cap, compact_change, compact_output, exit_code, file_presentation,
-    format_cost, humanize, mcp_result_text, message_presentation, number_f64, number_u64,
-    oga_operation, patch_summary, presentation_detail, presentation_kind, presentation_target,
-    provider_view, reasoning_view, string_value, text_value,
+    ProviderViewOptions, cap, compact_change, compact_output, exit_code, exit_summary,
+    file_presentation, format_cost, humanize, mcp_result_text, message_presentation, number_f64,
+    number_u64, oga_operation, patch_summary, presentation_detail, presentation_kind,
+    presentation_target, provider_view, reasoning_view, string_value, text_value,
     tool_presentation as tool_input_presentation, tool_title_with_input, tool_verb_with_input,
     usage_presentation,
 };
@@ -929,14 +929,10 @@ fn command_exit(payload: &BTreeMap<String, Value>) -> Option<i64> {
 }
 
 fn exit_outcome(code: i64, payload: &BTreeMap<String, Value>) -> String {
-    let reason = content_text(payload)
-        .filter(|text| !text.starts_with("Exited with code "))
-        .and_then(|text| text.lines().find(|line| !line.trim().is_empty()))
-        .map(|line| cap(line.trim(), SUBJECT_LIMIT).0);
-    match reason {
-        Some(reason) => format!("Exited with code {code} · {reason}"),
-        None => format!("Exited with code {code}"),
-    }
+    exit_summary(
+        code,
+        content_text(payload).filter(|text| !text.starts_with("Exited with code ")),
+    )
 }
 
 fn plan_view(
