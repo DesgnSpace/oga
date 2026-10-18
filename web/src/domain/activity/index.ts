@@ -297,7 +297,9 @@ export const ActivityStory = {
   },
   composeWithState,
   responseEvent(events: TaskEventView[]): TaskEventView | undefined {
-    return [...normalizeAntigravityEvents(events)].reverse().find((event) => event.kind === "message" && event.minor !== true);
+    return joinStreamedText(normalizeAntigravityEvents(events))
+      .reverse()
+      .find((event) => event.kind === "message" && event.minor !== true);
   },
   isTechnical,
 };
@@ -355,7 +357,7 @@ function composeWithState(
   ending: ActivityEnding | undefined,
   showReceipt = settled,
 ): ActivityComposition {
-  const events = deriveTurnIds(withoutDuplicateHookCalls(normalizeAntigravityEvents(rawEvents)));
+  const events = deriveTurnIds(joinStreamedText(withoutDuplicateHookCalls(normalizeAntigravityEvents(rawEvents))));
   const boundaries = events
     .map((event, index) => [index, event] as const)
     .filter(([, event]) => event.type === "handed_off");
@@ -1087,6 +1089,87 @@ export function withoutDuplicateHookCalls(events: TaskEventView[]): TaskEventVie
     if (event.turnId !== undefined) return !agentTurns.has(event.turnId);
     return !agentCalls.has(`${turn}:${event.actionId}`);
   });
+}
+
+const CHUNK_TYPES = new Set(["agent.agent_message_chunk", "agent.agent_thought_chunk"]);
+
+/** A slice of one message or thought that a worker sends a piece at a time. */
+function isChunk(event: TaskEventView): boolean {
+  return (
+    (event.kind === "message" || event.kind === "reasoning") &&
+    (event.contentIndex !== undefined || CHUNK_TYPES.has(event.type))
+  );
+}
+
+/**
+ * Joins the slices of a streamed reply or thought into one row each.
+ *
+ * Slices are joined exactly as sent, so a piece that starts mid-word continues
+ * the word and a paragraph break appears only where the text has one. A run of
+ * slices stays open until something visible interrupts it, so a stretch of
+ * thinking still reads as one block when the worker sends a stray line break
+ * as a message between its pieces. The joined row keeps the first slice's id,
+ * so a reply that is still growing stays one row. When an assistant message
+ * ends, its final text replaces the slices streamed for it.
+ */
+export function joinStreamedText(rawEvents: TaskEventView[]): TaskEventView[] {
+  const events = withoutReplacedSlices(rawEvents);
+  const out: TaskEventView[] = [];
+  const pieces = new Map<number, string[]>();
+  let open: { kind: TaskEventView["kind"]; index: number } | undefined;
+  const continues = (event: TaskEventView): boolean => {
+    if (open === undefined || open.kind !== event.kind) return false;
+    const first = out[open.index];
+    return (
+      (event.turnId === undefined || first.turnId === undefined || event.turnId === first.turnId) &&
+      (event.contentIndex === undefined || event.contentIndex === first.contentIndex)
+    );
+  };
+
+  for (const event of events) {
+    if (!isChunk(event)) {
+      if (!isTechnical(event)) open = undefined;
+      out.push(event);
+      continue;
+    }
+    const text = event.detail ?? "";
+    if (open !== undefined && continues(event)) {
+      pieces.get(open.index)?.push(text);
+      continue;
+    }
+    // Whitespace between two stretches of another kind is only a gap in them.
+    if (text.trim() === "") continue;
+    out.push(event);
+    open = { kind: event.kind, index: out.length - 1 };
+    pieces.set(open.index, [text]);
+  }
+
+  for (const [index, parts] of pieces) {
+    if (parts.length === 1) continue;
+    const joined = parts.join("");
+    const event = out[index];
+    out[index] = {
+      ...event,
+      detail: joined,
+      presentation: event.presentation ? { ...event.presentation, text: joined } : undefined,
+    };
+  }
+  return out;
+}
+
+/** Drops the slices an assistant message's own end now says in full. */
+function withoutReplacedSlices(events: TaskEventView[]): TaskEventView[] {
+  const replaced = new Set<number>();
+  events.forEach((event, index) => {
+    if (event.type !== "agent.message_end" || (event.kind !== "message" && event.kind !== "reasoning")) return;
+    if (eventText(event) === undefined) return;
+    for (let before = index - 1; before >= 0; before--) {
+      const slice = events[before];
+      if (slice.type === "agent.message_start" || slice.type === "agent.message_end") break;
+      if (slice.kind === event.kind && slice.contentIndex !== undefined) replaced.add(before);
+    }
+  });
+  return replaced.size === 0 ? events : events.filter((_, index) => !replaced.has(index));
 }
 
 /** Converts Antigravity's raw step protocol into the same rows other providers use. */

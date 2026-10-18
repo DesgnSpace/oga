@@ -148,9 +148,13 @@ fn chunk_text(payload: &BTreeMap<String, Value>) -> Option<String> {
     if text_value(content.get("type")) != Some("text") {
         return None;
     }
-    text_value(content.get("text"))
+    // Chunks are slices of one text, so spaces and line breaks at their edges
+    // are part of it and are kept exactly as sent.
+    content
+        .get("text")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
         .map(str::to_owned)
-        .filter(|text| !text.trim().is_empty())
 }
 
 fn message_view(
@@ -973,6 +977,27 @@ mod tests {
 
     fn view(update: Value) -> TaskEventView {
         crate::event_view(&acp_event(1, update), Provider::Claude)
+    }
+
+    #[test]
+    fn chunks_keep_the_spaces_and_line_breaks_they_were_sent_with() {
+        for (update, text) in [
+            ("agent_message_chunk", " the worktree."),
+            ("agent_thought_chunk", "decline "),
+            ("agent_message_chunk", "\n\n"),
+        ] {
+            let view = view(json!({
+                "sessionUpdate": update,
+                "content": {"type": "text", "text": text}
+            }));
+            assert_eq!(view.detail.as_deref(), Some(text));
+            assert_eq!(
+                view.presentation
+                    .and_then(|presentation| presentation.text)
+                    .as_deref(),
+                Some(text)
+            );
+        }
     }
 
     #[test]
