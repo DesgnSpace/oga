@@ -71,7 +71,7 @@ the middle, as answers carry it, is where to look and never changes the answer.
 It knows functions, methods, types, classes, protocols, enum cases, constants,
 fields, modules, macros, and documentation headings across Rust, TypeScript,
 TSX, JavaScript, Swift, Python, Go, PHP, Ruby, Java, C#, C, C++, Markdown,
-JSON, TOML, and YAML. Short names count: `db` and `Io` are searchable.
+JSON, TOML, YAML, and CSS. Short names count: `db` and `Io` are searchable.
 
 When one place is clearly the answer, you get one line. When several could be,
 you get up to `--limit` of them, each with the words it matched and a few words

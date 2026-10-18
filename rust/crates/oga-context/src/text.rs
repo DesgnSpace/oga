@@ -60,8 +60,9 @@ pub fn raw_words(text: &str) -> RawWords {
                 + part
                     .trim_end_matches(|char: char| !char.is_ascii_alphanumeric())
                     .len();
-            (!part[..end - start].is_empty()).then_some((start, end))
+            Some((!part[..end - start].is_empty()).then_some((start, end)))
         })
+        .flatten()
         .collect();
     RawWords { expanded, ranges }
 }
