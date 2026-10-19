@@ -10,8 +10,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     ProviderViewOptions, cap, compact_change, compact_output, exit_code, exit_summary,
-    failed_summary, file_presentation, format_cost, humanize, mcp_result_text,
-    message_presentation, number_f64, number_u64, oga_operation, patch_summary,
+    failed_summary, file_presentation, format_cost, format_search_outcome, humanize,
+    mcp_result_text, message_presentation, number_f64, number_u64, oga_operation, patch_summary,
     presentation_detail, presentation_kind, presentation_target, provider_view, reasoning_view,
     string_value, strip_terminal_codes, text_value, tool_presentation as tool_input_presentation,
     tool_title_with_input, tool_verb_with_input, usage_presentation,
@@ -442,7 +442,7 @@ fn tool_view(
     }
 
     let category = category(kind);
-    let mut presentation = tool_presentation(&category, payload, subject.clone());
+    let mut presentation = tool_presentation(provider, &category, payload, subject.clone());
     // A command that ran but exited non-zero is a failed call, whatever status
     // the agent reports for the call itself.
     if category.subject == Subject::Command
@@ -450,7 +450,7 @@ fn tool_view(
     {
         phase = EventPhase::Failed;
         presentation.exit_code = Some(code);
-        presentation.outcome = Some(exit_outcome(code, payload));
+        presentation.outcome = Some(exit_outcome(provider, code, payload));
     }
     // Command Code sends no exit status, so a run that printed its own failure
     // is the only sign it failed. Other agents report one, and their output
@@ -736,10 +736,21 @@ fn named_tool_view(
     complete: bool,
     phase: EventPhase,
 ) -> Option<TaskEventView> {
-    let tool = tool_name(payload).filter(|tool| is_named_tool(tool))?;
+    let tool = tool_name(payload)
+        .map(|tool| cursor_tool_alias(provider, tool))
+        .filter(|tool| is_named_tool(tool))?;
     let input = payload.get("rawInput").and_then(Value::as_object);
-    let named = named_tool(payload, &tool, input, phase == EventPhase::Failed)?;
-    let presentation = named.presentation;
+    let scoped = cursor_search_scope(provider, payload, input);
+    let named = named_tool(
+        payload,
+        &tool,
+        scoped.as_ref().or(input),
+        phase == EventPhase::Failed,
+    )?;
+    let mut presentation = named.presentation;
+    if provider == Provider::Cursor && presentation.outcome.is_none() {
+        presentation.outcome = cursor_search_outcome(payload);
+    }
     let phase = if named.failed {
         EventPhase::Failed
     } else {
@@ -945,20 +956,34 @@ impl AcpCalls {
 }
 
 fn tool_presentation(
+    provider: Provider,
     category: &Category,
     payload: &BTreeMap<String, Value>,
     subject: Option<String>,
 ) -> TaskEventPresentation {
+    let cursor = provider == Provider::Cursor;
     let raw_input = payload.get("rawInput").and_then(Value::as_object);
     let diff = diff_content(payload);
+    let located = || {
+        if cursor {
+            location_file(payload)
+        } else {
+            location_path(payload)
+        }
+    };
     let mut presentation = usage_presentation();
     presentation.outcome = outcome(payload);
+    if cursor && category.subject == Subject::Command && presentation.outcome.is_none() {
+        presentation.outcome = command_stream(payload, false)
+            .as_deref()
+            .and_then(compact_output);
+    }
 
     if category.subject == Subject::File {
         let path = diff
             .and_then(|diff| text_value(diff.get("path")))
             .map(str::to_owned)
-            .or_else(|| location_path(payload))
+            .or_else(&located)
             .or_else(|| {
                 raw_input.and_then(|input| string_value(input, &["filePath", "file_path", "path"]))
             });
@@ -976,8 +1001,17 @@ fn tool_presentation(
             file.outcome = content_text(payload)
                 .and_then(|text| outcome_beyond_path(text.trim(), &path))
                 .map(|outcome| cap(&outcome, SUBJECT_LIMIT).0);
+            if cursor && file.outcome.is_none() {
+                file.outcome = subject.as_deref().and_then(read_range);
+            }
             file.change = diff
-                .and_then(change_summary)
+                .and_then(|diff| {
+                    if cursor {
+                        cursor_change_summary(diff)
+                    } else {
+                        change_summary(diff)
+                    }
+                })
                 .or_else(|| patch.as_ref().and_then(|patch| patch.change()))
                 .or_else(|| {
                     raw_input
@@ -998,6 +1032,9 @@ fn tool_presentation(
         return presentation;
     }
     presentation.kind = PresentationType::Tool;
+    // Before its path arrives, Cursor names a file call only by what it does
+    // ("Edit File"), which is no target.
+    let subject = subject.filter(|_| !(cursor && category.subject == Subject::File));
     presentation.text = if category.title == "Search" {
         raw_input
             .and_then(search_subject)
@@ -1005,7 +1042,7 @@ fn tool_presentation(
     } else {
         subject
     }
-    .or_else(|| location_path(payload));
+    .or_else(located);
     presentation
 }
 
@@ -1164,11 +1201,138 @@ fn command_exit(payload: &BTreeMap<String, Value>) -> Option<i64> {
     })
 }
 
-fn exit_outcome(code: i64, payload: &BTreeMap<String, Value>) -> String {
+fn exit_outcome(provider: Provider, code: i64, payload: &BTreeMap<String, Value>) -> String {
+    let streams = (provider == Provider::Cursor)
+        .then(|| command_stream(payload, true))
+        .flatten();
     exit_summary(
         code,
-        content_text(payload).filter(|text| !text.starts_with("Exited with code ")),
+        content_text(payload)
+            .filter(|text| !text.starts_with("Exited with code "))
+            .or(streams.as_deref()),
     )
+}
+
+/// The line range a Cursor read names in its title: "Read a.rs (281 - 730)".
+fn read_range(title: &str) -> Option<String> {
+    let range = title.trim_end().strip_suffix(')')?.rsplit_once(" (")?.1;
+    let (from, to) = range.split_once(" - ")?;
+    let (from, to) = (
+        from.trim().parse::<u64>().ok()?,
+        to.trim().parse::<u64>().ok()?,
+    );
+    Some(format!("lines {from}\u{2013}{to}"))
+}
+
+/// A file call's path without a line: Cursor counts lines from zero, and the
+/// range it read is already in the call's title.
+fn location_file(payload: &BTreeMap<String, Value>) -> Option<String> {
+    let first = payload.get("locations")?.as_array()?.first()?;
+    text_value(first.get("path")).map(str::to_owned)
+}
+
+/// What a Cursor command printed: its errors when `errors_first`, else only
+/// what it wrote to standard output.
+fn command_stream(payload: &BTreeMap<String, Value>, errors_first: bool) -> Option<String> {
+    let output = payload.get("rawOutput")?.as_object()?;
+    let stream = |key: &str| {
+        text_value(output.get(key))
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_owned)
+    };
+    if errors_first {
+        stream("stderr").or_else(|| stream("stdout"))
+    } else {
+        stream("stdout")
+    }
+}
+
+/// How much of a file an edit changed, as lines added and removed. A new file
+/// arrives without a before and is its own line count.
+fn cursor_change_summary(diff: &Map<String, Value>) -> Option<String> {
+    let new_text = text_value(diff.get("newText"))?;
+    let Some(old_text) = text_value(diff.get("oldText")) else {
+        return Some(line_count(new_text));
+    };
+    let mut balance = HashMap::<&str, i64>::new();
+    for line in old_text.lines() {
+        *balance.entry(line).or_default() -= 1;
+    }
+    for line in new_text.lines() {
+        *balance.entry(line).or_default() += 1;
+    }
+    let added: i64 = balance.values().filter(|count| **count > 0).sum();
+    let removed: i64 = -balance.values().filter(|count| **count < 0).sum::<i64>();
+    Some(if added == 0 && removed == 0 {
+        "no change".to_owned()
+    } else {
+        format!("+{added} \u{2212}{removed}")
+    })
+}
+
+/// Cursor's file finder is called "Find"; it does what a glob does.
+fn cursor_tool_alias(provider: Provider, tool: String) -> String {
+    if provider == Provider::Cursor && tool.eq_ignore_ascii_case("find") {
+        "glob".to_owned()
+    } else {
+        tool
+    }
+}
+
+/// Cursor names where a search ran in the call's location, not its input.
+fn cursor_search_scope(
+    provider: Provider,
+    payload: &BTreeMap<String, Value>,
+    input: Option<&Map<String, Value>>,
+) -> Option<Map<String, Value>> {
+    if provider != Provider::Cursor {
+        return None;
+    }
+    let mut fields = input?.clone();
+    if string_value(&fields, &["path"]).is_none() {
+        fields.insert("path".to_owned(), Value::String(location_file(payload)?));
+    }
+    Some(fields)
+}
+
+/// Cursor reports how many files or matches a search found, not which.
+fn cursor_search_outcome(payload: &BTreeMap<String, Value>) -> Option<String> {
+    let output = payload.get("rawOutput")?.as_object()?;
+    let capped = output.get("truncated").and_then(Value::as_bool) == Some(true);
+    [("totalFiles", "file"), ("totalMatches", "match")]
+        .into_iter()
+        .find_map(|(key, noun)| {
+            let found = number_u64(output.get(key))?;
+            Some(format_search_outcome(found, noun, capped))
+        })
+}
+
+/// Cursor sends a new file's diff as the two header lines of a unified diff
+/// with their first character cut: `-- /dev/null` for the before and
+/// `++ b/<path>` as the first line of the after. The file is only the lines
+/// that follow.
+pub(crate) fn tidy_cursor_diffs(event: &mut TaskEvent) {
+    let Some(Value::Array(blocks)) = event.payload.get_mut("content") else {
+        return;
+    };
+    for diff in blocks.iter_mut().filter_map(Value::as_object_mut) {
+        let is_new_file = text_value(diff.get("type")) == Some("diff")
+            && text_value(diff.get("oldText")).is_some_and(|old| old.trim() == "-- /dev/null");
+        if !is_new_file {
+            continue;
+        }
+        diff.remove("oldText");
+        let body = text_value(diff.get("newText"))
+            .and_then(|text| text.strip_prefix("++ b/"))
+            .map(|rest| {
+                rest.split_once('\n')
+                    .map_or("", |(_, body)| body)
+                    .to_owned()
+            });
+        if let Some(body) = body {
+            diff.insert("newText".to_owned(), Value::String(body));
+        }
+    }
 }
 
 fn plan_view(

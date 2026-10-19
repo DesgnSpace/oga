@@ -300,7 +300,9 @@ export function expansionFromEvent(event: TaskEventView): EventExpansion | undef
     // `tool_response`; only fall back to that wrapper itself once none of the
     // keys above turned up anywhere inside it.
     let text = acpContentText(raw) ?? findText(raw, keys) ?? (event.kind === "file" ? undefined : findText(raw, ["tool_response"]));
-    if (isSearch && (text === undefined || text.trim() === "")) {
+    // A search that reports a count without its hits has found something.
+    const reportedHits = /^[1-9]\d*\+? (file|match)/.test(event.result ?? "");
+    if (isSearch && !reportedHits && (text === undefined || text.trim() === "")) {
       text = event.verb === "Found" ? "No files found." : "No matches found.";
     }
     const path = event.presentation?.path;
@@ -1294,7 +1296,18 @@ function imageDataUrlFromRaw(raw: string): string | undefined {
 }
 
 function commandOutput(raw: string): string | undefined {
-  return findText(raw, ["stdout", "stderr", "output", "rawOutput", "aggregated_output"]) ?? acpContentText(raw) ?? findText(raw, ["tool_response"]);
+  return streamsText(raw) ?? findText(raw, ["stdout", "stderr", "output", "rawOutput", "aggregated_output"]) ?? acpContentText(raw) ?? findText(raw, ["tool_response"]);
+}
+
+/** A result that keeps what a command wrote and what it complained about apart reads as both, errors last. */
+function streamsText(raw: string): string | undefined {
+  const value = parseRawJson(raw);
+  if (typeof value !== "object" || value === null) return undefined;
+  const output = (value as { rawOutput?: unknown }).rawOutput;
+  if (typeof output !== "object" || output === null) return undefined;
+  const { stdout, stderr } = output as { stdout?: unknown; stderr?: unknown };
+  const parts = [stdout, stderr].filter((part): part is string => typeof part === "string" && part.trim() !== "");
+  return parts.length > 0 ? parts.map((part) => part.replace(/\s+$/, "")).join("\n") : undefined;
 }
 
 /**
