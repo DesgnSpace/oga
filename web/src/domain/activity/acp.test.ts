@@ -488,6 +488,33 @@ describe("a Command Code run", () => {
   });
 });
 
+describe("a Cursor run", () => {
+  async function rows(): Promise<TraceRow[]> {
+    // SAFETY: the fixture is the Rust mapper's `TaskEventView[]` for a recorded run.
+    const events = (await Bun.file(new URL("./fixtures/cursor.json", import.meta.url)).json()) as TaskEventView[];
+    const composition = ActivityStory.composeWithState(events, true, undefined, true);
+    const flat = (row: TraceRow): TraceRow[] => [row, ...row.children.flatMap(flat)];
+    return TraceVisibility.interleavedRows(composition, "/home/dev/desgn/oga", false)
+      .flatMap(flat)
+      .filter((row) => !row.isTechnical);
+  }
+
+  it("does not say a search found nothing when it reported a count", async () => {
+    const search = (await rows()).find((row) => row.event?.title === "Search code");
+
+    expect(search?.result).toBe("694+ matches");
+    expect(JSON.stringify(search?.expansion ?? null)).not.toContain("No matches found");
+  });
+
+  it("shows a failed command's errors in its output", async () => {
+    const failed = (await rows()).find((row) => row.event?.title === "Run command" && row.state === "failed");
+
+    expect(failed?.expansion?.type).toBe("command");
+    const output = failed?.expansion?.type === "command" ? failed.expansion.output : undefined;
+    expect(output).toContain("error: route 5");
+  });
+});
+
 describe("a command named only by its update", () => {
   it("shows the command, not the output it printed", () => {
     const [row] = callRows([

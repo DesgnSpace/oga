@@ -669,6 +669,9 @@ pub fn event_views(events: Vec<TaskEvent>, timeline: &ProviderTimeline) -> Vec<T
             }
             let provider = timeline.provider_for(&event);
             state.turn = event.turn_id.or(state.turn);
+            if provider == Provider::Cursor {
+                acp::tidy_cursor_diffs(&mut event);
+            }
             // The row shows the payload as recorded, before the patch fills it in.
             let mut raw_text = raw_text(&event);
             // A task-tool row expands into the whole checklist, which only the
@@ -4754,8 +4757,15 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
         "permission_replied" => tree_value(payload, &["instruction"]),
         "transport_fallback" => tree_value(payload, &["detail"]),
         "worker_spawned" => {
+            let cursor = tree_value(payload, &["provider"]).as_deref() == Some("cursor");
             let provider = tree_value(payload, &["provider"]).map(|value| humanize(&value));
-            let model = tree_value(payload, &["model"]).map(|value| humanize(&value));
+            let model = tree_value(payload, &["model"]).map(|value| {
+                if cursor {
+                    cursor_model_label(&value)
+                } else {
+                    humanize(&value)
+                }
+            });
             match (provider, model) {
                 (Some(provider), Some(model)) => Some(format!("{provider} {model}")),
                 (None, Some(model)) => Some(model),
@@ -5357,6 +5367,17 @@ fn event_title(event_type: &str, payload: &BTreeMap<String, Value>) -> String {
 
 /// A wire subtype reads as `compact_boundary`; a person reads "Compact
 /// boundary". Anything with no better name at least arrives in their language.
+/// Cursor's model ids carry their settings in brackets, as in
+/// `composer-2.5[fast=false]`, and a version's dot is part of the name.
+fn cursor_model_label(id: &str) -> String {
+    let name = id.split('[').next().unwrap_or(id).replace('-', " ");
+    let mut label = name.trim().to_owned();
+    if let Some(first) = label.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    label
+}
+
 fn humanize(value: &str) -> String {
     let mut words = value.replace(['_', '-', '.'], " ");
     if let Some(first) = words.get_mut(..1) {

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Cursor tasks now read clearly: new files show only their content, edits say how many lines changed, searches say how many files or matches they found, reads name the lines they covered, and a failed command shows its error.
 - Cursor now runs through Cursor's own command line tool, `agent`. If Cursor isn't signed in, Settings says so and tells you to run `agent login` instead of listing a model your account may not have. If `agent` on your machine belongs to another tool, Oga says so and tells you how to put Cursor's back.
 - Command Code tasks now read clearly: the worker's todo list shows as one list that updates as it goes, a command that failed says so with the failing line, and skill loads, file reads, searches and edits name what they touched. Command Code models also offer low, medium and high effort.
 - A task moved to a different kind of worker now shows its earlier activity the way that worker recorded it, so subagents and their work from before the move appear in the right place.
