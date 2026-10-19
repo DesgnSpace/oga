@@ -3681,29 +3681,35 @@ async fn a_pi_task_from_before_acp_resumes_on_its_command_line() {
 /// The session id Cursor's ACP server opens, which is Cursor's own.
 const CURSOR_SESSION: &str = "3c9a1d7e-4b2f-4a8c-91d6-7e5b3f2a8c04";
 
-/// A Cursor profile on the adapters Oga ships, with `cursor-agent` resolving
-/// to a script that starts the scripted agent in `mode`. Cursor has no command
-/// line Oga runs, so nothing here answers one.
+/// What Cursor's CLI prints for `--version`.
+const CURSOR_BUILD: &str = "2026.05.20-2b5dd59";
+
+/// A Cursor profile on the adapters Oga ships, with `agent` resolving to a
+/// script that prints `printed` for `--version` and otherwise starts the
+/// scripted agent in `mode`. Cursor has no command line Oga runs, so nothing
+/// here answers one.
 fn cursor_harness(mode: &str) -> Harness {
+    cursor_harness_printing(mode, CURSOR_BUILD)
+}
+
+fn cursor_harness_printing(mode: &str, printed: &str) -> Harness {
     let directory = tempfile::tempdir().expect("temporary directory");
     let cwd = directory.path().join("project");
     let bin = directory.path().join("bin");
     fs::create_dir_all(cwd.join("src")).expect("project");
     fs::create_dir_all(&bin).expect("bin");
     let log = directory.path().join("agent.log");
-    if mode != "missing" {
-        let agent = bin.join("cursor-agent");
-        fs::write(
-            &agent,
-            format!(
-                "#!/bin/sh\nexec '{}' '{mode}' '{}'\n",
-                env!("CARGO_BIN_EXE_fake-acp-agent"),
-                log.display()
-            ),
-        )
-        .expect("fake agent");
-        fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).expect("executable");
-    }
+    let agent = bin.join("agent");
+    fs::write(
+        &agent,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '{printed}'; exit 0; fi\nexec '{}' '{mode}' '{}'\n",
+            env!("CARGO_BIN_EXE_fake-acp-agent"),
+            log.display()
+        ),
+    )
+    .expect("fake agent");
+    fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).expect("executable");
 
     let store = Arc::new(Store::open_writable(directory.path().join("oga.db")).expect("store"));
     let profile = Profile {
@@ -3765,7 +3771,7 @@ async fn cursor_runs_over_acp_with_its_sign_in_claimed_before_the_session() {
     assert_eq!(
         recorded.restore,
         Some(AcpRestore::Load),
-        "the server loads a session but cannot resume one"
+        "Cursor reopens a conversation with `session/load`, which it advertises in place of `session/resume`"
     );
     assert_eq!(
         task.session_id, None,
@@ -3833,6 +3839,78 @@ async fn a_cursor_sign_in_oga_cannot_claim_never_opens_a_session() {
         "a sign-in this client cannot claim stops the run before a session is asked for"
     );
     assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_command_that_is_grok_never_runs_as_cursor() {
+    let harness = cursor_harness_printing("cursor", "grok 1.0.62 (1474f9cbdd91) [stable]");
+
+    let task = harness.run("summarise the readme").await;
+
+    assert_eq!(task.state, TaskState::Failed, "{task:?}");
+    let error = task.error.as_deref().expect("a reason on the task");
+    assert!(error.contains("isn't Cursor's CLI"), "{error}");
+    assert!(error.contains("is Grok"), "{error}");
+    assert!(
+        error.contains("curl https://cursor.com/install -fsS | bash"),
+        "{error}"
+    );
+    assert!(
+        methods(&harness).is_empty(),
+        "Grok was never started as an ACP server: {:?}",
+        methods(&harness)
+    );
+    assert!(harness.cli_runs().is_empty());
+}
+
+#[tokio::test]
+async fn a_cursor_follow_up_reopens_its_conversation_with_session_load() {
+    let harness = cursor_harness("cursor");
+    let first = harness.run("start").await;
+
+    resume(
+        &harness.dispatcher,
+        ResumeRequest::new(&first.id).instruction("now the tests"),
+    )
+    .await
+    .expect("resumed");
+    let second = harness.settle(&first.id).await;
+
+    assert_eq!(second.state, TaskState::Completed, "{second:?}");
+    let loaded = harness.received("session/load");
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0]["sessionId"], CURSOR_SESSION);
+    assert_eq!(harness.received("session/new").len(), 1);
+    assert_eq!(harness.received("session/prompt").len(), 2);
+    assert_eq!(
+        harness.received("authenticate").len(),
+        2,
+        "the sign-in is claimed again before the conversation is loaded"
+    );
+    assert!(
+        !second.output.contains("an earlier answer"),
+        "the replayed conversation is not this turn's answer: {second:?}"
+    );
+}
+
+#[tokio::test]
+async fn cursors_extension_calls_never_stall_a_turn_or_show_up_as_activity() {
+    let harness = cursor_harness("cursor-extensions");
+
+    let task = harness.run("plan the migration").await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(
+        task.output.contains("question: error -32601"),
+        "the agent's blocking question is answered at once, so it never waits: {task:?}"
+    );
+    assert!(
+        harness
+            .events(&task.id)
+            .iter()
+            .all(|event| !event.kind.contains("cursor")),
+        "notifications Oga has no reading for add no rows"
+    );
 }
 
 const COMMAND_CODE_SESSION: &str = "7a4f2c1b-9e8d-4c3a-b6f5-1d2e3f4a5b6c";

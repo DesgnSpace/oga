@@ -586,6 +586,8 @@ export interface WorkerSettings {
   provider: Provider;
   enabled: boolean;
   configured: boolean;
+  /** What has to be fixed on this account before its models can be listed or run. */
+  notice?: string;
   models: ModelSettingsModel[];
 }
 

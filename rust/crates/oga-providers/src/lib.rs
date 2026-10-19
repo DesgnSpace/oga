@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 mod acp;
+mod cursor;
 mod opencode;
 mod opencode2;
 pub mod worker_path;
@@ -18,6 +19,7 @@ pub use acp::{
     AcpAdapter, AcpAdapters, AcpLaunch, AcpRelease, AcpSetting, AcpVersions, COMMAND_CODE_LOGIN,
     CURSOR_LOGIN, OPENCODE_ADAPTER,
 };
+pub use cursor::{CURSOR_BIN, NoCursorCli, cursor_executable};
 pub use opencode::{NoOpenCode1, OPENCODE_BIN, cannot_start, opencode_executable};
 pub use opencode2::{OPENCODE2_BIN, opencode2_executable};
 

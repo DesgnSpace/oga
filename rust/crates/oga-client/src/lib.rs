@@ -428,6 +428,9 @@ pub struct WorkerSettings {
     pub provider: oga_domain::Provider,
     pub enabled: bool,
     pub configured: bool,
+    /// What the worker's owner has to fix before its models can be listed or run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
     pub models: Vec<ModelSettingsModel>,
 }
 
