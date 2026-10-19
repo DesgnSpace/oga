@@ -1402,7 +1402,7 @@ function WorkerRow({
   onToggle: (id: string, enabled: boolean) => void;
   offline: boolean;
 }) {
-  const available = Boolean(worker?.configured) && profile.enabled;
+  const available = Boolean(worker?.configured) && profile.enabled && !worker?.notice;
   const modelCount = worker?.models.length ?? 0;
   const binaryPath = profile.command?.join(" ");
 
@@ -1543,6 +1543,14 @@ function WorkerModelsSection({
         </div>
       ) : !worker ? (
         <p className="settings-status">Loading models…</p>
+      ) : worker.notice ? (
+        <div className="settings-message settings-message-error" role="alert">
+          <strong>Couldn&apos;t read this account&apos;s models</strong>
+          <p>{worker.notice}</p>
+          <button className="settings-button" type="button" onClick={() => void loadModels(true)}>
+            Reload models
+          </button>
+        </div>
       ) : worker.models.length === 0 ? (
         <EmptyState
           title="No models yet"

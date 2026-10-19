@@ -25,7 +25,7 @@ use oga_domain::{
 };
 use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{
-    COMMAND_CODE_LOGIN, CURSOR_LOGIN, cannot_start, codex_home, environment_for,
+    COMMAND_CODE_LOGIN, CURSOR_LOGIN, cannot_start, codex_home, cursor_executable, environment_for,
     opencode_executable, opencode2_executable, unset_environment_for,
 };
 use oga_routing::{
@@ -629,7 +629,7 @@ pub async fn model_rows(
     let unavailable = tokio::task::spawn_blocking(move || {
         checked
             .iter()
-            .filter_map(|profile| cannot_start(profile).map(|reason| (profile.id.clone(), reason)))
+            .filter_map(|profile| worker_notice(profile).map(|reason| (profile.id.clone(), reason)))
             .collect::<HashMap<_, _>>()
     })
     .await
@@ -1232,22 +1232,79 @@ async fn discover(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
 /// The models a Cursor account can reach, read from a session of its own.
 ///
 /// Cursor offers its catalogue only to an ACP session: the ids carry the
-/// thinking, context, and speed choices a run makes, and `cursor-agent models`
-/// lists neither those ids nor those choices. So this opens a session in a
-/// throwaway directory, keeps what opening it answered, and drops the session
-/// without ever prompting it.
+/// thinking, context, and speed choices a run makes. So this opens a session
+/// in a throwaway directory, keeps what opening it answered, and drops the
+/// session without ever prompting it. An account that is not signed in is
+/// remembered, so Settings can say so instead of listing the fallback model
+/// as if the account offered it.
 async fn discover_cursor_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
-    let opened = open_acp_session(profile, "cursor-agent", CURSOR_LOGIN).await?;
-    Ok(acp_session_models(&opened, profile))
+    let binary = cursor_executable(profile).map_err(|_| ())?;
+    let opened = open_acp_session(profile, &binary, CURSOR_LOGIN).await;
+    let mut notes = sign_in_notes().lock().expect("sign-in notes poisoned");
+    match opened {
+        Ok(opened) => {
+            notes.remove(&profile.id);
+            Ok(acp_session_models(&opened, profile))
+        }
+        Err(OpenFailure::SignIn) => {
+            notes.insert(profile.id.clone(), CURSOR_SIGN_IN_NOTICE.to_owned());
+            Err(())
+        }
+        Err(OpenFailure::Other) => {
+            notes.remove(&profile.id);
+            Err(())
+        }
+    }
+}
+
+const CURSOR_SIGN_IN_NOTICE: &str =
+    "Cursor isn't signed in. Run agent login in a terminal, then reload the models.";
+
+/// Why a profile's catalog could not be read, for the profiles whose account
+/// has to sign in first.
+static SIGN_IN_NOTES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn sign_in_notes() -> &'static Mutex<HashMap<String, String>> {
+    SIGN_IN_NOTES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// What a worker's owner needs to fix before it can run or list its models:
+/// the reason it cannot start, or that its account is not signed in.
+fn worker_notice(profile: &Profile) -> Option<String> {
+    cannot_start(profile).or_else(|| {
+        sign_in_notes()
+            .lock()
+            .expect("sign-in notes poisoned")
+            .get(&profile.id)
+            .cloned()
+    })
 }
 
 async fn discover_command_code_models(profile: &Profile) -> Result<Vec<ModelInfo>, ()> {
-    let opened = open_acp_session(profile, "command-code", COMMAND_CODE_LOGIN).await?;
+    let opened = open_acp_session(profile, "command-code", COMMAND_CODE_LOGIN)
+        .await
+        .map_err(|_| ())?;
     Ok(acp_session_models(&opened, profile))
 }
 
-async fn open_acp_session(profile: &Profile, binary: &str, method_id: &str) -> Result<Value, ()> {
-    let dir = tempfile::tempdir().map_err(|_| ())?;
+enum OpenFailure {
+    /// The agent refused to sign in with the account's saved login.
+    SignIn,
+    Other,
+}
+
+enum Answer {
+    Result(Value),
+    Refused,
+    Gone,
+}
+
+async fn open_acp_session(
+    profile: &Profile,
+    binary: &str,
+    method_id: &str,
+) -> Result<Value, OpenFailure> {
+    let dir = tempfile::tempdir().map_err(|_| OpenFailure::Other)?;
     let cwd = dir.path().display().to_string();
     let mut command = Command::new(binary);
     command
@@ -1259,22 +1316,35 @@ async fn open_acp_session(profile: &Profile, binary: &str, method_id: &str) -> R
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
     apply_profile_environment(&mut command, profile);
-    let mut agent = command.spawn().map_err(|_| ())?;
-    let mut stdin = agent.stdin.take().ok_or(())?;
-    let mut stdout = BufReader::new(agent.stdout.take().ok_or(())?).lines();
+    let mut agent = command.spawn().map_err(|_| OpenFailure::Other)?;
+    let mut stdin = agent.stdin.take().ok_or(OpenFailure::Other)?;
+    let mut stdout = BufReader::new(agent.stdout.take().ok_or(OpenFailure::Other)?).lines();
     timeout(PROVIDER_TIMEOUT, async {
-        let handshake = [
-            (
-                1,
-                "initialize",
-                json!({"protocolVersion": 1, "clientCapabilities": {}}),
-            ),
-            (2, "authenticate", json!({"methodId": method_id})),
-        ];
-        for (id, method, params) in handshake {
-            ask(&mut stdin, &mut stdout, id, method, params).await?;
+        let initialized = ask(
+            &mut stdin,
+            &mut stdout,
+            1,
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}}),
+        )
+        .await;
+        if !matches!(initialized, Answer::Result(_)) {
+            return Err(OpenFailure::Other);
         }
-        ask(
+        match ask(
+            &mut stdin,
+            &mut stdout,
+            2,
+            "authenticate",
+            json!({"methodId": method_id}),
+        )
+        .await
+        {
+            Answer::Result(_) => {}
+            Answer::Refused => return Err(OpenFailure::SignIn),
+            Answer::Gone => return Err(OpenFailure::Other),
+        }
+        match ask(
             &mut stdin,
             &mut stdout,
             3,
@@ -1282,37 +1352,44 @@ async fn open_acp_session(profile: &Profile, binary: &str, method_id: &str) -> R
             json!({"cwd": cwd, "mcpServers": []}),
         )
         .await
+        {
+            Answer::Result(opened) => Ok(opened),
+            Answer::Refused | Answer::Gone => Err(OpenFailure::Other),
+        }
     })
     .await
-    .ok()
-    .flatten()
-    .ok_or(())
+    .unwrap_or(Err(OpenFailure::Other))
 }
 
-/// Sends one request and answers with the agent's `result` for it, skipping
-/// everything it says on the way. An error, or a close before the answer,
-/// ends the read.
+/// Sends one request and answers with the agent's reply to it, skipping
+/// everything it says on the way.
 async fn ask(
     stdin: &mut ChildStdin,
     lines: &mut Lines<BufReader<ChildStdout>>,
     id: u64,
     method: &str,
     params: Value,
-) -> Option<Value> {
+) -> Answer {
     let frame = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-    stdin
+    if stdin
         .write_all(format!("{frame}\n").as_bytes())
         .await
-        .ok()?;
+        .is_err()
+    {
+        return Answer::Gone;
+    }
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         if message["id"] == json!(id) {
-            return message.get("result").cloned();
+            return match message.get("result") {
+                Some(result) => Answer::Result(result.clone()),
+                None => Answer::Refused,
+            };
         }
     }
-    None
+    Answer::Gone
 }
 
 async fn cached_opencode_models(profile: &Profile) -> Vec<ModelInfo> {
@@ -1520,6 +1597,15 @@ async fn model_settings_view(store: &Store, refresh: bool) -> Result<Value, Http
         refresh_catalog_in_background(&profiles);
         models
     };
+    let checked = profiles.clone();
+    let notices = tokio::task::spawn_blocking(move || {
+        checked
+            .iter()
+            .filter_map(|profile| worker_notice(profile).map(|notice| (profile.id.clone(), notice)))
+            .collect::<HashMap<_, _>>()
+    })
+    .await
+    .map_err(|error| HttpError::internal(format!("checking workers failed: {error}")))?;
     let workers = profiles
         .iter()
         .map(|profile| {
@@ -1566,14 +1652,18 @@ async fn model_settings_view(store: &Store, refresh: bool) -> Result<Value, Http
                     })
                 })
                 .collect::<Vec<_>>();
-            json!({
+            let mut worker = json!({
                 "id": profile.id,
                 "label": profile.label,
                 "provider": profile.provider,
                 "enabled": enabled,
                 "configured": profile.enabled,
                 "models": model_rows,
-            })
+            });
+            if let Some(notice) = notices.get(&profile.id) {
+                worker["notice"] = json!(notice);
+            }
+            worker
         })
         .collect::<Vec<_>>();
     Ok(json!({
@@ -2348,6 +2438,66 @@ mod catalog_tests {
                 Some(&["low".to_owned(), "medium".to_owned(), "high".to_owned()][..])
             );
         }
+    }
+
+    #[cfg(unix)]
+    fn fake_cursor_agent(bin: &Path, authenticate: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let program = bin.join("agent");
+        std::fs::write(
+            &program,
+            format!(
+                concat!(
+                    "#!/bin/sh\n",
+                    "[ \"$1\" = --version ] && {{ echo 2026.05.20-2b5dd59; exit 0; }}\n",
+                    "[ \"$1\" = acp ] || exit 1\n",
+                    "while IFS= read -r line; do\n",
+                    "  case \"$line\" in\n",
+                    "    *'\"method\":\"initialize\"'*)\n",
+                    "      printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"protocolVersion\":1,\"authMethods\":[{{\"id\":\"cursor_login\",\"name\":\"Cursor Login\"}}]}}}}' ;;\n",
+                    "    *'\"method\":\"authenticate\"'*)\n",
+                    "      printf '%s\\n' '{authenticate}' ;;\n",
+                    "    *'\"method\":\"session/new\"'*)\n",
+                    "      printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{{\"sessionId\":\"ses_cursor\",\"models\":{{\"availableModels\":[{{\"modelId\":\"composer-2\",\"name\":\"Composer 2\"}}]}}}}}}'\n",
+                    "      exit 0 ;;\n",
+                    "    *) exit 1 ;;\n",
+                    "  esac\n",
+                    "done\n",
+                ),
+                authenticate = authenticate,
+            ),
+        )
+        .expect("fake agent");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("executable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_cursor_account_that_is_not_signed_in_is_told_so_instead_of_shown_a_fallback_list() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let bin = directory.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        let mut cursor = profile("fixture-cursor-sign-in", Provider::Cursor);
+        cursor.env.insert("PATH".into(), bin.display().to_string());
+
+        fake_cursor_agent(
+            &bin,
+            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Internal error","data":{"details":"[unauthenticated] Error"}}}"#,
+        );
+        assert!(discover(&cursor).await.is_err());
+        let notice = worker_notice(&cursor).expect("the account needs signing in");
+        assert!(notice.contains("agent login"), "{notice}");
+
+        fake_cursor_agent(&bin, r#"{"jsonrpc":"2.0","id":2,"result":{}}"#);
+        let models = discover(&cursor).await.expect("discovered cursor models");
+        assert_eq!(models[0].id, "composer-2");
+        assert_eq!(
+            worker_notice(&cursor),
+            None,
+            "signing in clears what the page said"
+        );
     }
 }
 

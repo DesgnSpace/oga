@@ -11,8 +11,8 @@ use oga_domain::{Profile, Provider};
 use serde_json::Value;
 
 use crate::{
-    ProviderCommand, environment_for, home, opencode_executable, opencode2_executable, skills_dir,
-    unset_environment_for,
+    CURSOR_BIN, ProviderCommand, cursor_executable, environment_for, home, opencode_executable,
+    opencode2_executable, skills_dir, unset_environment_for,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -476,14 +476,23 @@ fn fx() -> AcpAdapter {
         })
 }
 
-/// Cursor's ACP server requires the account's saved login and keeps no resumable session.
+/// Cursor's ACP server is the `agent` command, which signs in with the account's
+/// saved login and reopens a conversation with `session/load`. A profile whose
+/// `agent` is another tool's is never started.
 fn cursor() -> AcpAdapter {
-    AcpAdapter::new("cursor-acp", |_| {
-        ["cursor-agent", "acp"].map(str::to_owned).to_vec()
+    AcpAdapter::new("cursor-acp", |launch| {
+        let executable =
+            cursor_executable(launch.profile).unwrap_or_else(|_| CURSOR_BIN.to_owned());
+        vec![executable, "acp".to_owned()]
     })
     .authentication(CURSOR_LOGIN)
     .acp_only()
     .oga_tools(true)
+    .incompatibility(|launch| {
+        cursor_executable(launch.profile)
+            .err()
+            .map(|missing| missing.to_string())
+    })
     .settings(|launch| {
         let setting = |id: &str, value: &str| AcpSetting {
             id: id.into(),

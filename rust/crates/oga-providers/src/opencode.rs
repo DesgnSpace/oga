@@ -14,7 +14,7 @@ use std::{
 
 use oga_domain::{Profile, Provider};
 
-use crate::{environment_for, home, worker_path::worker_path};
+use crate::{cursor::cursor_executable, environment_for, home, worker_path::worker_path};
 
 /// The profile environment key naming the OpenCode 1 executable outright.
 pub const OPENCODE_BIN: &str = "OPENCODE_BIN";
@@ -33,7 +33,7 @@ const INSTALL_DIRECTORIES: &[&str] = &[
 /// OpenCode 1 takes seconds to print its version on a loaded machine.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The version each executable reported, keyed by its resolved path and last
+/// What each executable printed for `--version`, keyed by its resolved path and last
 /// change, so an upgrade in place is checked again. A check that failed is
 /// not kept, so the next start asks again.
 type ReportedVersions = HashMap<(PathBuf, SystemTime), String>;
@@ -79,31 +79,26 @@ pub fn opencode_executable(profile: &Profile) -> Result<String, NoOpenCode1> {
     if let Some(explicit) = explicit(&env, OPENCODE_BIN) {
         return Ok(explicit);
     }
-    let mut directories = env::split_paths(
-        env.get("PATH")
-            .cloned()
-            .unwrap_or_else(worker_path)
-            .as_str(),
-    )
-    .collect::<Vec<_>>();
-    if !env.contains_key("PATH") {
-        let home = home();
-        directories.extend(
-            INSTALL_DIRECTORIES
-                .iter()
-                .map(|directory| PathBuf::from(crate::expand_home(directory, &home))),
-        );
-    }
+    let directories = search_directories(&env);
     first_reporting_v1(&directories)
 }
 
 /// Why a task on this profile is refused before it starts, when it is: an
-/// OpenCode profile whose every `opencode` reports another version than 1.
+/// OpenCode profile whose every `opencode` reports another version than 1, or
+/// a Cursor profile whose `agent` is not Cursor's.
 pub fn cannot_start(profile: &Profile) -> Option<String> {
-    (profile.provider == Provider::OpenCode && profile.command.is_none())
-        .then(|| opencode_executable(profile).err())
-        .flatten()
-        .map(|missing| missing.to_string())
+    if profile.command.is_some() {
+        return None;
+    }
+    match profile.provider {
+        Provider::OpenCode => opencode_executable(profile)
+            .err()
+            .map(|missing| missing.to_string()),
+        Provider::Cursor => cursor_executable(profile)
+            .err()
+            .map(|missing| missing.to_string()),
+        _ => None,
+    }
 }
 
 fn first_reporting_v1(directories: &[PathBuf]) -> Result<String, NoOpenCode1> {
@@ -122,6 +117,27 @@ fn first_reporting_v1(directories: &[PathBuf]) -> Result<String, NoOpenCode1> {
     Err(NoOpenCode1 { found: reported })
 }
 
+/// Where a profile's worker looks for an executable: the path it is started
+/// with and then, when the profile sets no `PATH`, the usual install directories.
+pub(crate) fn search_directories(env: &BTreeMap<String, String>) -> Vec<PathBuf> {
+    let mut directories = env::split_paths(
+        env.get("PATH")
+            .cloned()
+            .unwrap_or_else(worker_path)
+            .as_str(),
+    )
+    .collect::<Vec<_>>();
+    if !env.contains_key("PATH") {
+        let home = home();
+        directories.extend(
+            INSTALL_DIRECTORIES
+                .iter()
+                .map(|directory| PathBuf::from(crate::expand_home(directory, &home))),
+        );
+    }
+    directories
+}
+
 /// A non-empty value the profile's environment gives `key`.
 pub(crate) fn explicit(env: &BTreeMap<String, String>, key: &str) -> Option<String> {
     env.get(key)
@@ -138,7 +154,7 @@ pub(crate) fn find_on_path(program: &str, path: &str) -> Option<PathBuf> {
 
 /// Every executable `program` in `directories`, in order, each install once
 /// however many links lead to it.
-fn all_named(program: &str, directories: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn all_named(program: &str, directories: &[PathBuf]) -> Vec<PathBuf> {
     let mut seen = Vec::new();
     let mut found = Vec::new();
     for candidate in directories.iter().map(|directory| directory.join(program)) {
@@ -167,8 +183,13 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
-/// The version `<executable> --version` reports, asked once per install.
+/// The version number `<executable> --version` reports, asked once per install.
 pub(crate) fn reported_version(executable: &Path) -> Option<String> {
+    printed_version(executable).and_then(|printed| version_number(&printed))
+}
+
+/// What `<executable> --version` prints, trimmed, asked once per install.
+pub(crate) fn printed_version(executable: &Path) -> Option<String> {
     let resolved = std::fs::canonicalize(executable).ok()?;
     let modified = std::fs::metadata(&resolved)
         .and_then(|metadata| metadata.modified())
@@ -181,7 +202,7 @@ pub(crate) fn reported_version(executable: &Path) -> Option<String> {
     {
         return Some(known);
     }
-    let answer = version_of(executable).and_then(|printed| version_number(&printed))?;
+    let answer = version_of(executable)?.trim().to_owned();
     if let Ok(mut cache) = REPORTED.lock() {
         cache
             .get_or_insert_with(HashMap::new)

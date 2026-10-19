@@ -33,12 +33,14 @@
 //! that does not offer the task's model, and `auth` one that refuses the
 //! session until someone signs in.
 //!
-//! A mode starting `cursor` answers the way `cursor-agent acp` does: it names
+//! A mode starting `cursor` answers the way Cursor's `agent acp` does: it names
 //! neither itself nor its version, offers one sign-in method and refuses every
 //! session until the client claims it, names its session with a UUID of
 //! Cursor's own, and offers the model and the execution mode as session
 //! settings. `no-model` is an account that does not offer the task's model,
 //! and `no-sign-in` a server offering a method this client cannot claim.
+//! `extensions` sends Cursor's own notifications and asks one of its blocking
+//! questions during the turn, then reports how the client answered it.
 //!
 //! A mode whose turns are `steer` waits for an instruction to be handed to the
 //! turn it is already running, the way `claude-agent-acp` takes one over
@@ -729,6 +731,42 @@ fn prompt(
             chunk(
                 &session,
                 &format!("step: {answer}{told}\nOGA_RESULT: completed"),
+            );
+        }
+        "extensions" => {
+            for method in [
+                "cursor/update_todos",
+                "cursor/task",
+                "cursor/generate_image",
+            ] {
+                emit(&json!({
+                    "jsonrpc": "2.0",
+                    "method": method,
+                    "params": {"sessionId": session, "merge": false, "todos": []},
+                }));
+            }
+            emit(&json!({
+                "jsonrpc": "2.0",
+                "id": 9010,
+                "method": "cursor/ask_question",
+                "params": {"sessionId": session, "title": "Which database?"},
+            }));
+            let mut answer = "no answer".to_owned();
+            for line in lines.by_ref() {
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                log(log_path, &json!({"received": message}));
+                if message["id"] == json!(9010) {
+                    answer = message["error"]["code"]
+                        .as_i64()
+                        .map_or_else(|| "answered".to_owned(), |code| format!("error {code}"));
+                    break;
+                }
+            }
+            chunk(
+                &session,
+                &format!("question: {answer}\nOGA_RESULT: completed"),
             );
         }
         "refused-then-quiet" => {
