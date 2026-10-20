@@ -334,6 +334,17 @@ pub struct RestartHoldArgs {
     pub attempt: u32,
 }
 
+/// Marks a hold armed by a rearm: a settled task waiting for its
+/// prerequisites to complete again. Only a completion after `at` releases it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RearmHoldArgs {
+    /// When the task was rearmed, ISO.
+    pub at: String,
+    /// The state it settled in, restored when the rearm is dropped.
+    pub previous_state: TaskState,
+}
+
 /// Arguments a hold release replays against its verb.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -352,6 +363,9 @@ pub struct HoldArgs {
     /// a start somebody chose from a wait on a prerequisite or an account.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled: Option<bool>,
+    /// Present only on a hold armed by a rearm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rearm: Option<RearmHoldArgs>,
 }
 
 /// Why a `pending` task has not started. One per task.

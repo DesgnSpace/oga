@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use oga_domain::{HoldArgs, HoldVerb, OnBlockerFailure, Task, TaskHold, TaskState};
+use oga_domain::{HoldArgs, HoldVerb, OnBlockerFailure, RearmHoldArgs, Task, TaskHold, TaskState};
 use oga_store::{Store, StoreError, append_event};
 use rusqlite::{OptionalExtension, params};
 use serde_json::json;
@@ -231,6 +231,69 @@ pub fn unsettled_blockers(
     })
 }
 
+/// A rearmed task's prerequisites as it sees them: one whose last ending came
+/// before the rearm reads as still to settle, so a stale result neither
+/// releases the task nor stops it.
+pub fn rearm_blockers(
+    store: &Store,
+    task_id: &str,
+    rearmed_at: &str,
+) -> Result<Vec<DependencyBlocker>, StoreError> {
+    store.with_connection(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT tasks.id,tasks.state,tasks.shipped_prompt IS NOT NULL,(SELECT MAX(created_at) FROM task_events WHERE task_events.task_id=tasks.id AND event_type IN ('completed','completion_asserted','failed','cancelled','blocked')) FROM task_dependencies JOIN tasks ON tasks.id=task_dependencies.blocker_id WHERE task_dependencies.task_id=? ORDER BY task_dependencies.created_at,task_dependencies.rowid",
+        )?;
+        Ok(statement
+            .query_map([task_id], |row| {
+                let state: String = row.get(1)?;
+                let state: TaskState = serde_json::from_str(&format!("\"{state}\""))
+                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
+                let ended_at: Option<String> = row.get(3)?;
+                let fresh = ended_at.is_some_and(|ended_at| ended_at.as_str() > rearmed_at);
+                let settled = state == TaskState::Completed || is_blocking_end(state);
+                Ok(DependencyBlocker {
+                    id: row.get(0)?,
+                    state: if settled && !fresh {
+                        TaskState::Pending
+                    } else {
+                        state
+                    },
+                    started: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+/// The wait a rearm puts a settled task in. Every prerequisite is named, since
+/// each one has to complete again.
+pub fn rearm_hold(
+    task_id: &str,
+    prerequisites: &[Task],
+    on_blocker_failure: OnBlockerFailure,
+    instruction: Option<String>,
+    previous_state: TaskState,
+    now: &str,
+) -> TaskHold {
+    let mut hold = dependency_hold(task_id, prerequisites, on_blocker_failure, instruction, now);
+    hold.verb = HoldVerb::Resume;
+    hold.args.rearm = Some(RearmHoldArgs {
+        at: now.into(),
+        previous_state,
+    });
+    let names = prerequisites
+        .iter()
+        .map(|task| task.title.as_deref().unwrap_or(&task.id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    hold.note = if on_blocker_failure == OnBlockerFailure::Run {
+        format!("rearmed: waiting for {names} to complete again; will start even if one fails")
+    } else {
+        format!("rearmed: waiting for {names} to complete again")
+    };
+    hold
+}
+
 pub fn dependency_hold(
     task_id: &str,
     waiting_on: &[Task],
@@ -252,6 +315,7 @@ pub fn dependency_hold(
             network: None,
             restart: None,
             scheduled: None,
+            rearm: None,
         },
         start_at: None,
         await_profile: None,

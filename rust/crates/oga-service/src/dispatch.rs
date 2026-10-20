@@ -9,8 +9,8 @@ use std::{
 
 use oga_domain::{
     CompletionCode, HoldArgs, HoldVerb, MemoryEntry, OnBlockerFailure, ScopeGrant,
-    SelectionDecision, Task, TaskCompletion, TaskKind, TaskScope, TaskState, TaskWorktree,
-    Transport, WorktreeOption,
+    SelectionDecision, Task, TaskCompletion, TaskHold, TaskKind, TaskScope, TaskState,
+    TaskWorktree, Transport, WorktreeOption,
 };
 use oga_providers::AcpAdapters;
 use oga_runner::ProviderRunner;
@@ -1165,6 +1165,9 @@ impl Dispatcher {
         let report = HoldSweep::new(self.store.clone())
             .sweep_with(&waiting::StoreProbe::new(self.store.clone()))
             .map_err(|error| DispatchError::Refusal(error.to_string()))?;
+        for hold in &report.rearmed {
+            self.resume_rearmed(hold.clone());
+        }
         for hold in &report.released {
             let Some(task) = lifecycle::load_task(&self.store, &hold.task_id)? else {
                 continue;
@@ -1259,9 +1262,21 @@ impl Dispatcher {
                 return;
             }
         };
-        for queued in released {
+        for queued in released.waiting {
             self.launch_waiting(queued);
         }
+        for hold in released.rearmed {
+            self.resume_rearmed(hold);
+        }
+    }
+
+    fn resume_rearmed(&self, hold: TaskHold) {
+        let dispatcher = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = crate::resume::resume_rearmed(&dispatcher, &hold).await {
+                eprintln!("resuming rearmed task {} failed: {error}", hold.task_id);
+            }
+        });
     }
 
     /// Start a queued task that never ran, from its brief as it now reads.

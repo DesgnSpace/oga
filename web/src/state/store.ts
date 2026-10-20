@@ -16,6 +16,14 @@ export class Store<T> {
 
   set(next: T): void {
     this.state = next;
+    this.notify();
+  }
+
+  setQuiet(next: T): void {
+    this.state = next;
+  }
+
+  notify(): void {
     for (const listener of Array.from(this.listeners)) listener();
   }
 

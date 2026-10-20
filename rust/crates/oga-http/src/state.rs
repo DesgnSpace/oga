@@ -959,7 +959,7 @@ fn hold_view_from_row_offset(row: &Row<'_>, first: usize) -> rusqlite::Result<Ta
     let args: Value = serde_json::from_str(&args).unwrap_or_default();
     let kind = if args.get("scheduled") == Some(&Value::Bool(true)) {
         oga_domain::HoldViewKind::Time
-    } else if verb == "delegate" {
+    } else if verb == "delegate" || args.get("rearm").is_some() {
         oga_domain::HoldViewKind::Dependency
     } else if args.get("restart").is_some() {
         oga_domain::HoldViewKind::Restart
@@ -971,8 +971,10 @@ fn hold_view_from_row_offset(row: &Row<'_>, first: usize) -> rusqlite::Result<Ta
         oga_domain::HoldViewKind::Time
     };
     let waiting_on = if kind == oga_domain::HoldViewKind::Dependency {
+        let note = note.strip_prefix("rearmed: ").unwrap_or(&note);
         note.strip_prefix("waiting for ")
             .and_then(|text| text.split(" to finish").next())
+            .and_then(|text| text.split(" to complete again").next())
             .map(str::to_owned)
     } else {
         match (await_profile, await_model) {

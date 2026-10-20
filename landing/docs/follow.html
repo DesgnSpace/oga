@@ -129,6 +129,11 @@ oga edit &lt;task-id&gt; -m "push the branch when you're done"</code></pre>
         <pre><code>oga edit &lt;task-id&gt; --requeue</code></pre>
         <p>Cancelling work before it started never sets off the work waiting on it — even work you asked to run when something before it fails. That work waits until you put the cancelled task back in line or change what it waits on.</p>
 
+        <p>Finished work that waits on other work can also run again after it. When an earlier task needs a second pass and the work after it should follow, rearm each later task:</p>
+        <pre><code>oga edit &lt;task-id&gt; --rearm
+oga edit &lt;task-id&gt; --rearm -m "the API changed - update the client calls"</code></pre>
+        <p>It waits again, and picks its own session back up once each task it waits on completes again. A completion from before the rearm doesn't count, so rearming a whole chain runs it again in order. Nothing is rearmed unless you ask. <code>--no-rearm</code> takes it out of line and leaves it as it ended; cancelling it does the same, but leaves it cancelled.</p>
+
         <div class="docs-callout">
           <p>Search <code>oga tasks --query "feature, file, or command"</code> before you start something new. If it finds related work, pick that task back up instead of running two against each other.</p>
         </div>

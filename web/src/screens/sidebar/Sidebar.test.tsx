@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
 import { resetFeedsForTests } from "@/bridge/events";
-import { EVENT_BATCH_EVENT, STATUS_EVENT, type EventBatch, type StreamStatus, type TaskSummary } from "@/bridge/types";
+import { EVENT_BATCH_EVENT, STATUS_EVENT, WINDOW_VISIBILITY_EVENT, type EventBatch, type StreamStatus, type TaskSummary, type WindowVisibility } from "@/bridge/types";
+import { resetWindowVisibilityForTests } from "@/lib/window-visibility";
 import { SidebarController } from "@/state/sidebar-state";
 import { resetTaskOutcomeViewsForTests, taskOutcomeViews } from "@/state/task-outcome-views";
 import * as sidebarProjection from "@/state/sidebar-projection";
@@ -98,6 +99,8 @@ function stubRowLayout({
 describe("the sidebar", () => {
   beforeEach(() => {
     projectionFromState.mockClear();
+    resetFeedsForTests();
+    resetWindowVisibilityForTests();
     resetTaskOutcomeViewsForTests();
     // Preferences persist between tests otherwise: one that groups by none
     // would leave the next one without headers.
@@ -468,5 +471,63 @@ describe("the sidebar", () => {
     });
 
     expect(controller.snapshot.connection).toBe("connected");
+  });
+
+  it("holds list changes while the window is hidden and catches up when it is shown", async () => {
+    let tasks: TaskSummary[] = [task("one", "first task")];
+    let reads = 0;
+    let batchListener: ((batch: EventBatch) => void) | undefined;
+    let visibilityListener: ((visibility: WindowVisibility) => void) | undefined;
+    resetFeedsForTests();
+    resetWindowVisibilityForTests();
+    setTransport({
+      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+        if (command === "broker_stream_status") {
+          // SAFETY: the stream status this fixture returns has the StreamStatus shape the sidebar reads.
+          return { connected: true, cursor: 0, streamFloor: 0, stale: false } as T;
+        }
+        if (command !== "broker_call") throw { message: `no handler for ${command}` };
+        // SAFETY: broker_call requests in this fixture always carry a call object.
+        const call = (args?.call as { call: string } | undefined)?.call;
+        if (call !== "summary") throw { message: `no handler for ${call}` };
+        reads += 1;
+        // SAFETY: the summary this fixture returns has the BrokerSummaryState shape SidebarController reads.
+        return { profiles: [], tasks, tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as T;
+      },
+      listen: (event, handle) => {
+        if (event === EVENT_BATCH_EVENT) {
+          // SAFETY: the bridge forwards each event's registered payload type.
+          batchListener = handle as (batch: EventBatch) => void;
+        }
+        if (event === WINDOW_VISIBILITY_EVENT) {
+          // SAFETY: the bridge forwards each event's registered payload type.
+          visibilityListener = handle as (visibility: WindowVisibility) => void;
+        }
+      },
+    });
+
+    const controller = new SidebarController();
+    render(<Sidebar sidebarController={controller} />);
+    await screen.findByText("first task");
+    const readsWhileVisible = reads;
+
+    act(() => visibilityListener?.({ visible: false }));
+    tasks = [task("one", "finished while away", { state: "completed", updatedAt: "2026-08-31T11:00:00Z" })];
+    act(() => batchListener?.({
+      cursor: 9,
+      streamFloor: 0,
+      stale: false,
+      pointers: [{ id: 9, cursor: 9, taskId: "one", type: "completed", kind: "lifecycle", state: "completed", at: "2026-08-31T11:00:00Z", title: "finished while away", summary: "" }],
+    }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
+
+    expect(screen.queryByText("finished while away")).toBeNull();
+    expect(reads).toBe(readsWhileVisible);
+
+    act(() => visibilityListener?.({ visible: true }));
+
+    await screen.findByText("finished while away");
+    expect(controller.snapshot.tasks.map((entry) => entry.promptPreview)).toEqual(["finished while away"]);
+    expect(reads).toBe(readsWhileVisible + 1);
   });
 });

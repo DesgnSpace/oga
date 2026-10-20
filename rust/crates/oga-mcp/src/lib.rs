@@ -776,6 +776,7 @@ impl McpServer {
         request.model = optional_string(args, "model");
         request.instruction = optional_string(args, "instruction");
         request.requeue = optional_bool(args, "requeue").unwrap_or(false);
+        request.rearm = optional_bool(args, "rearm");
         let task = self.state.dispatcher.edit(request).await?;
         self.started_response(
             task,

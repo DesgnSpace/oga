@@ -41,10 +41,10 @@ pub use store::{
 pub use task::{
     AcpAgentIdentity, AcpRestore, AcpSteering, ActivityCounts, ArchivedFilter, BranchOutcome,
     CheckoutOutcome, CompletionCode, HoldArgs, HoldVerb, HoldViewKind, InFlightTask, ListOrder,
-    NetworkHoldArgs, OnBlockerFailure, Provider, RestartHoldArgs, StateFilter, Task, TaskAttempt,
-    TaskCompletion, TaskCompletionOverride, TaskControlState, TaskHold, TaskHoldView, TaskKind,
-    TaskListQuery, TaskMatch, TaskScope, TaskState, TaskSummary, TaskTransport, TaskWorker,
-    TaskWorktree, Transport, TransportPreference, TransportReason, WorktreeDeleteBatchResult,
-    WorktreeDeleteEntry, WorktreeDeleteResult, WorktreeDeleteSkipped, WorktreeOption,
-    WorktreeRequest, image_mime,
+    NetworkHoldArgs, OnBlockerFailure, Provider, RearmHoldArgs, RestartHoldArgs, StateFilter, Task,
+    TaskAttempt, TaskCompletion, TaskCompletionOverride, TaskControlState, TaskHold, TaskHoldView,
+    TaskKind, TaskListQuery, TaskMatch, TaskScope, TaskState, TaskSummary, TaskTransport,
+    TaskWorker, TaskWorktree, Transport, TransportPreference, TransportReason,
+    WorktreeDeleteBatchResult, WorktreeDeleteEntry, WorktreeDeleteResult, WorktreeDeleteSkipped,
+    WorktreeOption, WorktreeRequest, image_mime,
 };

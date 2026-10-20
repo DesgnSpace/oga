@@ -704,6 +704,10 @@ export interface EventBatch {
   pointers: EventPointer[];
 }
 
+export interface WindowVisibility {
+  visible: boolean;
+}
+
 /** What the shell's single broker connection is doing right now. */
 export interface StreamStatus {
   connected: boolean;
@@ -718,6 +722,7 @@ export const STATUS_EVENT = "oga-broker-status";
 export const TASK_DELTA_EVENT = "oga-task-delta";
 export const MENU_EVENT = "oga-menu-command";
 export const OPEN_TASK_EVENT = "oga-open-task";
+export const WINDOW_VISIBILITY_EVENT = "oga-window-visibility";
 
 /** Only the menu items the shell hands to the page: opening the window,
  * quitting, and the help links are answered natively and never arrive here. */

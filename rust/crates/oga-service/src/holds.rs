@@ -151,6 +151,9 @@ pub struct HoldSweepReport {
     /// instruction, a restart's attempt count — lives in its args, and the row
     /// is already deleted by the time the caller launches.
     pub released: Vec<TaskHold>,
+    /// Rearmed tasks whose prerequisites all completed again. Their holds are
+    /// still in place for the caller to claim as it resumes them.
+    pub rearmed: Vec<TaskHold>,
     pub rechecked: Vec<String>,
     pub expired: Vec<String>,
     pub dropped: Vec<String>,
@@ -206,6 +209,7 @@ impl<C: Clock> HoldSweep<C> {
         for hold in holds {
             match self.evaluate(&hold, now, &now_iso, &probe)? {
                 HoldAction::Released => report.released.push(hold),
+                HoldAction::Rearmed => report.rearmed.push(hold),
                 HoldAction::Rechecked => report.rechecked.push(hold.task_id),
                 HoldAction::Expired => report.expired.push(hold.task_id),
                 HoldAction::Dropped => report.dropped.push(hold.task_id),
@@ -363,8 +367,14 @@ impl<C: Clock> HoldSweep<C> {
                 return Ok(HoldAction::Rechecked);
             }
         }
-        if hold.verb == HoldVerb::Delegate {
-            let blockers = dependencies::unsettled_blockers(&self.store, &task.id)?;
+        if hold.verb == HoldVerb::Delegate || hold.args.rearm.is_some() {
+            let blockers = match &hold.args.rearm {
+                Some(rearm) => dependencies::rearm_blockers(&self.store, &task.id, &rearm.at)?
+                    .into_iter()
+                    .filter(|blocker| blocker.state != TaskState::Completed)
+                    .collect(),
+                None => dependencies::unsettled_blockers(&self.store, &task.id)?,
+            };
             let policy = hold
                 .args
                 .on_blocker_failure
@@ -379,7 +389,10 @@ impl<C: Clock> HoldSweep<C> {
                     blocker.state.as_str(),
                     hold.note
                 );
-                block_held_task(&self.store, &task, &reason, true, now_iso)?;
+                // A rearmed task ran before, so it is never revived as one
+                // that has yet to start; it waits for the next rearm.
+                let dependency_blocked = hold.args.rearm.is_none();
+                block_held_task(&self.store, &task, &reason, dependency_blocked, now_iso)?;
                 drop_hold(
                     &self.store,
                     hold,
@@ -403,6 +416,11 @@ impl<C: Clock> HoldSweep<C> {
                 return Ok(HoldAction::Rechecked);
             }
         }
+        // A rearmed task picks up its session through resume, which claims
+        // the hold as it starts the run.
+        if hold.args.rearm.is_some() {
+            return Ok(HoldAction::Rearmed);
+        }
         if release_hold(&self.store, hold, now_iso)? {
             Ok(HoldAction::Released)
         } else {
@@ -414,6 +432,7 @@ impl<C: Clock> HoldSweep<C> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HoldAction {
     Released,
+    Rearmed,
     Rechecked,
     Expired,
     Dropped,
@@ -534,6 +553,30 @@ pub fn drop_hold(
     })
 }
 
+/// Deletes a hold still as it was read, on a task still waiting, so of two
+/// callers that both find it ready only one starts the task.
+pub(crate) fn claim_hold(store: &Store, hold: &TaskHold, now: &str) -> Result<bool, StoreError> {
+    store.transaction(|tx| {
+        let changed = tx.execute(
+            "DELETE FROM task_holds WHERE task_id=? AND updated_at=? AND EXISTS (SELECT 1 FROM tasks WHERE id=? AND state='pending')",
+            params![hold.task_id, hold.updated_at, hold.task_id],
+        )?;
+        if changed != 1 {
+            return Ok(false);
+        }
+        append_event(
+            tx,
+            &hold.task_id,
+            "hold_released",
+            TaskState::Pending,
+            &json!({"note": hold.note}),
+            now,
+            None,
+        )?;
+        Ok(true)
+    })
+}
+
 fn release_hold(store: &Store, hold: &TaskHold, now: &str) -> Result<bool, StoreError> {
     store.transaction(|tx| {
         let changed = tx.execute(
@@ -580,7 +623,7 @@ fn wait_kind(hold: &TaskHold) -> Option<&'static str> {
     hold.await_profile.is_some().then_some("rate_limit")
 }
 
-fn block_held_task(
+pub(crate) fn block_held_task(
     store: &Store,
     task: &Task,
     reason: &str,

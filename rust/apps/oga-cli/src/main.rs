@@ -806,7 +806,10 @@ Usage: oga <command> [options]
                        says what happens if one fails. Also --worker, --model,
                        --effort, --parent, --timeout 2h, and -m to add an
                        instruction. --requeue puts a cancelled one back to
-                       waiting.
+                       waiting. --rearm puts one that ended back to waiting
+                       on what it waits on: it runs again, in its own
+                       session, once each of those completes again. -m adds
+                       an instruction to that run. --no-rearm undoes it.
   complete <task-id>   Mark a task complete.
   cleanup              Free the disk that old finished work is holding. Shows
                        what would go and deletes nothing until you say so.
@@ -1541,6 +1544,8 @@ fn parse_edit_args(args: &[String]) -> CliResult<(EditCliOptions, Vec<String>)> 
         match flag {
             "--json" => options.json = true,
             "--requeue" => request.requeue = true,
+            "--rearm" => request.rearm = Some(true),
+            "--no-rearm" => request.rearm = Some(false),
             "--depends-on" => {
                 let id = take()?;
                 let ids = request.depends_on.get_or_insert_with(Vec::new);
@@ -1584,7 +1589,7 @@ async fn run_edit(args: &[String]) -> CliResult<i32> {
     let (options, values) = parse_edit_args(args)?;
     let id = values.first().ok_or_else(|| {
         CliError::new(
-            "usage: oga edit <task-id> [--depends-on id] [--add-dep id] [--remove-dep id] [--on-blocker-failure hold|run] [--worker name] [--model name] [--effort high] [--parent id] [--timeout 2h] [-m instruction] [--requeue]",
+            "usage: oga edit <task-id> [--depends-on id] [--add-dep id] [--remove-dep id] [--on-blocker-failure hold|run] [--worker name] [--model name] [--effort high] [--parent id] [--timeout 2h] [-m instruction] [--requeue] [--rearm|--no-rearm]",
         )
     })?;
     if values.len() != 1 {
@@ -1602,8 +1607,22 @@ async fn run_edit(args: &[String]) -> CliResult<i32> {
             "title": task_title(&task),
             "profileId": worker,
             "model": model,
-            "action": "edited",
+            "action": match options.request.rearm {
+                Some(true) => "rearmed",
+                Some(false) => "rearm dropped",
+                None => "edited",
+            },
         }))?;
+    } else if options.request.rearm == Some(true) {
+        println!("Rearmed {} {}", response.id, task_title(&task));
+        println!("It runs again once what it waits on completes again.");
+    } else if options.request.rearm == Some(false) {
+        println!(
+            "Dropped the rearm on {} {}; it is {} again.",
+            response.id,
+            task_title(&task),
+            response.state.as_str()
+        );
     } else {
         println!(
             "Changed {} {} on {worker} with {model}",
@@ -4163,6 +4182,7 @@ mod tests {
             "-m",
             "also update the docs",
             "--requeue",
+            "--rearm",
             "tsk_1",
         ]
         .map(String::from)
@@ -4177,6 +4197,7 @@ mod tests {
         assert_eq!(request.timeout_ms, Some(7_200_000));
         assert_eq!(request.instruction.as_deref(), Some("also update the docs"));
         assert!(request.requeue);
+        assert_eq!(request.rearm, Some(true));
         assert_eq!(values, ["tsk_1"]);
 
         let (cleared, _) = parse_edit_args(&["--depends-on".into(), "none".into()]).unwrap();

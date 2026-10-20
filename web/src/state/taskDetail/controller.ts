@@ -3,6 +3,7 @@
 import { broker, streamStatus, unwatchTask, watchTask } from "@/bridge/client";
 import { onBrokerStatus, onTaskDelta } from "@/bridge/events";
 import type { EventBatch, StreamStatus, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
+import { isWindowVisible, subscribeWindowVisibility } from "@/lib/window-visibility";
 import { Store } from "../store";
 import {
   absorbPage,
@@ -48,6 +49,9 @@ export class TaskDetailController {
   private resyncActivation = -1;
   private unsubscribeDelta: (() => void) | undefined;
   private unsubscribeStatus: (() => void) | undefined;
+  private unsubscribeVisibility: (() => void) | undefined;
+  private visible = true;
+  private presentationPending = false;
   private view: TaskDetailViewState = defaultViewState();
 
   constructor(private readonly taskId: string) {
@@ -103,7 +107,7 @@ export class TaskDetailController {
 
   async loadInitial(): Promise<void> {
     if (this.managed && !this.active) return;
-    this.store.update((state) => ({ ...state, loading: true, connection: "loading", error: undefined }));
+    this.commitUpdate((state) => ({ ...state, loading: true, connection: "loading", error: undefined }));
     await this.resync();
   }
 
@@ -114,7 +118,7 @@ export class TaskDetailController {
       await this.resyncPromise;
       return;
     }
-    this.store.update((state) => ({ ...state, loading: true, connection: "loading", error: undefined }));
+    this.commitUpdate((state) => ({ ...state, loading: true, connection: "loading", error: undefined }));
     this.resyncActivation = activation;
     const pending = this.enqueue(() => this.readSnapshot(activation));
     const tracked = pending.finally(() => {
@@ -137,7 +141,10 @@ export class TaskDetailController {
     this.active = true;
     this.activation += 1;
     const activation = this.activation;
-    this.store.update((state) => ({
+    this.visible = isWindowVisible();
+    this.presentationPending = false;
+    this.unsubscribeVisibility = subscribeWindowVisibility(() => this.setVisible(isWindowVisible()));
+    this.commitUpdate((state) => ({
       ...state,
       loading: true,
       loadingEarlier: false,
@@ -170,6 +177,8 @@ export class TaskDetailController {
     this.unsubscribeDelta = undefined;
     this.unsubscribeStatus?.();
     this.unsubscribeStatus = undefined;
+    this.unsubscribeVisibility?.();
+    this.unsubscribeVisibility = undefined;
     await this.enqueue(async () => {
       await unwatchTask(this.taskId);
     });
@@ -213,7 +222,7 @@ export class TaskDetailController {
     if (page.ok) {
       this.absorbPage(page.value);
     }
-    this.store.update((state) => {
+    this.commitUpdate((state) => {
       const next: TaskDetailState = { ...state, loading: false };
       if (task.ok) {
         next.task = task.value;
@@ -240,12 +249,12 @@ export class TaskDetailController {
   }
 
   private finishSync(): void {
-    this.store.update((state) => ({ ...state, loading: false, connection: "live", error: undefined }));
+    this.commitUpdate((state) => ({ ...state, loading: false, connection: "live", error: undefined }));
   }
 
   private clearMissing(error: string): void {
     this.events = [];
-    this.store.update((state) => ({
+    this.commitUpdate((state) => ({
       ...state,
       task: undefined,
       revision: state.revision + 1,
@@ -262,13 +271,13 @@ export class TaskDetailController {
   private absorbPage(page: TaskEventPage): void {
     const result = absorbPage(this.events, this.store.snapshot, page);
     this.events = result.events;
-    this.store.set(result.state);
+    this.commit(result.state);
   }
 
   private adopt(snapshot: TaskSnapshot): void {
     const result = adopt(this.events, this.store.snapshot, snapshot);
     this.events = result.events;
-    this.store.set(result.state);
+    this.commit(result.state);
   }
 
   async loadEarlier(): Promise<void> {
@@ -279,7 +288,7 @@ export class TaskDetailController {
     }
     const before = state.oldestId;
     const activation = this.activation;
-    this.store.update((s) => ({ ...s, loadingEarlier: true }));
+    this.commitUpdate((s) => ({ ...s, loadingEarlier: true }));
     const result = await broker.taskEvents(this.taskId, {
       before,
       last: EVENT_PAGE_SIZE,
@@ -287,14 +296,14 @@ export class TaskDetailController {
     });
     if (!this.canApply(activation)) return;
     if (this.store.snapshot.oldestId !== before) {
-      this.store.update((s) => ({ ...s, loadingEarlier: false }));
+      this.commitUpdate((s) => ({ ...s, loadingEarlier: false }));
       return;
     }
     if (result.ok) {
       this.absorbPage(result.value);
-      this.store.update((s) => ({ ...s, loadingEarlier: false, error: undefined }));
+      this.commitUpdate((s) => ({ ...s, loadingEarlier: false, error: undefined }));
     } else {
-      this.store.update((s) => ({ ...s, loadingEarlier: false, error: result.error.message }));
+      this.commitUpdate((s) => ({ ...s, loadingEarlier: false, error: result.error.message }));
     }
   }
 
@@ -306,7 +315,7 @@ export class TaskDetailController {
   applyDelta(delta: TaskDelta): DeltaOutcome {
     const result = applyDelta(this.events, this.store.snapshot, this.taskId, delta);
     this.events = result.events;
-    this.store.set(result.state);
+    this.commit(result.state);
     return result.outcome;
   }
 
@@ -317,7 +326,7 @@ export class TaskDetailController {
    */
   applyConnection(status: StreamStatus): boolean {
     const [next, returning] = applyConnection(this.store.snapshot, status);
-    this.store.set(next);
+    this.commit(next);
     return returning;
   }
 
@@ -338,8 +347,29 @@ export class TaskDetailController {
     if (this.events.length <= count) return;
     this.events = this.events.slice(-count);
     const oldestId = this.events[0].id;
-    this.store.update((state) => ({ ...state, oldestId, hasEarlier: true, revision: state.revision + 1 }));
+    this.commitUpdate((state) => ({ ...state, oldestId, hasEarlier: true, revision: state.revision + 1 }));
     this.view = { ...this.view, scrollTop: 0, stickToEnd: true };
+  }
+
+  private commit(next: TaskDetailState): void {
+    if (this.visible) {
+      this.store.set(next);
+      return;
+    }
+    this.store.setQuiet(next);
+    this.presentationPending = true;
+  }
+
+  private commitUpdate(updater: (state: TaskDetailState) => TaskDetailState): void {
+    this.commit(updater(this.store.snapshot));
+  }
+
+  private setVisible(visible: boolean): void {
+    if (visible === this.visible) return;
+    this.visible = visible;
+    if (!visible || !this.presentationPending) return;
+    this.presentationPending = false;
+    this.store.notify();
   }
 
   private canApply(activation: number): boolean {
