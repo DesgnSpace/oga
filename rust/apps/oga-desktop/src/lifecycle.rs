@@ -1,12 +1,24 @@
 use std::time::Duration;
 
-use tauri::{App, AppHandle, Manager, Runtime, WebviewWindow, Window, WindowEvent};
+use tauri::{App, AppHandle, Emitter, Manager, Runtime, WebviewWindow, Window, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::time::timeout;
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 pub const WINDOW_STATE_FILE: &str = "oga-window-state.json";
+pub const VISIBILITY_EVENT: &str = "oga-window-visibility";
+
+/// The shell keeps work going while the window is hidden, so the page needs
+/// to know when to stop drawing and when to catch up.
+#[derive(Clone, Copy, serde::Serialize)]
+pub struct WindowVisibility {
+    pub visible: bool,
+}
+
+fn announce_visibility<R: Runtime>(app: &AppHandle<R>, visible: bool) {
+    let _ = app.emit(VISIBILITY_EVENT, WindowVisibility { visible });
+}
 
 const WINDOW_STATE_FLAGS: StateFlags = StateFlags::from_bits_retain(
     StateFlags::SIZE.bits()
@@ -59,6 +71,7 @@ pub fn toggle_main_window<R: Runtime>(app: &AppHandle<R>) {
     let should_hide = window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false);
     if should_hide {
         let _ = window.hide();
+        announce_visibility(app, false);
     } else {
         let _ = reveal_window(&window);
     }
@@ -109,7 +122,15 @@ pub fn handle_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) 
     {
         api.prevent_close();
         let _ = window.hide();
+        announce_visibility(window.app_handle(), false);
     }
+}
+
+#[tauri::command]
+pub fn main_window_visible<R: Runtime>(app: AppHandle<R>) -> bool {
+    app.get_webview_window(MAIN_WINDOW_LABEL)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(true)
 }
 
 pub fn handle_exit<R: Runtime>(app: &AppHandle<R>) {
@@ -125,5 +146,7 @@ pub fn handle_exit<R: Runtime>(app: &AppHandle<R>) {
 fn reveal_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     window.show()?;
     window.unminimize()?;
-    window.set_focus()
+    window.set_focus()?;
+    announce_visibility(window.app_handle(), true);
+    Ok(())
 }

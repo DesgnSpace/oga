@@ -7,10 +7,12 @@ import {
   OPEN_TASK_EVENT,
   STATUS_EVENT,
   TASK_DELTA_EVENT,
+  WINDOW_VISIBILITY_EVENT,
   type MenuCommand,
   type EventBatch,
   type StreamStatus,
   type TaskDelta,
+  type WindowVisibility,
 } from "./types";
 
 type Unsubscribe = () => void;
@@ -57,6 +59,7 @@ const statuses = new Feed<StreamStatus>(STATUS_EVENT);
 const deltas = new Feed<TaskDelta>(TASK_DELTA_EVENT);
 const menuCommands = new Feed<MenuCommand>(MENU_EVENT);
 const openedTasks = new Feed<string>(OPEN_TASK_EVENT);
+const visibilities = new Feed<WindowVisibility>(WINDOW_VISIBILITY_EVENT);
 
 export function onEventBatch(handle: (batch: EventBatch) => void): Unsubscribe {
   return batches.subscribe(handle);
@@ -78,8 +81,12 @@ export function onOpenTask(handle: (taskId: string) => void): Unsubscribe {
   return openedTasks.subscribe(handle);
 }
 
+export function onWindowVisibility(handle: (visibility: WindowVisibility) => void): Unsubscribe {
+  return visibilities.subscribe(handle);
+}
+
 export function liveSubscriptions(): number {
-  return batches.size + statuses.size + deltas.size + menuCommands.size + openedTasks.size;
+  return batches.size + statuses.size + deltas.size + menuCommands.size + openedTasks.size + visibilities.size;
 }
 
 export function resetFeedsForTests(): void {
@@ -88,4 +95,5 @@ export function resetFeedsForTests(): void {
   deltas.reset();
   menuCommands.reset();
   openedTasks.reset();
+  visibilities.reset();
 }

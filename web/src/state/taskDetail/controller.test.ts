@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { Transport } from "@/bridge/transport";
 import type { EventBatch, StreamStatus, Task, TaskDelta, TaskEventPage, TaskEventView, TaskSnapshot } from "@/bridge/types";
+import { TASK_DELTA_EVENT, WINDOW_VISIBILITY_EVENT } from "@/bridge/types";
+import { resetWindowVisibilityForTests } from "@/lib/window-visibility";
 import { INITIAL_EVENT_LIMIT } from "./state";
 
 function flush(): Promise<void> {
@@ -395,6 +397,45 @@ describe("delta and reconnect wiring", () => {
 
     expect(controller.snapshot.cursor).toBe(20);
     dispose();
+  });
+
+  it("holds detail redraws while hidden and keeps every event for the return", async () => {
+    const connected: StreamStatus = { connected: true, cursor: 0, streamFloor: 0, stale: false };
+    const transport = fakeTransport({
+      broker_watch_task: () => snapshot({ cursor: 0 }),
+      broker_stream_status: () => connected,
+      broker_unwatch_task: () => undefined,
+    });
+    const { watchTaskDetail } = await freshController(transport);
+    const { liveSubscriptions } = await import("@/bridge/events");
+    resetWindowVisibilityForTests();
+    const { controller, dispose } = watchTaskDetail("task");
+    await flush();
+    await flush();
+
+    const view = mock();
+    controller.subscribe(view);
+    const subscriptions = liveSubscriptions();
+
+    const firstDelta: TaskDelta = { taskId: "task", fromCursor: 0, cursor: 1, events: [event(1)] };
+    const secondDelta: TaskDelta = { taskId: "task", fromCursor: 1, cursor: 2, events: [event(2)] };
+    transport.emit(WINDOW_VISIBILITY_EVENT, { visible: false });
+    transport.emit(TASK_DELTA_EVENT, firstDelta);
+    transport.emit(TASK_DELTA_EVENT, secondDelta);
+
+    expect(view).not.toHaveBeenCalled();
+    controller.withEvents((events) => expect(events.map((item) => item.id)).toEqual([1, 2]));
+    expect(liveSubscriptions()).toBe(subscriptions);
+
+    transport.emit(WINDOW_VISIBILITY_EVENT, { visible: true });
+
+    expect(view).toHaveBeenCalledTimes(1);
+    controller.withEvents((events) => expect(events.map((item) => item.id)).toEqual([1, 2]));
+    expect(liveSubscriptions()).toBe(subscriptions);
+
+    dispose();
+    await flush();
+    expect(liveSubscriptions()).toBeLessThan(subscriptions);
   });
 
   it("resyncs when the broker connection returns from a drop", async () => {

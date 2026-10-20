@@ -70,6 +70,7 @@ import {
 } from "@/state/sidebar-projection";
 import { BackArrowIcon, FilterIcon, ForwardArrowIcon, RefreshIcon, SearchIcon, SettingsIcon, SidebarIcon } from "@/ui/icons";
 import { formatCost, taskDuration } from "@/lib/format";
+import { isWindowVisible, useWindowShown, useWindowVisible } from "@/lib/window-visibility";
 import { relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
@@ -227,12 +228,23 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   const groupRowRefs = useRef(new Map<string, HTMLButtonElement>());
   const [focusedTaskId, setFocusedTaskId] = useState<string | undefined>(initialTask);
   const [, setClock] = useState(0);
+  const visible = useWindowVisible();
+  const hiddenCursor = useRef(0);
 
   useEffect(() => {
-    if (!sidebar.tasks.some((task) => task.state === "running")) return;
+    if (!visible || !sidebar.tasks.some((task) => task.state === "running")) return;
     const timer = setInterval(() => setClock((clock) => clock + 1), 1_000);
     return () => clearInterval(timer);
-  }, [sidebar.tasks]);
+  }, [sidebar.tasks, visible]);
+
+  useWindowShown(() => {
+    const cursor = hiddenCursor.current;
+    hiddenCursor.current = 0;
+    if (cursor > sidebarRef.snapshot.eventCursor) {
+      sidebarRef.update((state) => ({ ...state, eventCursor: cursor }));
+    }
+    void sidebarRef.refresh();
+  });
 
   const projection = useMemo(
     () => projectionFromState(sidebar, (task) => taskOutcomeViews.isOrderingUnread(task)),
@@ -434,6 +446,10 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
     };
 
     const unsub = onEventBatch((batch: EventBatch) => {
+      if (!isWindowVisible()) {
+        hiddenCursor.current = Math.max(hiddenCursor.current, batch.cursor);
+        return;
+      }
       const action = sidebarRef.applyBatch(batch);
       if (action === "refresh") {
         requestRefresh();

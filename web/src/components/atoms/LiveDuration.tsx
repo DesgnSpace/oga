@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { taskDuration } from "@/lib/format";
+import { useWindowVisible } from "@/lib/window-visibility";
 
 export function LiveDuration({ durationMs, runningSince, running }: {
   durationMs: number | undefined;
@@ -9,11 +10,12 @@ export function LiveDuration({ durationMs, runningSince, running }: {
   running: boolean;
 }) {
   const ticking = running && runningSince !== undefined;
+  const visible = useWindowVisible();
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (!ticking) return;
+    if (!ticking || !visible) return;
     const timer = setInterval(() => setTick((tick) => tick + 1), 1_000);
     return () => clearInterval(timer);
-  }, [ticking]);
+  }, [ticking, visible]);
   return <>{taskDuration(durationMs, runningSince, running)}</>;
 }

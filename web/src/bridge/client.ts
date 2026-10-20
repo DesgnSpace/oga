@@ -137,6 +137,10 @@ export function streamStatus(): Promise<BridgeResult<StreamStatus>> {
   return command<StreamStatus>("broker_stream_status");
 }
 
+export function mainWindowVisible(): Promise<BridgeResult<boolean>> {
+  return command<boolean>("main_window_visible");
+}
+
 /**
  * Asks the shell to follow a task, and reads back everything needed to draw
  * it. From then on the shell pushes only what changes, over `onTaskDelta`.

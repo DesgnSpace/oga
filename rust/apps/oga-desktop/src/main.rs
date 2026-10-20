@@ -217,6 +217,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             broker_status,
             ensure_broker,
             stop_broker,
+            lifecycle::main_window_visible,
             install_mcp_configs,
             bridge::broker_call,
             bridge::broker_stream_status,
