@@ -602,6 +602,8 @@ pub struct EditRequest {
     pub instruction: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub requeue: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rearm: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

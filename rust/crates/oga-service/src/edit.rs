@@ -1,4 +1,6 @@
-//! Changes to a task no worker has picked up yet, and requeueing one cancelled before it started.
+//! Changes to a task no worker has picked up yet, requeueing one cancelled
+//! before it started, and rearming a settled one to run again after its
+//! prerequisites.
 
 use oga_domain::{HoldArgs, HoldVerb, OnBlockerFailure, Task, TaskHold, TaskKind, TaskState};
 use oga_store::{StoreError, append_event};
@@ -32,6 +34,9 @@ pub struct EditRequest {
     pub model: Option<String>,
     pub instruction: Option<String>,
     pub requeue: bool,
+    /// `true` puts a settled task back to waiting on its prerequisites;
+    /// `false` drops that wait and restores the state it settled in.
+    pub rearm: Option<bool>,
 }
 
 impl EditRequest {
@@ -72,6 +77,21 @@ impl EditRequest {
         self
     }
 
+    pub fn rearm(mut self, rearm: bool) -> Self {
+        self.rearm = Some(rearm);
+        self
+    }
+
+    /// The settings a rearm cannot carry: they belong to `resume` and `handoff`.
+    fn changes_run_settings(&self) -> bool {
+        self.parent_task_id.is_some()
+            || self.timeout_ms.is_some()
+            || self.effort.is_some()
+            || self.profile_id.is_some()
+            || self.model.is_some()
+            || self.requeue
+    }
+
     fn changes_nothing(&self) -> bool {
         self.depends_on.is_none()
             && self.add_depends_on.is_empty()
@@ -96,6 +116,11 @@ pub async fn edit(
     dispatcher: &Dispatcher,
     request: EditRequest,
 ) -> Result<Task, ContinuationError> {
+    match request.rearm {
+        Some(true) => return rearm(dispatcher, &request),
+        Some(false) => return drop_rearm(dispatcher, &request),
+        None => {}
+    }
     let store = dispatcher.store();
     let old = require_task(store, &request.task_id)?;
     require_editable(&old, &request)?;
@@ -264,6 +289,175 @@ pub async fn edit(
     if state == TaskState::Queued {
         dispatcher.launch_waiting(task.clone());
     }
+    Ok(task)
+}
+
+/// Puts a settled task back to waiting on its prerequisites. Only a
+/// completion after now releases it, and it then resumes its own session.
+fn rearm(dispatcher: &Dispatcher, request: &EditRequest) -> Result<Task, ContinuationError> {
+    let store = dispatcher.store();
+    let old = require_task(store, &request.task_id)?;
+    require_rearmable(&old, holds::get_hold(store, &old.id)?.as_ref(), request)?;
+    let current_ids = dependencies::dependency_ids(store, &old.id)?;
+    let prerequisite_ids = prerequisite_ids(&old.id, &current_ids, request)?;
+    if prerequisite_ids.is_empty() {
+        return Err(ContinuationError::Refusal(format!(
+            "task {} waits on no other task, so there is nothing to run again after; pass dependsOn to name one, or resume it",
+            old.id
+        )));
+    }
+    let prerequisites = prerequisite_ids
+        .iter()
+        .map(|id| {
+            lifecycle::load_task(store, id)?.ok_or_else(|| {
+                ContinuationError::Refusal(format!("unknown prerequisite task: {id}"))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let policy = match request.on_blocker_failure {
+        Some(policy) => policy,
+        None => dependencies::blocker_policy(store, &old.id)?,
+    };
+    let instruction = request
+        .instruction
+        .as_deref()
+        .map(str::trim)
+        .filter(|instruction| !instruction.is_empty())
+        .map(str::to_owned);
+    let now = now_iso();
+    let hold = dependencies::rearm_hold(
+        &old.id,
+        &prerequisites,
+        policy,
+        instruction.clone(),
+        old.state,
+        &now,
+    );
+    store.transaction(|tx| {
+        let changed = tx.execute(
+            "UPDATE tasks SET state='pending',on_blocker_failure=?,updated_at=? WHERE id=? AND state=?",
+            params![policy_column(policy), now, old.id, old.state.as_str()],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::Refusal(format!(
+                "task changed while it was being edited; read it again and retry: {}",
+                old.id
+            )));
+        }
+        if prerequisite_ids != current_ids {
+            dependencies::replace_dependencies(tx, &old.id, &prerequisite_ids, &now)?;
+        }
+        let mut payload = json!({
+            "previousState": old.state,
+            "dependsOn": prerequisite_ids,
+        });
+        if let Some(instruction) = &instruction {
+            payload["instruction"] = json!(instruction);
+        }
+        append_event(tx, &old.id, "rearmed", TaskState::Pending, &payload, &now, None)?;
+        holds::insert_hold(tx, &hold)
+    })?;
+    let task = require_task(store, &old.id)?;
+    // Leaving a blocking end lifts the reason its dependents were dropped.
+    if dependencies::is_blocking_end(old.state) {
+        dispatcher.restore_dropped_dependents(&task);
+    }
+    Ok(task)
+}
+
+fn require_rearmable(
+    task: &Task,
+    hold: Option<&TaskHold>,
+    request: &EditRequest,
+) -> Result<(), ContinuationError> {
+    if task.kind == Some(TaskKind::Orchestrator) {
+        return Err(ContinuationError::Refusal(format!(
+            "unknown task: {}",
+            task.id
+        )));
+    }
+    match task.state {
+        TaskState::Completed | TaskState::Failed | TaskState::Cancelled | TaskState::Blocked => {}
+        TaskState::Pending if hold.is_some_and(|hold| hold.args.rearm.is_some()) => {
+            return Err(ContinuationError::Refusal(format!(
+                "task {} is already rearmed; pass rearm: false to drop that first",
+                task.id
+            )));
+        }
+        state => {
+            return Err(ContinuationError::Refusal(format!(
+                "only a task that has ended can be rearmed; this one is {}: {}",
+                state.as_str(),
+                task.id
+            )));
+        }
+    }
+    if task.shipped_prompt.is_none() {
+        return Err(ContinuationError::Refusal(format!(
+            "task {} never ran, so there is no run to repeat; edit it, or requeue it if it was cancelled",
+            task.id
+        )));
+    }
+    if request.changes_run_settings() {
+        return Err(ContinuationError::Refusal(format!(
+            "rearm takes only instruction, dependsOn, addDependsOn, removeDependsOn and onBlockerFailure; resume or hand off task {} to change the rest",
+            task.id
+        )));
+    }
+    Ok(())
+}
+
+/// Takes a rearmed task out of its wait without running it: it is back in the
+/// state it had settled in.
+fn drop_rearm(dispatcher: &Dispatcher, request: &EditRequest) -> Result<Task, ContinuationError> {
+    let store = dispatcher.store();
+    let old = require_task(store, &request.task_id)?;
+    let Some(rearm) = holds::get_hold(store, &old.id)?
+        .filter(|_| old.state == TaskState::Pending)
+        .and_then(|hold| hold.args.rearm.map(|rearm| (hold.updated_at, rearm)))
+    else {
+        return Err(ContinuationError::Refusal(format!(
+            "task {} is not waiting on a rearm",
+            old.id
+        )));
+    };
+    if request.changes_run_settings() || !request.changes_nothing() {
+        return Err(ContinuationError::Refusal(format!(
+            "rearm: false only drops the rearm; pass no other changes: {}",
+            old.id
+        )));
+    }
+    let (hold_updated_at, rearm) = rearm;
+    let restored = rearm.previous_state;
+    let now = now_iso();
+    store.transaction(|tx| {
+        let removed = tx.execute(
+            "DELETE FROM task_holds WHERE task_id=? AND updated_at=?",
+            params![old.id, hold_updated_at],
+        )?;
+        let changed = tx.execute(
+            "UPDATE tasks SET state=?,updated_at=? WHERE id=? AND state='pending'",
+            params![restored.as_str(), now, old.id],
+        )?;
+        if removed != 1 || changed != 1 {
+            return Err(StoreError::Refusal(format!(
+                "task changed while it was being edited; read it again and retry: {}",
+                old.id
+            )));
+        }
+        append_event(
+            tx,
+            &old.id,
+            "rearm_dropped",
+            restored,
+            &json!({"restoredState": restored}),
+            &now,
+            None,
+        )?;
+        Ok(())
+    })?;
+    let task = require_task(store, &old.id)?;
+    dispatcher.settle_dependents(&task);
     Ok(task)
 }
 

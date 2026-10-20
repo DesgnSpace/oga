@@ -9,12 +9,15 @@ use crate::{
     dispatch::Dispatcher,
     encode_store,
     handoff_brief::{FreshSessionCause, HandoffBriefOptions, handoff_brief},
-    holds::{HOLD_EXPIRY, HoldSweep},
+    holds::{self, HOLD_EXPIRY, HoldSweep},
     lifecycle::now_iso,
     require_existing_worktree, require_profile, require_task, resume_prompt,
     schedule::{StartAt, parse_start_at},
     validate_model, waiting,
 };
+
+/// What a rearmed task is told when it was rearmed without an instruction.
+const REARM_INSTRUCTION: &str = "The tasks this one waits on ran again. Redo your brief from the current state of the work: check what is there now, and finish what is missing or out of date.";
 
 /// How long a `rate_limit` hold waits when the failed run named no reset time.
 const RATE_LIMIT_FALLBACK_MS: i64 = 10 * 60 * 1_000;
@@ -100,7 +103,8 @@ pub async fn resume(
             old.id
         )));
     }
-    let (profile, session, recreated_worktree) = prepare_reopen(dispatcher, &old).await?;
+    let (profile, session, recreated_worktree) =
+        prepare_reopen(dispatcher, &old, old.archived_at.is_some()).await?;
     let model = request
         .model
         .as_deref()
@@ -183,7 +187,8 @@ pub(crate) async fn continue_follow_up(
             old.state.as_str()
         )));
     }
-    let (profile, session, recreated_worktree) = prepare_reopen(dispatcher, &old).await?;
+    let (profile, session, recreated_worktree) =
+        prepare_reopen(dispatcher, &old, old.archived_at.is_some()).await?;
     let model = old.model.clone();
     let effort = old.effort.clone();
     let scope = old.scope.clone();
@@ -209,11 +214,67 @@ pub(crate) async fn continue_follow_up(
     .await
 }
 
+/// Starts a rearmed task whose prerequisites all completed again: it continues
+/// its session with the instruction given at rearm time. Claiming the hold is
+/// the release, so a task two settles both find ready starts once. A run that
+/// cannot start lands the task blocked with the reason.
+pub(crate) async fn resume_rearmed(
+    dispatcher: &Dispatcher,
+    hold: &TaskHold,
+) -> Result<Option<Task>, ContinuationError> {
+    let Some(rearm) = &hold.args.rearm else {
+        return Ok(None);
+    };
+    if !holds::claim_hold(dispatcher.store(), hold, &now_iso())? {
+        return Ok(None);
+    }
+    let old = require_task(dispatcher.store(), &hold.task_id)?;
+    let started = async {
+        let (profile, session, recreated_worktree) = prepare_reopen(dispatcher, &old, true).await?;
+        let instruction = hold
+            .args
+            .instruction
+            .clone()
+            .unwrap_or_else(|| REARM_INSTRUCTION.to_owned());
+        reopen(
+            dispatcher,
+            old.clone(),
+            Reopen {
+                profile,
+                session,
+                instruction: Some(instruction),
+                scope: old.scope.clone(),
+                scope_updated: false,
+                model: old.model.clone(),
+                model_updated: false,
+                effort: old.effort.clone(),
+                effort_updated: false,
+                timeout_ms: None,
+                previous_state: rearm.previous_state,
+                allow_running: false,
+                recreated_worktree,
+            },
+        )
+        .await
+    }
+    .await;
+    match started {
+        Ok(task) => Ok(Some(task)),
+        Err(error) => {
+            let reason = format!("rearmed run could not start: {}", error.message());
+            holds::block_held_task(dispatcher.store(), &old, &reason, false, &now_iso())?;
+            dispatcher.settle_dependents(&require_task(dispatcher.store(), &old.id)?);
+            Err(error)
+        }
+    }
+}
+
 /// The profile and session a reopen runs on, and whether its checkout had to
 /// be recreated. A follow-up and a resume share every check here.
 async fn prepare_reopen(
     dispatcher: &Dispatcher,
     old: &Task,
+    recreate_missing_worktree: bool,
 ) -> Result<(Profile, Option<String>, bool), ContinuationError> {
     let mut recreated_worktree = false;
     if let Some(worktree) = old
@@ -222,7 +283,7 @@ async fn prepare_reopen(
         .filter(|worktree| !worktree.deferred())
     {
         if !std::path::Path::new(&worktree.path).join(".git").exists() {
-            if old.archived_at.is_some() {
+            if recreate_missing_worktree {
                 oga_worktree::recreate_task_worktree(worktree).await?;
                 recreated_worktree = true;
             } else {
@@ -314,8 +375,9 @@ async fn reopen(
                 old.id
             )));
         }
-        if old.state == TaskState::Pending {
-            tx.execute("DELETE FROM task_holds WHERE task_id=?", [old.id.as_str()])?;
+        if old.state == TaskState::Pending
+            && tx.execute("DELETE FROM task_holds WHERE task_id=?", [old.id.as_str()])? == 1
+        {
             append_event(
                 tx,
                 &old.id,
@@ -403,7 +465,7 @@ async fn reopen(
                 same_account: true,
                 instruction: Some(instruction.clone().unwrap_or_default()),
                 fresh_session_cause: Some(
-                    if old.state == oga_domain::TaskState::Pending
+                    if previous_state == oga_domain::TaskState::Pending
                         || old
                             .completion
                             .as_ref()

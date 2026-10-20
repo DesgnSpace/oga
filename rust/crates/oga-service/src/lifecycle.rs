@@ -10,15 +10,15 @@ use std::{
 
 use crate::acp_run::{self, AcpEnd, AcpRun, AcpTurn, Delivered};
 use crate::authorization;
-use crate::dependencies;
 use crate::prompt::{
     WorkerOutcome, WorkerPromptInput, assemble_worker_message, interpret_worker_outcome,
 };
 use crate::transport::{self, TransportPlan};
+use crate::{dependencies, holds};
 use oga_domain::{
     CompletionCode, FailureCode, HoldArgs, HoldViewKind, Profile, ProfileFailure, ProfileSuccess,
-    Provider, Task, TaskAttempt, TaskCompletion, TaskHoldView, TaskKind, TaskScope, TaskState,
-    TaskTransport, TaskWorker, TaskWorktree,
+    Provider, Task, TaskAttempt, TaskCompletion, TaskHold, TaskHoldView, TaskKind, TaskScope,
+    TaskState, TaskTransport, TaskWorker, TaskWorktree,
 };
 use oga_providers::{
     AcpAdapters, CommandOptions, OgaServer, ParsedEvent, Usage, final_text,
@@ -214,6 +214,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
                             serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default();
                         let kind = match row.get::<_, String>(0)?.as_str() {
                             _ if args.scheduled == Some(true) => HoldViewKind::Time,
+                            _ if args.rearm.is_some() => HoldViewKind::Dependency,
                             "delegate" => HoldViewKind::Dependency,
                             _ if args.restart.is_some() => HoldViewKind::Restart,
                             _ => HoldViewKind::Time,
@@ -1470,10 +1471,23 @@ pub(crate) fn record_profile_outcome(
     Ok(())
 }
 
+/// The dependents one blocker's ending lets start.
+#[derive(Debug, Default)]
+pub struct ReleasedDependents {
+    /// Tasks that never ran, queued to start from their brief.
+    pub waiting: Vec<Task>,
+    /// Rearmed tasks whose prerequisites all completed again. Their holds stay
+    /// in place for the resume that claims them.
+    pub rearmed: Vec<TaskHold>,
+}
+
 /// Release dependency holds after one blocker settles. The operation is safe to
 /// call more than once because deleting the hold is the atomic release claim.
-pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, LifecycleError> {
-    let mut released = Vec::new();
+pub fn release_dependents(
+    store: &Store,
+    blocker: &Task,
+) -> Result<ReleasedDependents, LifecycleError> {
+    let mut released = ReleasedDependents::default();
     let dependents = store.with_connection(|connection| {
         let mut statement = connection.prepare(
             "SELECT tasks.id FROM task_dependencies JOIN tasks ON tasks.id=task_dependencies.task_id WHERE task_dependencies.blocker_id=? ORDER BY task_dependencies.created_at, task_dependencies.rowid",
@@ -1495,6 +1509,17 @@ pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, Li
         else {
             continue;
         };
+        // A prerequisite that fails after the rearm is left to the sweep,
+        // which blocks or releases by the task's policy.
+        if let Some(hold) = holds::get_hold(store, &dependent.id)?
+            && let Some(rearm) = &hold.args.rearm
+        {
+            let prerequisites = dependencies::rearm_blockers(store, &dependent.id, &rearm.at)?;
+            if dependencies::prerequisites_met(hold_policy, &prerequisites) {
+                released.rearmed.push(hold);
+            }
+            continue;
+        }
         let prerequisites = dependency_states(store, &dependent.id)?;
         if !dependencies::prerequisites_met(hold_policy, &prerequisites) {
             if dependencies::DependencyBlocker::of(blocker).stops_dependents(hold_policy) {
@@ -1508,7 +1533,7 @@ pub fn release_dependents(store: &Store, blocker: &Task) -> Result<Vec<Task>, Li
         let Some(queued) = queue_held_task(store, &dependent.id, &hold_note)? else {
             continue;
         };
-        released.push(queued);
+        released.waiting.push(queued);
     }
     Ok(released)
 }

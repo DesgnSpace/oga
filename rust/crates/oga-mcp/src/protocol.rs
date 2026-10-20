@@ -74,7 +74,8 @@ const HANDOFF_DESCRIPTION: &str = concat!(
 
 const EDIT_DESCRIPTION: &str = concat!(
     "Change a task that has not started, keeping its id: its prerequisites, settings, or brief. What waits on it is untouched. ",
-    "`requeue: true` puts one cancelled before it started back to waiting.",
+    "`requeue: true` puts one cancelled before it started back to waiting. ",
+    "`rearm: true` puts an ended task back to waiting on its prerequisites; it resumes its session, with any `instruction`, once each completes again. `rearm: false` undoes it; `cancel` drops it.",
 );
 
 const CANCEL_DESCRIPTION: &str = concat!(
@@ -930,6 +931,13 @@ fn shared_tools() -> Vec<Value> {
             described(
                 json!({ "type": "boolean", "default": false }),
                 "Put a task cancelled before it started back to waiting.",
+            ),
+        ),
+        (
+            "rearm".into(),
+            described(
+                json!({ "type": "boolean" }),
+                "Run this ended task again after its prerequisites complete again; false undoes it.",
             ),
         ),
     ]);

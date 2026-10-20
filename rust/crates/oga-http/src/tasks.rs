@@ -113,6 +113,7 @@ struct EditBody {
     instruction: Option<String>,
     #[serde(default)]
     requeue: bool,
+    rearm: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -567,6 +568,7 @@ pub async fn edit(
         model: body.model,
         instruction: body.instruction,
         requeue: body.requeue,
+        rearm: body.rearm,
     };
     let task = state.dispatcher.edit(request).await?;
     Ok((
