@@ -1530,21 +1530,21 @@ function settleAgentCall(first: TaskEventView, later: TaskEventView): TaskEventV
       rawText: later.rawText ?? first.rawText,
     };
   }
+  // An agent can open a shell call before it has the command, named only by
+  // its title ("Terminal") or not at all; a command an update brings names the row.
+  const [named, unnamed] = later.presentation?.command === undefined ? [first, later] : [later, first];
   return {
     ...first,
     phase: first.phase === "failed" || reverts ? first.phase : later.phase,
     complete: reverts ? first.complete : (later.complete ?? first.complete),
     verb,
-    // A call that opened without naming itself takes the name its update
-    // brought: an agent that runs a command often titles it only once it has
-    // one to report.
-    target: first.target ?? later.target,
+    target: named.target ?? unnamed.target,
     result: later.result ?? first.result,
     rawText: carriesPayload(later) ? (later.rawText ?? first.rawText) : first.rawText,
     presentation: first.presentation && {
       ...first.presentation,
-      text: first.presentation.text ?? later.presentation?.text,
-      command: first.presentation.command ?? later.presentation?.command,
+      text: named.presentation?.text ?? unnamed.presentation?.text,
+      command: named.presentation?.command ?? unnamed.presentation?.command,
       change: later.presentation?.change ?? first.presentation.change,
       outcome: later.presentation?.outcome ?? first.presentation.outcome,
     },

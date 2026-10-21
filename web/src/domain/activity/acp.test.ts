@@ -528,3 +528,42 @@ describe("a command named only by its update", () => {
     expect(row.result).toBe('{"id":1,"result":{"value":"output"}}');
   });
 });
+
+describe("a Claude shell call titled only \"Terminal\"", () => {
+  const ran = "grep -v '^#' /tmp/bub.txt | grep -v '^$' | wc -l;";
+
+  async function events(): Promise<TaskEventView[]> {
+    // SAFETY: the fixture is the Rust mapper's `TaskEventView[]` for a recorded run.
+    return (await Bun.file(new URL("./fixtures/claude-acp-terminal.json", import.meta.url)).json()) as TaskEventView[];
+  }
+
+  function rows(events: TaskEventView[]): TraceRow[] {
+    const composition = ActivityStory.composeWithState(events, true, undefined, true);
+    return TraceVisibility.interleavedRows(composition, "/home/dev/desgn/oga", false).filter((row) => !row.isTechnical);
+  }
+
+  function commandRow(all: TraceRow[], callId: string): TraceRow | undefined {
+    return all.find((row) => row.event?.actionId === callId);
+  }
+
+  it("names the step by the command its update brought, on the header and the $ line", async () => {
+    const row = commandRow(rows(await events()), "toolu_01AFbRDHENCmaTrS2E6qLP6u");
+
+    expect(row?.verb).toBe("Ran");
+    expect(row?.target).toStartWith(ran);
+    expect(row?.expansion?.type).toBe("command");
+    const command = row?.expansion?.type === "command" ? row.expansion.command : undefined;
+    expect(command).toStartWith(ran);
+    expect(command).toEndWith("/api/go.mod");
+    // The completing update carries only the output, which never becomes the label.
+    expect(row?.target).not.toContain("542");
+  });
+
+  it("falls back to the title while no command has arrived", async () => {
+    const opened = (await events()).filter((event) => event.id === 1112634);
+    const row = commandRow(rows(opened), "toolu_01AFbRDHENCmaTrS2E6qLP6u");
+
+    expect(row?.target).toBe("Terminal");
+    expect(row?.expansion?.type === "command" ? row.expansion.command : undefined).toBe("Terminal");
+  });
+});
