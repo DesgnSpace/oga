@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useShowTechnicalDetails } from "@/appearance";
 import { CopyButton } from "@/components/atoms/CopyButton";
-import { InlineMarkdown, MarkdownContent } from "@/domain/markdown";
+import { MarkdownContent } from "@/domain/markdown";
 import { compositionContainsNode, compositionHasThinking, type ActivityComposition } from "@/domain/activity";
 import { TraceVisibility, findRevealTarget, stripTransportMarkup, turnMarkerLabel, withoutThinking, type RevealRequest, type TraceRow, type TurnMarkerKind } from "@/domain/trace";
 import { ChevronIcon, FollowUpIcon, ReplyIcon, ResponseIcon, SteerIcon } from "@/ui/icons";
@@ -104,12 +104,11 @@ const TranscriptBubble = React.memo(function TranscriptBubble({ bubble }: { bubb
 });
 
 const TranscriptResponse = React.memo(function TranscriptResponse({ block, question }: { block: ResponseBlock; question: boolean }) {
-  const card = !question && block.marker !== undefined ? " transcript-card" : "";
   const className = question
     ? "detail-response detail-response-question"
     : block.error
-      ? `detail-response detail-response-error${card}`
-      : `detail-response${card}`;
+      ? "detail-response detail-response-error"
+      : "detail-response";
   const marker = !question && block.marker !== undefined ? <TurnMarker kind={block.marker} icon={ResponseIcon} /> : null;
 
   if (block.text === undefined) {
@@ -149,36 +148,41 @@ const TranscriptResponse = React.memo(function TranscriptResponse({ block, quest
   );
 });
 
-function workLabel(segment: WorkSegment): string {
-  const verb = segment.live ? "Working" : "Worked";
-  return segment.durationMs !== undefined ? `${verb} for ${durationWords(segment.durationMs)}` : verb;
+/**
+ * The turn's header: a short status such as "Working · 24 min · step 1 of 5".
+ * What the worker said stays in the feed below. A closed turn adds the gist
+ * of what it did, since its feed is hidden.
+ */
+function workStatus(segment: WorkSegment, entries: WorkEntry[], open: boolean): string {
+  const parts = [segment.live ? "Working" : "Worked"];
+  if (segment.durationMs !== undefined) parts.push(durationWords(segment.durationMs));
+  const step = stepProgress(segment.composition);
+  if (step !== undefined) parts.push(step);
+  const calls = entries.flatMap((entry) => (entry.type === "calls" ? entry.rows : []));
+  if (!open && calls.length > 0) {
+    const summary = callGroupSummary(calls);
+    parts.push(summary.charAt(0).toLowerCase() + summary.slice(1));
+  }
+  return parts.join(" · ");
 }
 
 function durationWords(ms: number): string {
   const seconds = Math.max(Math.round(ms / 1_000), 1);
-  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  if (seconds < 60) return `${seconds} sec`;
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  const hours = Math.round(minutes / 60);
-  return `${hours} hour${hours === 1 ? "" : "s"}`;
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.round(minutes / 60)} hr`;
 }
 
-function workSummary(segment: WorkSegment, rows: TraceRow[]): string {
-  const narration = segmentNarration(segment.composition);
-  if (narration) return narration;
-  const count = rows.reduce((total, row) => total + traceRowCount(row), 0);
-  return `${count} action${count === 1 ? "" : "s"}`;
-}
-
-function segmentNarration(composition: ActivityComposition): string | undefined {
-  for (const block of composition.blocks) {
-    if (block.type === "turn" && block.turn.title !== undefined) return block.turn.title.replace(/\s+/g, " ").trim();
+/** The newest "Step 2 of 5" the worker wrote, as "step 2 of 5". */
+function stepProgress(composition: ActivityComposition): string | undefined {
+  for (let at = composition.blocks.length - 1; at >= 0; at -= 1) {
+    const block = composition.blocks[at];
+    if (block?.type !== "turn" || block.turn.title === undefined) continue;
+    const match = /\bstep (\d+) of (\d+)\b/i.exec(block.turn.title);
+    if (match) return `step ${match[1]} of ${match[2]}`;
   }
   return undefined;
-}
-
-function traceRowCount(row: TraceRow): number {
-  return Math.max(1, row.children.reduce((total, child) => total + traceRowCount(child), 0));
 }
 
 type WorkEntry = { type: "message"; row: TraceRow } | { type: "calls"; rows: TraceRow[]; key: string };
@@ -230,30 +234,39 @@ function callKind(row: TraceRow): CallKind {
   return "tool";
 }
 
+/** Most telling first: what changed, then what ran, then what was looked at. */
+const CALL_KIND_ORDER: CallKind[] = ["file-edit", "command", "file-read", "search", "tool"];
+
+const CALL_KIND_WORDS: Record<CallKind, { done: string; running: string; one: string; many: (count: number) => string }> = {
+  "file-edit": { done: "Edited", running: "Editing", one: "a file", many: (count) => `${count} files` },
+  command: { done: "Ran", running: "Running", one: "a command", many: (count) => `${count} commands` },
+  "file-read": { done: "Read", running: "Reading", one: "a file", many: (count) => `${count} files` },
+  search: { done: "Searched", running: "Searching", one: "the code", many: (count) => `the code ${count} times` },
+  tool: { done: "Used", running: "Using", one: "a tool", many: (count) => `${count} tools` },
+};
+
+/**
+ * One short line for a run of tool calls: what is running now, or at most
+ * the two most telling counts, such as "Edited 4 files, ran 11 commands".
+ */
 function callGroupSummary(rows: TraceRow[]): string {
-  const counts = new Map<string, { kind: CallKind; count: number; running: boolean }>();
+  const running = [...rows].reverse().find((row) => row.state === "running");
+  if (running !== undefined) {
+    const words = CALL_KIND_WORDS[callKind(running)];
+    return `${words.running} ${words.one}…`;
+  }
+  const counts = new Map<CallKind, number>();
   for (const row of rows) {
     const kind = callKind(row);
-    const running = row.state === "running";
-    const key = `${kind}:${running}`;
-    const group = counts.get(key);
-    counts.set(key, { kind, count: (group?.count ?? 0) + 1, running });
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
-  const phrases = [...counts.values()].map(({ kind, count, running }, index) => {
-    const label = {
-      command: ["command", "commands", "Ran", "Running"],
-      "file-read": ["file", "files", "Read", "Reading"],
-      "file-edit": ["file", "files", "Edited", "Editing"],
-      search: ["the code", "the code", "Searched", "Searching"],
-      tool: ["tool", "tools", "Used", "Using"],
-    }[kind];
-    const quantity = kind === "search"
-      ? count === 1 ? label[0] : `${label[0]} ${count} times`
-      : count === 1 ? `a ${label[0]}` : `${count} ${label[1]}`;
-    const verb = running ? label[3] : label[2];
-    return `${index === 0 ? verb : verb.toLowerCase()} ${quantity}`;
+  const phrases = CALL_KIND_ORDER.filter((kind) => counts.has(kind)).slice(0, 2).map((kind, index) => {
+    const words = CALL_KIND_WORDS[kind];
+    const count = counts.get(kind) ?? 0;
+    const verb = index === 0 ? words.done : words.done.toLowerCase();
+    return `${verb} ${count === 1 ? words.one : words.many(count)}`;
   });
-  return `${phrases.join(", ")}${[...counts.values()].some((group) => group.running) ? "…" : ""}`;
+  return phrases.join(", ");
 }
 
 const TranscriptWork = React.memo(function TranscriptWork({
@@ -288,9 +301,8 @@ const TranscriptWork = React.memo(function TranscriptWork({
     onToggle(segment.id, segment.startsExpanded);
   }, [reveal, open, segment, onToggle]);
   if (rows.length === 0) return null;
-  const summary = workSummary(segment, rows);
-  const fullTitle = `${workLabel(segment)}${summary ? ` · ${summary}` : ""}`;
   const entries = workEntries(rows);
+  const status = workStatus(segment, entries, open);
 
   return (
     <div className="transcript-work">
@@ -301,10 +313,7 @@ const TranscriptWork = React.memo(function TranscriptWork({
         aria-label={open ? "Hide worker steps" : "Show worker steps"}
         onClick={() => onToggle(segment.id, segment.startsExpanded)}
       >
-        <span className="transcript-work-label" title={fullTitle}>
-          {workLabel(segment)}
-          {summary ? <> · <InlineMarkdown source={summary} /></> : null}
-        </span>
+        <span className="transcript-work-label" title={status}>{status}</span>
         <span className={`transcript-work-chevron${open ? " transcript-work-chevron-open" : ""}`} aria-hidden="true">
           <ChevronIcon size={14} />
         </span>

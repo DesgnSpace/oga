@@ -28,7 +28,6 @@ import { Modal } from "@/components/primitives/Modal";
 import { EmptyState } from "@/components/atoms/ListState";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import {
-  DisclosureIcon,
   ChevronIcon,
   FollowUpIcon,
   HandoffIcon,
@@ -530,9 +529,12 @@ const TraceRowView = React.memo(function TraceRowView({
       : "Show details";
   const running = row.state === "running";
   const ownsRunningAnimation = running && (!insideGroup || row.children.length > 0);
+  // A row's result and output preview wait until it is opened. Failures,
+  // rows with nothing to open, and thinking keep theirs in view.
+  const showOutcome = isOpen || !hasControl || row.state === "failed" || row.isThinking === true;
   const rowClass = `trace-row trace-row-${row.style} trace-state-${row.state}${
-    row.isStepStart ? " trace-row-step-start" : ""
-  }${row.marker !== undefined ? " trace-row-turn-boundary" : ""}${
+    row.isThinking ? " trace-row-thinking" : ""
+  }${row.isStepStart ? " trace-row-step-start" : ""}${row.marker !== undefined ? " trace-row-turn-boundary" : ""}${
     flashNodeId !== undefined && row.nodeId === flashNodeId ? " trace-row-flash" : ""
   }`;
   // Matches both a lone card's `subagent:` id and a batch's `subagents:` id.
@@ -552,13 +554,8 @@ const TraceRowView = React.memo(function TraceRowView({
       )}
       {row.verb !== undefined && <span className="trace-verb">{row.verb}</span>}
       <TraceTarget row={row} />
-      {row.preview !== undefined && <span className="trace-preview">{row.preview}</span>}
-      {row.result !== undefined && <span className="trace-result">{row.result}</span>}
-      {hasControl && (
-        <span className="trace-disclosure" aria-hidden="true">
-          <DisclosureIcon open={isOpen} size={14} />
-        </span>
-      )}
+      {showOutcome && row.preview !== undefined && <span className="trace-preview">{row.preview}</span>}
+      {showOutcome && row.result !== undefined && <span className="trace-result">{row.result}</span>}
     </>
   );
 
