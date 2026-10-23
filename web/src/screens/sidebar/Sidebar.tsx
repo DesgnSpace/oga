@@ -46,6 +46,7 @@ import {
 } from "@/state/sidebar-preferences";
 import {
   filtersActive,
+  searchTerm,
   SidebarController,
   type ConnectionState,
   type SidebarState,
@@ -212,6 +213,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   const [rowMenu, setRowMenu] = useState<{ task: TaskSummary } | null>(null);
   const [archiveBranchTask, setArchiveBranchTask] = useState<ArchiveBranchTask | null>(null);
   const [rowMenuPlacement, setRowMenuPlacement] = useState<{ top: number; left: number } | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
   const connectionWasLive = useRef(false);
   const connectionState = useRef<ConnectionState>(sidebarRef.snapshot.connection);
   const lastReadSearch = useRef(sidebarRef.snapshot.search.trim());
@@ -250,9 +252,17 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
     () => projectionFromState(sidebar, (task) => taskOutcomeViews.isOrderingUnread(task)),
     [sidebar.tasks, sidebar.search, sidebar.projectFilter, sidebar.grouping, sidebar.sort, taskOutcomeVersion],
   );
+  // A search lists every match, so only the plain list folds long finished groups.
+  const searching = searchTerm(sidebar) !== "";
   const effectiveRows = useMemo(
-    () => projectionRows(projection, sidebar.collapsed, sidebar.grouping),
-    [projection, sidebar.collapsed, sidebar.grouping],
+    () =>
+      projectionRows(
+        projection,
+        sidebar.collapsed,
+        sidebar.grouping,
+        searching ? undefined : { expanded: expandedGroups, keep: sidebar.selectedTask },
+      ),
+    [projection, sidebar.collapsed, sidebar.grouping, searching, expandedGroups, sidebar.selectedTask],
   );
 
   const emptyMessage = useMemo(
@@ -279,6 +289,9 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   // nothing visible; the footer hides until a group is expanded again.
   const allGroupsCollapsed =
     effectiveRows.length > 0 && effectiveRows.every((row) => row.type === "groupHeader");
+  // Older tasks would land behind a folded group, so Load more waits until
+  // every long finished group is open.
+  const finishedGroupFolded = effectiveRows.some((row) => row.type === "more" && row.hidden > 0);
 
   const taskIds = useMemo(
     () => effectiveRows.flatMap((row) => (row.type === "task" ? [row.task.id] : [])),
@@ -626,6 +639,14 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
     [sidebarRef],
   );
 
+  const handleToggleMore = useCallback((id: string) => {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
   const handleSearch = useCallback(
     (value: string) => {
       sidebarRef.setSearch(value);
@@ -943,6 +964,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
                 sidebar={sidebar}
                 onSelect={handleSelectTask}
                 onToggle={handleToggleGroup}
+                onToggleMore={handleToggleMore}
                 onContextMenu={handleRowContextMenu}
                 onOpenMenu={handleRowMenuButton}
                 openMenuTaskId={rowMenu?.task.id}
@@ -958,7 +980,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
           state={sidebar}
           emptyMessage={emptyMessage}
           hasNoWorkers={hasNoWorkers}
-          allGroupsCollapsed={allGroupsCollapsed}
+          canLoadMore={!allGroupsCollapsed && !finishedGroupFolded}
           onOpenSettings={onOpenSettings}
           onRefresh={handleRefresh}
           onLoadMore={handleLoadMore}
@@ -1008,6 +1030,7 @@ function SidebarRowView({
   sidebar,
   onSelect,
   onToggle,
+  onToggleMore,
   onContextMenu,
   onOpenMenu,
   openMenuTaskId,
@@ -1020,6 +1043,7 @@ function SidebarRowView({
   sidebar: SidebarState;
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
+  onToggleMore: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, task: TaskSummary) => void;
   onOpenMenu: (event: React.MouseEvent<HTMLButtonElement>, task: TaskSummary) => void;
   openMenuTaskId?: string;
@@ -1048,6 +1072,21 @@ function SidebarRowView({
         <span className="group-title">{row.title}</span>
         <span className="group-count">{row.count}</span>
       </button>
+    );
+  }
+
+  if (row.type === "more") {
+    return (
+      <div className="sidebar-task-row">
+        <button
+          className="sidebar-task sidebar-show-more"
+          type="button"
+          aria-expanded={row.hidden === 0}
+          onClick={() => onToggleMore(row.groupId)}
+        >
+          {row.hidden === 0 ? "Show fewer" : "Show more"}
+        </button>
+      </div>
     );
   }
 
@@ -1112,7 +1151,7 @@ function SidebarFooter({
   state,
   emptyMessage,
   hasNoWorkers,
-  allGroupsCollapsed,
+  canLoadMore,
   onOpenSettings,
   onRefresh,
   onLoadMore,
@@ -1120,7 +1159,8 @@ function SidebarFooter({
   state: SidebarState;
   emptyMessage: string | undefined;
   hasNoWorkers: boolean;
-  allGroupsCollapsed: boolean;
+  /** False while Load more would add rows nobody can see. */
+  canLoadMore: boolean;
   onOpenSettings?: (tab: "workers") => void;
   onRefresh: () => void;
   onLoadMore: () => void;
@@ -1186,7 +1226,7 @@ function SidebarFooter({
       </div>
     );
   }
-  if (state.tasksHasMore && !allGroupsCollapsed) {
+  if (state.tasksHasMore && canLoadMore) {
     const label = state.isLoadingMore ? "Loading…" : state.loadMoreFailed ? "Couldn't load more. Try again" : "Load more";
     return (
       <>

@@ -92,23 +92,38 @@ export function projectionListedTaskIds(
 
 export type SidebarRow =
   | { type: "groupHeader"; id: string; title: string; count: number; collapsed: boolean; indented: boolean }
-  | { type: "task"; task: TaskSummary; indented: boolean };
+  | { type: "task"; task: TaskSummary; indented: boolean }
+  /** `hidden` is 0 once the group is open. */
+  | { type: "more"; groupId: string; hidden: number };
 
 export function sidebarRowKey(row: SidebarRow): string {
   if (row.type === "groupHeader") return `group:${row.id}:${row.collapsed}:${row.indented}`;
+  if (row.type === "more") return `more:${row.groupId}`;
   return `task:${row.task.id}`;
 }
 
+const FINISHED_GROUP_LIMIT = 20;
+const FINISHED_GROUPS = new Set<string>(["completed", "cancelled"]);
+
+export interface FinishedGroupLimit {
+  expanded: ReadonlySet<string>;
+  /** A task that must stay listed, such as the one open on screen. */
+  keep?: string;
+}
+
+/** Grouped by status, a long Completed or Cancelled group lists its first tasks, then a Show more row. */
 export function projectionRows(
   projection: SidebarProjection,
   collapsed: CollapsedGroups,
   grouping: TaskGrouping,
+  limit?: FinishedGroupLimit,
 ): SidebarRow[] {
   const collapsedIds = collapsedGroupIds(collapsed, grouping);
   if (projection.projectNodes) {
     return projection.projectNodes.flatMap((node) => rowsForNode(node, collapsedIds));
   }
-  return projection.groups.flatMap((group) => rowsForGroup(group, collapsedIds, false));
+  const groupLimit = grouping === "status" ? limit : undefined;
+  return projection.groups.flatMap((group) => rowsForGroup(group, collapsedIds, false, groupLimit));
 }
 
 function rowsForNode(node: ProjectSidebarNode, collapsed: Set<string>): SidebarRow[] {
@@ -129,7 +144,12 @@ function rowsForNode(node: ProjectSidebarNode, collapsed: Set<string>): SidebarR
   return rows;
 }
 
-function rowsForGroup(group: TaskGroup, collapsed: Set<string>, indented: boolean): SidebarRow[] {
+function rowsForGroup(
+  group: TaskGroup,
+  collapsed: Set<string>,
+  indented: boolean,
+  limit?: FinishedGroupLimit,
+): SidebarRow[] {
   const rows: SidebarRow[] = [];
   if (group.title !== undefined) {
     rows.push({
@@ -141,9 +161,17 @@ function rowsForGroup(group: TaskGroup, collapsed: Set<string>, indented: boolea
       indented,
     });
   }
-  if (group.title === undefined || !collapsed.has(group.id)) {
+  if (group.title !== undefined && collapsed.has(group.id)) return rows;
+  const long = limit !== undefined && FINISHED_GROUPS.has(group.id) && group.tasks.length > FINISHED_GROUP_LIMIT;
+  if (!long) {
     for (const task of group.tasks) rows.push({ type: "task", task, indented });
+    return rows;
   }
+  // An open task past the fold stays listed under the first ones, so its row never disappears.
+  const kept = group.tasks.slice(FINISHED_GROUP_LIMIT).filter((task) => task.id === limit.keep);
+  const shown = limit.expanded.has(group.id) ? group.tasks : [...group.tasks.slice(0, FINISHED_GROUP_LIMIT), ...kept];
+  for (const task of shown) rows.push({ type: "task", task, indented });
+  rows.push({ type: "more", groupId: group.id, hidden: group.tasks.length - shown.length });
   return rows;
 }
 

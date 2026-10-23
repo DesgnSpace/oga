@@ -67,9 +67,9 @@ function heading(path: string): HTMLElement {
   return matching[0];
 }
 
-/** The file the header names as the one on screen, or nothing while it is unset. */
+/** The file the panel is on, or nothing while it is unset. */
 function onScreen(): string | null {
-  return document.querySelector(".changed-files-active-file")?.textContent ?? null;
+  return document.querySelector(".changed-file-row-active .changed-file-name")?.getAttribute("title") ?? null;
 }
 
 /** Lets the panel's next frame run, which is when it settles on a file. */
@@ -87,7 +87,7 @@ async function press(key: string, init: KeyboardEventInit = {}): Promise<void> {
 
 /** The files the panel lists, top to bottom, wherever they sit. */
 function rowPaths(): (string | null)[] {
-  return [...document.querySelectorAll(".changed-file-path")].map((row) => row.textContent);
+  return [...document.querySelectorAll(".changed-file-name")].map((row) => row.getAttribute("title"));
 }
 
 /** jsdom has no desktop shell, so a test that needs a call sets this. */
@@ -181,7 +181,9 @@ describe("reviewing changed files", () => {
     await press("j", { metaKey: true });
     expect(onScreen()).toBe("web/src/one.ts");
 
-    screen.getByRole("checkbox").focus();
+    const field = document.createElement("input");
+    document.querySelector(".changed-files-panel")!.append(field);
+    field.focus();
     await press("j");
     expect(onScreen()).toBe("web/src/one.ts");
   });

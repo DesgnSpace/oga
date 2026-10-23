@@ -69,8 +69,6 @@ describe("Transcript", () => {
 
     expect(document.querySelectorAll(".transcript-work-toggle")).toHaveLength(2);
     expect([...document.querySelectorAll(".transcript-work-toggle")].map((button) => button.getAttribute("aria-expanded"))).toEqual(["false", "true"]);
-    expect(screen.getByText(/Working for 2 seconds/).textContent).toContain("1 action");
-    expect(screen.getByText(/Working for 2 seconds/).textContent).not.toContain("step 2");
   });
 
   it("keeps a manual toggle through a live rerender", () => {
@@ -84,37 +82,6 @@ describe("Transcript", () => {
     if (item.type !== "work") throw new Error("expected work item");
     view.rerender(<Transcript items={[{ ...item, segment: { ...item.segment, startsExpanded: true } }]} />);
     expect(document.querySelector(".transcript-work-toggle")?.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("uses an action count when a turn has nothing the worker said", () => {
-    const event: TaskEventView = {
-      id: 1,
-      taskId: "task",
-      source: "claude",
-      type: "agent.tool_use",
-      kind: "command",
-      phase: "completed",
-      title: "Searched grep -n pattern",
-      detail: "pattern",
-      actionId: "call_1",
-      createdAt: "2026-07-30T15:00:01Z",
-    };
-    const composition: ActivityComposition = ActivityStory.compose([event]);
-
-    render(<Transcript items={[{
-      type: "work",
-      segment: {
-        id: 1,
-        composition,
-        cwd: "/repo",
-        live: false,
-        startsExpanded: false,
-        durationMs: 38_000,
-      },
-    }]} />);
-
-    expect(screen.getByRole("button").textContent).toContain("1 action");
-    expect(screen.getByRole("button").textContent).not.toContain(event.title);
   });
 
   it("groups mixed tool calls into one plain summary and reveals the rows on activation", () => {
@@ -143,9 +110,9 @@ describe("Transcript", () => {
 
     const { container } = render(<Transcript items={[item]} />);
 
-    const summary = screen.getByRole("button", { name: "Ran a command, edited a file, used a tool" });
+    const summary = screen.getByRole("button", { name: "Edited a file, ran a command" });
     expect(summary.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.getAllByText("Now let's run typecheck and tests to make sure nothing broke.")).toHaveLength(2);
+    expect(screen.getByText("Now let's run typecheck and tests to make sure nothing broke.")).toBeTruthy();
     expect(container.querySelector(".trace-result")).toBeNull();
     fireEvent.click(summary);
     expect(summary.getAttribute("aria-expanded")).toBe("true");

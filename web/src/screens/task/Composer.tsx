@@ -2,12 +2,10 @@
 
 import * as React from "react";
 import type { Task, TaskScope } from "@/bridge/types";
-import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 import type { ActivitySubagent } from "@/domain/activity";
 import type { TodoProgress } from "@/domain/trace";
 import { ReturnIcon } from "@/ui/icons";
 import { ComposerTray } from "./ComposerTray";
-import { taskStatusLabel } from "./format";
 
 export type ComposerSendMode = "primary" | "steer";
 
@@ -59,7 +57,7 @@ function placeholder(routing: ConversationInputRouting): string {
     case "queue":
       return "Add a follow-up…";
     case "resume":
-      return routing.textRequired ? "What should happen next?" : "Send a message to continue…";
+      return routing.textRequired ? "Say what should happen next…" : "Add a message…";
     case "none":
       return "";
   }
@@ -110,6 +108,16 @@ function otherChoice(choice: ComposerSendChoice): ComposerSendChoice {
 
 function choiceLabel(choice: ComposerSendChoice): string {
   return choice === "now" ? "Send now" : "Queue";
+}
+
+/** e.g. `⌘↵ to send now, ⌥↵ to queue` */
+function sendHint(routing: ConversationInputRouting, choice: ComposerSendChoice): string {
+  const submit = submitShortcut();
+  if (routing.type !== "steer-and-queue") return `${submit} to ${actionLabel(routing).toLowerCase()}`;
+  const alternate = alternateShortcut();
+  return choice === "now"
+    ? `${submit} to send now, ${alternate} to queue`
+    : `${submit} to queue, ${alternate} to send now`;
 }
 
 function choiceHelp(choice: ComposerSendChoice): string {
@@ -189,8 +197,9 @@ export function ConversationComposer({
   const label = dualSend ? choiceLabel(choice) : actionLabel(routing);
   const shortcut = submitShortcut();
   const alternate = alternateShortcut();
-  const hint =
+  const prompt =
     dualSend && choice === "now" ? "Send a message…" : placeholder(routing);
+  const hint = routing.type === "none" ? "" : `${prompt.replace(/…$/, "")} · ${sendHint(routing, choice)}`;
 
   React.useEffect(() => {
     if (!focusRequest || focusRequest.taskId !== task.id) return;
@@ -267,7 +276,7 @@ export function ConversationComposer({
                 setDraft("");
               }
             }}
-            aria-label={hint}
+            aria-label={prompt}
           />
           <button
             className={`composer-send${draft.trim() !== "" ? " composer-send-active" : ""}`}
@@ -316,7 +325,6 @@ export function ConversationComposer({
               })}
             </div>
           )}
-          <TaskStatusDot state={task.state} label={taskStatusLabel(task)} />
         </div>
       </div>
       <p className="composer-note">

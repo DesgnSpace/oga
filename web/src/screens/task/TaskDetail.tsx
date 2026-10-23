@@ -12,7 +12,6 @@ import type { ChangeSort } from "@/domain/changes/ordering";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { copyText } from "@/lib/identifiers";
-import { projectName } from "@/state/sidebar-projection";
 import { toast } from "@/state/toast";
 import { WorktreeIcon } from "@/ui/icons";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
@@ -164,9 +163,13 @@ function WorktreeChip({ worktree, label }: { worktree: NonNullable<NonNullable<T
   );
 }
 
-// The title bar's secondary strip scrolls instead of wrapping the bar. Cost,
-// duration, and token stats live in the model chip's tooltip rather than as
-// their own elements, so the bar stays to one muted chip plus the menu.
+/** The model without its provider prefix: `openai/gpt-5` reads as `gpt-5`. */
+function shortModel(model: string): string {
+  return model.slice(model.lastIndexOf("/") + 1) || model;
+}
+
+// The project, full model name, cost, duration, and tokens live in the tooltip
+// so the task title stays the bar's main text.
 function TaskDetailSecondary({
   task,
   workerLabel,
@@ -185,9 +188,8 @@ function TaskDetailSecondary({
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
       {task.worktree && <WorktreeChip worktree={task.worktree} label={task.worktreeLabel} />}
       <span className="task-detail-fact" title={factTitle}>
-        <span className="task-detail-project">{projectName(projectPath)} · </span>
         {workerLabel && <span className="task-detail-worker">{workerLabel} · </span>}
-        <span className="task-detail-model">{task.model}</span>
+        <span className="task-detail-model">{shortModel(task.model)}</span>
         {effort && (
           <span className="task-detail-effort" title={effort.title}>
             {" · "}

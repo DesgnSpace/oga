@@ -17,12 +17,13 @@ import {
 } from "@/domain/changes/ordering";
 import { buildFileTree, type TreeNode } from "@/domain/changes/tree";
 import { absoluteTime, relativeTime } from "@/ui/time";
-import { CheckCircleIcon, CheckIcon, ChevronIcon, CircleIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, OpenExternalIcon, RefreshIcon } from "@/ui/icons";
+import { CheckCircleIcon, CheckIcon, ChevronIcon, CircleIcon, CloseIcon, CollapseIcon, DisclosureIcon, ExpandIcon, KeyboardIcon, ListIcon, MoreIcon, OpenExternalIcon, RefreshIcon } from "@/ui/icons";
 import { EmptyState, LoadingState } from "@/components/atoms/ListState";
 import { CodeDiff } from "@/components/CodeDiff";
 import { CopyButton } from "@/components/atoms/CopyButton";
 import { Modal } from "@/components/primitives/Modal";
-import { MenuPanel } from "@/components/menu/Menu";
+import { MenuPanel, type MenuAction } from "@/components/menu/Menu";
+import { useDiffView, type DiffView } from "@/state/diff-preferences";
 import {
   CHANGED_FILES_MAX_WIDTH,
   CHANGED_FILES_MIN_WIDTH,
@@ -32,7 +33,6 @@ import { useReviewedFiles, type ReviewedFiles } from "@/state/reviewed-files";
 import { toast } from "@/state/toast";
 import { REVIEW_SHORTCUTS, useReviewKeys } from "./reviewKeys";
 import { patchFromBlocks } from "@/lib/unified-patch";
-import { DiffHeader } from "@/components/DiffHeader";
 
 /** Arrow-key resize increment, in pixels. */
 const RESIZE_KEYBOARD_STEP = 16;
@@ -75,14 +75,16 @@ const CHANGES_SOURCE_HINTS = {
 } satisfies Record<ChangesSource, string>;
 
 const CHANGE_SORT_LABELS = {
-  folder: "By folder",
-  size: "By size",
+  folder: "Sort by folder",
+  size: "Sort by size",
 } satisfies Record<ChangeSort, string>;
 
-const CHANGE_SORT_HINTS = {
-  folder: "Folder by folder, in the order the changes came in",
-  size: "Biggest changes first",
-} satisfies Record<ChangeSort, string>;
+const DIFF_VIEWS = ["unified", "split"] as const satisfies readonly DiffView[];
+
+const DIFF_VIEW_LABELS = {
+  unified: "Unified view",
+  split: "Split view",
+} satisfies Record<DiffView, string>;
 
 const STATUS_LABELS = {
   added: "New",
@@ -175,7 +177,6 @@ function ChangedFileRow({
   active,
   registerRow,
   registerHeading,
-  showDiffHeader,
 }: {
   file: ChangedFileView;
   expanded: boolean;
@@ -188,7 +189,6 @@ function ChangedFileRow({
   active: boolean;
   registerRow: (path: string, element: HTMLElement | null) => void;
   registerHeading: (path: string, element: HTMLElement | null) => void;
-  showDiffHeader: boolean;
 }) {
   const patch = React.useMemo(
     () => file.patch ?? patchFromBlocks(file.path, file.change.blocks),
@@ -197,6 +197,9 @@ function ChangedFileRow({
   const status = file.status === undefined || file.status === "modified" ? undefined : STATUS_LABELS[file.status];
   const isReviewed = reviewed.isReviewed(file);
   const openable = canOpenInEditor(file);
+  const slash = file.path.lastIndexOf("/");
+  const name = file.path.slice(slash + 1);
+  const folder = slash > 0 ? file.path.slice(0, slash) : undefined;
   return (
     <section
       className={`changed-file-row${active ? " changed-file-row-active" : ""}${isReviewed ? " changed-file-row-reviewed" : ""}`}
@@ -213,7 +216,9 @@ function ChangedFileRow({
           <span className="changed-file-disclosure" aria-hidden="true">
             <DisclosureIcon open={expanded} />
           </span>
-          <span className="changed-file-path" title={file.path}>{file.path}</span>
+          <span className="changed-file-name" title={file.path}>{name}</span>
+          {/* The marks either side keep a leading dot in place inside the right-to-left box. */}
+          {folder !== undefined && <>{" "}<span className="changed-file-folder">{`\u200E${folder}\u200E`}</span></>}
           <span className="changed-file-count">
             {status !== undefined && <span className="changed-file-status">{status}</span>}
             <span className="diff-stat-added">{`+${file.added}`}</span>{" "}
@@ -249,7 +254,6 @@ function ChangedFileRow({
       </div>
       {expanded && (
         <div className="changed-file-diff">
-          {showDiffHeader && <DiffHeader />}
           {patch !== undefined && <CodeDiff patch={patch} numbered={file.patch !== undefined} wrap />}
           {file.tooLarge ? (
             <p className="changed-file-note">
@@ -286,10 +290,9 @@ interface FileRowProps {
   activePath?: string;
   registerRow: (path: string, element: HTMLElement | null) => void;
   registerHeading: (path: string, element: HTMLElement | null) => void;
-  showDiffHeader: boolean;
 }
 
-function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, onOpenInEditor, reviewable, activePath, registerRow, registerHeading, showDiffHeader }: FileRowProps & { files: ChangedFileView[]; reviewable: boolean }) {
+function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggleReviewed, onOpenInEditor, reviewable, activePath, registerRow, registerHeading }: FileRowProps & { files: ChangedFileView[]; reviewable: boolean }) {
   return (
     <div className="changed-files-list">
       {files.map((file) => (
@@ -305,7 +308,6 @@ function ChangedFileList({ files, expandedPaths, onToggleFile, reviewed, onToggl
           active={activePath === file.path}
           registerRow={registerRow}
           registerHeading={registerHeading}
-          showDiffHeader={showDiffHeader}
         />
       ))}
     </div>
@@ -522,47 +524,91 @@ function SourcePicker({
   );
 }
 
-function SortPicker({
-  sort,
-  onSortChange,
+/** One menu item per choice, with the current one checked. */
+function choiceItems<T extends string>(
+  options: readonly T[],
+  current: T,
+  labels: Record<T, string>,
+  onChoose: (option: T) => void,
+): MenuAction[] {
+  return options.map((option) => ({
+    key: option,
+    label: labels[option],
+    checked: current === option,
+    onSelect: () => onChoose(option),
+  }));
+}
+
+function KeysPanel() {
+  return (
+    <div className="changed-files-keys-panel">
+      <p className="changed-files-keys-heading">While the changed files have focus</p>
+      <dl className="changed-files-keys-list">
+        {REVIEW_SHORTCUTS.map((row) => (
+          <div className="changed-files-keys-row" key={row.action}>
+            <dt className="changed-files-keys-cap">
+              {row.keys.map((combo) => (
+                <span className="changed-files-keys-combo" key={combo.join("")}>
+                  {combo.map((key) => (
+                    <kbd className="keycap" key={key}>{key}</kbd>
+                  ))}
+                </span>
+              ))}
+            </dt>
+            <dd className="changed-files-keys-action">{row.action}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function ChangedFilesMenu({
+  sections,
+  keysOffered,
 }: {
-  sort: ChangeSort;
-  onSortChange: (sort: ChangeSort) => void;
+  sections: MenuAction[][];
+  keysOffered: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
-  const label = CHANGE_SORT_LABELS[sort];
-  const choices = CHANGE_SORTS.map((option) => ({
-    key: option,
-    label: CHANGE_SORT_LABELS[option],
-    icon: sort === option ? <CheckIcon /> : undefined,
+  const [keysOpen, setKeysOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const closeKeys = React.useCallback(() => setKeysOpen(false), []);
+  useDismissOutside(keysOpen, closeKeys, ref);
+  const closeAfter = (item: MenuAction): MenuAction => ({
+    ...item,
     onSelect: () => {
       setOpen(false);
-      onSortChange(option);
+      item.onSelect();
     },
-  }));
+  });
+  const keys: MenuAction[] = keysOffered
+    ? [{ key: "keys", label: "Review shortcuts", icon: <KeyboardIcon size={12} />, onSelect: () => setKeysOpen(true) }]
+    : [];
   return (
-    <div className="changed-files-sort">
+    <div className="changed-files-more" ref={ref}>
       <button
-        className="text-button"
+        className="icon-button"
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Order files ${CHANGE_SORT_LABELS[sort].toLowerCase()}`}
-        title={CHANGE_SORT_HINTS[sort]}
-        onClick={() => setOpen((value) => !value)}
+        aria-label="More options"
+        title="More options"
+        onClick={() => {
+          setKeysOpen(false);
+          setOpen((value) => !value);
+        }}
       >
-        {label}
-        <span className="changed-files-sort-chevron" aria-hidden="true">
-          <ChevronIcon />
-        </span>
+        <MoreIcon />
       </button>
       {open && (
         <MenuPanel
-          className="changed-files-sort-menu"
-          sections={[choices]}
+          className="changed-files-more-menu"
+          sections={[...sections, keys].map((section) => section.map(closeAfter))}
           onClose={() => setOpen(false)}
         />
       )}
+      {keysOpen && <KeysPanel />}
     </div>
   );
 }
@@ -653,8 +699,7 @@ function ChangedFilesView({
 
   const [filePopoverOpen, setFilePopoverOpen] = React.useState(false);
   const filePopoverRef = React.useRef<HTMLDivElement>(null);
-  const [keysOpen, setKeysOpen] = React.useState(false);
-  const keysRef = React.useRef<HTMLDivElement>(null);
+  const [view, setView] = useDiffView();
   // The generated group is closed in the tree until a reader opens it.
   const [collapsedDirs, setCollapsedDirs] = React.useState<Set<string>>(() => new Set([GENERATED_GROUP_KEY]));
   // In the list, a generated group opens only when a reader asks for it.
@@ -686,9 +731,7 @@ function ChangedFilesView({
   }, [turns, full]);
 
   const closeFilePopover = React.useCallback(() => setFilePopoverOpen(false), []);
-  const closeKeys = React.useCallback(() => setKeysOpen(false), []);
   useDismissOutside(filePopoverOpen, closeFilePopover, filePopoverRef);
-  useDismissOutside(keysOpen, closeKeys, keysRef);
 
   React.useEffect(() => () => {
     if (scrollFrameRef.current !== undefined) cancelAnimationFrame(scrollFrameRef.current);
@@ -911,7 +954,6 @@ function ChangedFilesView({
     activePath,
     registerRow,
     registerHeading,
-    showDiffHeader: !full,
   };
 
   const fileTree = (
@@ -939,6 +981,46 @@ function ChangedFilesView({
       />
     );
 
+  const listedCount = listedTurns
+    ? listedTurns.reduce((count, entry) => count + entry.files.length + entry.generated.length, 0)
+    : changes.files.length;
+
+  const summary = (
+    <p className="changed-files-summary">
+      <span>{fileCount(listedCount)}</span>
+      <span>
+        <span className="diff-stat-added">{`+${added}`}</span>{" "}
+        <span className="diff-stat-removed">{`-${removed}`}</span>
+      </span>
+      {toReview.length > 0 && <span>{`${reviewed.count(toReview)} of ${toReview.length} reviewed`}</span>}
+      {listed.generated.length > 0 && (
+        <span>{`${fileCount(listed.generated.length, "generated file")}, not part of the review`}</span>
+      )}
+    </p>
+  );
+
+  const ready = !empty && !loading && error === undefined;
+  const menuSections: MenuAction[][] = [
+    choiceItems(DIFF_VIEWS, view, DIFF_VIEW_LABELS, setView),
+    ready
+      ? [
+          ...choiceItems(CHANGE_SORTS, sort, CHANGE_SORT_LABELS, onSortChange),
+          ...(source === "run"
+            ? [{ key: "turns", label: "Group by turn", checked: groupByTurn, onSelect: () => onGroupByTurn(!groupByTurn) }]
+            : []),
+        ]
+      : [],
+    ready
+      ? [
+          { key: "open-all", label: "Open all files", disabled: allOpen, onSelect: openAll },
+          { key: "close-all", label: "Close all files", disabled: noneOpen, onSelect: closeAll },
+        ]
+      : [],
+    source === "run"
+      ? []
+      : [{ key: "refresh", label: "Refresh", icon: <RefreshIcon size={12} />, disabled: loading, onSelect: onReload }],
+  ];
+
   const diffs = (
     <div
       className="changed-files-diffs"
@@ -946,6 +1028,7 @@ function ChangedFilesView({
       onWheel={endScrollHold}
       onTouchMove={endScrollHold}
     >
+      {summary}
       {listedTurns ? (
         <div className="changed-files-turns">
           {listedTurns.map((entry) => (
@@ -972,141 +1055,52 @@ function ChangedFilesView({
   return (
     <div className="changed-files-view" ref={setViewRoot}>
       <header className={`changed-files-header${full ? " changed-files-header-full" : ""}`}>
-        <div className="changed-files-header-row">
-          <div className="changed-files-header-title">
-            <h2 className="visually-hidden" id={full ? FULL_SCREEN_TITLE_ID : undefined}>
-              Changed files
-            </h2>
-            <SourcePicker
-              source={source}
-              base={base}
-              branches={branches}
-              onSourceChange={onSourceChange}
-              onBaseChange={onBaseChange}
-            />
-            {activePath !== undefined ? (
-              <p className="changed-files-active-file" title={activePath}>
-                {activePath}
-              </p>
-            ) : (
-              changes.files.length > 0 && (
-                <p className="changed-files-summary">
-                  {`${fileCount(listedTurns ? listedTurns.reduce((count, entry) => count + entry.files.length + entry.generated.length, 0) : changes.files.length)} · `}
-                  <span className="diff-stat-added">{`+${added}`}</span>
-                  {" · "}
-                  <span className="diff-stat-removed">{`-${removed}`}</span>
-                </p>
-              )
-            )}
-            {toReview.length > 0 && (
-              <p className="changed-files-reviewed-progress">
-                {`${reviewed.count(toReview)} of ${toReview.length} reviewed`}
-              </p>
-            )}
-            {listed.generated.length > 0 && (
-              <p className="changed-files-generated-count">
-                {`${fileCount(listed.generated.length, "generated file")}, not part of the review`}
-              </p>
-            )}
-          </div>
-          <div className="changed-files-header-actions">
-            {full && <DiffHeader />}
-            {!empty && error === undefined && <SortPicker sort={sort} onSortChange={onSortChange} />}
-            {source === "run" ? (
-              <label className="changed-files-group">
-                <input type="checkbox" checked={groupByTurn} onChange={(event) => onGroupByTurn(event.target.checked)} />
-                Group by turn
-              </label>
-            ) : null}
-            {full && !empty && (
-              <>
-                <button className="text-button" type="button" disabled={allOpen} onClick={openAll}>
-                  Open all
-                </button>
-                <button className="text-button" type="button" disabled={noneOpen} onClick={closeAll}>
-                  Close all
-                </button>
-              </>
-            )}
-            {!empty && error === undefined && (
-              <div className="changed-files-keys" ref={keysRef}>
-                <button
-                  className="text-button changed-files-keys-trigger"
-                  type="button"
-                  aria-haspopup="true"
-                  aria-expanded={keysOpen}
-                  title="Keys for reviewing files"
-                  onClick={() => setKeysOpen((value) => !value)}
-                >
-                  <kbd className="keycap" aria-hidden="true">?</kbd>
-                  <span className="visually-hidden">Keys for reviewing files</span>
-                </button>
-                {keysOpen && (
-                  <div className="changed-files-keys-panel">
-                    <p className="changed-files-keys-heading">While the changed files have focus</p>
-                    <dl className="changed-files-keys-list">
-                      {REVIEW_SHORTCUTS.map((row) => (
-                        <div className="changed-files-keys-row" key={row.action}>
-                          <dt className="changed-files-keys-cap">
-                            {row.keys.map((combo) => (
-                              <span className="changed-files-keys-combo" key={combo.join("")}>
-                                {combo.map((key) => (
-                                  <kbd className="keycap" key={key}>{key}</kbd>
-                                ))}
-                              </span>
-                            ))}
-                          </dt>
-                          <dd className="changed-files-keys-action">{row.action}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                )}
-              </div>
-            )}
-            <button
-              className="icon-button"
-              type="button"
-              disabled={loading || source === "run"}
-              aria-label="Refresh"
-              title={source === "run" ? "This run's edits appear on their own" : "Refresh"}
-              onClick={onReload}
-            >
-              <RefreshIcon />
-            </button>
-            {!full && !empty && !loading && error === undefined && (
-              <div className="changed-files-tree-popover" ref={filePopoverRef}>
-                <button
-                  className="text-button"
-                  type="button"
-                  aria-haspopup="true"
-                  aria-expanded={filePopoverOpen}
-                  onClick={() => setFilePopoverOpen((value) => !value)}
-                >
-                  Files
-                </button>
-                {filePopoverOpen && (
-                  <div className="changed-files-tree-popover-panel">
-                    <nav aria-label="File list">{fileTree}</nav>
-                  </div>
-                )}
-              </div>
-            )}
-            {onExpand !== undefined && (
-              <button className="icon-button" type="button" aria-label="Full screen" title="Full screen" onClick={onExpand}>
-                <ExpandIcon />
+        <h2 className="visually-hidden" id={full ? FULL_SCREEN_TITLE_ID : undefined}>
+          Changed files
+        </h2>
+        <SourcePicker
+          source={source}
+          base={base}
+          branches={branches}
+          onSourceChange={onSourceChange}
+          onBaseChange={onBaseChange}
+        />
+        <div className="changed-files-header-actions">
+          {!full && ready && (
+            <div className="changed-files-tree-popover" ref={filePopoverRef}>
+              <button
+                className="icon-button"
+                type="button"
+                aria-haspopup="true"
+                aria-expanded={filePopoverOpen}
+                aria-label="Go to a file"
+                title="Go to a file"
+                onClick={() => setFilePopoverOpen((value) => !value)}
+              >
+                <ListIcon />
               </button>
-            )}
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={full ? "Exit full screen" : "Hide changed files"}
-              title={full ? "Exit full screen" : "Hide changed files"}
-              onClick={onClose}
-            >
-              {full ? <CollapseIcon /> : <CloseIcon />}
+              {filePopoverOpen && (
+                <div className="changed-files-tree-popover-panel">
+                  <nav aria-label="File list">{fileTree}</nav>
+                </div>
+              )}
+            </div>
+          )}
+          <ChangedFilesMenu sections={menuSections} keysOffered={ready} />
+          {onExpand !== undefined && (
+            <button className="icon-button" type="button" aria-label="Full screen" title="Full screen" onClick={onExpand}>
+              <ExpandIcon />
             </button>
-          </div>
+          )}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={full ? "Exit full screen" : "Hide changed files"}
+            title={full ? "Exit full screen" : "Hide changed files"}
+            onClick={onClose}
+          >
+            {full ? <CollapseIcon /> : <CloseIcon />}
+          </button>
         </div>
       </header>
       <div className={`changed-files-content${full ? " changed-files-content-full" : ""}`}>

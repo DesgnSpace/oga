@@ -53,9 +53,13 @@ gap reaches the outer radius, the inner element keeps its own token.
 | `--text-heading` | 17px | Section heading, weight 600 |
 | `--text-lg` | 16px | Dialog title in the rail |
 | `--text-base` | 13px | Body text, row titles (600), row descriptions (muted) |
-| `--text-md` | 12px | Rail group labels, small captions |
+| `--text-md` | 12px | Rail and task list group labels, small captions, and every muted meta line in the task view: title bar facts, `+`/`−` counts, the changed files summary, the line under the composer |
+| `--text-reading` | 14px | What the worker says and what the user sends, in the task view |
 
 Descriptions use `--color-text-muted` and stop at `65ch`.
+
+Reading text uses `--leading-reading` (1.65) and stops at `--reading-max`
+(`72ch`, about 70 characters a line).
 
 ## Controls
 
@@ -106,6 +110,50 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   settings, empty states, and the task screen's transcript, messages, and
   composer all size to it, so their left and right edges line up.
 
+### Task list
+
+- Rows are the title alone; worker, project, time and cost show on hover.
+- A row's status mark shows only what its group doesn't already say: running,
+  waiting, needs a reply, failed, or a new update. A finished task already
+  opened has no mark, and its title stays on the same edge as the others.
+- Grouped by status, Completed and Cancelled list their first 20 tasks, then
+  a "Show more" row. A task open past the fold is listed under those 20.
+  Every other group lists in full, and a search lists every match.
+
+### Task title bar
+
+- The task's status mark and title (`--text-reading`, 500) lead the bar.
+- On the right, one line of muted `--text-md` text: worker · model ·
+  effort, with the model's provider prefix dropped. The project, full model
+  name, cost, time and tokens show on hover. No chip or pill behind it.
+- The `+`/`−` counts keep their colours at the same size and normal weight,
+  then the icon buttons.
+
+### Task feed
+
+- What the user sent (the brief, follow-ups, replies, instructions) sits in
+  a right-aligned bubble: a light tint, no border, `--radius-panel`, at most
+  `--reading-max` wide.
+- What the worker says is the main text: `--text-reading`, full text colour,
+  left-aligned, at most `--reading-max` wide.
+- Tool calls between two worker messages fold into one muted line with a
+  short label: what is running now, or at most two counts ("Edited 4 files,
+  ran 11 commands"). Opened, each call is one quiet line: a verb, then its
+  file, command, or pattern in monospace. Its result shows once that line is
+  opened.
+- A turn's header is a short status ("Working · 24 min · step 1 of 5"); the
+  worker's words stay in the feed.
+
+### Composer
+
+- One box at `--text-reading`. Its placeholder says what to type and which
+  keys send ("Send a message · ⌘↵ to send now, ⌥↵ to queue"); the send
+  button sits inside the box.
+- One quiet `--text-md` line under it: what the run may change and its
+  branch on the left ("Can edit · feat/x"), and while a run is active the
+  Send now | Queue switch on the right: a tinted track, the chosen part
+  raised on the box's colour.
+
 ### Page header — `PageHeader`
 
 - The page title (`--text-title`) names the page and matches its rail label.
@@ -144,6 +192,29 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 - A row that opens something (a worker) stretches its open button over the
   row and keeps the control above it; a chevron at the far right shows it
   opens.
+
+### Changed files panel
+
+- The top bar is one line: what is being compared on the left (a quiet
+  label that opens the source menu), then icon buttons on the right: go to
+  a file, more options, full screen, close. The unified or split choice,
+  order, grouping, open or close all, refresh, and the review keys live in
+  the more options menu.
+- Counts and review progress sit in one muted line above the first file.
+- A file's header is one line: the file name (600), its folder in muted
+  text, then the `+`/`−` counts. Per-file actions sit on the right.
+- Changed lines take a soft tint and a thin coloured edge in the line
+  number gutter. Changed words inside them take a slightly stronger tint.
+- Skipped lines between two hunks show as a row that says how many lines
+  are hidden ("26 unmodified lines").
+- A long line wraps with its continuation indented under the code.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `--diff-line-tint` | 6% | 9% | How much of the status colour tints an added or removed line |
+| `--diff-gutter-tint` | 4% | 7% | The same, for that line's number |
+| `--diff-word-tint` | 14% | 20% | The changed words inside a changed line |
+| `--diff-marker` | 2px | 2px | Width of the coloured edge on a changed line's number |
 
 ## Dialogs
 

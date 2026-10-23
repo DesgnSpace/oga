@@ -31,6 +31,11 @@
        task view is scaled down to read as the same size as --text-base. */
     --text-base-mono: calc(var(--text-base) * 0.94);
     --text-lg: 1rem;
+    /* What the worker says and what the user sends, in the task view. */
+    --text-reading: 0.875rem;
+    --leading-reading: 1.65;
+    /* About 70 characters of prose at the size it is used with. */
+    --reading-max: 72ch;
     --text-heading: 1.0625rem;
     --text-title: 1.75rem;
     --color-bg: #fafafa;
@@ -49,6 +54,12 @@
     --color-success: #087f5b;
     --color-warning: #a15c05;
     --color-scrim: rgba(0, 0, 0, 0.22);
+    /* How strongly the changed-files diff tints a changed line, its line
+       number, and the changed words inside it, plus the edge marker width. */
+    --diff-line-tint: 6%;
+    --diff-gutter-tint: 4%;
+    --diff-word-tint: 14%;
+    --diff-marker: 2px;
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
@@ -116,6 +127,9 @@
         --color-success: #6ee7b7;
         --color-warning: #f5c27a;
         --color-scrim: rgba(0, 0, 0, 0.38);
+        --diff-line-tint: 9%;
+        --diff-gutter-tint: 7%;
+        --diff-word-tint: 20%;
     }
 }
 
@@ -575,7 +589,7 @@ a {
     margin: 0 0 0 var(--space-2);
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: var(--text-base);
+    font-size: var(--text-reading);
     font-weight: 500;
     white-space: nowrap;
 }
@@ -615,13 +629,13 @@ a {
     overflow: hidden;
 }
 
+/* Change counts stay in colour but at the meta line's size and weight. */
 .title-bar-diff {
     display: inline-flex;
     gap: var(--space-1);
-    margin-inline-start: var(--space-2);
-    font-family: var(--font-mono);
-    font-size: var(--text-base-mono);
-    font-weight: 600;
+    margin-inline: var(--space-2);
+    font-size: var(--text-md);
+    font-variant-numeric: tabular-nums;
 }
 
 .title-bar-secondary-row {
@@ -1003,6 +1017,27 @@ a {
     margin-top: 0;
 }
 
+/* An opened finished task needs no mark; the slot stays so titles share one edge. */
+.sidebar-task .task-dot-look-settled.task-dot-viewed {
+    visibility: hidden;
+}
+
+/* Same height as a task row, with its label on the titles' edge: the row
+   padding, the status mark's width, and the gap after it. */
+.sidebar-show-more {
+    border: 0;
+    padding-inline-start: calc(var(--space-2) * 3);
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.sidebar-show-more:hover,
+.sidebar-show-more:focus-visible {
+    color: var(--color-text);
+}
+
 .sidebar-task-row {
     position: relative;
     display: flex;
@@ -1034,7 +1069,7 @@ a {
     align-items: center;
     padding: var(--space-5) var(--space-3) var(--space-1);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     font-weight: 600;
 }
 
@@ -1091,7 +1126,8 @@ a {
 .group-count {
     flex: 0 0 auto;
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
+    font-weight: 400;
 }
 
 /* One look per state, shared by the sidebar row, task header, and composer — see TaskStatusDot. */
@@ -1652,11 +1688,12 @@ h1 {
     background: var(--color-accent);
 }
 
+/* One line: what is compared on the left, a few icon buttons on the right. */
 .changed-files-header {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-3);
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -1666,73 +1703,25 @@ h1 {
     padding-left: var(--macos-titlebar-inset);
 }
 
-/* On a narrow panel the actions drop below the title as one row, never
-   splitting across two lines. */
-.changed-files-header-row {
+.changed-files-summary {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2) var(--space-3);
-}
-
-.changed-files-header-title {
-    display: flex;
-    flex: 1 1 10rem;
-    align-items: center;
-    gap: var(--space-3);
-    min-width: 0;
-}
-
-.changed-files-active-file {
-    min-width: 0;
-    margin: 0;
-    overflow: hidden;
+    gap: 0 var(--space-2);
+    margin: 0 0 var(--space-2);
+    padding: 0 var(--space-2);
     color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: var(--text-md);
 }
 
-.changed-files-summary {
-    min-width: 0;
-    margin: 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.changed-files-reviewed-progress,
-.changed-files-generated-count {
-    flex: 0 0 auto;
-    margin: 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    white-space: nowrap;
-}
-
-.changed-files-sort {
-    position: relative;
-}
-
-.changed-files-sort-menu {
-    position: absolute;
-    z-index: var(--z-raised);
-    top: 100%;
-    right: 0;
-    margin-top: var(--space-1);
+.changed-files-summary > span + span::before {
+    margin-right: var(--space-2);
+    content: "·";
 }
 
 .changed-files-header-actions {
     display: flex;
     align-items: center;
     flex: 0 0 auto;
-    justify-content: flex-end;
     gap: var(--space-1);
     margin-inline-start: auto;
 }
@@ -1743,8 +1732,18 @@ h1 {
     min-width: 0;
 }
 
-.changed-files-source-trigger {
-    max-width: min(200px, 100%);
+/* A quiet label that opens a menu, not a bordered button. */
+.changed-files-header .changed-files-source-trigger {
+    max-width: 100%;
+    padding-inline: var(--control-padding-inline-small);
+    border-color: transparent;
+    background: transparent;
+    font-weight: 600;
+}
+
+.changed-files-header .changed-files-source-trigger:hover,
+.changed-files-header .changed-files-source-trigger:focus-visible {
+    background: var(--color-hover);
 }
 
 .changed-files-source-label {
@@ -1753,8 +1752,7 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-source-chevron,
-.changed-files-sort-chevron {
+.changed-files-source-chevron {
     display: inline-flex;
     flex: 0 0 auto;
     color: var(--color-text-muted);
@@ -1777,20 +1775,16 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-group {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-    cursor: pointer;
+.changed-files-more {
+    position: relative;
 }
 
-.changed-files-group input {
-    width: 14px;
-    height: 14px;
-    flex: 0 0 auto;
-    accent-color: var(--color-accent);
+.changed-files-more-menu {
+    position: absolute;
+    z-index: var(--z-raised);
+    top: 100%;
+    right: 0;
+    margin-top: var(--space-1);
 }
 
 .changed-files-content {
@@ -1867,16 +1861,6 @@ h1 {
     border-radius: var(--radius-panel);
     background: var(--color-surface);
     box-shadow: 0 4px 16px color-mix(in srgb, #000 16%, transparent);
-}
-
-/* The one small cap in the header that opens the whole set. */
-.changed-files-keys {
-    position: relative;
-}
-
-.changed-files-keys-trigger {
-    width: var(--control-height);
-    padding: 0;
 }
 
 .changed-files-keys-panel {
@@ -2104,15 +2088,16 @@ h1 {
     align-items: center;
 }
 
+/* File name, its folder, then the counts, kept together on one line. The
+   folder gives way first when the panel is narrow. */
 .changed-file-heading {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
+    display: flex;
     flex: 1 1 auto;
     width: 100%;
     min-width: 0; /* a flex item will not shrink below its content without this */
     min-height: 32px;
-    align-items: center;
-    gap: var(--space-1);
+    align-items: baseline;
+    gap: var(--space-2);
     padding: 0 var(--space-2);
     border: 0;
     border-radius: var(--radius-row);
@@ -2165,16 +2150,20 @@ h1 {
     color: var(--color-accent);
 }
 
-.changed-file-row-reviewed .changed-file-path,
+.changed-file-row-reviewed .changed-file-name,
 .changed-files-tree-file-reviewed .changed-files-tree-name {
     color: var(--color-text-muted);
 }
 
-.changed-file-disclosure,
-.changed-file-count {
+.changed-file-disclosure {
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
+}
+
+.changed-file-count {
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
 }
 
 .diff-stat-added {
@@ -2187,18 +2176,37 @@ h1 {
 
 .changed-file-disclosure {
     display: flex;
+    flex: 0 0 auto;
+    align-self: center;
+    width: 18px;
     justify-content: center;
 }
 
-.changed-file-path {
+.changed-file-name,
+.changed-file-folder {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.changed-file-name {
+    flex: 0 1 auto;
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+/* Cut from the left, so the folder nearest the file stays in view. */
+.changed-file-folder {
+    flex: 0 1000 auto;
     direction: rtl;
-    text-align: left;
-    font-family: var(--font-mono);
+    color: var(--color-text-muted);
     font-size: var(--text-md);
+}
+
+.changed-file-count {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .changed-file-diff {
@@ -2220,6 +2228,13 @@ h1 {
 .changed-file-diff .code-diff {
     --diffs-font-size: var(--text-sm);
     --diffs-line-height: 18px;
+    --diff-line-mix: calc(100% - var(--diff-line-tint));
+    --diff-gutter-mix: calc(100% - var(--diff-gutter-tint));
+    --diff-gutter-padding: 1ch;
+    --diff-marker-width: var(--diff-marker);
+    --diff-wrap-indent: 2ch;
+    --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--color-success) var(--diff-word-tint), transparent);
+    --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--color-danger) var(--diff-word-tint), transparent);
 }
 
 .diff-view-toggle {
@@ -2508,13 +2523,14 @@ h1 {
     width: 100%;
     min-height: 44px;
     max-height: 160px;
-    padding: 12px 44px 12px var(--space-4);
+    /* The right side clears the send button inside the box. */
+    padding: var(--space-3) calc(var(--control-height) + var(--space-4)) var(--space-3) var(--space-4);
     resize: none;
     border: 0;
     background: transparent;
     color: inherit;
     font: inherit;
-    font-size: 0.875rem;
+    font-size: var(--text-reading);
     line-height: 1.5;
     box-sizing: border-box;
     overflow-x: hidden;
@@ -2565,6 +2581,8 @@ h1 {
     opacity: 0.4;
 }
 
+/* One quiet line under the box: what the run may change on the left, when a
+   message goes on the right. */
 .composer-controls {
     display: flex;
     align-items: center;
@@ -2572,7 +2590,7 @@ h1 {
     gap: var(--space-2);
     padding: 0 var(--space-4);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
 }
 
 .composer-controls-left {
@@ -2598,9 +2616,13 @@ h1 {
 .composer-branch {
     min-width: 0;
     overflow: hidden;
-    font-family: var(--font-mono);
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.composer-scope-picker + .composer-branch::before {
+    content: "·";
+    margin-inline-end: var(--space-2);
 }
 
 /* Shares the toolbar's inset, and keeps its line when empty so the input and
@@ -2608,40 +2630,45 @@ h1 {
 .composer-note {
     min-height: 1.5em;
     margin: 0;
-    padding: 0 18px;
+    padding: 0 var(--space-4);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     line-height: 1.5;
 }
 
+/* Send now and Queue as one two-part switch: a tinted track, with the
+   chosen part raised on the composer's own colour. */
 .composer-send-choice {
     display: flex;
     align-items: center;
-    gap: var(--space-1);
+    padding: calc(var(--space-1) / 2);
+    border-radius: var(--radius-control);
+    background: var(--color-hover);
 }
 
 .composer-send-choice-option {
-    min-height: var(--control-height-small);
-    padding: calc(var(--space-1) / 2) var(--control-padding-inline-small);
+    min-height: calc(var(--control-height-small) - var(--space-1));
+    padding: 0 var(--control-padding-inline-small);
     border: 1px solid transparent;
-    border-radius: var(--radius-control);
+    border-radius: calc(var(--radius-control) - var(--space-1) / 2);
     background: transparent;
     color: var(--color-text-muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     line-height: var(--control-line-height);
     white-space: nowrap;
     cursor: pointer;
 }
 
 .composer-send-choice-option:not(:disabled):hover {
-    color: inherit;
+    color: var(--color-text);
 }
 
 .composer-send-choice-option[aria-pressed="true"] {
     border-color: var(--color-border);
-    background: var(--color-selection);
-    color: inherit;
+    background: var(--color-elevated);
+    color: var(--color-text);
+    box-shadow: 0 1px 2px color-mix(in srgb, #000 6%, transparent);
 }
 
 .composer-send-choice-option:disabled {
@@ -2852,13 +2879,12 @@ h1 {
     overflow: hidden;
     flex: 0 1 auto;
     align-items: baseline;
-    gap: 4px;
-    padding: 2px var(--space-2);
-    border-radius: var(--radius-chip);
-    background: var(--color-sidebar);
+    gap: var(--space-1);
+    padding: 0;
+    background: transparent;
     color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font: inherit;
+    font-size: var(--text-md);
     white-space: nowrap;
 }
 
@@ -2870,7 +2896,6 @@ h1 {
     white-space: nowrap;
 }
 
-.task-detail-project,
 .task-detail-worker,
 .task-detail-effort {
     flex: 0 0 auto;
@@ -2917,6 +2942,8 @@ h1 {
     padding: 0;
     border: 0;
     background: transparent;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
 }
 
 .detail-response-error {
@@ -3143,7 +3170,7 @@ h1 {
 
 .detail-response,
 .detail-empty-response {
-    width: min(100%, var(--content-max));
+    width: min(100%, var(--reading-max));
     margin-inline: 0 auto;
 }
 
@@ -3153,10 +3180,9 @@ h1 {
     gap: var(--space-3);
 }
 
-/* Requests read as part of the same column as the work below them, so they
-   start on the same edge rather than hanging off the right. */
+/* What the user sent sits on the right, apart from the worker's words. */
 .transcript-row-user {
-    align-items: flex-start;
+    align-items: flex-end;
 }
 
 .transcript-turn-marker {
@@ -3169,26 +3195,30 @@ h1 {
     font-weight: 500;
 }
 
+/* The bubble keeps room on its left for the copy button, which sits outside
+   it so short messages stay snug. */
 .transcript-bubble {
-    width: min(100%, var(--content-max));
-    max-width: 100%;
+    max-width: min(calc(100% - var(--control-height) - var(--space-2)), var(--reading-max));
     padding: 0;
     background: transparent;
     border: 0;
     color: var(--color-text);
-    font-size: 0.875rem;
-    line-height: 1.65;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
     word-wrap: break-word;
     text-align: left;
 }
 
-/* The brief, follow-ups, replies, instructions, and responses sit in a soft
-   card so what was said to or by the worker reads apart from its narration.
-   Barely lifted off the page: a faint tint and a hairline, no white slab. */
+.transcript-bubble.copy-host > .copy-button {
+    inset-block-start: 0;
+    inset-inline-end: calc(100% + var(--space-2));
+}
+
+/* The brief, follow-ups, replies, and instructions sit in a soft filled
+   bubble: a light tint, no border. */
 .transcript-card {
-    --transcript-card-bg: color-mix(in srgb, var(--color-text) 2.5%, var(--color-bg));
+    --transcript-card-bg: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
     padding: var(--space-3) var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
     border-radius: var(--radius-panel);
     background: var(--transcript-card-bg);
 }
@@ -3314,8 +3344,8 @@ h1 {
     display: flex;
     width: 100%;
     align-items: center;
-    gap: var(--space-3);
-    padding: 6px 0;
+    gap: var(--space-1);
+    padding: var(--space-1) 0;
     background: none;
     border: none;
     color: var(--color-text-muted);
@@ -3332,7 +3362,7 @@ h1 {
 
 .transcript-work-label {
     min-width: 0;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3350,9 +3380,22 @@ h1 {
     transform: rotate(90deg);
 }
 
+/* The worker's words and the one-line tool summaries between them, with
+   clear room between each. */
 .transcript-work-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
     border: 0;
     padding-top: var(--space-3);
+}
+
+/* An opened tool summary lists its calls on a hairline rail below it. */
+.transcript-work-body .transcript-call-group > .trace-panel {
+    margin-top: var(--space-1);
+    margin-inline-start: var(--space-1);
+    padding-inline-start: var(--space-3);
+    border-inline-start: 1px solid var(--color-border);
 }
 
 .transcript-work-body .trace-panel {
@@ -3429,14 +3472,12 @@ h1 {
 }
 
 .detail-response > .markdown-content > :first-child:not(.markdown-code),
-.transcript-bubble-preview > .markdown-content > :first-child:not(.markdown-code),
 .detail-response-label,
-.copy-host > .transcript-turn-marker {
+.detail-response > .transcript-turn-marker {
     padding-inline-end: var(--space-7);
 }
 
-.detail-response > .markdown-content > .markdown-code:first-child,
-.transcript-bubble-preview > .markdown-content > .markdown-code:first-child {
+.detail-response > .markdown-content > .markdown-code:first-child {
     margin-block-start: var(--space-7);
 }
 
@@ -3466,8 +3507,11 @@ h1 {
         min-height: var(--control-height);
     }
 
-    .detail-response > .markdown-content > .markdown-code:first-child,
-    .transcript-bubble-preview > .markdown-content > .markdown-code:first-child {
+    .transcript-bubble {
+        max-width: min(calc(100% - var(--space-7) - var(--space-2)), var(--reading-max));
+    }
+
+    .detail-response > .markdown-content > .markdown-code:first-child {
         margin-block-start: var(--space-8);
     }
 
@@ -3612,8 +3656,8 @@ h1 {
 
 
 .trace-row {
-    min-height: 28px;
-    padding: 4px 0;
+    min-height: var(--control-height);
+    padding: var(--space-1) 0;
 }
 
 .trace-row-step-start {
@@ -3626,14 +3670,14 @@ h1 {
     width: 100%;
     align-items: baseline;
     gap: var(--space-2);
-    min-height: 20px;
+    min-height: var(--space-5);
 }
 
-/* The whole row is the control: a 24px plus sign is a needlessly small target
-   for something this wide. */
+/* The whole row is the control. */
 .trace-row-main-toggle {
     padding: 0;
     border: 0;
+    border-radius: var(--radius-row);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -3641,9 +3685,16 @@ h1 {
     cursor: pointer;
 }
 
-.trace-row-main-toggle:hover .trace-disclosure,
-.trace-row-main-toggle:focus-visible .trace-disclosure {
-    color: var(--color-accent);
+/* Inside an opened tool summary, a row's hover fill reaches left into the
+   rail's padding, so the text keeps its edge. */
+.transcript-call-group .trace-row-main-toggle {
+    width: calc(100% + var(--space-2));
+    margin-inline-start: calc(-1 * var(--space-2));
+    padding-inline: var(--space-2);
+}
+
+.transcript-call-group .trace-row-main-toggle:is(:hover, [aria-expanded="true"]) {
+    background: var(--color-hover);
 }
 
 /* A reveal from the composer tray lands here: a brief outline, then gone. */
@@ -3653,11 +3704,12 @@ h1 {
     outline-offset: 1px;
 }
 
-
+/* A tool call is one quiet line: a plain verb, then its file, command, or
+   pattern. It darkens on hover or when open. */
 .trace-verb {
-    color: var(--color-text);
+    flex: 0 0 auto;
+    color: var(--color-text-muted);
     font-size: var(--text-base);
-    font-weight: 450;
 }
 
 .trace-row-turn-boundary {
@@ -3687,9 +3739,12 @@ h1 {
 
 .trace-target {
     flex: 0 1 auto;
-    max-width: 46ch;
+    color: var(--color-text-muted);
     font-size: var(--text-base);
-    font-weight: 450;
+}
+
+.trace-row-main-toggle:is(:hover, [aria-expanded="true"]) :is(.trace-verb, .trace-target) {
+    color: var(--color-text);
 }
 
 .trace-target-technical {
@@ -3697,7 +3752,7 @@ h1 {
     font-size: var(--text-base-mono);
 }
 
-/* The agent's own words are the row, not a preview of it — shown whole,
+/* The worker's own words are the main text: shown whole at reading size,
    wrapping onto as many lines as it takes, with long unbroken runs like
    paths and hashes breaking instead of stretching the row wider. */
 .trace-row-message .trace-row-main {
@@ -3711,6 +3766,13 @@ h1 {
     text-overflow: clip;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+.trace-row-message:not(.trace-row-thinking) .trace-target {
+    max-width: var(--reading-max);
+    color: var(--color-text);
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
 }
 
 @keyframes trace-running-shimmer {
@@ -3740,39 +3802,22 @@ h1 {
     }
 }
 
+/* Shown once a row is opened, or on a row that failed: plain muted text
+   after the target, not a column of its own. */
 .trace-preview,
 .trace-result {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     color: var(--color-text-muted);
+    font-size: var(--text-base);
+}
+
+.trace-preview {
     font-family: var(--font-mono);
     font-size: var(--text-base-mono);
 }
 
-/* The result (usually a duration) sits against the disclosure on every row,
-   so times line up in one column however long the target or preview runs. */
-.trace-result {
-    flex: 0 1 auto;
-    margin-left: auto;
-    text-align: right;
-}
-
-.trace-result + .trace-disclosure {
-    margin-left: 0;
-}
-
 .trace-state-failed .trace-result {
     color: color-mix(in srgb, var(--color-danger) 70%, var(--color-text-muted));
-}
-
-.trace-disclosure {
-    display: grid;
-    width: 24px;
-    height: 24px;
-    flex: 0 0 auto;
-    margin-left: auto;
-    place-items: center;
-    color: var(--color-text-muted);
-    line-height: 1;
 }
 
 .trace-children {
@@ -4182,7 +4227,7 @@ select {
 .task-metadata,
 .task-detail-fact,
 .changed-files-summary,
-.changed-files-generated-count,
+.changed-file-count,
 .card-row dd {
     font-variant-numeric: tabular-nums;
 }
