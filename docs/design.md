@@ -53,7 +53,7 @@ gap reaches the outer radius, the inner element keeps its own token.
 | `--text-heading` | 17px | Section heading, weight 600 |
 | `--text-lg` | 16px | Dialog title in the rail |
 | `--text-base` | 13px | Body text, row titles (600), row descriptions (muted) |
-| `--text-md` | 12px | Rail group labels, small captions |
+| `--text-md` | 12px | Rail and task list group labels, small captions, and every muted meta line in the task view: title bar facts, `+`/`−` counts, the changed files summary, the line under the composer |
 | `--text-reading` | 14px | What the worker says and what the user sends, in the task view |
 
 Descriptions use `--color-text-muted` and stop at `65ch`.

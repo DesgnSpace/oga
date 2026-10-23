@@ -1071,7 +1071,7 @@ a {
     align-items: center;
     padding: var(--space-5) var(--space-3) var(--space-1);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     font-weight: 600;
 }
 
@@ -1128,7 +1128,8 @@ a {
 .group-count {
     flex: 0 0 auto;
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
+    font-weight: 400;
 }
 
 /* One look per state, shared by the sidebar row, task header, and composer — see TaskStatusDot. */
@@ -2156,11 +2157,16 @@ h1 {
     color: var(--color-text-muted);
 }
 
-.changed-file-disclosure,
-.changed-file-count {
+.changed-file-disclosure {
     color: var(--color-text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
+}
+
+/* Matches the title bar's counts: body font, meta size. */
+.changed-file-count {
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
 }
 
 .diff-stat-added {
@@ -2629,7 +2635,7 @@ h1 {
     margin: 0;
     padding: 0 var(--space-4);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     line-height: 1.5;
 }
 
