@@ -54,8 +54,12 @@ gap reaches the outer radius, the inner element keeps its own token.
 | `--text-lg` | 16px | Dialog title in the rail |
 | `--text-base` | 13px | Body text, row titles (600), row descriptions (muted) |
 | `--text-md` | 12px | Rail group labels, small captions |
+| `--text-reading` | 14px | What the worker says and what the user sends, in the task view |
 
 Descriptions use `--color-text-muted` and stop at `65ch`.
+
+Reading text uses `--leading-reading` (1.65) and stops at `--reading-max`
+(`72ch`, about 70 characters a line).
 
 ## Controls
 
@@ -105,6 +109,21 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 - `--content-max` is the one reading column every main-pane screen shares:
   settings, empty states, and the task screen's transcript, messages, and
   composer all size to it, so their left and right edges line up.
+
+### Task feed
+
+- What the user sent (the brief, follow-ups, replies, instructions) sits in
+  a right-aligned bubble: a light tint, no border, `--radius-panel`, at most
+  `--reading-max` wide.
+- What the worker says is the main text: `--text-reading`, full text colour,
+  left-aligned, at most `--reading-max` wide.
+- Tool calls between two worker messages fold into one muted line with a
+  short label: what is running now, or at most two counts ("Edited 4 files,
+  ran 11 commands"). Opened, each call is one quiet line: a verb, then its
+  file, command, or pattern in monospace. Its result shows once that line is
+  opened.
+- A turn's header is a short status ("Working · 24 min · step 1 of 5"); the
+  worker's words stay in the feed.
 
 ### Page header — `PageHeader`
 

@@ -31,6 +31,11 @@
        task view is scaled down to read as the same size as --text-base. */
     --text-base-mono: calc(var(--text-base) * 0.94);
     --text-lg: 1rem;
+    /* What the worker says and what the user sends, in the task view. */
+    --text-reading: 0.875rem;
+    --leading-reading: 1.65;
+    /* About 70 characters of prose at the size it is used with. */
+    --reading-max: 72ch;
     --text-heading: 1.0625rem;
     --text-title: 1.75rem;
     --color-bg: #fafafa;
@@ -2917,6 +2922,8 @@ h1 {
     padding: 0;
     border: 0;
     background: transparent;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
 }
 
 .detail-response-error {
@@ -3143,7 +3150,7 @@ h1 {
 
 .detail-response,
 .detail-empty-response {
-    width: min(100%, var(--content-max));
+    width: min(100%, var(--reading-max));
     margin-inline: 0 auto;
 }
 
@@ -3153,10 +3160,9 @@ h1 {
     gap: var(--space-3);
 }
 
-/* Requests read as part of the same column as the work below them, so they
-   start on the same edge rather than hanging off the right. */
+/* What the user sent sits on the right, apart from the worker's words. */
 .transcript-row-user {
-    align-items: flex-start;
+    align-items: flex-end;
 }
 
 .transcript-turn-marker {
@@ -3169,26 +3175,30 @@ h1 {
     font-weight: 500;
 }
 
+/* The bubble keeps room on its left for the copy button, which sits outside
+   it so short messages stay snug. */
 .transcript-bubble {
-    width: min(100%, var(--content-max));
-    max-width: 100%;
+    max-width: min(calc(100% - var(--control-height) - var(--space-2)), var(--reading-max));
     padding: 0;
     background: transparent;
     border: 0;
     color: var(--color-text);
-    font-size: 0.875rem;
-    line-height: 1.65;
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
     word-wrap: break-word;
     text-align: left;
 }
 
-/* The brief, follow-ups, replies, instructions, and responses sit in a soft
-   card so what was said to or by the worker reads apart from its narration.
-   Barely lifted off the page: a faint tint and a hairline, no white slab. */
+.transcript-bubble.copy-host > .copy-button {
+    inset-block-start: 0;
+    inset-inline-end: calc(100% + var(--space-2));
+}
+
+/* The brief, follow-ups, replies, and instructions sit in a soft filled
+   bubble: a light tint, no border. */
 .transcript-card {
-    --transcript-card-bg: color-mix(in srgb, var(--color-text) 2.5%, var(--color-bg));
+    --transcript-card-bg: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
     padding: var(--space-3) var(--space-4);
-    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
     border-radius: var(--radius-panel);
     background: var(--transcript-card-bg);
 }
@@ -3314,8 +3324,8 @@ h1 {
     display: flex;
     width: 100%;
     align-items: center;
-    gap: var(--space-3);
-    padding: 6px 0;
+    gap: var(--space-1);
+    padding: var(--space-1) 0;
     background: none;
     border: none;
     color: var(--color-text-muted);
@@ -3332,7 +3342,7 @@ h1 {
 
 .transcript-work-label {
     min-width: 0;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3350,9 +3360,22 @@ h1 {
     transform: rotate(90deg);
 }
 
+/* The worker's words and the one-line tool summaries between them, with
+   clear room between each. */
 .transcript-work-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
     border: 0;
     padding-top: var(--space-3);
+}
+
+/* An opened tool summary lists its calls on a hairline rail below it. */
+.transcript-work-body .transcript-call-group > .trace-panel {
+    margin-top: var(--space-1);
+    margin-inline-start: var(--space-1);
+    padding-inline-start: var(--space-3);
+    border-inline-start: 1px solid var(--color-border);
 }
 
 .transcript-work-body .trace-panel {
@@ -3429,14 +3452,12 @@ h1 {
 }
 
 .detail-response > .markdown-content > :first-child:not(.markdown-code),
-.transcript-bubble-preview > .markdown-content > :first-child:not(.markdown-code),
 .detail-response-label,
-.copy-host > .transcript-turn-marker {
+.detail-response > .transcript-turn-marker {
     padding-inline-end: var(--space-7);
 }
 
-.detail-response > .markdown-content > .markdown-code:first-child,
-.transcript-bubble-preview > .markdown-content > .markdown-code:first-child {
+.detail-response > .markdown-content > .markdown-code:first-child {
     margin-block-start: var(--space-7);
 }
 
@@ -3466,8 +3487,11 @@ h1 {
         min-height: var(--control-height);
     }
 
-    .detail-response > .markdown-content > .markdown-code:first-child,
-    .transcript-bubble-preview > .markdown-content > .markdown-code:first-child {
+    .transcript-bubble {
+        max-width: min(calc(100% - var(--space-7) - var(--space-2)), var(--reading-max));
+    }
+
+    .detail-response > .markdown-content > .markdown-code:first-child {
         margin-block-start: var(--space-8);
     }
 
@@ -3612,8 +3636,8 @@ h1 {
 
 
 .trace-row {
-    min-height: 28px;
-    padding: 4px 0;
+    min-height: var(--control-height);
+    padding: var(--space-1) 0;
 }
 
 .trace-row-step-start {
@@ -3626,14 +3650,14 @@ h1 {
     width: 100%;
     align-items: baseline;
     gap: var(--space-2);
-    min-height: 20px;
+    min-height: var(--space-5);
 }
 
-/* The whole row is the control: a 24px plus sign is a needlessly small target
-   for something this wide. */
+/* The whole row is the control. */
 .trace-row-main-toggle {
     padding: 0;
     border: 0;
+    border-radius: var(--radius-row);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -3641,9 +3665,16 @@ h1 {
     cursor: pointer;
 }
 
-.trace-row-main-toggle:hover .trace-disclosure,
-.trace-row-main-toggle:focus-visible .trace-disclosure {
-    color: var(--color-accent);
+/* Inside an opened tool summary, a row's hover fill reaches left into the
+   rail's padding, so the text keeps its edge. */
+.transcript-call-group .trace-row-main-toggle {
+    width: calc(100% + var(--space-2));
+    margin-inline-start: calc(-1 * var(--space-2));
+    padding-inline: var(--space-2);
+}
+
+.transcript-call-group .trace-row-main-toggle:is(:hover, [aria-expanded="true"]) {
+    background: var(--color-hover);
 }
 
 /* A reveal from the composer tray lands here: a brief outline, then gone. */
@@ -3653,11 +3684,12 @@ h1 {
     outline-offset: 1px;
 }
 
-
+/* A tool call is one quiet line: a plain verb, then its file, command, or
+   pattern. It darkens on hover or when open. */
 .trace-verb {
-    color: var(--color-text);
+    flex: 0 0 auto;
+    color: var(--color-text-muted);
     font-size: var(--text-base);
-    font-weight: 450;
 }
 
 .trace-row-turn-boundary {
@@ -3687,9 +3719,12 @@ h1 {
 
 .trace-target {
     flex: 0 1 auto;
-    max-width: 46ch;
+    color: var(--color-text-muted);
     font-size: var(--text-base);
-    font-weight: 450;
+}
+
+.trace-row-main-toggle:is(:hover, [aria-expanded="true"]) :is(.trace-verb, .trace-target) {
+    color: var(--color-text);
 }
 
 .trace-target-technical {
@@ -3697,7 +3732,7 @@ h1 {
     font-size: var(--text-base-mono);
 }
 
-/* The agent's own words are the row, not a preview of it — shown whole,
+/* The worker's own words are the main text: shown whole at reading size,
    wrapping onto as many lines as it takes, with long unbroken runs like
    paths and hashes breaking instead of stretching the row wider. */
 .trace-row-message .trace-row-main {
@@ -3711,6 +3746,13 @@ h1 {
     text-overflow: clip;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+
+.trace-row-message:not(.trace-row-thinking) .trace-target {
+    max-width: var(--reading-max);
+    color: var(--color-text);
+    font-size: var(--text-reading);
+    line-height: var(--leading-reading);
 }
 
 @keyframes trace-running-shimmer {
@@ -3740,39 +3782,22 @@ h1 {
     }
 }
 
+/* Shown once a row is opened, or on a row that failed: plain muted text
+   after the target, not a column of its own. */
 .trace-preview,
 .trace-result {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     color: var(--color-text-muted);
+    font-size: var(--text-base);
+}
+
+.trace-preview {
     font-family: var(--font-mono);
     font-size: var(--text-base-mono);
 }
 
-/* The result (usually a duration) sits against the disclosure on every row,
-   so times line up in one column however long the target or preview runs. */
-.trace-result {
-    flex: 0 1 auto;
-    margin-left: auto;
-    text-align: right;
-}
-
-.trace-result + .trace-disclosure {
-    margin-left: 0;
-}
-
 .trace-state-failed .trace-result {
     color: color-mix(in srgb, var(--color-danger) 70%, var(--color-text-muted));
-}
-
-.trace-disclosure {
-    display: grid;
-    width: 24px;
-    height: 24px;
-    flex: 0 0 auto;
-    margin-left: auto;
-    place-items: center;
-    color: var(--color-text-muted);
-    line-height: 1;
 }
 
 .trace-children {
