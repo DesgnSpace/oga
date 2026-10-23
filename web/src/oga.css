@@ -2520,13 +2520,14 @@ h1 {
     width: 100%;
     min-height: 44px;
     max-height: 160px;
-    padding: 12px 44px 12px var(--space-4);
+    /* The right side clears the send button inside the box. */
+    padding: var(--space-3) calc(var(--control-height) + var(--space-4)) var(--space-3) var(--space-4);
     resize: none;
     border: 0;
     background: transparent;
     color: inherit;
     font: inherit;
-    font-size: 0.875rem;
+    font-size: var(--text-reading);
     line-height: 1.5;
     box-sizing: border-box;
     overflow-x: hidden;
@@ -2577,6 +2578,8 @@ h1 {
     opacity: 0.4;
 }
 
+/* One quiet line under the box: what the run may change on the left, when a
+   message goes on the right. */
 .composer-controls {
     display: flex;
     align-items: center;
@@ -2584,7 +2587,7 @@ h1 {
     gap: var(--space-2);
     padding: 0 var(--space-4);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
 }
 
 .composer-controls-left {
@@ -2610,9 +2613,13 @@ h1 {
 .composer-branch {
     min-width: 0;
     overflow: hidden;
-    font-family: var(--font-mono);
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.composer-scope-picker + .composer-branch::before {
+    content: "·";
+    margin-inline-end: var(--space-2);
 }
 
 /* Shares the toolbar's inset, and keeps its line when empty so the input and
@@ -2620,40 +2627,45 @@ h1 {
 .composer-note {
     min-height: 1.5em;
     margin: 0;
-    padding: 0 18px;
+    padding: 0 var(--space-4);
     color: var(--color-text-muted);
     font-size: var(--text-sm);
     line-height: 1.5;
 }
 
+/* Send now and Queue as one two-part switch: a tinted track, with the
+   chosen part raised on the composer's own colour. */
 .composer-send-choice {
     display: flex;
     align-items: center;
-    gap: var(--space-1);
+    padding: calc(var(--space-1) / 2);
+    border-radius: var(--radius-control);
+    background: var(--color-hover);
 }
 
 .composer-send-choice-option {
-    min-height: var(--control-height-small);
-    padding: calc(var(--space-1) / 2) var(--control-padding-inline-small);
+    min-height: calc(var(--control-height-small) - var(--space-1));
+    padding: 0 var(--control-padding-inline-small);
     border: 1px solid transparent;
-    border-radius: var(--radius-control);
+    border-radius: calc(var(--radius-control) - var(--space-1) / 2);
     background: transparent;
     color: var(--color-text-muted);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     line-height: var(--control-line-height);
     white-space: nowrap;
     cursor: pointer;
 }
 
 .composer-send-choice-option:not(:disabled):hover {
-    color: inherit;
+    color: var(--color-text);
 }
 
 .composer-send-choice-option[aria-pressed="true"] {
     border-color: var(--color-border);
-    background: var(--color-selection);
-    color: inherit;
+    background: var(--color-elevated);
+    color: var(--color-text);
+    box-shadow: 0 1px 2px color-mix(in srgb, #000 6%, transparent);
 }
 
 .composer-send-choice-option:disabled {

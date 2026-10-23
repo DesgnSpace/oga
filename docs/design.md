@@ -144,6 +144,16 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 - A turn's header is a short status ("Working · 24 min · step 1 of 5"); the
   worker's words stay in the feed.
 
+### Composer
+
+- One box at `--text-reading`. Its placeholder says what to type and which
+  keys send ("Send a message · ⌘↵ to send now, ⌥↵ to queue"); the send
+  button sits inside the box.
+- One quiet `--text-md` line under it: what the run may change and its
+  branch on the left ("Can edit · feat/x"), and while a run is active the
+  Send now | Queue switch on the right: a tinted track, the chosen part
+  raised on the box's colour.
+
 ### Page header — `PageHeader`
 
 - The page title (`--text-title`) names the page and matches its rail label.
