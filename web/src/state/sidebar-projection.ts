@@ -167,14 +167,11 @@ function rowsForGroup(
     for (const task of group.tasks) rows.push({ type: "task", task, indented });
     return rows;
   }
-  // An open task past the limit keeps the whole group listed, so its row never disappears.
-  const keepsHiddenTask = group.tasks.slice(FINISHED_GROUP_LIMIT).some((task) => task.id === limit.keep);
-  const expanded = limit.expanded.has(group.id);
-  const shown = expanded || keepsHiddenTask ? group.tasks : group.tasks.slice(0, FINISHED_GROUP_LIMIT);
+  // An open task past the fold stays listed under the first ones, so its row never disappears.
+  const kept = group.tasks.slice(FINISHED_GROUP_LIMIT).filter((task) => task.id === limit.keep);
+  const shown = limit.expanded.has(group.id) ? group.tasks : [...group.tasks.slice(0, FINISHED_GROUP_LIMIT), ...kept];
   for (const task of shown) rows.push({ type: "task", task, indented });
-  if (!keepsHiddenTask || expanded) {
-    rows.push({ type: "more", groupId: group.id, hidden: group.tasks.length - shown.length });
-  }
+  rows.push({ type: "more", groupId: group.id, hidden: group.tasks.length - shown.length });
   return rows;
 }
 

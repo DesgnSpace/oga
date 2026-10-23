@@ -459,6 +459,12 @@ describe("the sidebar", () => {
       render(<Sidebar sidebarController={new SidebarController()} initialTask="d22" onSelectTask={mock()} />);
 
       expect(await screen.findByText("done 22")).toBeTruthy();
+      expect(screen.queryByText("done 21")).toBeNull();
+
+      act(() => screen.getByRole("button", { name: "Show more" }).click());
+      act(() => screen.getByRole("button", { name: "Show fewer" }).click());
+      expect(screen.getByText("done 22")).toBeTruthy();
+      expect(screen.queryByText("done 21")).toBeNull();
     } finally {
       restore();
     }

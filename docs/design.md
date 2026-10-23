@@ -117,8 +117,8 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   waiting, needs a reply, failed, or a new update. A finished task already
   opened has no mark, and its title stays on the same edge as the others.
 - Grouped by status, Completed and Cancelled list their first 20 tasks, then
-  a "Show more" row. Every other group lists in full, and a search lists
-  every match.
+  a "Show more" row. A task open past the fold is listed under those 20.
+  Every other group lists in full, and a search lists every match.
 
 ### Task title bar
 
