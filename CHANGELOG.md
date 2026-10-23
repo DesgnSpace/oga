@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- A task is now easier to read: your messages sit on the right, the worker's replies are the main text in a narrower column, and the commands it runs and files it touches fold into one short line, such as "Edited 4 files, ran 11 commands", that opens to a list.
+- A task is now easier to read: your messages sit on the right, the worker's replies are the main text in a narrower column, and the commands it runs and files it touches fold into one short line, such as "Edited 4 files, ran 11 commands", that opens to a list. The changed files panel is calmer too: its top bar shows only what is compared plus a few buttons, each file's name, folder and line counts sit on one line, skipped lines say how many there are ("26 unmodified lines"), and the unified or split choice is made once for the whole panel from its menu.
 - A command a Claude worker runs now shows the command itself in the task view, instead of "Terminal".
 - A finished task that waits on other work can now be set to run again after it: `oga edit <task-id> --rearm` holds it until what it waits on completes again, then it picks up its own session. Rearm each task in a chain and they run again in order. `--no-rearm` undoes it.
 - Cursor tasks now read clearly: new files show only their content, edits say how many lines changed, searches say how many files or matches they found, reads name the lines they covered, and a failed command shows its error.

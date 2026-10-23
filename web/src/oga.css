@@ -54,6 +54,12 @@
     --color-success: #087f5b;
     --color-warning: #a15c05;
     --color-scrim: rgba(0, 0, 0, 0.22);
+    /* How strongly the changed-files diff tints a changed line, its line
+       number, and the changed words inside it, plus the edge marker width. */
+    --diff-line-tint: 6%;
+    --diff-gutter-tint: 4%;
+    --diff-word-tint: 14%;
+    --diff-marker: 2px;
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
@@ -121,6 +127,9 @@
         --color-success: #6ee7b7;
         --color-warning: #f5c27a;
         --color-scrim: rgba(0, 0, 0, 0.38);
+        --diff-line-tint: 9%;
+        --diff-gutter-tint: 7%;
+        --diff-word-tint: 20%;
     }
 }
 
@@ -1657,11 +1666,12 @@ h1 {
     background: var(--color-accent);
 }
 
+/* One line: what is compared on the left, a few icon buttons on the right. */
 .changed-files-header {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-3);
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -1671,73 +1681,25 @@ h1 {
     padding-left: var(--macos-titlebar-inset);
 }
 
-/* On a narrow panel the actions drop below the title as one row, never
-   splitting across two lines. */
-.changed-files-header-row {
+.changed-files-summary {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2) var(--space-3);
-}
-
-.changed-files-header-title {
-    display: flex;
-    flex: 1 1 10rem;
-    align-items: center;
-    gap: var(--space-3);
-    min-width: 0;
-}
-
-.changed-files-active-file {
-    min-width: 0;
-    margin: 0;
-    overflow: hidden;
+    gap: 0 var(--space-2);
+    margin: 0 0 var(--space-2);
+    padding: 0 var(--space-2);
     color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: var(--text-md);
 }
 
-.changed-files-summary {
-    min-width: 0;
-    margin: 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.changed-files-reviewed-progress,
-.changed-files-generated-count {
-    flex: 0 0 auto;
-    margin: 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    white-space: nowrap;
-}
-
-.changed-files-sort {
-    position: relative;
-}
-
-.changed-files-sort-menu {
-    position: absolute;
-    z-index: var(--z-raised);
-    top: 100%;
-    right: 0;
-    margin-top: var(--space-1);
+.changed-files-summary > span + span::before {
+    margin-right: var(--space-2);
+    content: "·";
 }
 
 .changed-files-header-actions {
     display: flex;
     align-items: center;
     flex: 0 0 auto;
-    justify-content: flex-end;
     gap: var(--space-1);
     margin-inline-start: auto;
 }
@@ -1748,8 +1710,18 @@ h1 {
     min-width: 0;
 }
 
-.changed-files-source-trigger {
-    max-width: min(200px, 100%);
+/* A quiet label that opens a menu, not a bordered button. */
+.changed-files-header .changed-files-source-trigger {
+    max-width: 100%;
+    padding-inline: var(--control-padding-inline-small);
+    border-color: transparent;
+    background: transparent;
+    font-weight: 600;
+}
+
+.changed-files-header .changed-files-source-trigger:hover,
+.changed-files-header .changed-files-source-trigger:focus-visible {
+    background: var(--color-hover);
 }
 
 .changed-files-source-label {
@@ -1758,8 +1730,7 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-source-chevron,
-.changed-files-sort-chevron {
+.changed-files-source-chevron {
     display: inline-flex;
     flex: 0 0 auto;
     color: var(--color-text-muted);
@@ -1782,20 +1753,16 @@ h1 {
     white-space: nowrap;
 }
 
-.changed-files-group {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-    cursor: pointer;
+.changed-files-more {
+    position: relative;
 }
 
-.changed-files-group input {
-    width: 14px;
-    height: 14px;
-    flex: 0 0 auto;
-    accent-color: var(--color-accent);
+.changed-files-more-menu {
+    position: absolute;
+    z-index: var(--z-raised);
+    top: 100%;
+    right: 0;
+    margin-top: var(--space-1);
 }
 
 .changed-files-content {
@@ -1872,16 +1839,6 @@ h1 {
     border-radius: var(--radius-panel);
     background: var(--color-surface);
     box-shadow: 0 4px 16px color-mix(in srgb, #000 16%, transparent);
-}
-
-/* The one small cap in the header that opens the whole set. */
-.changed-files-keys {
-    position: relative;
-}
-
-.changed-files-keys-trigger {
-    width: var(--control-height);
-    padding: 0;
 }
 
 .changed-files-keys-panel {
@@ -2109,15 +2066,16 @@ h1 {
     align-items: center;
 }
 
+/* File name, its folder, then the counts, kept together on one line. The
+   folder gives way first when the panel is narrow. */
 .changed-file-heading {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
+    display: flex;
     flex: 1 1 auto;
     width: 100%;
     min-width: 0; /* a flex item will not shrink below its content without this */
     min-height: 32px;
-    align-items: center;
-    gap: var(--space-1);
+    align-items: baseline;
+    gap: var(--space-2);
     padding: 0 var(--space-2);
     border: 0;
     border-radius: var(--radius-row);
@@ -2170,7 +2128,7 @@ h1 {
     color: var(--color-accent);
 }
 
-.changed-file-row-reviewed .changed-file-path,
+.changed-file-row-reviewed .changed-file-name,
 .changed-files-tree-file-reviewed .changed-files-tree-name {
     color: var(--color-text-muted);
 }
@@ -2192,18 +2150,37 @@ h1 {
 
 .changed-file-disclosure {
     display: flex;
+    flex: 0 0 auto;
+    align-self: center;
+    width: 18px;
     justify-content: center;
 }
 
-.changed-file-path {
+.changed-file-name,
+.changed-file-folder {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.changed-file-name {
+    flex: 0 1 auto;
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+/* Cut from the left, so the folder nearest the file stays in view. */
+.changed-file-folder {
+    flex: 0 1000 auto;
     direction: rtl;
-    text-align: left;
-    font-family: var(--font-mono);
+    color: var(--color-text-muted);
     font-size: var(--text-md);
+}
+
+.changed-file-count {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .changed-file-diff {
@@ -2225,6 +2202,13 @@ h1 {
 .changed-file-diff .code-diff {
     --diffs-font-size: var(--text-sm);
     --diffs-line-height: 18px;
+    --diff-line-mix: calc(100% - var(--diff-line-tint));
+    --diff-gutter-mix: calc(100% - var(--diff-gutter-tint));
+    --diff-gutter-padding: 1ch;
+    --diff-marker-width: var(--diff-marker);
+    --diff-wrap-indent: 2ch;
+    --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--color-success) var(--diff-word-tint), transparent);
+    --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--color-danger) var(--diff-word-tint), transparent);
 }
 
 .diff-view-toggle {
@@ -4207,7 +4191,7 @@ select {
 .task-metadata,
 .task-detail-fact,
 .changed-files-summary,
-.changed-files-generated-count,
+.changed-file-count,
 .card-row dd {
     font-variant-numeric: tabular-nums;
 }

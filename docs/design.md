@@ -164,6 +164,29 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   row and keeps the control above it; a chevron at the far right shows it
   opens.
 
+### Changed files panel
+
+- The top bar is one line: what is being compared on the left (a quiet
+  label that opens the source menu), then icon buttons on the right: go to
+  a file, more options, full screen, close. The unified or split choice,
+  order, grouping, open or close all, refresh, and the review keys live in
+  the more options menu.
+- Counts and review progress sit in one muted line above the first file.
+- A file's header is one line: the file name (600), its folder in muted
+  text, then the `+`/`−` counts. Per-file actions sit on the right.
+- Changed lines take a soft tint and a thin coloured edge in the line
+  number gutter. Changed words inside them take a slightly stronger tint.
+- Skipped lines between two hunks show as a row that says how many lines
+  are hidden ("26 unmodified lines").
+- A long line wraps with its continuation indented under the code.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `--diff-line-tint` | 6% | 9% | How much of the status colour tints an added or removed line |
+| `--diff-gutter-tint` | 4% | 7% | The same, for that line's number |
+| `--diff-word-tint` | 14% | 20% | The changed words inside a changed line |
+| `--diff-marker` | 2px | 2px | Width of the coloured edge on a changed line's number |
+
 ## Dialogs
 
 The settings dialog keeps `--space-7` clear on every side of the window
