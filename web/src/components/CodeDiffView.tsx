@@ -60,6 +60,36 @@ registerCustomTheme(THEME_NAME, () => Promise.resolve(THEME));
 
 const THEMES = { light: THEME_NAME, dark: THEME_NAME };
 
+// Reaches inside the diff's shadow root. Each rule falls back to the viewer's
+// own value, so only a place that sets the `--diff-*` settings looks different.
+const DIFF_CSS = `
+  [data-line], [data-no-newline] {
+    --mix-light: var(--diff-line-mix, 88%);
+    --mix-dark: var(--diff-line-mix, 80%);
+  }
+  [data-gutter-buffer], [data-column-number] {
+    --mix-light: var(--diff-gutter-mix, 91%);
+    --mix-dark: var(--diff-gutter-mix, 85%);
+  }
+  [data-column-number] {
+    padding-left: var(--diff-gutter-padding, 2ch);
+  }
+  [data-column-number][data-line-type="change-addition"] {
+    box-shadow: inset var(--diff-marker-width, 0) 0 var(--diffs-addition-base);
+  }
+  [data-column-number][data-line-type="change-deletion"] {
+    box-shadow: inset var(--diff-marker-width, 0) 0 var(--diffs-deletion-base);
+  }
+  [data-overflow="wrap"] [data-line] {
+    padding-inline-start: calc(2ch + var(--diff-wrap-indent, 0ch));
+    text-indent: calc(var(--diff-wrap-indent, 0ch) * -1);
+  }
+  [data-unmodified-lines] {
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+  }
+`;
+
 export default function CodeDiffView({ patch, numbered = false, wrap = false }: CodeDiffProps) {
   const [view] = useDiffView();
   const fileDiff = React.useMemo(() => processFile(patch), [patch]);
@@ -69,10 +99,13 @@ export default function CodeDiffView({ patch, numbered = false, wrap = false }: 
       diffStyle: view,
       overflow: wrap ? "wrap" : "scroll",
       diffIndicators: "classic",
-      hunkSeparators: "simple",
+      // Only a patch with real line numbers knows how many lines sit between
+      // two hunks, so only that one can say "26 unmodified lines".
+      hunkSeparators: numbered ? "line-info" : "simple",
       lineDiffType: "word",
       disableFileHeader: true,
       disableLineNumbers: !numbered,
+      unsafeCSS: DIFF_CSS,
     }),
     [numbered, view, wrap],
   );
