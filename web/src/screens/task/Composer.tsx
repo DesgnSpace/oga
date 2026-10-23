@@ -110,7 +110,7 @@ function choiceLabel(choice: ComposerSendChoice): string {
   return choice === "now" ? "Send now" : "Queue";
 }
 
-/** The keys that send, as they read in the box's placeholder. */
+/** e.g. `⌘↵ to send now, ⌥↵ to queue` */
 function sendHint(routing: ConversationInputRouting, choice: ComposerSendChoice): string {
   const submit = submitShortcut();
   if (routing.type !== "steer-and-queue") return `${submit} to ${actionLabel(routing).toLowerCase()}`;

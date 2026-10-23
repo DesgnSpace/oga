@@ -168,9 +168,8 @@ function shortModel(model: string): string {
   return model.slice(model.lastIndexOf("/") + 1) || model;
 }
 
-// The title bar's secondary strip: worker, model and effort as one line of
-// muted text. The project, full model name, cost, duration, and token stats
-// sit in its tooltip, so the task title stays the bar's main text.
+// The project, full model name, cost, duration, and tokens live in the tooltip
+// so the task title stays the bar's main text.
 function TaskDetailSecondary({
   task,
   workerLabel,

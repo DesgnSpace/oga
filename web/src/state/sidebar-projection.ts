@@ -93,7 +93,7 @@ export function projectionListedTaskIds(
 export type SidebarRow =
   | { type: "groupHeader"; id: string; title: string; count: number; collapsed: boolean; indented: boolean }
   | { type: "task"; task: TaskSummary; indented: boolean }
-  /** Opens or folds the rest of a long finished group. `hidden` is 0 once it is open. */
+  /** `hidden` is 0 once the group is open. */
   | { type: "more"; groupId: string; hidden: number };
 
 export function sidebarRowKey(row: SidebarRow): string {
@@ -102,22 +102,16 @@ export function sidebarRowKey(row: SidebarRow): string {
   return `task:${row.task.id}`;
 }
 
-/** How many tasks a finished status group lists before the rest wait behind Show more. */
-export const FINISHED_GROUP_LIMIT = 20;
+const FINISHED_GROUP_LIMIT = 20;
 const FINISHED_GROUPS = new Set<string>(["completed", "cancelled"]);
 
 export interface FinishedGroupLimit {
-  /** Finished groups the user opened in full. */
   expanded: ReadonlySet<string>;
   /** A task that must stay listed, such as the one open on screen. */
   keep?: string;
 }
 
-/**
- * The rows the list draws. Grouped by status and given `limit`, a long
- * Completed or Cancelled group lists its first tasks and a Show more row;
- * Running, Waiting and the rest always list in full.
- */
+/** Grouped by status, a long Completed or Cancelled group lists its first tasks, then a Show more row. */
 export function projectionRows(
   projection: SidebarProjection,
   collapsed: CollapsedGroups,
@@ -173,8 +167,7 @@ function rowsForGroup(
     for (const task of group.tasks) rows.push({ type: "task", task, indented });
     return rows;
   }
-  // An open task past the limit keeps the whole group listed, with no fold
-  // control, so the row the user is on never disappears under them.
+  // An open task past the limit keeps the whole group listed, so its row never disappears.
   const keepsHiddenTask = group.tasks.slice(FINISHED_GROUP_LIMIT).some((task) => task.id === limit.keep);
   const expanded = limit.expanded.has(group.id);
   const shown = expanded || keepsHiddenTask ? group.tasks : group.tasks.slice(0, FINISHED_GROUP_LIMIT);

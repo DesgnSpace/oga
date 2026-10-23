@@ -1017,9 +1017,7 @@ a {
     margin-top: 0;
 }
 
-/* A finished task the user has already opened needs no mark: its group, or
-   the absence of a running, waiting or failed mark, already says it is done.
-   The space stays so every title starts on the same edge. */
+/* An opened finished task needs no mark; the slot stays so titles share one edge. */
 .sidebar-task .task-dot-look-settled.task-dot-viewed {
     visibility: hidden;
 }
@@ -2163,7 +2161,6 @@ h1 {
     font-size: var(--text-sm);
 }
 
-/* Matches the title bar's counts: body font, meta size. */
 .changed-file-count {
     color: var(--color-text-muted);
     font-size: var(--text-md);
@@ -2876,7 +2873,6 @@ h1 {
     white-space: nowrap;
 }
 
-/* Worker, model and effort as plain muted text, a step below the title. */
 .task-detail-fact {
     display: inline-flex;
     min-width: 0;
