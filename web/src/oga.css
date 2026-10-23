@@ -1017,6 +1017,29 @@ a {
     margin-top: 0;
 }
 
+/* A finished task the user has already opened needs no mark: its group, or
+   the absence of a running, waiting or failed mark, already says it is done.
+   The space stays so every title starts on the same edge. */
+.sidebar-task .task-dot-look-settled.task-dot-viewed {
+    visibility: hidden;
+}
+
+/* Same height as a task row, with its label on the titles' edge: the row
+   padding, the status mark's width, and the gap after it. */
+.sidebar-show-more {
+    border: 0;
+    padding-inline-start: calc(var(--space-2) * 3);
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.sidebar-show-more:hover,
+.sidebar-show-more:focus-visible {
+    color: var(--color-text);
+}
+
 .sidebar-task-row {
     position: relative;
     display: flex;

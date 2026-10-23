@@ -110,6 +110,16 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   settings, empty states, and the task screen's transcript, messages, and
   composer all size to it, so their left and right edges line up.
 
+### Task list
+
+- Rows are the title alone; worker, project, time and cost show on hover.
+- A row's status mark shows only what its group doesn't already say: running,
+  waiting, needs a reply, failed, or a new update. A finished task already
+  opened has no mark, and its title stays on the same edge as the others.
+- Grouped by status, Completed and Cancelled list their first 20 tasks, then
+  a "Show more" row. Every other group lists in full, and a search lists
+  every match.
+
 ### Task feed
 
 - What the user sent (the brief, follow-ups, replies, instructions) sits in

@@ -428,6 +428,42 @@ describe("the sidebar", () => {
     }
   });
 
+  it("folds a long Completed group behind Show more, and holds Load more until it is open", async () => {
+    const restore = stubRowLayout({ rowHeight: 36, headerHeight: 44, viewportHeight: 10_000 });
+    try {
+      const done = Array.from({ length: 25 }, (_, index) => task(`d${index}`, `done ${index}`, { state: "completed" }));
+      setTransport(transport({ tasks: [task("run", "running task"), ...done], tasksHasMore: true }));
+      render(<Sidebar sidebarController={new SidebarController()} onSelectTask={mock()} />);
+      await screen.findByText("running task");
+
+      expect(screen.getByText("done 19")).toBeTruthy();
+      expect(screen.queryByText("done 20")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Load more/i })).toBeNull();
+
+      act(() => screen.getByRole("button", { name: "Show more" }).click());
+      expect(screen.getByText("done 24")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Load more/i })).toBeTruthy();
+
+      act(() => screen.getByRole("button", { name: "Show fewer" }).click());
+      expect(screen.queryByText("done 20")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps an open task listed when it sits past the fold", async () => {
+    const restore = stubRowLayout({ rowHeight: 36, headerHeight: 44, viewportHeight: 10_000 });
+    try {
+      const done = Array.from({ length: 25 }, (_, index) => task(`d${index}`, `done ${index}`, { state: "completed" }));
+      setTransport(transport({ tasks: done }));
+      render(<Sidebar sidebarController={new SidebarController()} initialTask="d22" onSelectTask={mock()} />);
+
+      expect(await screen.findByText("done 22")).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
   it("keeps a newer stream status when the startup read returns late", async () => {
     let resolveStatus: ((status: StreamStatus) => void) | undefined;
     let statusListener: ((status: StreamStatus) => void) | undefined;
