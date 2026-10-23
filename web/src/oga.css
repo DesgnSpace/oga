@@ -589,7 +589,7 @@ a {
     margin: 0 0 0 var(--space-2);
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: var(--text-base);
+    font-size: var(--text-reading);
     font-weight: 500;
     white-space: nowrap;
 }
@@ -629,13 +629,13 @@ a {
     overflow: hidden;
 }
 
+/* Change counts stay in colour but at the meta line's size and weight. */
 .title-bar-diff {
     display: inline-flex;
     gap: var(--space-1);
-    margin-inline-start: var(--space-2);
-    font-family: var(--font-mono);
-    font-size: var(--text-base-mono);
-    font-weight: 600;
+    margin-inline: var(--space-2);
+    font-size: var(--text-md);
+    font-variant-numeric: tabular-nums;
 }
 
 .title-bar-secondary-row {
@@ -2858,19 +2858,19 @@ h1 {
     white-space: nowrap;
 }
 
+/* Worker, model and effort as plain muted text, a step below the title. */
 .task-detail-fact {
     display: inline-flex;
     min-width: 0;
     overflow: hidden;
     flex: 0 1 auto;
     align-items: baseline;
-    gap: 4px;
-    padding: 2px var(--space-2);
-    border-radius: var(--radius-chip);
-    background: var(--color-sidebar);
+    gap: var(--space-1);
+    padding: 0;
+    background: transparent;
     color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font: inherit;
+    font-size: var(--text-md);
     white-space: nowrap;
 }
 
@@ -2882,7 +2882,6 @@ h1 {
     white-space: nowrap;
 }
 
-.task-detail-project,
 .task-detail-worker,
 .task-detail-effort {
     flex: 0 0 auto;

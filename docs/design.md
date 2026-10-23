@@ -120,6 +120,15 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   a "Show more" row. Every other group lists in full, and a search lists
   every match.
 
+### Task title bar
+
+- The task's status mark and title (`--text-reading`, 500) lead the bar.
+- On the right, one line of muted `--text-md` text: worker · model ·
+  effort, with the model's provider prefix dropped. The project, full model
+  name, cost, time and tokens show on hover. No chip or pill behind it.
+- The `+`/`−` counts keep their colours at the same size and normal weight,
+  then the icon buttons.
+
 ### Task feed
 
 - What the user sent (the brief, follow-ups, replies, instructions) sits in
