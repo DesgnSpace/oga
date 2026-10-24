@@ -69,6 +69,7 @@ interface GitDiffState {
 function useGitDiff(taskId: string, against: string | undefined): GitDiffState & { reload: () => void } {
   const [state, setState] = React.useState<GitDiffState>({ loading: false });
   const [attempt, setAttempt] = React.useState(0);
+  const reload = React.useCallback(() => setAttempt((value) => value + 1), []);
   React.useEffect(() => {
     if (against === undefined) return;
     let cancelled = false;
@@ -81,7 +82,7 @@ function useGitDiff(taskId: string, against: string | undefined): GitDiffState &
       cancelled = true;
     };
   }, [taskId, against, attempt]);
-  return { ...state, reload: () => setAttempt((value) => value + 1) };
+  return { ...state, reload };
 }
 
 interface BranchChoices {
@@ -385,6 +386,12 @@ export function TaskDetail({ taskId, onHeader, focusRequest, onFocusRequestConsu
         : base;
   const git = useGitDiff(taskId, against);
   const showingGit = changesSource !== "run";
+  const wasSettledRef = React.useRef<boolean | undefined>(undefined);
+  React.useEffect(() => {
+    const settled = task !== undefined && activityIsSettled(task.state);
+    if (wasSettledRef.current === false && settled) git.reload();
+    wasSettledRef.current = settled;
+  }, [task?.state, git.reload]);
   const awaitingBranches = changesSource === "branch" && base === undefined;
   const chooseSource = (source: ChangesSource) => {
     setChangesSource(source);

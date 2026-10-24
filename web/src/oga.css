@@ -1726,6 +1726,13 @@ h1 {
     margin-inline-start: auto;
 }
 
+.changed-files-header-source {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: var(--space-1);
+}
+
 .changed-files-source-picker {
     position: relative;
     flex: 0 1 auto;

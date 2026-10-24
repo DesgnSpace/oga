@@ -1016,9 +1016,6 @@ function ChangedFilesView({
           { key: "close-all", label: "Close all files", disabled: noneOpen, onSelect: closeAll },
         ]
       : [],
-    source === "run"
-      ? []
-      : [{ key: "refresh", label: "Refresh", icon: <RefreshIcon size={12} />, disabled: loading, onSelect: onReload }],
   ];
 
   const diffs = (
@@ -1058,13 +1055,27 @@ function ChangedFilesView({
         <h2 className="visually-hidden" id={full ? FULL_SCREEN_TITLE_ID : undefined}>
           Changed files
         </h2>
-        <SourcePicker
-          source={source}
-          base={base}
-          branches={branches}
-          onSourceChange={onSourceChange}
-          onBaseChange={onBaseChange}
-        />
+        <div className="changed-files-header-source">
+          <SourcePicker
+            source={source}
+            base={base}
+            branches={branches}
+            onSourceChange={onSourceChange}
+            onBaseChange={onBaseChange}
+          />
+          {source !== "run" && (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Refresh changed files"
+              title="Refresh"
+              disabled={loading}
+              onClick={onReload}
+            >
+              <RefreshIcon />
+            </button>
+          )}
+        </div>
         <div className="changed-files-header-actions">
           {!full && ready && (
             <div className="changed-files-tree-popover" ref={filePopoverRef}>

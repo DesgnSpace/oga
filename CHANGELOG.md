@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- In the changed files panel, Refresh is now a one-click button in the header instead of hiding in More options, and changed files reload on their own once a run settles.
 - The task view is easier to read. Your messages sit on the right, and the tools a worker uses fold into one short line, such as "Edited 4 files, ran 11 commands". The changed files panel has fewer buttons, with one unified or split choice for all files. The task list shows the latest 20 finished tasks, with "Show more" for the rest.
 - A command a Claude worker runs now shows the command itself in the task view, instead of "Terminal".
 - A finished task that waits on other work can now be set to run again after it: `oga edit <task-id> --rearm` holds it until what it waits on completes again, then it picks up its own session. Rearm each task in a chain and they run again in order. `--no-rearm` undoes it.

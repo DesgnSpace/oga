@@ -196,10 +196,10 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 ### Changed files panel
 
 - The top bar is one line: what is being compared on the left (a quiet
-  label that opens the source menu), then icon buttons on the right: go to
-  a file, more options, full screen, close. The unified or split choice,
-  order, grouping, open or close all, refresh, and the review keys live in
-  the more options menu.
+  label that opens the source menu) with refresh beside it for git-backed
+  sources, then icon buttons on the right: go to a file, more options, full
+  screen, close. The unified or split choice, order, grouping, open or close
+  all, and the review keys live in the more options menu.
 - Counts and review progress sit in one muted line above the first file.
 - A file's header is one line: the file name (600), its folder in muted
   text, then the `+`/`−` counts. Per-file actions sit on the right.
