@@ -33,7 +33,7 @@
     --text-lg: 1rem;
     /* What the worker says and what the user sends, in the task view. */
     --text-reading: 0.875rem;
-    --leading-reading: 1.65;
+    --leading-reading: 1.5;
     /* About 70 characters of prose at the size it is used with. */
     --reading-max: 72ch;
     --text-heading: 1.0625rem;
@@ -2989,7 +2989,7 @@ h1 {
 
 .markdown-content {
     display: grid;
-    gap: var(--space-4);
+    gap: var(--space-3);
     min-width: 0;
     max-width: 100%;
     white-space: normal;
@@ -3036,7 +3036,7 @@ h1 {
 .markdown-content p {
     margin: 0;
     max-width: 100%;
-    line-height: 1.65;
+    line-height: var(--leading-reading);
     overflow-wrap: anywhere;
     word-break: break-word;
 }
@@ -3170,7 +3170,7 @@ h1 {
 .transcript {
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
+    gap: var(--space-5);
     width: min(100%, var(--content-max));
     margin-inline: auto;
 }
@@ -3387,14 +3387,20 @@ h1 {
     transform: rotate(90deg);
 }
 
-/* The worker's words and the one-line tool summaries between them, with
-   clear room between each. */
+/* The worker's words and the one-line tool summaries between them. The
+   gap alone sets the room between them, so a message row drops its own. */
 .transcript-work-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--space-2);
     border: 0;
-    padding-top: var(--space-3);
+    padding-top: var(--space-2);
+}
+
+.transcript-work-body .trace-row-message {
+    min-height: 0;
+    margin-top: 0;
+    padding-block: 0;
 }
 
 /* An opened tool summary lists its calls on a hairline rail below it. */

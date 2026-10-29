@@ -58,7 +58,7 @@ gap reaches the outer radius, the inner element keeps its own token.
 
 Descriptions use `--color-text-muted` and stop at `65ch`.
 
-Reading text uses `--leading-reading` (1.65) and stops at `--reading-max`
+Reading text uses `--leading-reading` (1.5) and stops at `--reading-max`
 (`72ch`, about 70 characters a line).
 
 ## Controls
