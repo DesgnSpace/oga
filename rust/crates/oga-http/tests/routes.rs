@@ -3083,3 +3083,69 @@ async fn the_enabled_model_read_lists_only_enabled_workers_and_their_enabled_mod
     );
     assert_eq!(enabled["revision"], full["revision"]);
 }
+
+#[tokio::test]
+async fn a_live_page_shows_the_command_a_shell_call_got_before_the_page() {
+    let fixture = Fixture::new();
+    let append = |kind: &str, payload: Value| {
+        let Value::Object(payload) = payload else {
+            panic!("payload is an object")
+        };
+        fixture
+            .store
+            .repositories()
+            .events()
+            .append(&TaskEvent {
+                id: 0,
+                task_id: "task".into(),
+                kind: kind.into(),
+                state: TaskState::Running,
+                payload: payload.into_iter().collect(),
+                created_at: "2026-01-01T00:00:40.000Z".into(),
+                turn_id: Some(1),
+            })
+            .expect("event insert")
+    };
+    let meta = json!({"claudeCode": {"toolName": "Bash"}});
+    append(
+        "agent.tool_call",
+        json!({
+            "sessionUpdate": "tool_call", "toolCallId": "call", "title": "Terminal",
+            "kind": "execute", "rawInput": {}, "_meta": meta,
+        }),
+    );
+    let named = append(
+        "agent.tool_call_update",
+        json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "call",
+            "title": "git branch --show-current",
+            "rawInput": {"command": "git branch --show-current"}, "_meta": meta,
+        }),
+    );
+    append(
+        "agent.tool_call_update",
+        json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "call", "status": "completed",
+            "content": [{"type": "content", "content": {"type": "text", "text": "main"}}],
+            "rawOutput": "main", "_meta": meta,
+        }),
+    );
+
+    let (status, body) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            &format!("/api/tasks/task/events?after={named}"),
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let events = body["events"].as_array().expect("events");
+    assert_eq!(events.len(), 1, "only the rows after the cursor come back");
+    assert_eq!(
+        events[0]["presentation"]["command"],
+        "git branch --show-current"
+    );
+}

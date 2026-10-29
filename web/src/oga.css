@@ -730,6 +730,11 @@ a {
     padding-left: var(--macos-titlebar-inset);
 }
 
+/* Full screen hides the traffic lights, so the bars start at the gutter. */
+.platform-macos.window-full-screen {
+    --macos-titlebar-inset: var(--gutter);
+}
+
 .sidebar-topbar-drag {
     flex: 1;
     align-self: stretch;

@@ -1,7 +1,7 @@
 //! State polling and per-task read routes.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -480,13 +480,19 @@ async fn event_response(
         store
             .with_connection(|connection| {
                 let events = read_events_with_connection(connection, &task_id, &query)?;
+                let first_id = events.first().map_or(0, |event| event.id);
+                let context = earlier_call_events_with_connection(connection, &task_id, &events)?;
                 let timeline = load_provider_timeline(
                     connection,
                     &task_id,
                     provider,
-                    events.first().map_or(0, |event| event.id),
+                    context.first().map_or(first_id, |event| event.id),
                 )?;
-                let views = mark_repeated_retries(event_views(events, &timeline));
+                let views = event_views(context.into_iter().chain(events).collect(), &timeline)
+                    .into_iter()
+                    .filter(|view| view.id >= first_id)
+                    .collect();
+                let views = mark_repeated_retries(views);
                 let (updated_task, task_updated_at) = if include_task {
                     let updated_at: String = connection.query_row(
                         "SELECT updated_at FROM tasks WHERE id=?",
@@ -1172,6 +1178,58 @@ fn read_events_with_connection(
             .collect::<Result<Vec<_>, _>>()?
     };
     Ok(rows)
+}
+
+/// The earlier events of each tool call a page updates but does not open.
+/// An update names only what changed, so read alone it loses what the call
+/// is, such as the command a shell call ran. The page reads these first and
+/// does not return them.
+fn earlier_call_events_with_connection(
+    connection: &Connection,
+    task_id: &str,
+    events: &[TaskEvent],
+) -> rusqlite::Result<Vec<TaskEvent>> {
+    let Some(first_id) = events.first().map(|event| event.id) else {
+        return Ok(Vec::new());
+    };
+    let call_id = |event: &TaskEvent| {
+        event
+            .payload
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    let opened: HashSet<String> = events
+        .iter()
+        .filter(|event| event.kind == "agent.tool_call")
+        .filter_map(call_id)
+        .collect();
+    let unopened: BTreeSet<String> = events
+        .iter()
+        .filter(|event| event.kind == "agent.tool_call_update")
+        .filter_map(call_id)
+        .filter(|id| !opened.contains(id))
+        .collect();
+    let mut opener = connection.prepare_cached(
+        "SELECT id FROM task_events WHERE task_id=? AND id<? AND event_type='agent.tool_call' AND json_extract(payload,'$.toolCallId')=? ORDER BY id DESC LIMIT 1",
+    )?;
+    let mut rest = connection.prepare_cached(
+        "SELECT id,task_id,event_type,state,payload,created_at,turn_id FROM task_events WHERE task_id=? AND id>=? AND id<? AND event_type IN ('agent.tool_call','agent.tool_call_update') AND json_extract(payload,'$.toolCallId')=? ORDER BY id",
+    )?;
+    let mut earlier = Vec::new();
+    for id in unopened {
+        let Some(opened_at) = opener
+            .query_row(params![task_id, first_id, id], |row| row.get::<_, i64>(0))
+            .optional()?
+        else {
+            continue;
+        };
+        for event in rest.query_map(params![task_id, opened_at, first_id, id], event_from_row)? {
+            earlier.push(event?);
+        }
+    }
+    earlier.sort_by_key(|event| event.id);
+    Ok(earlier)
 }
 
 fn event_from_row(row: &Row<'_>) -> rusqlite::Result<TaskEvent> {

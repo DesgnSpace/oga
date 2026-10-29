@@ -58,9 +58,39 @@ function keepLinksOutOfTheWindow(): void {
   });
 }
 
+interface DesktopWindow {
+  isFullscreen(): Promise<boolean>;
+  onResized(handle: () => void): Promise<() => void>;
+}
+
+declare global {
+  interface Window {
+    __TAURI__?: { window?: { getCurrentWindow?: () => DesktopWindow } };
+  }
+}
+
+function desktopWindow(): DesktopWindow | undefined {
+  return window.__TAURI__?.window?.getCurrentWindow?.();
+}
+
+/** Marks the page while the window is full screen, where macOS hides the
+    traffic lights, so the top bars can drop the room kept for them. */
+function trackFullScreen(): void {
+  const current = desktopWindow();
+  if (current === undefined) return;
+  const update = () => {
+    void current.isFullscreen().then((fullScreen) => {
+      document.documentElement.classList.toggle("window-full-screen", fullScreen);
+    }, () => undefined);
+  };
+  update();
+  void current.onResized(update);
+}
+
 export function installNativeChrome(): void {
   suppressKeystrokeBeep();
   keepLinksOutOfTheWindow();
+  trackFullScreen();
   if (import.meta.env.PROD) {
     suppressContextMenu();
   }
