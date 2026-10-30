@@ -139,6 +139,20 @@ impl Default for WaitSettings {
     }
 }
 
+/// Whether workers are asked to credit Oga on the commits they make, in every
+/// project that doesn't say otherwise itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttributionSettings {
+    pub enabled: bool,
+}
+
+impl Default for AttributionSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Every read over the API masks `api_key`; an empty `instructions` means the
 /// built-in default routing prompt.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -2088,6 +2088,64 @@ async fn brief_rules_saved_for_the_machine_reach_a_project_that_has_its_own_file
     );
 }
 
+/// The prompt a worker would get for a new task started in the fixture folder.
+async fn new_task_prompt(fixture: &Fixture) -> String {
+    let dispatcher = Dispatcher::new(fixture.store.clone(), ProviderRunner::default());
+    let plan = dispatcher
+        .plan(DispatchRequest::new("profile", "do the work", &fixture.cwd))
+        .await
+        .expect("plan");
+    oga_service::prompt::assemble_worker_message(&plan.prompt)
+}
+
+#[tokio::test]
+async fn the_attribution_switch_decides_new_task_prompts_unless_the_project_says_otherwise() {
+    let fixture = Fixture::new();
+    let attribution = |enabled: bool| {
+        request(
+            &fixture.router,
+            Method::PUT,
+            "/api/attribution",
+            Body::from(json!({ "enabled": enabled }).to_string()),
+        )
+    };
+
+    let (_, shown) = json_response(
+        request(
+            &fixture.router,
+            Method::GET,
+            "/api/attribution",
+            Body::empty(),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        shown,
+        json!({ "enabled": true }),
+        "on until somebody saves it off"
+    );
+    assert!(new_task_prompt(&fixture).await.contains("## Attribution"));
+
+    let (status, saved) = json_response(attribution(false).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved, json!({ "enabled": false }));
+    assert!(!new_task_prompt(&fixture).await.contains("## Attribution"));
+
+    fixture.write_source(".oga.yaml", "version: 1\nworker:\n  attribution: true\n");
+    assert!(
+        new_task_prompt(&fixture).await.contains("## Attribution"),
+        "a project that turns it on keeps it on while the app switch is off"
+    );
+
+    attribution(true).await;
+    fixture.write_source(".oga.yaml", "version: 1\nworker:\n  attribution: false\n");
+    assert!(
+        !new_task_prompt(&fixture).await.contains("## Attribution"),
+        "a project that turns it off keeps it off while the app switch is on"
+    );
+}
+
 #[tokio::test]
 async fn saved_brief_rules_are_returned_and_capped() {
     let fixture = Fixture::new();

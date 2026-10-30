@@ -6,8 +6,9 @@ use std::{
 };
 
 use chrono::{Datelike, SecondsFormat, TimeZone, Utc};
-use oga_domain::{CompletionCode, MemoryEntry, TaskCompletion, TaskState};
+use oga_domain::{AttributionSettings, CompletionCode, MemoryEntry, TaskCompletion, TaskState};
 use oga_providers::NO_FINAL_MESSAGE;
+use oga_store::Store;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -74,7 +75,24 @@ pub fn assemble_worker_message(input: &WorkerPromptInput) -> String {
     sections.join("\n\n")
 }
 
+pub const ATTRIBUTION_SETTINGS_KEY: &str = "attribution";
+
+/// Reads the all-projects attribution switch, which is on until somebody
+/// saves it off.
+pub fn attribution_settings(store: &Store) -> AttributionSettings {
+    let cwd = oga_config::global_cwd().display().to_string();
+    store
+        .repositories()
+        .settings()
+        .get(&cwd, ATTRIBUTION_SETTINGS_KEY)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
 pub fn attribution_for(
+    store: &Store,
     cwd: &std::path::Path,
     provider: &str,
     model: &str,
@@ -85,19 +103,18 @@ pub fn attribution_for(
         model: model.to_owned(),
         effort: effort.map(str::to_owned),
     };
+    let app_setting = attribution_settings(store).enabled;
     let Ok(layers) = oga_config::load_config_layers(Some(cwd)) else {
-        return Some(attribution);
+        return app_setting.then_some(attribution);
     };
     let project = oga_config::read_worker_attribution(layers.project.as_ref())
         .ok()
         .flatten();
-    let user = oga_config::read_worker_attribution(layers.user.as_ref())
-        .ok()
-        .flatten();
-    oga_config::resolve_worker_attribution(project, user).then_some(attribution)
+    oga_config::resolve_worker_attribution(project, app_setting).then_some(attribution)
 }
 
 pub fn attribution_for_task(
+    store: &Store,
     task: &oga_domain::Task,
     provider: oga_domain::Provider,
 ) -> Option<WorkerAttribution> {
@@ -107,6 +124,7 @@ pub fn attribution_for_task(
         .map(|worktree| worktree.origin_cwd.as_str())
         .unwrap_or(task.cwd.as_str());
     attribution_for(
+        store,
         std::path::Path::new(cwd),
         provider.as_str(),
         &task.model,

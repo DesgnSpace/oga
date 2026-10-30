@@ -486,6 +486,7 @@ impl Dispatcher {
                 request.memories
             },
             attribution: prompt::attribution_for(
+                &self.store,
                 &workspace,
                 profile.provider.as_str(),
                 &task.model,
@@ -1196,7 +1197,11 @@ impl Dispatcher {
                         },
                         None => WorkerPromptInput {
                             task: task.prompt.clone(),
-                            attribution: prompt::attribution_for_task(&task, profile.provider),
+                            attribution: prompt::attribution_for_task(
+                                &self.store,
+                                &task,
+                                profile.provider,
+                            ),
                             ..WorkerPromptInput::default()
                         },
                     };
@@ -1285,7 +1290,11 @@ impl Dispatcher {
             Ok(Some(profile)) => {
                 let prompt = WorkerPromptInput {
                     task: queued.prompt.clone(),
-                    attribution: prompt::attribution_for_task(&queued, profile.provider),
+                    attribution: prompt::attribution_for_task(
+                        &self.store,
+                        &queued,
+                        profile.provider,
+                    ),
                     ..WorkerPromptInput::default()
                 };
                 self.launch_task(queued, profile, prompt, None);
