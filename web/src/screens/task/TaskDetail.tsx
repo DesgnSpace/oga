@@ -12,6 +12,7 @@ import type { ChangeSort } from "@/domain/changes/ordering";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { copyText } from "@/lib/identifiers";
+import { projectName } from "@/state/sidebar-projection";
 import { toast } from "@/state/toast";
 import { WorktreeIcon } from "@/ui/icons";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";
@@ -169,8 +170,8 @@ function shortModel(model: string): string {
   return model.slice(model.lastIndexOf("/") + 1) || model;
 }
 
-// The project, full model name, cost, duration, and tokens live in the tooltip
-// so the task title stays the bar's main text.
+// The full path, full model name, cost, duration, and tokens live in the
+// tooltip so the task title stays the bar's main text.
 function TaskDetailSecondary({
   task,
   workerLabel,
@@ -189,6 +190,7 @@ function TaskDetailSecondary({
     <div className="title-bar-secondary-row" aria-label="Task status and usage">
       {task.worktree && <WorktreeChip worktree={task.worktree} label={task.worktreeLabel} />}
       <span className="task-detail-fact" title={factTitle}>
+        <span className="task-detail-project">{projectName(projectPath)} · </span>
         {workerLabel && <span className="task-detail-worker">{workerLabel} · </span>}
         <span className="task-detail-model">{shortModel(task.model)}</span>
         {effort && (

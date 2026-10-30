@@ -1180,10 +1180,8 @@ fn read_events_with_connection(
     Ok(rows)
 }
 
-/// The earlier events of each tool call a page updates but does not open.
-/// An update names only what changed, so read alone it loses what the call
-/// is, such as the command a shell call ran. The page reads these first and
-/// does not return them.
+/// Earlier events of the tool calls a page updates but does not open. An ACP
+/// update names only what changed, so it cannot be read without them.
 fn earlier_call_events_with_connection(
     connection: &Connection,
     task_id: &str,
