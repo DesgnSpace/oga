@@ -103,14 +103,12 @@ pub fn attribution_for(
         model: model.to_owned(),
         effort: effort.map(str::to_owned),
     };
-    let app_setting = attribution_settings(store).enabled;
-    let Ok(layers) = oga_config::load_config_layers(Some(cwd)) else {
-        return app_setting.then_some(attribution);
-    };
-    let project = oga_config::read_worker_attribution(layers.project.as_ref())
+    let project = oga_config::load_config_layers(Some(cwd))
         .ok()
+        .and_then(|layers| oga_config::read_worker_attribution(layers.project.as_ref()).ok())
         .flatten();
-    oga_config::resolve_worker_attribution(project, app_setting).then_some(attribution)
+    oga_config::resolve_worker_attribution(project, attribution_settings(store).enabled)
+        .then_some(attribution)
 }
 
 pub fn attribution_for_task(
