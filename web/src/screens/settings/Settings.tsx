@@ -34,6 +34,7 @@ import type {
   AdvisorSettings,
   AdvisorView,
   AppearanceSettings,
+  AttributionSettings,
   CleanupSettings,
   CleanupSnapshot,
   LoveRule,
@@ -525,6 +526,71 @@ function SettingsSkeleton() {
 }
 
 type WorkersView = { kind: "list" } | { kind: "add" } | { kind: "worker"; id: string };
+
+function AttributionPanel() {
+  const [settings, setSettings] = useState<AttributionSettings | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const loadAttribution = useCallback(async () => {
+    const result = await broker.attribution();
+    if (result.ok) {
+      setSettings(result.value);
+      setError(undefined);
+    } else {
+      setError(result.error.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAttribution();
+  }, [loadAttribution]);
+
+  const save = async (next: AttributionSettings) => {
+    const previous = settings;
+    setSettings(next);
+    setSaving(true);
+    const result = await broker.putAttribution(next);
+    setSaving(false);
+    if (result.ok) {
+      setSettings(result.value);
+      setError(undefined);
+      return;
+    }
+    setSettings(previous);
+    setError(result.error.message);
+  };
+
+  return (
+    <Section title="Credit on commits" description="Applies to the next task you start, in every project.">
+      {error ? (
+        <div className="settings-message settings-message-error" role="alert">
+          <strong>Couldn&apos;t load these choices</strong>
+          <p>{error}</p>
+          <button className="text-button" type="button" onClick={() => void loadAttribution()}>
+            Try again
+          </button>
+        </div>
+      ) : null}
+      {settings ? (
+        <Card>
+          <CardRow
+            as="label"
+            title="Credit the worker on its commits"
+            description="Oga adds a line to each commit a worker makes, crediting the worker and model. A project can turn this off in its own config file."
+          >
+            <input
+              type="checkbox"
+              checked={settings.enabled}
+              disabled={saving}
+              onChange={(event) => void save({ enabled: event.target.checked })}
+            />
+          </CardRow>
+        </Card>
+      ) : null}
+    </Section>
+  );
+}
 
 function WaitingPanel() {
   const [settings, setSettings] = useState<WaitSettings | undefined>(undefined);
@@ -2370,6 +2436,7 @@ function BriefRulesPanel({
           </div>
         )}
       </Section>
+      <AttributionPanel />
     </>
   );
 }

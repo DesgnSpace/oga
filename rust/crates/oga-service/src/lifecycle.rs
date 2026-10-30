@@ -341,7 +341,7 @@ pub async fn run_task(
 ) -> Result<RunOutcome, LifecycleError> {
     let prompt = WorkerPromptInput {
         task: task.prompt.clone(),
-        attribution: crate::prompt::attribution_for_task(&task, profile.provider),
+        attribution: crate::prompt::attribution_for_task(&store, &task, profile.provider),
         ..WorkerPromptInput::default()
     };
     run_task_with_prompt(store, runner, task, profile, prompt).await

@@ -19,9 +19,10 @@ use oga_config::{
     read_model_settings,
 };
 use oga_domain::{
-    AdvisorSettings, AdvisorView, AppearanceSettings, CleanupSettings, CleanupSnapshot,
-    MemoryEntry, ModelInfo, ModelInfoSource, ModelQuery as DomainModelQuery, ModelSettingsRow,
-    Profile, ProfileUsage, Provider, UsageSource, UsageWindow, UsageWindowKind, WaitSettings,
+    AdvisorSettings, AdvisorView, AppearanceSettings, AttributionSettings, CleanupSettings,
+    CleanupSnapshot, MemoryEntry, ModelInfo, ModelInfoSource, ModelQuery as DomainModelQuery,
+    ModelSettingsRow, Profile, ProfileUsage, Provider, UsageSource, UsageWindow, UsageWindowKind,
+    WaitSettings,
 };
 use oga_pricing::catalogue as pricing_catalogue;
 use oga_providers::{
@@ -367,6 +368,32 @@ pub async fn put_waiting(
     })
     .await?;
     get_waiting(State(state)).await
+}
+
+pub async fn get_attribution(
+    State(state): State<HttpState>,
+) -> Result<impl IntoResponse, HttpError> {
+    let settings =
+        run_blocking(move || Ok(oga_service::prompt::attribution_settings(&state.store))).await?;
+    Ok(Json(settings))
+}
+
+pub async fn put_attribution(
+    State(state): State<HttpState>,
+    body: Bytes,
+) -> Result<impl IntoResponse, HttpError> {
+    let settings: AttributionSettings = parse_json(&body)?;
+    let store = state.store.clone();
+    run_blocking(move || {
+        Ok(store.repositories().settings().put(
+            &global_cwd().display().to_string(),
+            oga_service::prompt::ATTRIBUTION_SETTINGS_KEY,
+            &serde_json::to_string(&settings).unwrap(),
+            &now_iso(),
+        )?)
+    })
+    .await?;
+    get_attribution(State(state)).await
 }
 
 /// The advisor's own settings, with the key masked. Everything else here
