@@ -2908,6 +2908,7 @@ h1 {
     white-space: nowrap;
 }
 
+.task-detail-project,
 .task-detail-worker,
 .task-detail-effort {
     flex: 0 0 auto;
