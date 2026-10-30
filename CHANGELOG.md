@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Settings now has a switch for crediting workers on their commits. Find it under Brief rules, in Credit on commits. It applies to every project, and a project can still turn it off in its own config file. The old setting in your own config file no longer applies.
 - In the changed files panel, Refresh is now a one-click button in the header instead of hiding in More options, and changed files reload on their own once a run settles.
 - The task view is easier to read. Your messages sit on the right, and the tools a worker uses fold into one short line, such as "Edited 4 files, ran 11 commands". The changed files panel has fewer buttons, with one unified or split choice for all files. The task list shows the latest 20 finished tasks, with "Show more" for the rest.
 - A command a Claude worker runs now shows the command itself in the task view, instead of "Terminal".
