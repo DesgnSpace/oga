@@ -410,6 +410,11 @@ export interface WaitSettings {
   moveOnRateLimit: boolean;
 }
 
+/** Whether workers are asked to credit Oga on the commits they make, in every project. */
+export interface AttributionSettings {
+  enabled: boolean;
+}
+
 /**
  * Whether a task that names no worker has one picked for it, the key that
  * signs in, and the text the advisor is asked to pick with. An empty
@@ -777,6 +782,8 @@ export type BrokerCall =
   | { call: "runCleanup" }
   | { call: "waiting" }
   | { call: "putWaiting"; settings: WaitSettings }
+  | { call: "attribution" }
+  | { call: "putAttribution"; settings: AttributionSettings }
   | { call: "advisor" }
   | { call: "putAdvisor"; settings: AdvisorSettings }
   | { call: "appearance" }
@@ -816,6 +823,8 @@ export interface BrokerCallResult {
   runCleanup: CleanupResult;
   waiting: WaitSettings;
   putWaiting: WaitSettings;
+  attribution: AttributionSettings;
+  putAttribution: AttributionSettings;
   advisor: AdvisorView;
   putAdvisor: AdvisorView;
   appearance: AppearanceSettings;

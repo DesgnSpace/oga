@@ -212,6 +212,10 @@ pub fn router(state: HttpState) -> Router {
             get(settings::get_waiting).put(settings::put_waiting),
         )
         .route(
+            "/api/attribution",
+            get(settings::get_attribution).put(settings::put_attribution),
+        )
+        .route(
             "/api/advisor",
             get(settings::get_advisor).put(settings::put_advisor),
         )

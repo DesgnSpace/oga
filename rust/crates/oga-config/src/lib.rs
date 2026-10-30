@@ -1484,10 +1484,9 @@ pub fn read_worker_attribution(layer: Option<&ConfigLayer>) -> Result<Option<boo
         .transpose()
 }
 
-/// Attribution is on unless somebody turns it off. The project file wins over
-/// the all-projects file; either `false` silences the stamp.
-pub fn resolve_worker_attribution(project: Option<bool>, user: Option<bool>) -> bool {
-    project.or(user).unwrap_or(true)
+/// The project file wins; without it, the app's all-projects switch decides.
+pub fn resolve_worker_attribution(project: Option<bool>, app_setting: bool) -> bool {
+    project.unwrap_or(app_setting)
 }
 
 fn parse_model_override(
@@ -2343,10 +2342,9 @@ mod tests {
         assert_eq!(read_worker_attribution(Some(&prompt_only)).unwrap(), None);
         let bad = layer("/work/.oga.yaml", "worker:\n  attribution: sometimes\n");
         assert!(read_worker_attribution(Some(&bad)).is_err());
-        assert!(resolve_worker_attribution(None, None));
-        assert!(!resolve_worker_attribution(Some(false), Some(true)));
-        assert!(!resolve_worker_attribution(None, Some(false)));
-        assert!(resolve_worker_attribution(Some(true), Some(false)));
+        assert!(!resolve_worker_attribution(Some(false), true));
+        assert!(resolve_worker_attribution(Some(true), false));
+        assert!(!resolve_worker_attribution(None, false));
     }
 
     #[test]

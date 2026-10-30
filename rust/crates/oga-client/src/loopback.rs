@@ -677,6 +677,21 @@ impl LoopbackClient {
         .await
     }
 
+    pub async fn attribution(&self) -> Result<oga_domain::AttributionSettings, ClientError> {
+        self.get_json(self.endpoint(&["api", "attribution"])).await
+    }
+
+    pub async fn put_attribution(
+        &self,
+        settings: &oga_domain::AttributionSettings,
+    ) -> Result<oga_domain::AttributionSettings, ClientError> {
+        self.put_json(
+            self.endpoint(&["api", "attribution"]),
+            serde_json::to_value(settings).map_err(ClientError::Encode)?,
+        )
+        .await
+    }
+
     pub async fn advisor(&self) -> Result<AdvisorView, ClientError> {
         self.get_json(self.endpoint(&["api", "advisor"])).await
     }
