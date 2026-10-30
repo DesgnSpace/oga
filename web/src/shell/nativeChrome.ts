@@ -69,19 +69,14 @@ declare global {
   }
 }
 
-function desktopWindow(): DesktopWindow | undefined {
-  return window.__TAURI__?.window?.getCurrentWindow?.();
-}
-
-/** Marks the page while the window is full screen, where macOS hides the
-    traffic lights, so the top bars can drop the room kept for them. */
+// macOS hides the traffic lights in full screen, so the top bars drop their inset.
 function trackFullScreen(): void {
-  const current = desktopWindow();
+  const current = window.__TAURI__?.window?.getCurrentWindow?.();
   if (current === undefined) return;
   const update = () => {
     void current.isFullscreen().then((fullScreen) => {
       document.documentElement.classList.toggle("window-full-screen", fullScreen);
-    }, () => undefined);
+    });
   };
   update();
   void current.onResized(update);
