@@ -1566,6 +1566,22 @@ h1 {
     color: var(--color-text-muted);
 }
 
+.menu-item-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--color-text-muted);
+    border-radius: var(--radius-chip);
+}
+
+.menu-item-checkbox.is-checked {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: var(--color-surface);
+}
+
 .menu-item-label {
     flex: 1;
 }

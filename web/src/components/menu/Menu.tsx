@@ -10,7 +10,7 @@ export interface MenuAction {
   onSelect: () => void;
   destructive?: boolean;
   disabled?: boolean;
-  /** Makes the item a checkbox, with a check in the icon slot while on. */
+  /** Makes the item a checkbox, with a box in the icon slot that fills while on. */
   checked?: boolean;
   /** Marks an item that opens a further view, with a trailing chevron. */
   opensView?: boolean;
@@ -119,7 +119,13 @@ export function MenuPanel({ sections, prompt, className, onClose }: MenuPanelPro
             >
               {(item.icon || item.checked !== undefined) && (
                 <span className="menu-item-icon" aria-hidden="true">
-                  {item.checked ? <CheckIcon size={12} /> : item.icon}
+                  {item.checked === undefined ? (
+                    item.icon
+                  ) : (
+                    <span className={`menu-item-checkbox${item.checked ? " is-checked" : ""}`}>
+                      {item.checked && <CheckIcon size={10} />}
+                    </span>
+                  )}
                 </span>
               )}
               <span className="menu-item-label">{item.label}</span>
