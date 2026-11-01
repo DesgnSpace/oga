@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.4 - 2026-11-01
+
 - The task header now shows which project the task runs in, next to the worker and model.
 - Settings now has a switch for crediting workers on their commits. Find it under Brief rules, in Credit on commits. It applies to every project, and a project can still turn it off in its own config file. The old setting in your own config file no longer applies.
 - In the changed files panel, Refresh is now a one-click button in the header instead of hiding in More options, and changed files reload on their own once a run settles.

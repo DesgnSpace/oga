@@ -2738,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "oga-acp"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "agent-client-protocol-schema",
  "oga-domain",
@@ -2752,7 +2752,7 @@ dependencies = [
 
 [[package]]
 name = "oga-advisor"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -2762,7 +2762,7 @@ dependencies = [
 
 [[package]]
 name = "oga-cli"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "axum",
  "chrono",
@@ -2788,7 +2788,7 @@ dependencies = [
 
 [[package]]
 name = "oga-client"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "axum",
  "bytes",
@@ -2804,7 +2804,7 @@ dependencies = [
 
 [[package]]
 name = "oga-config"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-domain",
  "serde",
@@ -2816,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "oga-context"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-domain",
  "oga-store",
@@ -2850,7 +2850,7 @@ dependencies = [
 
 [[package]]
 name = "oga-desktop"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "objc2",
  "objc2-foundation",
@@ -2872,7 +2872,7 @@ dependencies = [
 
 [[package]]
 name = "oga-domain"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "oga-events"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-domain",
  "oga-store",
@@ -2894,7 +2894,7 @@ dependencies = [
 
 [[package]]
 name = "oga-http"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "axum",
  "http-body-util",
@@ -2923,7 +2923,7 @@ dependencies = [
 
 [[package]]
 name = "oga-mcp"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "axum",
  "chrono",
@@ -2947,7 +2947,7 @@ dependencies = [
 
 [[package]]
 name = "oga-pricing"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-config",
  "reqwest 0.12.28",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "oga-providers"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "libc",
  "oga-domain",
@@ -2970,7 +2970,7 @@ dependencies = [
 
 [[package]]
 name = "oga-routing"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-config",
  "oga-domain",
@@ -2982,7 +2982,7 @@ dependencies = [
 
 [[package]]
 name = "oga-runner"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "libc",
  "oga-domain",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "oga-service"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "oga-store"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-domain",
  "rusqlite",
@@ -3033,7 +3033,7 @@ dependencies = [
 
 [[package]]
 name = "oga-worktree"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "oga-domain",
  "tempfile",
