@@ -60,15 +60,14 @@ ARCHIVE_NAME="Oga-$VERSION.app.tar.gz"
 RELEASED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 SIGNATURE="$(<"$UPDATER_ARCHIVE.sig")"
 
-# The updater manifest, install pointer, and release history.
+# The updater manifest, install pointer, and release list. The bucket keeps
+# only the current version, so the release list names only that one.
 MANIFEST="$TMP_DIR/latest.json"
 LATEST="$TMP_DIR/latest"
 RELEASES_JSON="$TMP_DIR/releases.json"
-EXISTING_JSON="$TMP_DIR/releases-existing.json"
-curl -fsS "$BASE_URL/releases.json" -o "$EXISTING_JSON" || printf '{"latest":"","releases":[]}\n' > "$EXISTING_JSON"
 VERSION="$VERSION" SIGNATURE="$SIGNATURE" RELEASED_AT="$RELEASED_AT" CHANGELOG="$ROOT/CHANGELOG.md" \
 ARCHIVE_URL="$BASE_URL/$ARCHIVE_NAME" ZIP_URL="$BASE_URL/$ZIP_NAME" DMG_URL="$BASE_URL/$DMG_NAME" \
-MANIFEST="$MANIFEST" LATEST="$LATEST" RELEASES_JSON="$RELEASES_JSON" EXISTING_JSON="$EXISTING_JSON" python3 - <<'PY'
+MANIFEST="$MANIFEST" LATEST="$LATEST" RELEASES_JSON="$RELEASES_JSON" python3 - <<'PY'
 import json, os
 import re
 env = os.environ
@@ -83,12 +82,9 @@ with open(env["MANIFEST"], "w") as f:
 with open(env["LATEST"], "w") as f:
     json.dump({"version": env["VERSION"], "url": env["ZIP_URL"], "dmgUrl": env["DMG_URL"], "releasedAt": env["RELEASED_AT"], "notes": notes}, f)
     f.write("\n")
-with open(env["EXISTING_JSON"]) as f:
-    existing = json.load(f)
 release = {"version": env["VERSION"], "date": env["RELEASED_AT"], "zipUrl": env["ZIP_URL"], "dmgUrl": env["DMG_URL"], "updaterUrl": env["ARCHIVE_URL"], "signature": env["SIGNATURE"]}
-releases = [release] + [r for r in existing.get("releases", []) if r.get("version") != release["version"]]
 with open(env["RELEASES_JSON"], "w") as f:
-    json.dump({"latest": release["version"], "releases": releases}, f, indent=2)
+    json.dump({"latest": release["version"], "releases": [release]}, f, indent=2)
     f.write("\n")
 PY
 
@@ -117,6 +113,13 @@ upload "$MANIFEST" "latest.json" application/json "public, max-age=60"
 upload "$LATEST" "latest" application/json "public, max-age=300"
 upload "$RELEASES_JSON" "releases.json" application/json "public, max-age=60"
 upload scripts/install.sh "install.sh" text/x-shellscript "public, max-age=300"
+
+# Remove every older version's files. In `aws s3` filters the last match wins,
+# so this keeps the current version and the `Oga-latest` copies.
+aws s3 rm "s3://$R2_BUCKET/oga/" --recursive \
+    --endpoint-url "$ENDPOINT_URL" \
+    --exclude "*" --include "Oga-*" \
+    --exclude "Oga-$VERSION.*" --exclude "Oga-latest.*"
 
 # The Homebrew cask installs the same zip install.sh does.
 ZIP_SHA256="$(shasum -a 256 "$ZIP_PATH" | awk '{print $1}')"

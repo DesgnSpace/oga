@@ -2062,11 +2062,13 @@ h1 {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     width: 100%;
+    min-height: 32px;
     align-items: center;
-    gap: var(--space-1);
-    margin-bottom: var(--space-2);
-    padding: 0;
+    gap: var(--space-2);
+    margin-block: var(--space-1);
+    padding: 0 var(--space-2);
     border: 0;
+    border-radius: var(--radius-row);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -2075,10 +2077,8 @@ h1 {
 }
 
 .changed-files-turn-heading:hover,
-.changed-files-turn-heading:focus-visible,
-.changed-files-generated-heading:hover,
-.changed-files-generated-heading:focus-visible {
-    color: var(--color-accent);
+.changed-files-generated-heading:hover {
+    background: color-mix(in srgb, var(--color-text) 5%, transparent);
 }
 
 .changed-files-turn-label,
@@ -2106,14 +2106,26 @@ h1 {
 
 .changed-file-row {
     min-width: 0;
+    padding-block: var(--space-1);
     border-bottom: 1px solid var(--color-border);
 }
 
 /* A flex row, because a mark inside the button that opens the diff would be a
-   button inside a button. */
+   button inside a button. The hover and selected tint sit here, so they cover
+   the actions too. */
 .changed-file-head {
     display: flex;
+    min-height: 32px;
     align-items: center;
+    border-radius: var(--radius-row);
+}
+
+.changed-file-head:hover {
+    background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.changed-file-row-active .changed-file-head {
+    background: var(--color-selection);
 }
 
 /* File name, its folder, then the counts, kept together on one line. The
@@ -2121,10 +2133,9 @@ h1 {
 .changed-file-heading {
     display: flex;
     flex: 1 1 auto;
-    width: 100%;
+    align-self: stretch;
     min-width: 0; /* a flex item will not shrink below its content without this */
-    min-height: 32px;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-2);
     padding: 0 var(--space-2);
     border: 0;
@@ -2141,7 +2152,7 @@ h1 {
     flex: 0 0 auto;
     align-items: center;
     gap: var(--space-1);
-    padding-inline-end: var(--space-2);
+    padding-inline-end: var(--space-1);
     opacity: 0;
     transition: opacity 0.12s ease;
 }
@@ -2166,14 +2177,6 @@ h1 {
     background: transparent;
 }
 
-.changed-file-heading:hover {
-    background: color-mix(in srgb, var(--color-text) 5%, transparent);
-}
-
-.changed-file-row-active .changed-file-heading {
-    background: var(--color-selection);
-}
-
 .changed-file-row-reviewed .changed-file-reviewed {
     color: var(--color-accent);
 }
@@ -2181,17 +2184,6 @@ h1 {
 .changed-file-row-reviewed .changed-file-name,
 .changed-files-tree-file-reviewed .changed-files-tree-name {
     color: var(--color-text-muted);
-}
-
-.changed-file-disclosure {
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-}
-
-.changed-file-count {
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
 }
 
 .diff-stat-added {
@@ -2205,9 +2197,9 @@ h1 {
 .changed-file-disclosure {
     display: flex;
     flex: 0 0 auto;
-    align-self: center;
     width: 18px;
     justify-content: center;
+    color: var(--color-text-muted);
 }
 
 .changed-file-name,
@@ -2234,12 +2226,14 @@ h1 {
 
 .changed-file-count {
     flex: 0 0 auto;
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
     white-space: nowrap;
 }
 
 .changed-file-diff {
     max-width: 100%;
-    padding: 0 0 var(--space-2);
+    padding-block: var(--space-1);
     background: var(--color-surface);
 }
 
