@@ -48,8 +48,8 @@ OPENCODE2_BIN: /Users/me/.opencode/bin/opencode2
 
 ## How tasks run
 
-- Over ACP (`opencode2 acp`) on OpenCode 2.0.x. On another release line the
-  task runs on the command line instead.
+- Over ACP (`opencode2 acp`) on OpenCode 2.0.x and 2.2.x. On another release
+  line the task runs on the command line instead.
 - The command line is `opencode2 run --standalone --format json --model
   provider/model#effort --auto -- <prompt>`, started in the task's directory.
 - Both start a private OpenCode server with the worker's environment rather

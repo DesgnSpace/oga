@@ -221,7 +221,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         .additional_directories(adapter.directories_for(&acp_launch));
     if let Some(release) = &adapter.release {
         launch = launch.release(match &release.versions {
-            AcpVersions::Line(line) => AgentRelease::line(&release.agent, line),
+            AcpVersions::Lines(lines) => AgentRelease::lines(&release.agent, lines),
             AcpVersions::Build(build) => AgentRelease::build(&release.agent, build),
         });
     }

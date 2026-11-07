@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Tasks on OpenCode 2.2 no longer show a note that Oga only works with OpenCode 2.0.
+
 ## 0.2.4 - 2026-11-01
 
 - The task header now shows which project the task runs in, next to the worker and model.
