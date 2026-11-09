@@ -134,8 +134,8 @@ pub struct AgentRelease {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentVersions {
-    /// The patch releases of one `major.minor` line.
-    Line(String),
+    /// The patch releases of each listed `major.minor` line.
+    Lines(Vec<String>),
     /// One build and no other, for an agent published only as numbered
     /// builds that promise nothing between them.
     Build(String),
@@ -144,17 +144,23 @@ pub enum AgentVersions {
 impl std::fmt::Display for AgentVersions {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Line(line) => write!(formatter, "{line}.x"),
+            Self::Lines(lines) => {
+                let lines: Vec<String> = lines.iter().map(|line| format!("{line}.x")).collect();
+                formatter.write_str(&lines.join(" or "))
+            }
             Self::Build(build) => formatter.write_str(build),
         }
     }
 }
 
 impl AgentRelease {
-    pub fn line(name: impl Into<String>, line: impl Into<String>) -> Self {
+    pub fn lines<Line: Into<String>>(
+        name: impl Into<String>,
+        lines: impl IntoIterator<Item = Line>,
+    ) -> Self {
         Self {
             name: name.into(),
-            versions: AgentVersions::Line(line.into()),
+            versions: AgentVersions::Lines(lines.into_iter().map(Into::into).collect()),
         }
     }
 
@@ -170,13 +176,15 @@ impl AgentRelease {
     fn admits(&self, agent: &Implementation) -> bool {
         agent.name == self.name
             && match &self.versions {
-                AgentVersions::Line(line) => agent
-                    .version
-                    .strip_prefix(line.as_str())
-                    .and_then(|rest| rest.strip_prefix('.'))
-                    .is_some_and(|patch| {
-                        !patch.is_empty() && patch.bytes().all(|b| b.is_ascii_digit())
-                    }),
+                AgentVersions::Lines(lines) => lines.iter().any(|line| {
+                    agent
+                        .version
+                        .strip_prefix(line.as_str())
+                        .and_then(|rest| rest.strip_prefix('.'))
+                        .is_some_and(|patch| {
+                            !patch.is_empty() && patch.bytes().all(|b| b.is_ascii_digit())
+                        })
+                }),
                 AgentVersions::Build(build) => agent.version == *build,
             }
     }
@@ -988,7 +996,7 @@ mod tests {
 
     #[test]
     fn a_release_line_admits_its_patch_releases_only() {
-        let line = AgentRelease::line("@agentclientprotocol/codex-acp", "1.12");
+        let line = AgentRelease::lines("@agentclientprotocol/codex-acp", ["1.12"]);
         let agent = |name: &str, version: &str| Implementation::new(name, version);
 
         assert!(line.admits(&agent("@agentclientprotocol/codex-acp", "1.12.0")));
@@ -1007,5 +1015,18 @@ mod tests {
             );
         }
         assert!(!line.admits(&agent("codex-acp", "1.12.0")));
+    }
+
+    #[test]
+    fn several_release_lines_admit_each_line_and_nothing_between() {
+        let lines = AgentRelease::lines("OpenCode", ["2.0", "2.2"]);
+        let agent = |version: &str| Implementation::new("OpenCode", version);
+
+        assert!(lines.admits(&agent("2.0.1")));
+        assert!(lines.admits(&agent("2.2.5")));
+        for version in ["2.1.0", "2.3.0", "1.18.32"] {
+            assert!(!lines.admits(&agent(version)), "{version}");
+        }
+        assert_eq!(lines.versions.to_string(), "2.0.x or 2.2.x");
     }
 }

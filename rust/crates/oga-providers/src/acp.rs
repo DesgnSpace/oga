@@ -47,17 +47,20 @@ pub struct AcpRelease {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpVersions {
-    /// The patch releases of one `major.minor` line.
-    Line(String),
+    /// The patch releases of each listed `major.minor` line.
+    Lines(Vec<String>),
     /// One build and no other.
     Build(String),
 }
 
 impl AcpRelease {
-    pub fn line(agent: impl Into<String>, line: impl Into<String>) -> Self {
+    pub fn lines<Line: Into<String>>(
+        agent: impl Into<String>,
+        lines: impl IntoIterator<Item = Line>,
+    ) -> Self {
         Self {
             agent: agent.into(),
-            versions: AcpVersions::Line(line.into()),
+            versions: AcpVersions::Lines(lines.into_iter().map(Into::into).collect()),
         }
     }
 
@@ -327,7 +330,7 @@ fn claude() -> AcpAdapter {
 fn codex() -> AcpAdapter {
     const AGENT: &str = "@agentclientprotocol/codex-acp";
     AcpAdapter::new("codex-acp", |_| vec!["codex-acp".to_owned()])
-        .release(AcpRelease::line(AGENT, "1.12"))
+        .release(AcpRelease::lines(AGENT, ["1.12"]))
         .oga_tools(true)
         .native_sessions_from(AGENT)
         .incompatibility(|launch| {
@@ -401,7 +404,7 @@ fn opencode2() -> AcpAdapter {
     AcpAdapter::new("opencode2-acp", |launch| {
         vec![opencode2_executable(launch.profile), "acp".to_owned()]
     })
-    .release(AcpRelease::line("OpenCode", "2.0"))
+    .release(AcpRelease::lines("OpenCode", ["2.0", "2.2"]))
     .native_sessions_from("OpenCode")
     .settings(|launch| {
         let setting = |id: &str, value: &str| AcpSetting {
@@ -1264,7 +1267,10 @@ mod tests {
         );
         assert_eq!(
             adapter.release,
-            Some(AcpRelease::line("@agentclientprotocol/codex-acp", "1.12"))
+            Some(AcpRelease::lines(
+                "@agentclientprotocol/codex-acp",
+                ["1.12"]
+            ))
         );
         assert_eq!(adapter.incompatibility_for(&launch), None);
     }
@@ -1477,7 +1483,7 @@ mod tests {
         );
         assert_eq!(
             adapter.release,
-            Some(AcpRelease::line("OpenCode", "2.0")),
+            Some(AcpRelease::lines("OpenCode", ["2.0", "2.2"])),
             "OpenCode 1 reports the same name, so only the verified line opens a session"
         );
         assert_eq!(adapter.native_sessions_from.as_deref(), Some("OpenCode"));
