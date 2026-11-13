@@ -5,9 +5,13 @@ use oga_store::append_event;
 use serde_json::json;
 
 use crate::{
-    ContinuationError, SteerRequest, acp_question::Answer, close_attempt, continuation_prompt,
-    dispatch::Dispatcher, encode_store, lifecycle::now_iso, require_existing_worktree,
-    require_profile, require_task,
+    ContinuationError, SteerRequest,
+    acp_question::Answer,
+    close_attempt, continuation_prompt,
+    dispatch::Dispatcher,
+    encode_store,
+    lifecycle::{ActiveRun, now_iso},
+    require_existing_worktree, require_profile, require_task,
 };
 
 #[derive(Debug, Clone)]
@@ -59,12 +63,16 @@ pub async fn reply(
             old.id
         )));
     }
-    if let Some(waiting) = dispatcher
+    if let Some((run, waiting)) = dispatcher
         .active_runs()
         .get(&old.id)
-        .and_then(|run| run.take_question())
+        .and_then(|run| run.take_question().map(|waiting| (run, waiting)))
     {
-        return answer_live_question(dispatcher, &old, waiting, Answer::read(answer)).await;
+        let reply = LiveReply {
+            answer: Answer::read(answer),
+            scope: request.scope,
+        };
+        return answer_live_question(dispatcher, &old, &run, waiting, reply).await;
     }
     require_existing_worktree(&old)?;
     let profile = require_profile(dispatcher.store(), &old.profile_id)?;
@@ -131,27 +139,35 @@ pub async fn reply(
     Ok(task)
 }
 
+/// What a person said to a question the worker is parked on.
+struct LiveReply {
+    answer: Answer,
+    scope: Option<TaskScope>,
+}
+
 /// The task runs again before the worker hears the answer, so the worker's
 /// next question opens only after this one has closed.
 async fn answer_live_question(
     dispatcher: &Dispatcher,
     old: &Task,
+    run: &ActiveRun,
     waiting: tokio::sync::oneshot::Sender<Answer>,
-    answer: Answer,
+    LiveReply { answer, scope }: LiveReply,
 ) -> Result<Task, ContinuationError> {
     let now = now_iso();
+    let scope_json = scope.as_ref().map(encode_store).transpose()?;
     let instruction = match &answer {
         Answer::Instead(instruction) => Some(instruction.clone()),
         Answer::Allow | Answer::Refuse => None,
     };
-    let mut payload = json!({"answer": answer.name()});
+    let mut payload = json!({"answer": answer.name(), "scopeUpdated": scope.is_some()});
     if let Some(instruction) = &instruction {
         payload["instruction"] = json!(instruction);
     }
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='running',question=NULL,updated_at=? WHERE id=? AND state='needs_input'",
-            rusqlite::params![now, old.id],
+            "UPDATE tasks SET state='running',question=NULL,scope_json=COALESCE(?,scope_json),updated_at=? WHERE id=? AND state='needs_input'",
+            rusqlite::params![scope_json, now, old.id],
         )?;
         if changed != 1 {
             return Err(oga_store::StoreError::Refusal(format!(
@@ -170,6 +186,10 @@ async fn answer_live_question(
         )?;
         Ok(())
     })?;
+    // Set before the worker hears the answer, so its next request sees it.
+    if let Some(scope) = scope {
+        run.set_scope(scope);
+    }
     if waiting.send(answer).is_err() {
         return Err(ContinuationError::Refusal(format!(
             "the worker stopped before your answer reached it: {}",

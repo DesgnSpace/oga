@@ -722,6 +722,16 @@ fn prompt(
                 &format!("inside: {inside}, outside: {outside}\nOGA_RESULT: completed"),
             );
         }
+        "edit-outside-twice" => {
+            let cwd = env::current_dir().expect("cwd").display().to_string();
+            let manifest = format!("{cwd}/Cargo.toml");
+            let first = ask_permission(&session, 9005, &manifest, lines, log_path);
+            let second = ask_permission(&session, 9006, &manifest, lines, log_path);
+            chunk(
+                &session,
+                &format!("first: {first}, second: {second}\nOGA_RESULT: completed"),
+            );
+        }
         turns if turns.starts_with("outside") => {
             let (answer, mut told) = ask_outside(&session, lines, log_path);
             if turns == "outside-steer" && told.is_none() {

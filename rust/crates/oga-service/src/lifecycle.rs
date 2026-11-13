@@ -111,6 +111,13 @@ impl ActiveRun {
         }
     }
 
+    /// Widens or narrows what a run already open may touch.
+    pub(crate) fn set_scope(&self, scope: TaskScope) {
+        if let Self::Acp(run) = self {
+            run.set_scope(scope);
+        }
+    }
+
     fn same_as(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Cli(left), Self::Cli(right)) => Arc::ptr_eq(left, right),

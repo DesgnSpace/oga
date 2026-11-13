@@ -1018,6 +1018,72 @@ async fn a_step_outside_the_scope_waits_for_the_person_and_allowing_it_carries_t
     assert!(!kinds.iter().any(|kind| kind == "answered"), "{kinds:?}");
 }
 
+fn src_only() -> TaskScope {
+    TaskScope {
+        read: vec!["**".into()],
+        write: vec!["src/**".into()],
+    }
+}
+
+async fn park_on_the_manifest(harness: &Harness) -> Task {
+    let dispatched = harness
+        .dispatcher
+        .dispatch(DispatchRequest::new("work", "edit things", &harness.cwd).scope(src_only()))
+        .await
+        .expect("dispatched");
+    harness.await_question(&dispatched.task.id).await
+}
+
+#[tokio::test]
+async fn a_reply_that_widens_the_scope_lets_the_worker_through_without_asking_again() {
+    let harness = harness("edit-outside-twice");
+    let asked = park_on_the_manifest(&harness).await;
+    let widened = TaskScope {
+        read: vec!["**".into()],
+        write: vec!["src/**".into(), "Cargo.toml".into()],
+    };
+
+    let replied = reply(
+        &harness.dispatcher,
+        ReplyRequest::new(&asked.id, "yes, the manifest is part of this").scope(widened.clone()),
+    )
+    .await
+    .expect("replied");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(replied.scope, widened, "the answer returns the new scope");
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert_eq!(task.scope, widened, "the record keeps the new scope");
+    assert!(
+        task.output.contains("first: allow, second: allow"),
+        "{}",
+        task.output
+    );
+}
+
+#[tokio::test]
+async fn allowing_a_step_outside_the_scope_lets_that_path_through_for_the_rest_of_the_task() {
+    let harness = harness("edit-outside-twice");
+    let asked = park_on_the_manifest(&harness).await;
+
+    reply(&harness.dispatcher, ReplyRequest::new(&asked.id, "allow"))
+        .await
+        .expect("replied");
+    let task = harness.settle(&asked.id).await;
+
+    assert_eq!(task.state, TaskState::Completed, "{task:?}");
+    assert!(
+        task.output.contains("first: allow, second: allow"),
+        "{}",
+        task.output
+    );
+    assert!(
+        task.scope.write.iter().any(|rule| rule == "Cargo.toml"),
+        "the record shows what was let through: {:?}",
+        task.scope
+    );
+}
+
 #[tokio::test]
 async fn refusing_a_step_outside_the_scope_gives_the_worker_its_reject_option() {
     let harness = harness("outside");

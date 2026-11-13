@@ -95,10 +95,16 @@ pub(crate) struct AcpRun {
     /// Instructions handed over as their own prompt, still to be answered.
     joined: Mutex<Vec<SentPrompt>>,
     questions: Arc<Questions>,
+    scope: Arc<LiveScope>,
     cancelled: AtomicBool,
 }
 
 impl AcpRun {
+    /// What the worker may touch from its next request on.
+    pub(crate) fn set_scope(&self, scope: TaskScope) {
+        self.scope.replace(scope);
+    }
+
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         self.questions.close();
@@ -232,12 +238,13 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         launch = launch.mcp_servers(vec![oga_mcp_server(&task.id)]);
     }
     let questions = Arc::new(Questions::default());
+    let scope = Arc::new(LiveScope::new(task.scope.clone()));
     let policy = Arc::new(TaskPolicy {
         store: Arc::clone(store),
         task_id: task.id.clone(),
         turn_id: turn.turn_id,
         cwd: PathBuf::from(&task.cwd),
-        scope: task.scope.clone(),
+        scope: Arc::clone(&scope),
         declines_questions: adapter.declines_questions,
         skills: skill_directories(turn.profile),
         refused: Refused::default(),
@@ -320,6 +327,7 @@ pub(crate) async fn run(turn: AcpTurn<'_>) -> Result<AcpEnd, LifecycleError> {
         steering,
         joined: Mutex::new(Vec::new()),
         questions,
+        scope,
         cancelled: AtomicBool::new(false),
     });
     let active = ActiveRun::Acp(Arc::clone(&run));
@@ -1174,12 +1182,76 @@ impl Transcript {
     }
 }
 
+/// What the worker may touch right now. A reply can widen it while the run is
+/// open, so the policy reads it on every request.
+struct LiveScope(Mutex<Granted>);
+
+struct Granted {
+    scope: TaskScope,
+    /// Paths outside the task's folder that a person allowed, which no scope
+    /// rule can name. The flag is true for write access.
+    elsewhere: Vec<(bool, PathBuf)>,
+}
+
+impl LiveScope {
+    fn new(scope: TaskScope) -> Self {
+        Self(Mutex::new(Granted {
+            scope,
+            elsewhere: Vec::new(),
+        }))
+    }
+
+    fn granted(&self) -> std::sync::MutexGuard<'_, Granted> {
+        self.0.lock().expect("scope lock is not poisoned")
+    }
+
+    fn replace(&self, scope: TaskScope) {
+        self.granted().scope = scope;
+    }
+
+    fn covers(&self, cwd: &Path, writes: bool, path: &Path) -> bool {
+        let granted = self.granted();
+        let rules = if writes {
+            &granted.scope.write
+        } else {
+            &granted.scope.read
+        };
+        scope_covers(cwd, rules, path)
+            || granted
+                .elsewhere
+                .iter()
+                .any(|(wrote, allowed)| allowed == path && (*wrote || !writes))
+    }
+
+    /// Lets these paths through from now on and returns the scope as it now
+    /// stands, to keep with the task.
+    fn allow(&self, cwd: &Path, writes: bool, paths: &[String]) -> TaskScope {
+        let mut granted = self.granted();
+        for path in paths.iter().map(Path::new) {
+            let Some(relative) = relative_inside(cwd, path) else {
+                if !granted.elsewhere.iter().any(|(_, known)| known == path) {
+                    granted.elsewhere.push((writes, path.to_path_buf()));
+                }
+                continue;
+            };
+            let scope = &mut granted.scope;
+            if writes && !scope_covers(cwd, &scope.write, path) {
+                scope.write.push(relative.clone());
+            }
+            if !scope_covers(cwd, &scope.read, path) {
+                scope.read.push(relative);
+            }
+        }
+        granted.scope.clone()
+    }
+}
+
 struct TaskPolicy {
     store: Arc<Store>,
     task_id: String,
     turn_id: i64,
     cwd: PathBuf,
-    scope: TaskScope,
+    scope: Arc<LiveScope>,
     /// Every request is a question for a person, and nobody is there to answer.
     declines_questions: bool,
     /// Skill folders, which the agent reads whatever the scope.
@@ -1194,17 +1266,12 @@ impl TaskPolicy {
         fields: &oga_acp::schema::ToolCallUpdateFields,
         writes: bool,
     ) -> Vec<String> {
-        let rules = if writes {
-            &self.scope.write
-        } else {
-            &self.scope.read
-        };
         fields
             .locations
             .iter()
             .flatten()
             .map(|location| location.path.as_path())
-            .filter(|path| !scope_covers(&self.cwd, rules, path))
+            .filter(|path| !self.scope.covers(&self.cwd, writes, path))
             .filter(|path| {
                 writes
                     || !self
@@ -1250,6 +1317,29 @@ impl TaskPolicy {
         };
         self.questions.ask(open).await
     }
+
+    /// Saves the scope with the task, so the paths a person let through stay
+    /// let through if the task is resumed.
+    async fn keep_scope(&self, scope: TaskScope) {
+        let task_id = self.task_id.clone();
+        let saved = match encode(&scope) {
+            Ok(json) => {
+                self.store
+                    .write(move |tx| {
+                        tx.execute(
+                            "UPDATE tasks SET scope_json=? WHERE id=?",
+                            params![json, task_id],
+                        )?;
+                        Ok(())
+                    })
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(error) = saved {
+            eprintln!("saving the scope of {} failed: {error}", self.task_id);
+        }
+    }
 }
 
 impl AcpPolicy for TaskPolicy {
@@ -1283,9 +1373,16 @@ impl AcpPolicy for TaskPolicy {
                 None
             };
             let allowed = match &answer {
-                Some(answer) => *answer == Answer::Allow,
+                Some(Answer::Allow) => true,
+                Some(Answer::Refuse) => false,
+                // A reply that widened the scope has already let the step through.
+                Some(Answer::Instead(_)) => self.outside_scope(fields, writes).is_empty(),
                 None => outside.is_empty() && !self.declines_questions,
             };
+            if allowed && !outside.is_empty() {
+                let scope = self.scope.allow(&self.cwd, writes, &outside);
+                self.keep_scope(scope).await;
+            }
             let decision = choose(&request.options, allowed);
             // An instruction already says how the worker goes on.
             if !allowed && !matches!(answer, Some(Answer::Instead(_))) {
@@ -1470,10 +1567,10 @@ mod tests {
             task_id: "task".into(),
             turn_id: 1,
             cwd: PathBuf::from("/repo"),
-            scope: TaskScope {
+            scope: Arc::new(LiveScope::new(TaskScope {
                 read: rules(&["**"]),
                 write: rules(&["src/**"]),
-            },
+            })),
             declines_questions,
             skills: vec![PathBuf::from("/home/.agents/skills")],
             refused: Refused::default(),
