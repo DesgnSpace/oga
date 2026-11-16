@@ -3063,6 +3063,23 @@ h1 {
     padding-left: var(--space-5);
 }
 
+/* The base reset strips list markers. Put them back for written content. */
+.markdown-content ul {
+    list-style: disc;
+}
+
+.markdown-content ol {
+    list-style: decimal;
+}
+
+.markdown-content li ul {
+    list-style: circle;
+}
+
+.markdown-content li::marker {
+    color: var(--color-text-muted);
+}
+
 .markdown-content li + li {
     margin-top: var(--space-2);
 }
