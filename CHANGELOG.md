@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.5 - 2026-11-16
+
 - Replying `allow`, or widening the task's scope in your reply, now lets a worker that stopped on a file outside its scope carry on. It no longer asks about the same file again, and the task keeps the new scope.
 - Tasks on OpenCode 2.2 no longer show a note that Oga only works with OpenCode 2.0.
 
