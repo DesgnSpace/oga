@@ -16,13 +16,13 @@ All spacing sits on a 4px base.
 | Token | Value | Typical use |
 | --- | --- | --- |
 | `--space-1` | 4px | Title to description in a row or section header; between rail items |
-| `--space-2` | 8px | Tight groups: icon to text in small controls, page title to description |
-| `--space-3` | 12px | Icon to label in the rail; pill inner padding; between inline controls |
-| `--space-4` | 16px | Section heading to its card; row vertical padding |
-| `--space-5` | 24px | Row horizontal padding; rail padding; between rail groups; text to control |
-| `--space-6` | 32px | Rail search field height; narrow-window page top padding |
-| `--space-7` | 48px | Between sections; below the page header; content side padding; dialog margin |
-| `--space-8` | 64px | Above the page title |
+| `--space-2` | 8px | Tight groups: icon to text in small controls, page title to description, section label to its card |
+| `--space-3` | 12px | Icon to label in the rail; pill inner padding; row vertical padding; between inline controls |
+| `--space-4` | 16px | Row side padding; rail padding |
+| `--space-5` | 24px | Between rail groups; text to control; below the page header |
+| `--space-6` | 32px | Rail search field height; between sections; narrow-window page top padding |
+| `--space-7` | 48px | Above the page title; content side padding; dialog margin |
+| `--space-8` | 64px | Below the last section |
 
 There is no 20px step. The existing tokens already name 24px as `--space-5`,
 and renumbering them would move every screen. Where a reference calls for
@@ -49,10 +49,9 @@ gap reaches the outer radius, the inner element keeps its own token.
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--text-title` | 28px | Page title, weight 600 |
-| `--text-heading` | 17px | Section heading, weight 600 |
+| `--text-title` | 24px | Page title, weight 600 |
 | `--text-lg` | 16px | Dialog title in the rail |
-| `--text-base` | 13px | Body text, row titles (600), row descriptions (muted) |
+| `--text-base` | 13px | Body text, row titles, row descriptions (muted), section labels (600, muted) |
 | `--text-md` | 12px | Rail and task list group labels, small captions, and every muted meta line in the task view: title bar facts, `+`/`−` counts, the changed files summary, the line under the composer |
 | `--text-reading` | 14px | What the worker says and what the user sends, in the task view |
 
@@ -84,12 +83,12 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 ### Sidebar (rail)
 
 - Its own full-height panel on `--color-sidebar`, with a hairline to its
-  right. It is 16rem wide.
-- `--space-5` (24px) padding on every side.
+  right. It is 15rem wide.
+- `--space-4` (16px) padding on the sides and bottom, `--space-5` on top.
 - Search field at the top, 32px tall, `--radius-control`.
 - Items sit in groups under a small muted label (`--text-md`, 600). Groups are
-  `--space-5` apart, and items in a group are `--space-1` apart.
-- Each item is an icon and a label, `--nav-item-height` (40px) tall, with
+  `--space-5` apart, and items in a group touch.
+- Each item is an icon and a label, `--nav-item-height` (32px) tall, with
   `--space-3` inside padding and `--space-3` between icon and label. Icons
   come from `web/src/ui/icons.tsx`.
 - The selected item is a pill: `--color-selection` background, `--radius-row`.
@@ -102,13 +101,14 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 ### Content column
 
 - The content area scrolls on its own and sits on `--color-bg`.
-- One centred column, `.page-column`: at most `--content-max` (800px) of
-  content, with `--space-7` side padding, `--space-8` above the title, and
+- One centred column, `.page-column`: at most `--settings-max` (672px) of
+  content, with `--space-7` side padding, `--space-7` above the title, and
   `--space-8` below the last section.
 - Below 800px: `--space-5` sides, `--space-6` top, `--space-7` bottom.
 - `--content-max` is the one reading column every main-pane screen shares:
-  settings, empty states, and the task screen's transcript, messages, and
-  composer all size to it, so their left and right edges line up.
+  empty states and the task screen's transcript, messages, and composer all
+  size to it, so their left and right edges line up. Settings reads as a
+  form, so it uses the narrower `--settings-max`.
 
 ### Task list
 
@@ -161,16 +161,16 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 - Page actions (refresh, add, a scope picker, a "checked" time) sit on the
   right, vertically centred on the header, `--space-3` apart. They wrap under
   the title when there is no room.
-- `--space-7` below the header.
+- `--space-5` below the header.
 - No eyebrow labels above titles. A heading says what the page or section is
   once.
 
 ### Section — `Section`
 
-- A heading (`--text-heading`) with an optional muted description
-  `--space-1` under it, and optional actions on the right.
-- `--space-4` between the header and the card.
-- `--space-7` between sections: wrap them in `.page-sections`.
+- A quiet label (`--text-base`, 600, muted) with an optional muted
+  description `--space-1` under it, and optional actions on the right.
+- `--space-2` between the header and the card.
+- `--space-6` between sections: wrap them in `.page-sections`.
 - Sections never clip. The content area scrolls instead.
 
 ### Card — `Card`
@@ -181,13 +181,13 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 ### Row — `CardRow`
 
-- `--space-4` vertical and `--space-5` horizontal padding.
-- Title on top (600), muted description `--space-1` under it.
+- `--space-3` vertical and `--space-4` horizontal padding.
+- Title on top (normal weight), muted description `--space-1` under it.
 - The control (switch, checkbox, select, input, button) sits on the right,
   vertically centred, `--space-5` from the text. The text wraps before it
   reaches the control. When the row is too narrow, the control drops under
   the text.
-- Hairlines between rows are inset by the row padding, not full width.
+- Hairlines between rows run the full card width.
 - Pass `as="label"` when the whole row should reach its one control.
 - A row that opens something (a worker) stretches its open button over the
   row and keeps the control above it; a chevron at the far right shows it

@@ -36,8 +36,7 @@
     --leading-reading: 1.5;
     /* About 70 characters of prose at the size it is used with. */
     --reading-max: 72ch;
-    --text-heading: 1.0625rem;
-    --text-title: 1.75rem;
+    --text-title: 1.5rem;
     --color-bg: #fafafa;
     --color-sidebar: #f4f4f4;
     --color-surface: #ffffff;
@@ -72,10 +71,12 @@
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --gutter: var(--space-4);
     /* The one reading column every main-pane screen shares: task transcript,
-       composer, settings, and empty states all size to this. */
+       composer, and empty states all size to this. */
     --content-max: 50rem;
+    /* Settings reads as a narrow form, so its column is tighter. */
+    --settings-max: 42rem;
     --trace-card-max-height: 24rem;
-    --nav-item-height: 40px;
+    --nav-item-height: 32px;
     /* A rounded element inside another takes the outer radius minus the gap
        between them, so corners stay concentric (docs/design.md, Radii). */
     --radius-chip: 4px;
@@ -4874,9 +4875,9 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 /* Page layout; the rules and spacing scale are in docs/design.md. */
 .page-column {
     width: 100%;
-    max-width: calc(var(--content-max) + var(--space-7) * 2);
+    max-width: calc(var(--settings-max) + var(--space-7) * 2);
     margin-inline: auto;
-    padding: var(--space-8) var(--space-7);
+    padding: var(--space-7) var(--space-7) var(--space-8);
 }
 
 .page-header {
@@ -4885,7 +4886,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     align-items: center;
     justify-content: space-between;
     gap: var(--space-4) var(--space-5);
-    margin-bottom: var(--space-7);
+    margin-bottom: var(--space-5);
 }
 
 .page-header-text,
@@ -4927,7 +4928,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .page-sections {
     display: grid;
-    gap: var(--space-7);
+    gap: var(--space-6);
 }
 
 .section {
@@ -4940,12 +4941,14 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     align-items: flex-end;
     justify-content: space-between;
     gap: var(--space-3) var(--space-5);
-    margin-bottom: var(--space-4);
+    margin-bottom: var(--space-2);
 }
 
+/* A quiet label over its card, not a heading. */
 .section-title {
     margin: 0;
-    font-size: var(--text-heading);
+    color: var(--color-text-muted);
+    font-size: var(--text-base);
     font-weight: 600;
     line-height: 1.3;
 }
@@ -4971,16 +4974,16 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     gap: var(--space-3) var(--space-5);
     min-width: 0;
     margin: 0;
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-3) var(--space-4);
 }
 
-/* Hairlines between rows stop at the row padding, in line with the text. */
+/* Hairlines between rows run the full card width. */
 .card-row + .card-row::before {
     content: "";
     position: absolute;
     top: 0;
-    right: var(--space-5);
-    left: var(--space-5);
+    right: 0;
+    left: 0;
     border-top: 1px solid var(--color-border);
 }
 
@@ -4989,10 +4992,6 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     flex: 1 1 16rem;
     gap: var(--space-1);
     min-width: 0;
-}
-
-.card-row-title {
-    font-weight: 600;
 }
 
 .card-row-description {
@@ -5026,7 +5025,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-page {
     display: grid;
-    grid-template-columns: 16rem minmax(0, 1fr);
+    grid-template-columns: 15rem minmax(0, 1fr);
     height: 100%;
     min-height: 0;
     flex: 1 1 auto;
@@ -5051,7 +5050,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     z-index: var(--z-sticky);
     display: grid;
     gap: var(--space-4);
-    padding: var(--space-5) var(--space-5) var(--space-5);
+    padding: var(--space-5) var(--space-4) var(--space-4);
     background: var(--color-sidebar);
 }
 
@@ -5098,12 +5097,11 @@ body.modal-open .app-layout *::-webkit-scrollbar {
     display: grid;
     align-content: start;
     gap: var(--space-5);
-    padding: 0 var(--space-5) var(--space-5);
+    padding: 0 var(--space-4) var(--space-5);
 }
 
 .settings-nav-group {
     display: grid;
-    gap: var(--space-1);
 }
 
 .settings-nav-label {
