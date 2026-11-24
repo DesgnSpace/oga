@@ -10,15 +10,22 @@ import { handlesClick } from "@/router";
 import { taskStatusLabel } from "@/screens/task/format";
 import type { SidebarController } from "@/state";
 import { searchTerm, type SidebarState, type SidebarTask } from "@/state/sidebar-state";
-import { displayLabel, taskProjectLabel } from "@/state/sidebar-projection";
+import { focusTaskSearch } from "@/shell/taskSearch";
+import { displayLabel, projectId, projects, taskProjectLabel, type TaskProject } from "@/state/sidebar-projection";
 import {
+  ArrowUpRightIcon,
+  BellIcon,
   CancelIcon,
+  CheckCircleIcon,
   CheckIcon,
   ExclamationIcon,
   ExpandIcon,
+  FolderIcon,
   HistoryIcon,
+  ListIcon,
   PlayIcon,
   QuestionMarkIcon,
+  SearchIcon,
   SendIcon,
 } from "@/ui/icons";
 import { absoluteTime, relativeTime } from "@/ui/time";
@@ -28,6 +35,9 @@ const HOME_TASK_LIMIT = 12;
 
 /** Below this card width the preview has no room, so a pick opens the task. */
 const PREVIEW_MIN_CARD_WIDTH = 640;
+
+/** Below this card width the views column folds into tabs above the list. */
+const SIDE_MIN_CARD_WIDTH = 880;
 
 const NEEDS_YOU: ReadonlySet<TaskState> = new Set(["needs_input", "failed", "blocked"]);
 
@@ -60,13 +70,7 @@ function narrowsTasks(state: SidebarState): boolean {
   return state.archiveFilter !== "active" || state.projectFilter !== undefined || searchTerm(state) !== "";
 }
 
-function subtitle(state: SidebarState, waiting: number): string {
-  if (narrowsTasks(state)) return "Filtered by the sidebar";
-  return waiting > 0 ? "Tasks that need you come first" : "Newest first";
-}
-
-function countLabel(total: number, waiting: number): string {
-  if (waiting > 0) return `${waiting} ${waiting === 1 ? "needs" : "need"} you`;
+function countLabel(total: number): string {
   return `${total} ${total === 1 ? "task" : "tasks"}`;
 }
 
@@ -198,32 +202,119 @@ function FirstRun({ onOpenSettings }: { onOpenSettings: (tab: SettingsTab) => vo
   );
 }
 
+type StatusView = "recent" | "needs-you" | "in-progress" | "finished";
+
+type HomeView = { kind: "status"; id: StatusView } | { kind: "project"; id: string; name: string };
+
+interface StatusViewOption {
+  id: StatusView;
+  label: string;
+  title: string;
+  description: string;
+  icon: ReactNode;
+  matches: (task: SidebarTask) => boolean;
+}
+
+const STATUS_VIEWS: StatusViewOption[] = [
+  { id: "recent", label: "Recent", title: "Recent tasks", description: "Newest first", icon: <ListIcon />, matches: () => true },
+  { id: "needs-you", label: "Needs you", title: "Needs you", description: "Questions, failures, and blocked tasks", icon: <BellIcon />, matches: needsYou },
+  { id: "in-progress", label: "In progress", title: "In progress", description: "Running now or waiting to start", icon: <PlayIcon />, matches: inProgress },
+  { id: "finished", label: "Finished", title: "Finished", description: "Completed or cancelled", icon: <CheckCircleIcon />, matches: finished },
+];
+
+function inProgress(task: SidebarTask): boolean {
+  const look = taskStatusLook(task.state);
+  return look === "running" || look === "waiting";
+}
+
+function finished(task: SidebarTask): boolean {
+  return task.state === "completed" || task.state === "cancelled";
+}
+
+function statusView(id: StatusView) {
+  return STATUS_VIEWS.find((view) => view.id === id) ?? STATUS_VIEWS[0];
+}
+
+function viewMatches(view: HomeView, task: SidebarTask): boolean {
+  return view.kind === "project" ? projectId(task) === view.id : statusView(view.id).matches(task);
+}
+
+interface ViewHeading {
+  title: string;
+  description: string;
+}
+
+function viewHeading(view: HomeView, sidebar: SidebarState, waiting: number): ViewHeading {
+  if (view.kind === "project") return { title: view.name, description: "Tasks in this project" };
+  const status = statusView(view.id);
+  if (narrowsTasks(sidebar)) return { title: status.title, description: "Filtered by the sidebar" };
+  if (view.id === "recent" && waiting > 0) return { title: status.title, description: "Tasks that need you come first" };
+  return { title: status.title, description: status.description };
+}
+
 function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask: (id: string) => void }) {
   const tasks = useMemo(() => recentTasks(sidebar.tasks), [sidebar.tasks]);
-  const shown = tasks.slice(0, HOME_TASK_LIMIT);
+  const taskProjects = useMemo(() => projects(tasks), [tasks]);
   const waiting = tasks.filter(needsYou);
+  const [view, setView] = useState<HomeView>({ kind: "status", id: "recent" });
+  const viewTasks = tasks.filter((task) => viewMatches(view, task));
+  const shown = viewTasks.slice(0, HOME_TASK_LIMIT);
   const [pickedId, setPickedId] = useState<string>();
-  const picked = tasks.find((task) => task.id === pickedId) ?? shown[0];
+  const picked = viewTasks.find((task) => task.id === pickedId) ?? tasks.find((task) => task.id === pickedId) ?? shown[0];
   const [cardRef, cardWidth] = useCardWidth();
   const previewFits = cardWidth === undefined || cardWidth >= PREVIEW_MIN_CARD_WIDTH;
+  const sideFits = cardWidth === undefined || cardWidth >= SIDE_MIN_CARD_WIDTH;
+  const heading = viewHeading(view, sidebar, waiting.length);
 
+  const show = (next: HomeView) => {
+    setView(next);
+    setPickedId(undefined);
+  };
   const pick = (id: string) => {
     if (previewFits) setPickedId(id);
     else onOpenTask(id);
   };
 
   return (
-    <div ref={cardRef} className="home-card" data-preview={previewFits && picked !== undefined}>
+    <div
+      ref={cardRef}
+      className="home-card"
+      data-side={sideFits}
+      data-preview={previewFits && picked !== undefined}
+    >
+      {sideFits && (
+        <HomeSide
+          view={view}
+          workers={sidebar.profiles.length}
+          waiting={waiting.length}
+          projects={taskProjects}
+          onShow={show}
+        />
+      )}
       <div className="home-tasks">
         <header className="home-head">
           <div>
-            <h1 id="page-title" className="home-title">Recent tasks</h1>
-            <p className="home-subtitle">{subtitle(sidebar, waiting.length)}</p>
+            <h1 id="page-title" className="home-title">{heading.title}</h1>
+            <p className="home-subtitle">{heading.description}</p>
           </div>
-          <span className="home-count">{countLabel(tasks.length, waiting.length)}</span>
+          <span className="home-count">{countLabel(viewTasks.length)}</span>
         </header>
+        {!sideFits && (
+          <div className="home-tabs" role="group" aria-label="Task views">
+            {STATUS_VIEWS.map((status) => (
+              <button
+                key={status.id}
+                type="button"
+                aria-pressed={view.kind === "status" && view.id === status.id}
+                onClick={() => show({ kind: "status", id: status.id })}
+              >
+                {status.label}
+              </button>
+            ))}
+          </div>
+        )}
         {shown.length === 0 ? (
-          <p className="home-hint">No tasks match your sidebar search or filters. Clear them to see every task.</p>
+          <p className="home-hint">{emptyHint(view, sidebar)}</p>
         ) : (
           <>
             <ul className="home-list" aria-labelledby="page-title">
@@ -233,6 +324,7 @@ function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask:
                     task={task}
                     worker={workerLabel(task, sidebar)}
                     picked={previewFits && task.id === picked?.id}
+                    offerOpen={previewFits}
                     onPick={() => pick(task.id)}
                     onOpen={() => onOpenTask(task.id)}
                   />
@@ -240,8 +332,8 @@ function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask:
               ))}
             </ul>
             <p className="home-hint">
-              {previewFits ? "Pick a task to see where it stands. Double-click to open it." : "Pick a task to open it."}
-              {tasks.length > shown.length && ` The sidebar lists all ${tasks.length}.`}
+              {previewFits ? "Pick a task to see where it stands on the right." : "Pick a task to open it."}
+              {viewTasks.length > shown.length && ` The sidebar lists all ${viewTasks.length}.`}
             </p>
           </>
         )}
@@ -260,33 +352,104 @@ function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask:
   );
 }
 
-function HomeTaskCard({ task, worker, picked, onPick, onOpen }: {
+function emptyHint(view: HomeView, sidebar: SidebarState): string {
+  if (narrowsTasks(sidebar)) return "No tasks match your sidebar search or filters. Clear them to see every task.";
+  if (view.kind === "status" && view.id === "needs-you") return "Nothing needs you right now.";
+  return "No tasks here yet.";
+}
+
+function HomeSide({ view, workers, waiting, projects, onShow }: {
+  view: HomeView;
+  workers: number;
+  waiting: number;
+  projects: TaskProject[];
+  onShow: (view: HomeView) => void;
+}) {
+  return (
+    <nav className="home-side" aria-label="Task views">
+      <div className="home-workspace">
+        <span className="home-avatar" aria-hidden="true">O</span>
+        <span>
+          <strong>Oga</strong>
+          <small>{workers} {workers === 1 ? "worker" : "workers"}</small>
+        </span>
+      </div>
+      <button type="button" className="home-search" onClick={focusTaskSearch}>
+        <SearchIcon size={14} />
+        <span>Search tasks</span>
+        <kbd>⌘K</kbd>
+      </button>
+      <span className="home-side-label">Tasks</span>
+      <ul>
+        {STATUS_VIEWS.map((status) => (
+          <li key={status.id}>
+            <button
+              type="button"
+              aria-current={view.kind === "status" && view.id === status.id ? "page" : undefined}
+              onClick={() => onShow({ kind: "status", id: status.id })}
+            >
+              {status.icon}
+              <span>{status.label}</span>
+              {status.id === "needs-you" && waiting > 0 && <em className="home-badge">{waiting}</em>}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {projects.length > 1 && (
+        <>
+          <span className="home-side-label">Projects</span>
+          <ul>
+            {projects.map((project) => (
+              <li key={project.id}>
+                <button
+                  type="button"
+                  title={project.id}
+                  aria-current={view.kind === "project" && view.id === project.id ? "page" : undefined}
+                  onClick={() => onShow({ kind: "project", id: project.id, name: project.name })}
+                >
+                  <FolderIcon />
+                  <span>{project.name}</span>
+                  <small>{project.count}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </nav>
+  );
+}
+
+function HomeTaskCard({ task, worker, picked, offerOpen, onPick, onOpen }: {
   task: SidebarTask;
   worker: string;
   picked: boolean;
+  offerOpen: boolean;
   onPick: () => void;
   onOpen: () => void;
 }) {
   const look = taskStatusLook(task.state);
+  const title = displayLabel(task);
   return (
-    <button
-      type="button"
-      className="home-task"
-      aria-pressed={picked}
-      onClick={onPick}
-      onDoubleClick={onOpen}
-    >
-      <span className="home-task-icon" data-look={look} aria-hidden="true">
-        <StatusIcon task={task} />
-      </span>
-      <span className="home-task-text">
-        <strong>{displayLabel(task)}</strong>
-        <small title={absoluteTime(task.updatedAt)}>
-          {worker} · {taskProjectLabel(task)} · {relativeTime(task.updatedAt)}
-        </small>
-      </span>
-      <span className="home-tag" data-look={look}>{tagLabel(task)}</span>
-    </button>
+    <div className="home-task" data-picked={picked}>
+      <button type="button" className="home-task-pick" aria-pressed={picked} onClick={onPick} onDoubleClick={onOpen}>
+        <span className="home-task-icon" data-look={look} aria-hidden="true">
+          <StatusIcon task={task} />
+        </span>
+        <span className="home-task-text">
+          <strong>{title}</strong>
+          <small title={absoluteTime(task.updatedAt)}>
+            {worker} · {taskProjectLabel(task)} · {relativeTime(task.updatedAt)}
+          </small>
+        </span>
+        <span className="home-tag" data-look={look}>{tagLabel(task)}</span>
+      </button>
+      {offerOpen && (
+        <button type="button" className="home-task-open" aria-label={`Open ${title}`} onClick={onOpen}>
+          Open <ArrowUpRightIcon size={12} />
+        </button>
+      )}
+    </div>
   );
 }
 

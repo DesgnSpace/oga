@@ -36,13 +36,13 @@ const transport: Transport = {
 describe("the home screen", () => {
   afterEach(cleanup);
 
-  it("leads with the task that needs you, previews the one picked, and opens it", async () => {
+  it("leads with the task that needs you, previews the one picked, filters by view, and opens it", async () => {
     setTransport(transport);
     window.history.replaceState(null, "", "/");
     render(<AppShell />);
 
     const list = within(await screen.findByRole("list", { name: "Recent tasks" }));
-    const titles = list.getAllByRole("button").map((card) => card.querySelector("strong")?.textContent);
+    const titles = list.getAllByRole("listitem").map((card) => card.querySelector("strong")?.textContent);
     expect(titles).toEqual(["Older question", "Newer finished task"]);
 
     const preview = () => within(screen.getByRole("complementary", { name: "Task preview" }));
@@ -52,7 +52,11 @@ describe("the home screen", () => {
     await waitFor(() => expect(preview().getByText("All done.")).toBeTruthy());
     expect(preview().queryByText("Which branch?")).toBeNull();
 
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Task views" })).getByRole("button", { name: /Needs you/ }));
+    const needsYou = within(screen.getByRole("list", { name: "Needs you" }));
+    expect(needsYou.getAllByRole("listitem").map((card) => card.querySelector("strong")?.textContent)).toEqual(["Older question"]);
+
     fireEvent.click(preview().getByRole("button", { name: "Open task" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/tasks/done"));
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/ask"));
   });
 });

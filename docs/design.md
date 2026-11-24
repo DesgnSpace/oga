@@ -198,27 +198,38 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 ### Home
 
 - One card fills the pane: `--color-surface`, a 1px `--color-border`
-  edge, `--radius-window`, no shadow. Each column scrolls on its own.
-- Left column: a `--text-lg` title, a muted `--text-md` subtitle, and a
-  count pill on the right. Below it, the recent tasks as bordered cards
-  `--space-2` apart, tasks that need the user first, then a muted hint line.
-- A task card: a `--control-height` tile with the status icon, the title
-  (600) over a muted meta line (worker · project · time), and a status tag
-  on the right. Only "Needs you" (ink) and a problem (danger) tint the tile
-  and tag; every other state stays grey. Hover and the picked card take
-  `--color-border-strong`; the picked card also fills with `--color-hover`.
-- Right column, `--home-preview-width` (20rem) wide, behind a hairline: the
-  picked task's request in a tinted bubble, the worker's latest words as
-  plain text, and a facts card with uppercase mono labels. Other tasks that
-  need the user show as outlined pills under it. A box at the bottom with a
-  round send button opens the task with its reply box focused.
-- When the card is narrower than 640px the preview hides, and picking a
-  task opens it.
+  edge, `--radius-window`, no shadow. It holds up to three columns, split
+  by hairlines, and each scrolls on its own.
+- Views column, `--home-side-width` (12rem), on `--color-bg`: the
+  workspace (an ink square with "O", "Oga", the worker count), a 32px
+  search box with a `⌘K` key cap that opens the task search, then rail-style
+  rows under small labels: Tasks (Recent, Needs you, In progress, Finished)
+  and, with more than one project, Projects. The current row sits on
+  `--color-surface` with a hairline ring. Needs you carries a count badge,
+  the column's one ink tint.
+- List column: a `--text-lg` title, a muted `--text-md` subtitle, and a
+  count pill on the right. Below it, the tasks as bordered cards
+  `--space-2` apart, tasks that need the user first, then a muted hint.
+- A task card: a `--control-height` tile tinted with the ink accent (danger
+  for a problem) holding the status icon, the title (600) over a muted meta
+  line (worker · project · time), a status tag, and an Open button that
+  shows on hover, focus, or when the card is picked. Hover and the picked
+  card take `--color-border-strong`; the picked card also takes a 2% ink
+  fill.
+- Preview column, `--home-preview-width` (20rem): the picked task's request
+  in a tinted bubble, the worker's latest words as plain text, and a facts
+  card with uppercase mono labels. Other tasks that need the user show as
+  outlined pills under it. A box at the bottom with a grey square send
+  button opens the task with its reply box focused.
+- Below a 880px card the views column folds into tabs over the list. Below
+  640px the preview hides and picking a task opens it. When the list column
+  is under 480px the cards drop their Open button.
 
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
 | `--color-border-strong` | `#dcdcdc` | `#424242` | A hovered or picked card's edge, one step darker than a hairline |
 | `--home-max` | 72rem | 72rem | Widest the home card grows |
+| `--home-side-width` | 12rem | 12rem | The home views column |
 | `--home-preview-width` | 20rem | 20rem | The home preview column |
 
 ### Changed files panel

@@ -272,7 +272,7 @@ export function projectName(path: string): string {
   return path;
 }
 
-function projectId(task: TaskSummary): string {
+export function projectId(task: TaskSummary): string {
   return task.originCwd ?? task.cwd;
 }
 
