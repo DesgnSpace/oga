@@ -360,9 +360,6 @@ impl McpServer {
                 )));
             }
         };
-        // A task handing work onward is the new task's orchestrator when it is
-        // a short-lived orchestrator run, and its parent otherwise, unless the
-        // call names another parent.
         if let Some(caller_id) = &self.orchestrator_id
             && let Ok(caller) = self.state.dispatcher.task(caller_id)
         {

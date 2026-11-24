@@ -133,6 +133,16 @@ impl Broker {
     }
 
     async fn delegate(&self, profile: &str, title: &str, extra: Value) -> String {
+        self.delegate_from(None, profile, title, extra).await
+    }
+
+    async fn delegate_from(
+        &self,
+        caller: Option<&str>,
+        profile: &str,
+        title: &str,
+        extra: Value,
+    ) -> String {
         let mut arguments = json!({
             "prompt": format!("{title} work"),
             "cwd": self.cwd(),
@@ -145,7 +155,7 @@ impl Broker {
             .as_object_mut()
             .expect("arguments")
             .extend(extra.as_object().cloned().unwrap_or_default());
-        let body = self.call("delegate", arguments).await;
+        let body = self.call_from(caller, "delegate", arguments).await;
         body["id"]
             .as_str()
             .unwrap_or_else(|| panic!("delegate answered {body}"))
@@ -268,30 +278,16 @@ async fn work_a_task_hands_onward_names_it_as_parent() {
         .delegate("slow", "Lead", json!({ "canDelegate": true }))
         .await;
     let other = broker.delegate("later", "Other", json!({})).await;
-    let delegate_from_lead = |title: &str, extra: Value| {
-        let mut arguments = json!({
-            "prompt": format!("{title} work"),
-            "cwd": broker.cwd(),
-            "tldr": title,
-            "title": title,
-            "profile": "quick",
-            "model": "model",
-        });
-        arguments
-            .as_object_mut()
-            .expect("arguments")
-            .extend(extra.as_object().cloned().unwrap_or_default());
-        broker.call_from(Some(&lead), "delegate", arguments)
-    };
-
-    let child = delegate_from_lead("Child", json!({})).await;
-    let grouped = delegate_from_lead("Grouped", json!({ "parent": other })).await;
+    let child = broker
+        .delegate_from(Some(&lead), "quick", "Child", json!({}))
+        .await;
+    let grouped = broker
+        .delegate_from(Some(&lead), "quick", "Grouped", json!({ "parent": other }))
+        .await;
     let by_owner = broker.delegate("quick", "Owner's", json!({})).await;
 
-    let child = broker.record(child["id"].as_str().expect("child id")).await;
-    let grouped = broker
-        .record(grouped["id"].as_str().expect("grouped id"))
-        .await;
+    let child = broker.record(&child).await;
+    let grouped = broker.record(&grouped).await;
     assert_eq!(child["parentTaskId"], json!(lead), "{child}");
     assert_eq!(grouped["parentTaskId"], json!(other), "{grouped}");
     assert!(broker.record(&by_owner).await.get("parentTaskId").is_none());

@@ -377,7 +377,7 @@ pub fn interpret_worker_outcome(
             },
         };
     }
-    if let Some(question) = question_with_options(&output).or_else(|| prose_question(&output)) {
+    if let Some(question) = question_with_choices(&output).or_else(|| prose_question(&output)) {
         return WorkerOutcome {
             state: TaskState::NeedsInput,
             output,
@@ -479,7 +479,7 @@ fn completed_marker(output: &str) -> Option<&str> {
 
 /// A question followed by lettered choices (`A:`, `B)`, ...), wherever it sits:
 /// a worker may ask first and write its report after.
-fn question_with_options(output: &str) -> Option<String> {
+fn question_with_choices(output: &str) -> Option<String> {
     let lines: Vec<&str> = output
         .lines()
         .map(str::trim)

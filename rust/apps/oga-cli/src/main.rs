@@ -840,9 +840,8 @@ fn asks_for_help(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--help" || arg == "-h")
 }
 
-/// What `oga <command> --help` prints. Commands with their own usage text use
-/// it; the rest print their entry from `oga help`, so the two never disagree.
-/// `None` for commands that answer `--help` themselves.
+/// Usage for `oga <command> --help`, taken from `oga help` so the two never
+/// disagree. `None` for commands that answer `--help` themselves.
 fn command_usage(command: &str) -> Option<String> {
     match command {
         "delegate" | "love" | "query" | "relearn" | "help" | "--help" | "-h" | "--stdio" => None,
@@ -853,8 +852,7 @@ fn command_usage(command: &str) -> Option<String> {
     }
 }
 
-/// The command's entry in `help_text`: its first line and the deeper-indented
-/// lines that continue it, shifted to sit under a `Usage: oga` prefix.
+/// The command's entry in `help_text`, shifted under a `Usage: oga` prefix.
 fn help_entry(command: &str) -> Option<String> {
     let mut lines = help_text().lines().skip_while(|line| {
         !line
