@@ -21,7 +21,7 @@ between and around things, and they are generous so screens breathe.
 | `--space-2` | 8px | Tight groups: icon to text in small controls, page title to description, section label to its card |
 | `--space-3` | 12px | Icon to label in the rail; pill inner padding; row vertical padding; between inline controls |
 | `--space-4` | 20px | Row side padding; rail padding; the list gutter |
-| `--space-5` | 28px | Between rail groups; text to control; below the page header; around the home card |
+| `--space-5` | 28px | Between rail groups; text to control; below the page header; the home list's side padding |
 | `--space-6` | 40px | Between sections; narrow-window page top padding |
 | `--space-7` | 56px | Above the page title; content side padding; dialog margin |
 | `--space-8` | 80px | Below the last section |
@@ -50,7 +50,7 @@ Motion shows what changed. It is never decoration.
 | A menu opening | Fades in from 0.97 scale, from its top edge, 150ms |
 | A dialog opening | Fades in from 0.97 scale over its fading backdrop, 200ms |
 | A task status mark changing | Grows in from 0.4 scale, 200ms, only when it changed while shown |
-| A task arriving or changing status in the sidebar or on home | Fades in and drops 4px into place, 200ms |
+| A task arriving or changing status in the home list | Fades in and drops 4px into place, 200ms |
 
 ## Radii
 
@@ -60,7 +60,7 @@ Motion shows what changed. It is never decoration.
 | `--radius-control` | 8px | Buttons, icon buttons, inputs, selects, pickers |
 | `--radius-row` | 8px | List rows and their hover and selection fill, inset blocks |
 | `--radius-panel` | 12px | Cards, the transcript card, the changes panel, the reply box, menus, popovers, toasts |
-| `--radius-window` | 20px | Dialogs, the home card |
+| `--radius-window` | 20px | Dialogs |
 | `--radius-full` | 999px | Capsules: scrollbars, switch tracks, bars |
 
 Nested corners stay concentric: an element inside a rounded surface takes
@@ -104,7 +104,7 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 ## Layout
 
-### Sidebar (rail)
+### Settings rail
 
 - Its own full-height panel on `--color-sidebar`, with a hairline to its
   right. It is 15rem wide.
@@ -122,6 +122,24 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 - Below 800px wide the rail stacks over the page. Items flow into three
   columns (two below 560px), and the group labels hide.
 
+### App sidebar
+
+- The app's one navigation, on `--color-sidebar` with a hairline to its
+  right, 248px wide by default and resizable. Below the window controls:
+  the workspace (an ink square with "O", "Oga", the worker count, and a
+  settings icon; it opens Settings), a 32px search field with a `⌘K` key
+  cap, then rail rows under small muted labels: Tasks (Recent, Needs you,
+  In progress, Finished, Archived) and Projects.
+- Rows are `--nav-item-height`, icon and label `--space-3` apart. The row
+  for what home shows sits on `--color-surface` with a hairline ring. Needs
+  you carries a count badge, the rail's one ink tint; In progress and
+  projects carry a muted count. Other views carry no number.
+- Projects list recent work first, then the rest by name, with true totals.
+  Two projects with the same folder name each show the nearest parent
+  folder that tells them apart, muted after the name. Past 8 projects the
+  rest fold behind "Show all".
+- Picking a view, a project, or typing a search brings home on screen.
+
 ### Content column
 
 - The content area scrolls on its own and sits on `--color-bg`.
@@ -129,22 +147,11 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   content, with `--space-7` side padding, `--space-7` above the title, and
   `--space-8` below the last section.
 - Below 800px: `--space-5` sides, `--space-6` top, `--space-7` bottom.
-- Home is the one wider screen: its card is at most `--home-max` (72rem)
-  wide, with `--space-5` around it (`--space-3` below 800px).
+- Home has no column: its list and preview fill the whole pane.
 - `--content-max` is the one reading column every main-pane screen shares:
   empty states and the task screen's transcript, messages, and composer all
   size to it, so their left and right edges line up. Settings reads as a
   form, so it uses the narrower `--settings-max`.
-
-### Task list
-
-- Rows are the title alone; worker, project, time and cost show on hover.
-- A row's status mark shows only what its group doesn't already say: running,
-  waiting, needs a reply, failed, or a new update. A finished task already
-  opened has no mark, and its title stays on the same edge as the others.
-- Grouped by status, Completed and Cancelled list their first 20 tasks, then
-  a "Show more" row. A task open past the fold is listed under those 20.
-  Every other group lists in full, and a search lists every match.
 
 ### Task title bar
 
@@ -221,40 +228,37 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 ### Home
 
-- One card fills the pane: `--color-surface`, a 1px `--color-border`
-  edge, `--radius-window`, no shadow. It holds up to three columns, split
-  by hairlines, and each scrolls on its own.
-- Views column, `--home-side-width` (12rem), on `--color-bg`: the
-  workspace (an ink square with "O", "Oga", the worker count), a 32px
-  search box with a `⌘K` key cap that opens the task search, then rail-style
-  rows under small labels: Tasks (Recent, Needs you, In progress, Finished)
-  and, with more than one project, Projects. The current row sits on
-  `--color-surface` with a hairline ring. Needs you carries a count badge,
-  the column's one ink tint.
-- List column: a `--text-lg` title, a muted `--text-md` subtitle, and a
-  count pill on the right. Below it, the tasks as bordered cards
-  `--space-2` apart, tasks that need the user first, then a muted hint.
-- A task card: a `--control-height` tile tinted with the ink accent (danger
-  for a problem) holding the status icon, the title (600) over a muted meta
-  line (worker · project · time), a status tag, and an Open button that
-  shows on hover, focus, or when the card is picked. Hover and the picked
-  card take `--color-border-strong`; the picked card also takes a 2% ink
-  fill.
-- Preview column, `--home-preview-width` (20rem): the picked task's request
-  in a tinted bubble, the worker's latest words as plain text, and a facts
-  card with uppercase mono labels. Other tasks that need the user show as
-  outlined pills under it. A box at the bottom with a grey square send
-  button opens the task with its reply box focused.
-- Below a 880px card the views column folds into tabs over the list. Below
-  640px the preview hides and picking a task opens it. When the list column
-  is under 480px the cards drop their Open button.
+- The sidebar's current view as one list beside a preview of the picked
+  task. No frame: the list scrolls on `--color-bg`, and the preview,
+  `--home-preview-width` (20rem), sits after a hairline and scrolls on its
+  own.
+- List head: the view or project name (`--text-lg`, 600), a muted
+  `--text-md` line (what the view holds, the project's full folder, or the
+  search), and a count pill with the true total.
+- Sections under small muted labels: Needs you, then In progress, then
+  finished work by the day it last changed (Today, Yesterday, Earlier).
+  The Needs you and In progress views are one plain list, and they load
+  older pages on their own until every task they count is listed.
+- A row is the status mark, the title (500) over a muted meta line
+  (project · worker, plus branch or wait reason), a danger tag only for
+  Failed or Blocked, and the time on the right. Rows separate on space and
+  fill; the picked row takes the rail's current look. A finished task
+  already opened has no mark. Task actions sit in a menu at the row's end,
+  shown on hover or focus, and on right-click.
+- Click picks, double-click or Enter opens, arrow keys move the pick.
+- Preview: the title, what was asked (the task's summary, or the brief's
+  first paragraph as inline markdown) in the user's bubble, the worker's
+  question or error when there is one, a facts card with uppercase mono
+  labels, other tasks that need the user as pills, and one Open task
+  button (ink when the task waits on an answer).
+- Below a 720px home the preview hides and a pick opens the task.
 
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
-| `--color-border-strong` | `#dcdcdc` | `#424242` | A hovered or picked card's edge, one step darker than a hairline |
-| `--home-max` | 72rem | 72rem | Widest the home card grows |
-| `--home-side-width` | 12rem | 12rem | The home views column |
-| `--home-preview-width` | 20rem | 20rem | The home preview column |
+| `--color-border-strong` | `#dcdcdc` | `#424242` | The Open task button's edge |
+| `--home-list-max` | 64rem | 64rem | Widest the home list grows; it centres past that |
+| `--home-preview-width` | 20rem | 20rem | The home preview column, and its narrowest |
+| `--home-preview-max` | 28rem | 28rem | Widest the preview grows, at 22% of the window |
 
 ### Changed files panel
 
