@@ -8,6 +8,7 @@
 - `oga watch` no longer says the connection was lost when its time simply ran out, and it reports a task that finished while it was not looking.
 - `oga inspect` now lists the tasks a task waits for, and while it waits, what happens if one of them fails.
 - `--help` and `-h` now print how to use every `oga` command, instead of an unknown option error.
+- `oga tasks --json` now gives each task's full folder, instead of only its last part.
 
 ## 0.2.5 - 2026-11-16
 

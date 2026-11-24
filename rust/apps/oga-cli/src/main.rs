@@ -994,7 +994,7 @@ fn short_task_row(task: &TaskSummary) -> Value {
         "id": &task.id[..task.id.len().min(8)],
         "state": state_name(task.state),
         "title": summary_title(task),
-        "cwd": Path::new(&task.cwd).file_name().and_then(|name| name.to_str()).unwrap_or(&task.cwd),
+        "cwd": task.cwd,
         "durationMs": task.duration_ms,
     })
 }

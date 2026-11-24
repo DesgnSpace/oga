@@ -283,3 +283,48 @@ fn every_command_prints_its_usage_on_help() {
     assert!(after_an_id.status.success());
     assert!(String::from_utf8_lossy(&after_an_id.stdout).starts_with("Usage: oga inspect"));
 }
+
+/// Bug caught: `oga tasks --json` gives only the last part of each task's
+/// folder, so tasks in `/work/abuna/your` read as `"cwd": "your"`.
+#[test]
+fn tasks_json_names_each_tasks_full_folder() {
+    let home = TempDir::new().expect("temporary home");
+    let store = open_store(&home.path().join("oga.db"));
+    let folders = ["/work/abuna/your", "/work/evals/fix-bug"];
+    for (index, cwd) in folders.iter().enumerate() {
+        let at = format!("2026-01-01T00:00:0{index}.000Z");
+        store
+            .repositories()
+            .tasks()
+            .insert(&Task {
+                id: task_id(index),
+                kind: Some(TaskKind::Delegated),
+                profile_id: "main".into(),
+                model: "sonnet".into(),
+                prompt: format!("task {index}"),
+                cwd: (*cwd).into(),
+                state: TaskState::Completed,
+                created_at: at.clone(),
+                updated_at: at,
+                ..Task::default()
+            })
+            .expect("task");
+    }
+    drop(store);
+    let (_broker, port) = start_broker(home.path());
+
+    let rows = json(&oga(
+        home.path(),
+        port,
+        &["tasks", "--state", "completed", "--json"],
+    ));
+
+    let mut listed = rows
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|row| row["cwd"].as_str().expect("cwd"))
+        .collect::<Vec<_>>();
+    listed.sort_unstable();
+    assert_eq!(listed, folders);
+}
