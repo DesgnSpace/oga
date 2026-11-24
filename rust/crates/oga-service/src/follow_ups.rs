@@ -418,6 +418,8 @@ mod tests {
             queued_follow_up_items: None,
             hold: None,
             attachments: Vec::new(),
+            depends_on: Vec::new(),
+            on_blocker_failure: None,
         }
     }
 

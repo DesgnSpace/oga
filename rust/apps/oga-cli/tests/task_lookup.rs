@@ -1,4 +1,5 @@
-//! Task-id commands find any task the broker holds, however old.
+//! Task commands as a caller reads them: any task the broker holds, however
+//! old, with what it waits on.
 
 use std::{
     fs,
@@ -9,7 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use oga_domain::{Profile, Provider, Task, TaskKind, TaskState};
+use oga_domain::{
+    HoldArgs, HoldVerb, OnBlockerFailure, Profile, Provider, Task, TaskHold, TaskKind, TaskState,
+};
 use oga_store::Store;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -36,10 +39,11 @@ fn task_id(index: usize) -> String {
     format!("{index:08x}-0000-4000-8000-000000000000")
 }
 
-fn seed(database: &Path) {
+/// A store with the one profile every seeded task names.
+fn open_store(database: &Path) -> Store {
     let store = Store::open_writable(database).expect("store");
-    let repositories = store.repositories();
-    repositories
+    store
+        .repositories()
         .profiles()
         .insert(
             &Profile {
@@ -55,6 +59,12 @@ fn seed(database: &Path) {
             "2026-01-01T00:00:00.000Z",
         )
         .expect("profile");
+    store
+}
+
+fn seed(database: &Path) {
+    let store = open_store(database);
+    let repositories = store.repositories();
     for index in 0..TASK_COUNT {
         let at = format!(
             "2026-01-01T{:02}:{:02}:{:02}.000Z",
@@ -161,4 +171,87 @@ fn task_commands_resolve_ids_older_than_the_newest_two_thousand() {
     assert_eq!(failed.len(), 2);
     assert_eq!(failed[0]["id"], task_id(TASK_COUNT - 2)[..8]);
     assert_eq!(failed[1]["id"], task_id(TASK_COUNT - 4)[..8]);
+}
+
+/// A pending task in `/project` that nothing releases while the test runs.
+fn waiting_task(id: &str, store: &Store, verb: HoldVerb, args: HoldArgs) {
+    let at = "2026-01-01T00:00:00.000Z";
+    let never = "2099-01-01T00:00:00.000Z";
+    let repositories = store.repositories();
+    repositories
+        .tasks()
+        .insert(&Task {
+            id: id.into(),
+            kind: Some(TaskKind::Delegated),
+            profile_id: "main".into(),
+            model: "sonnet".into(),
+            prompt: format!("task {id}"),
+            cwd: "/project".into(),
+            state: TaskState::Pending,
+            created_at: at.into(),
+            updated_at: at.into(),
+            ..Task::default()
+        })
+        .expect("task");
+    repositories
+        .holds()
+        .put(&TaskHold {
+            task_id: id.into(),
+            verb,
+            args,
+            start_at: Some(never.into()),
+            await_profile: None,
+            await_model: None,
+            next_check_at: never.into(),
+            expires_at: never.into(),
+            probe_count: 0,
+            note: "waiting".into(),
+            created_at: at.into(),
+            updated_at: at.into(),
+        })
+        .expect("hold");
+}
+
+/// Bug caught: `oga inspect` leaves out what a task waits on, so a caller
+/// following a chain cannot see why it has not started.
+#[test]
+fn inspect_names_what_a_waiting_task_waits_on() {
+    let home = TempDir::new().expect("temporary home");
+    let store = open_store(&home.path().join("oga.db"));
+    let (blocker, waiting) = (task_id(1), task_id(2));
+    waiting_task(
+        &blocker,
+        &store,
+        HoldVerb::Resume,
+        HoldArgs {
+            scheduled: Some(true),
+            ..HoldArgs::default()
+        },
+    );
+    waiting_task(
+        &waiting,
+        &store,
+        HoldVerb::Delegate,
+        HoldArgs {
+            on_blocker_failure: Some(OnBlockerFailure::Run),
+            ..HoldArgs::default()
+        },
+    );
+    store
+        .repositories()
+        .dependency(&waiting, &blocker)
+        .expect("dependency");
+    drop(store);
+    let (_broker, port) = start_broker(home.path());
+
+    let record = json(&oga(home.path(), port, &["inspect", &waiting]));
+    let free = json(&oga(home.path(), port, &["inspect", &blocker]));
+
+    assert_eq!(
+        record["dependsOn"],
+        serde_json::json!([blocker]),
+        "{record}"
+    );
+    assert_eq!(record["onBlockerFailure"], "run", "{record}");
+    assert!(free.get("dependsOn").is_none(), "{free}");
 }

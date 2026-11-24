@@ -6,6 +6,7 @@
 - A task that was rearmed can now have its wait changed with `oga edit`, so one finished task that will never run again no longer holds it back for good.
 - A worker that starts its last message with `needs_input:` and then writes a report now stops and asks you, so the tasks waiting on it stay waiting.
 - `oga watch` no longer says the connection was lost when its time simply ran out, and it reports a task that finished while it was not looking.
+- `oga inspect` now lists the tasks a task waits for, and while it waits, what happens if one of them fails.
 
 ## 0.2.5 - 2026-11-16
 

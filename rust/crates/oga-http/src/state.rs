@@ -19,7 +19,7 @@ use oga_domain::{
     TaskKind, TaskListQuery, TaskState, TaskSummary, TaskWorktree,
 };
 use oga_events::{event_views, load_provider_timeline, mark_repeated_retries};
-use oga_store::{Store, attach_task_timing};
+use oga_store::{Store, attach_task_dependencies, attach_task_timing};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -810,6 +810,7 @@ fn load_task_with_connection(connection: &Connection, id: &str) -> rusqlite::Res
     if let Some(task) = &mut task {
         attach_task_read_fields(connection, std::slice::from_mut(task))?;
         attach_task_timing(connection, task)?;
+        attach_task_dependencies(connection, task)?;
         task.queued_follow_up_items = follow_up_items(connection, &task.id)?;
     }
     Ok(task)

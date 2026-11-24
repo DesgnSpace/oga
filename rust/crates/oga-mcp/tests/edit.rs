@@ -150,6 +150,11 @@ impl Broker {
             .to_owned()
     }
 
+    async fn record(&self, id: &str) -> Value {
+        self.call("inspect", json!({ "taskId": id, "fields": ["all"] }))
+            .await
+    }
+
     async fn wait_for(&self, id: &str, wanted: &str) {
         let mut state = String::new();
         for _ in 0..1_000 {
@@ -211,6 +216,38 @@ async fn a_waiting_task_moved_onto_new_work_waits_for_that_work_instead() {
     broker.open("later-gate");
     broker.wait_for(&urgent, "completed").await;
     broker.wait_for(&waiting, "completed").await;
+}
+
+/// Bug caught: the task record never says what a task waits on, so a caller
+/// following a chain cannot tell what holds it or what it ran after.
+#[tokio::test]
+async fn the_record_names_what_a_task_waits_on_while_waiting_and_after_it_runs() {
+    let broker = Broker::new();
+    let first = broker.delegate("slow", "First", json!({})).await;
+    let urgent = broker.delegate("later", "Urgent", json!({})).await;
+    let waiting = broker
+        .delegate(
+            "quick",
+            "Waiting",
+            json!({ "dependsOn": [first], "onBlockerFailure": "run" }),
+        )
+        .await;
+    let before = broker.record(&waiting).await;
+    assert_eq!(before["dependsOn"], json!([first]), "{before}");
+    assert_eq!(before["onBlockerFailure"], "run", "{before}");
+
+    broker
+        .call("edit", json!({ "taskId": waiting, "dependsOn": [urgent] }))
+        .await;
+    let edited = broker.record(&waiting).await;
+    assert_eq!(edited["dependsOn"], json!([urgent]), "{edited}");
+
+    broker.open("slow-gate");
+    broker.open("later-gate");
+    broker.wait_for(&waiting, "completed").await;
+    let ran = broker.record(&waiting).await;
+    assert_eq!(ran["dependsOn"], json!([urgent]), "{ran}");
+    assert!(ran.get("onBlockerFailure").is_none(), "{ran}");
 }
 
 #[tokio::test]

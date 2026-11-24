@@ -59,6 +59,12 @@ pub fn task_view(task: &Task, fields: &[String]) -> Value {
     if let Some(hold) = &task.hold {
         view.insert("hold".into(), json!(hold));
     }
+    if !task.depends_on.is_empty() {
+        view.insert("dependsOn".into(), json!(task.depends_on));
+    }
+    if let Some(policy) = task.on_blocker_failure {
+        view.insert("onBlockerFailure".into(), json!(policy));
+    }
     if !task.attachments.is_empty() {
         view.insert("attachments".into(), json!(task.attachments));
     }
