@@ -9,6 +9,7 @@
 - `oga inspect` now lists the tasks a task waits for, and while it waits, what happens if one of them fails.
 - `--help` and `-h` now print how to use every `oga` command, instead of an unknown option error.
 - `oga tasks --json` now gives each task's full folder, instead of only its last part.
+- A worker that asks you a question with choices, then writes its report, now waits for your answer instead of showing as finished.
 
 ## 0.2.5 - 2026-11-16
 

@@ -180,3 +180,55 @@ async fn a_report_that_quotes_the_marker_mid_way_still_completes() {
     let quoter = broker.delegate("quoter", &[]).await;
     broker.wait_for(&quoter, "completed").await;
 }
+
+/// Bug caught: a worker that asks the owner one question with choices and then
+/// writes its report settles as completed, so nobody is told it is waiting.
+#[tokio::test]
+async fn a_question_with_choices_ahead_of_a_report_parks_the_task() {
+    let broker = Broker::new(&[(
+        "asker",
+        "printf '%s\\n' \
+            'I raised the spacing in 2 commits. No app dev server is running, so there are no screenshots.' \
+            '' \
+            'Question: can you start the app dev server and send me the URL? Port 3000 is the landing site.' \
+            '- A: you start it, and I screenshot every screen, then fix what I see.' \
+            '- B: skip the visual check for now.' \
+            '' \
+            'TL;DR: every screen has more room now.' \
+            '' \
+            'Not verified: how it looks on screen.'",
+    )]);
+    let asker = broker.delegate("asker", &[]).await;
+
+    broker.wait_for(&asker, "needs_input").await;
+    let inspected = broker.inspect(&asker).await;
+    assert_eq!(
+        inspected["question"],
+        "Question: can you start the app dev server and send me the URL? Port 3000 is the landing site.\n\
+         - A: you start it, and I screenshot every screen, then fix what I see.\n\
+         - B: skip the visual check for now.",
+        "{inspected}"
+    );
+}
+
+/// A report that asks itself a question, and lists choices it already made,
+/// is still a finished report.
+#[tokio::test]
+async fn a_report_with_a_question_and_lettered_choices_it_made_still_completes() {
+    let broker = Broker::new(&[(
+        "reporter",
+        "printf '%s\\n' \
+            'TL;DR: the import retries now.' \
+            '' \
+            'Why did it fail? The token expired mid-run.' \
+            '- The retry keeps the first amount.' \
+            '' \
+            'Choices I weighed:' \
+            '- A: retry in the job.' \
+            '- B: retry in the client.' \
+            '' \
+            'Tests pass.'",
+    )]);
+    let reporter = broker.delegate("reporter", &[]).await;
+    broker.wait_for(&reporter, "completed").await;
+}
