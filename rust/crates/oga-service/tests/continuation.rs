@@ -90,6 +90,8 @@ fn task(id: &str, cwd: &str, state: TaskState) -> Task {
         queued_follow_up_items: None,
         hold: None,
         attachments: Vec::new(),
+        depends_on: Vec::new(),
+        on_blocker_failure: None,
     }
 }
 

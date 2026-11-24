@@ -212,6 +212,7 @@ pub(crate) fn load_task(store: &Store, task_id: &str) -> Result<Option<Task>, St
             .map_err(StoreError::from)?;
         if let Some(task) = &mut task {
             oga_store::attach_task_timing(connection, task)?;
+            oga_store::attach_task_dependencies(connection, task)?;
             task.hold = connection
                 .query_row(
                     "SELECT verb,start_at,note,expires_at,args_json FROM task_holds WHERE task_id=?",
@@ -326,6 +327,8 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         queued_follow_up_items: None,
         hold: None,
         attachments,
+        depends_on: Vec::new(),
+        on_blocker_failure: None,
     })
 }
 

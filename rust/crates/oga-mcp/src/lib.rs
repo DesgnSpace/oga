@@ -361,13 +361,13 @@ impl McpServer {
             }
         };
         if let Some(caller_id) = &self.orchestrator_id
-            && self
-                .state
-                .dispatcher
-                .task(caller_id)
-                .is_ok_and(|caller| caller.kind == Some(TaskKind::Orchestrator))
+            && let Ok(caller) = self.state.dispatcher.task(caller_id)
         {
-            request.orchestrator_id = Some(caller_id.clone());
+            if caller.kind == Some(TaskKind::Orchestrator) {
+                request.orchestrator_id = Some(caller.id);
+            } else if request.parent_task_id.is_none() {
+                request.parent_task_id = Some(caller.id);
+            }
         }
         let task = self.state.dispatcher.dispatch(request).await?.task;
         let task = self.enrich_task(task)?;

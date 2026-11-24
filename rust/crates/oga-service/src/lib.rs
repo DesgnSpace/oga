@@ -123,6 +123,7 @@ pub(crate) fn close_attempt(task: &Task, ended_at: &str, always_close: bool) -> 
         profile_id: Some(task.profile_id.clone()),
         model: Some(task.model.clone()),
         session_id: task.session_id.clone(),
+        shipped_prompt: task.shipped_prompt.clone(),
     });
     attempts
 }

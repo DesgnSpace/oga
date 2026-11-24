@@ -299,6 +299,10 @@ pub struct TaskAttempt {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// The prompt this run was sent. A later run sends its own, so only the
+    /// attempt keeps this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipped_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -577,6 +581,14 @@ pub struct Task {
     /// Present only while pending: what this task is waiting on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hold: Option<TaskHoldView>,
+    /// Ids of the tasks this one waits for, in the order they were added.
+    /// Single-task read only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
+    /// What happens to this task if one it waits for does not complete.
+    /// Present only while it still waits. Single-task read only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_blocker_failure: Option<OnBlockerFailure>,
     /// Paths handed to the worker alongside the prompt at dispatch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<String>,

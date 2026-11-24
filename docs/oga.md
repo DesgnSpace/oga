@@ -15,7 +15,7 @@ follow it, or operate without the app open.
 | `oga relearn` | Pick up what changed on disk, or save a hint. Add `--force` to read the project again from scratch. |
 | `oga love` | Read or set defaults for unnamed work. |
 | `oga inflight` | List work a restart would interrupt. |
-| `oga tasks [--query <text>]` | List today's tasks, or search active history. |
+| `oga tasks [--query <text>]` | List today's tasks, or search active history. `--state`, `--archived`, and `--limit` narrow the list; `--json` prints it as JSON, with each task's full folder in `cwd`. |
 | `oga inspect <task-id>` | Print a complete task record. |
 | `oga archive` / `oga restore` | Hide or restore task records. Add `--delete-branch` to archive a worktree task and safely remove its local branch. |
 | `oga cancel <task-id>...` | Stop a task. |
@@ -26,6 +26,8 @@ follow it, or operate without the app open.
 | `oga cleanup` | Preview removable activity and worktrees. |
 | `oga config [cwd]` | Print resolved profiles, models, routes, and brief rules. |
 | `oga version` | Print build information. |
+
+Add `--help` or `-h` to any command to print its usage.
 
 ## Finding code
 
@@ -124,7 +126,12 @@ oga watch <task-id> --timeout 30m &
 also includes tool, command, file, and error events. It exits with `0` when
 there is news, `1` on timeout, and `2` for invalid input.
 
-Use `oga inspect <task-id>` before acting on a settled task. Resume failed,
+Use `oga inspect <task-id>` before acting on a settled task. A task delegated
+with `dependsOn` lists those task ids in its record's `dependsOn`, before and
+after it runs. While it still waits, `onBlockerFailure` says what happens if
+one of them does not complete. Work that a task hands onward names that task in
+`parentTaskId`. Each entry in `attempts` keeps the
+`shippedPrompt` its run was sent. Resume failed,
 cancelled, or blocked work with `oga resume`; use `-m` when the next run needs
 an instruction. Move a task to a different account or model with
 `oga handoff <task-id> --worker <name>`; it keeps its id, request, and place in

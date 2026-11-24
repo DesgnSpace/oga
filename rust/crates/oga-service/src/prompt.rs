@@ -58,12 +58,17 @@ When the work is done and before your final answer, run `oga relearn` once with 
 /// left running in the background ends with it.
 const BACKGROUND_SECTION: &str = "## Background work\nDon't end your turn while background commands or subagents you started are still running; wait for them.";
 
+/// Oga reads a worker's last message to settle its task, and only this marker,
+/// or a question with lettered choices, tells it the worker is waiting.
+const ASKING_SECTION: &str = "## Asking the owner\nIf you need an answer from the owner before you can finish, make the first line of your final message `OGA_NEEDS_INPUT: <your question>`, then give the choices and the rest of your report. Without that line, the task counts as finished and nobody is told you are waiting.";
+
 /// Assemble the brief with its project memories and optional attribution.
 pub fn assemble_worker_message(input: &WorkerPromptInput) -> String {
     let mut sections = vec![input.task.clone()];
     if !input.memories.is_empty() {
         sections.push(memories_section(&input.memories));
     }
+    sections.push(ASKING_SECTION.to_owned());
     sections.push(BACKGROUND_SECTION.to_owned());
     sections.push(RELEARN_SECTION.to_owned());
     if let Some(attribution) = &input.attribution {
@@ -372,7 +377,7 @@ pub fn interpret_worker_outcome(
             },
         };
     }
-    if let Some(question) = prose_question(&output) {
+    if let Some(question) = question_with_choices(&output).or_else(|| prose_question(&output)) {
         return WorkerOutcome {
             state: TaskState::NeedsInput,
             output,
@@ -470,6 +475,42 @@ fn completed_marker(output: &str) -> Option<&str> {
                         .eq_ignore_ascii_case("completed")
                 })
     })
+}
+
+/// A question followed by lettered choices (`A:`, `B)`, ...), wherever it sits:
+/// a worker may ask first and write its report after.
+fn question_with_choices(output: &str) -> Option<String> {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    lines.iter().enumerate().find_map(|(index, question)| {
+        if !question.contains('?') {
+            return None;
+        }
+        let choices: Vec<&str> = lines[index + 1..]
+            .iter()
+            .zip('A'..='Z')
+            .take_while(|(line, letter)| choice_letter(line) == Some(*letter))
+            .map(|(line, _)| *line)
+            .collect();
+        (choices.len() >= 2).then(|| {
+            std::iter::once(*question)
+                .chain(choices)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+    })
+}
+
+/// The letter that labels a choice line: `- A: ...`, `**B)** ...`, `(C) ...`.
+fn choice_letter(line: &str) -> Option<char> {
+    let label = line.trim_start_matches(|character: char| "-*>( ".contains(character));
+    let mut characters = label.chars();
+    let letter = characters.next().filter(char::is_ascii_uppercase)?;
+    let rest = characters.as_str().trim_start_matches(['*', '_']);
+    rest.starts_with([':', ')', '.']).then_some(letter)
 }
 
 fn prose_question(output: &str) -> Option<String> {

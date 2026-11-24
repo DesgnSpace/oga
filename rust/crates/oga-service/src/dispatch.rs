@@ -474,6 +474,8 @@ impl Dispatcher {
             queued_follow_up_items: None,
             hold: None,
             attachments: request.attachments.clone(),
+            depends_on: Vec::new(),
+            on_blocker_failure: None,
         };
         let prompt = WorkerPromptInput {
             task: request.prompt,

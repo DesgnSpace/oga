@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use oga_domain::{
-    ArchivedFilter, ConsumerCursor, ListOrder, MemoryEntry, Profile, ProfileFailure,
+    ArchivedFilter, ConsumerCursor, HoldArgs, ListOrder, MemoryEntry, Profile, ProfileFailure,
     ProfileSuccess, ScopeGrant, SpendTotals, StateFilter, Task, TaskEvent, TaskHold, TaskKind,
     TaskListQuery, TaskMatch, TaskScope, TaskState, TaskTurn, TaskTurnStatus,
 };
@@ -50,6 +50,33 @@ pub fn attach_task_timing(
     let timing = task_timing(connection, &task.id)?;
     task.duration_ms = timing.duration_ms;
     task.running_since = timing.running_since;
+    Ok(())
+}
+
+/// Fills in what the task waits for. The hold carries `onBlockerFailure`, so it
+/// is known only while the task still waits.
+pub fn attach_task_dependencies(
+    connection: &rusqlite::Connection,
+    task: &mut Task,
+) -> rusqlite::Result<()> {
+    let mut statement = connection.prepare_cached(
+        "SELECT blocker_id FROM task_dependencies WHERE task_id=? ORDER BY rowid",
+    )?;
+    task.depends_on = statement
+        .query_map([&task.id], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    if task.depends_on.is_empty() {
+        return Ok(());
+    }
+    task.on_blocker_failure = connection
+        .query_row(
+            "SELECT args_json FROM task_holds WHERE task_id=?",
+            [&task.id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|args| serde_json::from_str::<HoldArgs>(&args).ok())
+        .and_then(|args| args.on_blocker_failure);
     Ok(())
 }
 
@@ -529,6 +556,8 @@ fn task_from_row(r: &Row<'_>) -> rusqlite::Result<Task> {
         queued_follow_up_items: None,
         hold: None,
         attachments: Vec::new(),
+        depends_on: Vec::new(),
+        on_blocker_failure: None,
     })
 }
 

@@ -8,6 +8,12 @@
 - A task that was rearmed can now have its wait changed with `oga edit`, so one finished task that will never run again no longer holds it back for good.
 - A worker that starts its last message with `needs_input:` and then writes a report now stops and asks you, so the tasks waiting on it stay waiting.
 - `oga watch` no longer says the connection was lost when its time simply ran out, and it reports a task that finished while it was not looking.
+- `oga inspect` now lists the tasks a task waits for, and while it waits, what happens if one of them fails.
+- `--help` and `-h` now print how to use every `oga` command, instead of an unknown option error.
+- `oga tasks --json` now gives each task's full folder, instead of only its last part.
+- A worker that asks you a question with choices, then writes its report, now waits for your answer instead of showing as finished.
+- Work that a task hands on to other workers now names that task as its parent, so you can see where each piece came from.
+- A task's earlier runs now keep the prompt each one was sent, so a reply or resume no longer hides the first brief.
 
 ## 0.2.5 - 2026-11-16
 
