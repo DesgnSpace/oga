@@ -7,6 +7,7 @@
 - A worker that starts its last message with `needs_input:` and then writes a report now stops and asks you, so the tasks waiting on it stay waiting.
 - `oga watch` no longer says the connection was lost when its time simply ran out, and it reports a task that finished while it was not looking.
 - `oga inspect` now lists the tasks a task waits for, and while it waits, what happens if one of them fails.
+- `--help` and `-h` now print how to use every `oga` command, instead of an unknown option error.
 
 ## 0.2.5 - 2026-11-16
 

@@ -255,3 +255,31 @@ fn inspect_names_what_a_waiting_task_waits_on() {
     assert_eq!(record["onBlockerFailure"], "run", "{record}");
     assert!(free.get("dependsOn").is_none(), "{free}");
 }
+
+/// Bug caught: a subcommand rejects `--help` as an unknown option, so a
+/// caller asking how to use it gets an error instead of its usage.
+#[test]
+fn every_command_prints_its_usage_on_help() {
+    let home = TempDir::new().expect("temporary home");
+    // Nothing listens here, so a command that ignores the flag cannot reach a broker.
+    let port = free_port();
+    let commands = [
+        "serve", "watch", "tail", "query", "relearn", "love", "inflight", "delegate", "tasks",
+        "inspect", "archive", "restore", "cancel", "resume", "handoff", "edit", "complete",
+        "cleanup", "config", "version", "help",
+    ];
+    for command in commands {
+        for flag in ["--help", "-h"] {
+            let output = oga(home.path(), port, &[command, flag]);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.to_lowercase().contains("usage:"),
+                "oga {command} {flag} printed {stdout:?} and {:?}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    let after_an_id = oga(home.path(), port, &["inspect", "abc", "--help"]);
+    assert!(after_an_id.status.success());
+    assert!(String::from_utf8_lossy(&after_an_id.stdout).starts_with("Usage: oga inspect"));
+}

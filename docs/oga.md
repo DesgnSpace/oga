@@ -15,7 +15,7 @@ follow it, or operate without the app open.
 | `oga relearn` | Pick up what changed on disk, or save a hint. Add `--force` to read the project again from scratch. |
 | `oga love` | Read or set defaults for unnamed work. |
 | `oga inflight` | List work a restart would interrupt. |
-| `oga tasks [--query <text>]` | List today's tasks, or search active history. |
+| `oga tasks [--query <text>]` | List today's tasks, or search active history. `--state`, `--archived`, and `--limit` narrow the list; `--json` prints it as JSON. |
 | `oga inspect <task-id>` | Print a complete task record. |
 | `oga archive` / `oga restore` | Hide or restore task records. Add `--delete-branch` to archive a worktree task and safely remove its local branch. |
 | `oga cancel <task-id>...` | Stop a task. |
@@ -26,6 +26,8 @@ follow it, or operate without the app open.
 | `oga cleanup` | Preview removable activity and worktrees. |
 | `oga config [cwd]` | Print resolved profiles, models, routes, and brief rules. |
 | `oga version` | Print build information. |
+
+Add `--help` or `-h` to any command to print its usage.
 
 ## Finding code
 

@@ -136,6 +136,13 @@ async fn run(args: Vec<String>) -> CliResult<i32> {
         return Ok(0);
     };
 
+    if asks_for_help(&args[1..])
+        && let Some(usage) = command_usage(command)
+    {
+        println!("{usage}");
+        return Ok(0);
+    }
+
     match command {
         "serve" | "--stdio" => {
             run_serve(&args[1..], command == "--stdio").await?;
@@ -370,7 +377,7 @@ fn run_version() -> CliResult<i32> {
 }
 
 async fn run_query(args: &[String]) -> CliResult<i32> {
-    if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
+    if asks_for_help(args) {
         println!(
             "Usage: oga query [--in PATH]... [--limit N] [--code] \"<question>\" | oga query --init [--force]"
         );
@@ -516,7 +523,7 @@ fn query_broker_error(client: &LoopbackClient, error: oga_client::ClientError) -
 }
 
 async fn run_relearn_worker(args: &[String]) -> CliResult<i32> {
-    if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
+    if asks_for_help(args) {
         println!(
             "Usage: oga relearn '[{{\"hints\":[\"<words>\"],\"path\":\"<file you read>\",\"symbol\":\"<optional symbol>\"}}]'"
         );
@@ -633,10 +640,7 @@ async fn run_relearn(args: &[String]) -> CliResult<i32> {
     if env::var_os("OGA_TASK_ID").is_some() {
         return run_relearn_worker(args).await;
     }
-    if args
-        .first()
-        .is_some_and(|arg| arg == "--help" || arg == "-h")
-    {
+    if asks_for_help(args) {
         println!(
             "Usage: oga relearn [--force] | oga relearn \"<hint words|alias>\" <path>[#<symbol>] | oga relearn '<json>'"
         );
@@ -787,10 +791,13 @@ Usage: oga <command> [options]
                        or --kind to choose who runs it, --effort for how hard
                        it thinks, --worktree to run it in its own checkout,
                        --cwd to run it elsewhere.
-  tasks [options]      List today's tasks. Add --query or -q to search history.
-  inspect <task-id>    Show one task record.
+  tasks [options]      List today's tasks. Add --query or -q to search history,
+                       --state to list one state, --archived for archived
+                       tasks, --limit N for at most N rows, --json for JSON.
+  inspect <task-id>    Show one task record, as JSON.
   archive <task-id>... Archive tasks. Add --delete-branch to remove each
                         worktree's local branch safely.
+  restore <task-id>... Bring archived tasks back.
   cancel <task-id>...  Cancel tasks.
   resume <task-id>     Resume a task, optionally with -m instruction. Add
                        --start-at 4h (or an exact time) to have it start later
@@ -827,6 +834,40 @@ First run:
      finds.
   3. Ask your agent to delegate a task, then follow it:
      oga watch <task-id> &"#
+}
+
+fn asks_for_help(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--help" || arg == "-h")
+}
+
+/// What `oga <command> --help` prints. Commands with their own usage text use
+/// it; the rest print their entry from `oga help`, so the two never disagree.
+/// `None` for commands that answer `--help` themselves.
+fn command_usage(command: &str) -> Option<String> {
+    match command {
+        "delegate" | "love" | "query" | "relearn" | "help" | "--help" | "-h" | "--stdio" => None,
+        "watch" => Some(watch_usage()),
+        "tail" => Some(tail_usage().to_owned()),
+        "cleanup" => Some(cleanup_usage().to_owned()),
+        _ => help_entry(command),
+    }
+}
+
+/// The command's entry in `help_text`: its first line and the deeper-indented
+/// lines that continue it, shifted to sit under a `Usage: oga` prefix.
+fn help_entry(command: &str) -> Option<String> {
+    let mut lines = help_text().lines().skip_while(|line| {
+        !line
+            .strip_prefix("  ")
+            .and_then(|entry| entry.strip_prefix(command))
+            .is_some_and(|rest| rest.starts_with(' '))
+    });
+    let mut usage = format!("Usage: oga {}", lines.next()?.trim_start());
+    for line in lines.take_while(|line| line.starts_with("   ")) {
+        usage.push_str("\n         ");
+        usage.push_str(line);
+    }
+    Some(usage)
 }
 
 fn unknown_command_message(command: &str) -> String {
@@ -3389,7 +3430,7 @@ fn profiles_from_store() -> Vec<Profile> {
 }
 
 async fn run_love(args: &[String]) -> CliResult<i32> {
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+    if asks_for_help(args) {
         println!("{LOVE_USAGE}");
         return Ok(0);
     }
