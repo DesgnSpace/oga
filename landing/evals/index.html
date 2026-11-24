@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Which Models Work Best With Oga — Oga Evals</title>
+  <meta name="description" content="We test how well each model works with Oga: follow a brief, stay in scope, ask when blocked, report honestly, and lead other models. Pick a model for Oga here.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://oga.desgn.space/evals/">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/evals/evals.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Oga">
+  <meta property="og:title" content="Which Models Work Best With Oga — Oga Evals">
+  <meta property="og:description" content="We test how well each model works with Oga: follow a brief, stay in scope, ask when blocked, report honestly, and lead other models.">
+  <meta property="og:url" content="https://oga.desgn.space/evals/">
+  <meta property="og:image" content="https://oga.desgn.space/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Oga — Desktop orchestrator for coding agents">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Which Models Work Best With Oga — Oga Evals">
+  <meta name="twitter:description" content="We test how well each model works with Oga: follow a brief, stay in scope, ask when blocked, report honestly, and lead other models.">
+  <meta name="twitter:image" content="https://oga.desgn.space/og-image.png">
+</head>
+<body class="evals-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <a class="wordmark" href="/">
+      <img src="/logo.svg" alt="Oga logo" width="32" height="32">
+      <span aria-hidden="true">Oga</span>
+    </a>
+    <nav class="header-nav">
+      <a class="header-link" href="/docs/">Docs</a>
+      <a class="header-link" href="/#install">Install</a>
+    </nav>
+  </header>
+
+  <main id="main" class="evals">
+    <header class="evals-hero">
+      <p class="evals-eyebrow">Model evals</p>
+      <h1>Which models work best with Oga</h1>
+      <p class="evals-lede">We give each model the same small jobs through Oga and check how it works. Does it follow the brief, stay inside its files, ask when it is stuck, and report honestly? As a lead, does it hand work to other models and check what comes back?</p>
+      <p class="evals-aside">This is not a ranking of the smartest model. A strong model can still score low here if it ignores the brief.</p>
+    </header>
+
+    <section class="evals-section" aria-labelledby="ranking-title">
+      <div class="evals-section-head">
+        <h2 id="ranking-title">Ranking</h2>
+        <p class="evals-muted" id="evals-meta" hidden></p>
+      </div>
+      <div id="evals-ranking" aria-live="polite">
+        <p class="evals-state">Loading results…</p>
+      </div>
+      <p class="evals-muted evals-note">A score counts the checks a model passed plus the points a reviewer gave it, out of the most it could get. Select a model to compare it.</p>
+    </section>
+
+    <section class="evals-section" id="compare" aria-labelledby="compare-title" hidden>
+      <div class="evals-section-head">
+        <h2 id="compare-title">Compare 2 models</h2>
+        <p class="evals-muted">Open a job to read the reviewer's note and every check. Copy the page address to share this comparison.</p>
+      </div>
+      <div class="compare-bar">
+        <div class="picker" data-side="a"></div>
+        <button type="button" class="swap" id="compare-swap" aria-label="Swap the 2 models">
+          <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>
+        </button>
+        <div class="picker" data-side="b"></div>
+      </div>
+      <div id="compare-result"></div>
+    </section>
+
+    <section class="evals-section" aria-labelledby="cases-title">
+      <div class="evals-section-head">
+        <h2 id="cases-title">What we test</h2>
+        <p class="evals-muted">On every job we also check the house rules: commit message format, only the files it was given, no stray files, and a report in the shape we asked for.</p>
+      </div>
+      <dl class="evals-cases">
+        <div>
+          <dt>Fix a bug</dt>
+          <dd>Fix a planted bug without editing the test that catches it, then commit cleanly.</dd>
+        </div>
+        <div>
+          <dt>Stay in scope</dt>
+          <dd>The real fix sits in a file the model may not change. A good model stops and asks. A bad one hard-codes a way around it.</dd>
+        </div>
+        <div>
+          <dt>Build with tests</dt>
+          <dd>Build a small feature, with tests that would catch real bugs.</dd>
+        </div>
+        <div>
+          <dt>Lead other models</dt>
+          <dd>Split a job into 2 chained Oga tasks for another model, then check the result and report.</dd>
+        </div>
+      </dl>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>Oga</strong>
+      <span>&copy; 2026 Oga.</span>
+    </div>
+    <div class="footer-meta">
+      <a href="/docs/">Docs</a>
+      <a href="/evals/">Model evals</a>
+      <a href="https://desgn.space">Desgn</a>
+      <a href="https://github.com/DesgnSpace/oga" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </div>
+  </footer>
+  <script src="/evals/evals.js"></script>
+</body>
+</html>
