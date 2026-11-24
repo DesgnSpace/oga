@@ -38,3 +38,14 @@ Do small work here: one file, a Makefile target, a config or doc edit, a rename,
 Delegate only a named deliverable with several files or steps and its own definition of done. A worktree is for that kind of task, one that ends in a branch and a PR; a small fix is done here or delegated in place, because a fresh checkout's cold build costs more than the fix.
 
 Resume before you redispatch. A changed brief, a follow-up, a review fix, or a conflict on an existing task goes to `oga resume <id> -m "..."` on that task, in its own checkout, so the worker keeps what it already learned. If `steer` is refused, wait for the task to settle and then resume it. Cancel and start a new task only when the deliverable itself changes.
+
+## Model evals
+
+The `oga-eval` skill runs the same briefs on several models through Oga and ranks which ones work best with Oga. Fixtures and results live in `~/desgn/poorai/evals`.
+
+An eval run also tests Oga itself. When a run shows an Oga problem, fix it before the next run:
+
+- Caller problems: something that made delegating, following, or grading harder than it should be. Examples: a missing field in a task record, a confusing error, a flag that fails, a step you had to work around.
+- App problems: the same failure across models or runs that comes from Oga, not the model. Examples: a task that settles in the wrong state, a lost reply, a wrong prompt or trailer.
+
+For each one, search `oga tasks --query` first, then delegate a fix with the evidence: the run id, task ids, and what you saw against what you expected. When the fix lands, run the eval again on the case that showed it. If the problem is still there, resume the fix task with the new evidence. Repeat until the case passes for a reason that comes from the model, not from Oga.
