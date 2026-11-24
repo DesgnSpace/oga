@@ -9,6 +9,7 @@ import type { ConnectionState } from "@/state/sidebar-state";
 import { loadTaskNotifications } from "@/state/notification-preferences";
 import { readStorage, writeStorage } from "@/state/storage";
 import { forgetArchivedTaskViews } from "@/state/taskDetail";
+import { Home } from "@/screens/home";
 import { Sidebar } from "@/screens/sidebar";
 import { LoadingState } from "@/components/atoms/ListState";
 import { type Route, RouterProvider, handlesClick, routePath, useRouter } from "@/router";
@@ -115,93 +116,6 @@ function OfflineBanner({ connection, onRetry }: { connection: ConnectionState; o
   );
 }
 
-function EmptyWorkspace({ sidebarController, onOpenSettings }: { sidebarController: SidebarController; onOpenSettings: (tab: "workers" | "connections") => void }) {
-  const sidebar = useSyncExternalStore(
-    (listener) => sidebarController.subscribe(listener),
-    () => sidebarController.snapshot,
-  );
-  const hasTasks = sidebar.tasks.length > 0;
-  const hasConnectedAi = sidebar.profiles.length > 0;
-
-  if (sidebar.loadState === "loading" && !hasTasks) {
-    return (
-      <div id="page-title">
-        <LoadingState label="Loading your workspace…" />
-      </div>
-    );
-  }
-
-  if (sidebar.loadState === "error" && !hasTasks) {
-    return (
-      <>
-        <h1 id="page-title" className="page-title">Your workspace</h1>
-        <p className="app-description">Couldn&apos;t load your workspace.</p>
-        <button className="text-button" type="button" onClick={() => sidebarController.refresh()}>
-          Try again
-        </button>
-      </>
-    );
-  }
-
-  if (sidebar.loadState === "ready" && !hasConnectedAi) {
-    return (
-      <div className="app-first-run-card">
-        <h1 id="page-title" className="page-title">Connect your AI to start delegating</h1>
-        <p className="app-description">Choose an AI account for the work you want to hand off.</p>
-        <button className="settings-button settings-button-primary" type="button" onClick={() => onOpenSettings("workers")}>
-          Connect your AI
-        </button>
-      </div>
-    );
-  }
-
-  if (hasTasks) {
-    return (
-      <>
-        <h1 id="page-title" className="page-title">Your workspace</h1>
-        <p className="app-description">Choose a task from the sidebar.</p>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <h1 id="page-title" className="page-title">Get your first task running</h1>
-      <ol className="app-first-run-steps">
-        <li>
-          Add a worker in{" "}
-          <a
-            href="/settings"
-            onClick={(event) => {
-              if (!handlesClick(event)) return;
-              event.preventDefault();
-              onOpenSettings("workers");
-            }}
-          >
-            Open worker settings
-          </a>
-          .
-        </li>
-        <li>
-          Connect your editor or agent in{" "}
-          <a
-            href="/settings"
-            onClick={(event) => {
-              if (!handlesClick(event)) return;
-              event.preventDefault();
-              onOpenSettings("connections");
-            }}
-          >
-            Open connection settings
-          </a>
-          .
-        </li>
-        <li>Delegate a task from there. It shows up here.</li>
-      </ol>
-    </>
-  );
-}
-
 function NotFoundScreen({ onBack }: { onBack: () => void }) {
   return (
     <>
@@ -228,6 +142,8 @@ function contentClassName(route: Route): string {
       return "app-content app-content-task";
     case "icons":
       return "app-content app-content-icons";
+    case "home":
+      return "app-content app-content-home";
     default:
       return "app-content";
   }
@@ -389,7 +305,7 @@ function Shell() {
                 onFocusRequestConsumed={consumeFocusRequest}
               />}
               {underlyingRoute.kind === "home" && (
-                <EmptyWorkspace sidebarController={sidebarController} onOpenSettings={openSettings} />
+                <Home sidebarController={sidebarController} onOpenSettings={openSettings} onOpenTask={selectTask} />
               )}
               {underlyingRoute.kind === "icons" && <IconGallery />}
               {underlyingRoute.kind === "not-found" && <NotFoundScreen onBack={() => navigate({ kind: "home" })} />}

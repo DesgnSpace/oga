@@ -36,7 +36,7 @@ and renumbering them would move every screen. Where a reference calls for
 | `--radius-control` | 8px | Buttons, icon buttons, inputs, selects, pickers |
 | `--radius-row` | 8px | List rows and their hover and selection fill, inset blocks |
 | `--radius-panel` | 12px | Cards, the transcript card, the changes panel, the reply box, menus, popovers, toasts |
-| `--radius-window` | 20px | Dialogs |
+| `--radius-window` | 20px | Dialogs, the home card |
 | `--radius-full` | 999px | Capsules: scrollbars, switch tracks, bars |
 
 Nested corners stay concentric: an element inside a rounded surface takes
@@ -105,6 +105,8 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   content, with `--space-7` side padding, `--space-7` above the title, and
   `--space-8` below the last section.
 - Below 800px: `--space-5` sides, `--space-6` top, `--space-7` bottom.
+- Home is the one wider screen: its card is at most `--home-max` (72rem)
+  wide, with `--space-5` around it (`--space-3` below 800px).
 - `--content-max` is the one reading column every main-pane screen shares:
   empty states and the task screen's transcript, messages, and composer all
   size to it, so their left and right edges line up. Settings reads as a
@@ -192,6 +194,32 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 - A row that opens something (a worker) stretches its open button over the
   row and keeps the control above it; a chevron at the far right shows it
   opens.
+
+### Home
+
+- One card fills the pane: `--color-surface`, a 1px `--color-border`
+  edge, `--radius-window`, no shadow. Each column scrolls on its own.
+- Left column: a `--text-lg` title, a muted `--text-md` subtitle, and a
+  count pill on the right. Below it, the recent tasks as bordered cards
+  `--space-2` apart, tasks that need the user first, then a muted hint line.
+- A task card: a `--control-height` tile with the status icon, the title
+  (600) over a muted meta line (worker · project · time), and a status tag
+  on the right. Only "Needs you" (ink) and a problem (danger) tint the tile
+  and tag; every other state stays grey. Hover and the picked card take
+  `--color-border-strong`; the picked card also fills with `--color-hover`.
+- Right column, `--home-preview-width` (20rem) wide, behind a hairline: the
+  picked task's request in a tinted bubble, the worker's latest words as
+  plain text, and a facts card with uppercase mono labels. Other tasks that
+  need the user show as outlined pills under it. A box at the bottom with a
+  round send button opens the task with its reply box focused.
+- When the card is narrower than 640px the preview hides, and picking a
+  task opens it.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `--color-border-strong` | `#dcdcdc` | `#424242` | A hovered or picked card's edge, one step darker than a hairline |
+| `--home-max` | 72rem | 72rem | Widest the home card grows |
+| `--home-preview-width` | 20rem | 20rem | The home preview column |
 
 ### Changed files panel
 
