@@ -1275,7 +1275,7 @@ impl Dispatcher {
         }
     }
 
-    fn resume_rearmed(&self, hold: TaskHold) {
+    pub(crate) fn resume_rearmed(&self, hold: TaskHold) {
         let dispatcher = self.clone();
         tokio::spawn(async move {
             if let Err(error) = crate::resume::resume_rearmed(&dispatcher, &hold).await {

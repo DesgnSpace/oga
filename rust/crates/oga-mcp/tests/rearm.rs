@@ -348,3 +348,44 @@ async fn cancel_and_rearm_false_drop_a_waiting_rearm() {
     assert_eq!(runs.iter().filter(|run| *run == "a").count(), 1, "{runs:?}");
     assert_eq!(runs.iter().filter(|run| *run == "b").count(), 1, "{runs:?}");
 }
+
+/// Bug caught: a rearmed task waits on a prerequisite that finished and will
+/// never run again, and the refusal on `edit` leaves no way to fix the wait.
+#[tokio::test]
+async fn a_rearmed_wait_can_drop_a_prerequisite_that_will_not_run_again() {
+    let broker = Broker::new();
+    let head = broker.delegate("head", "Head", &[]).await;
+    let b = broker.delegate("b", "B", &[]).await;
+    broker.wait_for(&b, "completed").await;
+    let a = broker.delegate("a", "A", &[&head, &b]).await;
+    broker.open_head();
+    broker.wait_for(&a, "completed").await;
+
+    broker.rearm(&a).await;
+    broker.rerun_head(&head).await;
+    // Head ran again; B did not and will not, so the wait never ends.
+    broker.stays(&a, "pending").await;
+
+    let edited = broker
+        .call("edit", json!({ "taskId": a, "removeDependsOn": [b] }))
+        .await;
+    assert!(error(&edited).is_empty(), "{edited}");
+    broker.wait_for(&a, "completed").await;
+    let runs = broker.runs();
+    assert_eq!(runs.iter().filter(|run| *run == "a").count(), 2, "{runs:?}");
+}
+
+/// Bug caught: an edit of a rearmed wait empties it, and the task parks with
+/// nothing that could release it.
+#[tokio::test]
+async fn a_rearmed_wait_cannot_be_emptied_by_an_edit() {
+    let broker = Broker::new();
+    let (head, a) = broker.head_and_dependent().await;
+    broker.rearm(&a).await;
+
+    let emptied = broker
+        .call("edit", json!({ "taskId": a, "removeDependsOn": [head] }))
+        .await;
+    assert!(error(&emptied).contains("rearm: false"), "{emptied}");
+    assert_eq!(broker.state(&a).await, "pending");
+}

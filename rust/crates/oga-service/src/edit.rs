@@ -2,7 +2,9 @@
 //! before it started, and rearming a settled one to run again after its
 //! prerequisites.
 
-use oga_domain::{HoldArgs, HoldVerb, OnBlockerFailure, Task, TaskHold, TaskKind, TaskState};
+use oga_domain::{
+    HoldArgs, HoldVerb, OnBlockerFailure, RearmHoldArgs, Task, TaskHold, TaskKind, TaskState,
+};
 use oga_store::{StoreError, append_event};
 use rusqlite::params;
 use serde_json::{Map, Value, json};
@@ -123,6 +125,12 @@ pub async fn edit(
     }
     let store = dispatcher.store();
     let old = require_task(store, &request.task_id)?;
+    if let Some(hold) = holds::get_hold(store, &old.id)?
+        && old.state == TaskState::Pending
+        && let Some(rearm) = hold.args.rearm.clone()
+    {
+        return edit_rearmed(dispatcher, &request, &old, &hold, &rearm);
+    }
     require_editable(&old, &request)?;
     require_existing_worktree(&old)?;
 
@@ -365,6 +373,129 @@ fn rearm(dispatcher: &Dispatcher, request: &EditRequest) -> Result<Task, Continu
     Ok(task)
 }
 
+/// Changes what a rearmed task waits on. The rearm keeps the time it was made
+/// and the state the task settled in, so a prerequisite that already completed
+/// again since still counts. A wait left satisfied by the change starts the
+/// run at once.
+fn edit_rearmed(
+    dispatcher: &Dispatcher,
+    request: &EditRequest,
+    old: &Task,
+    hold: &TaskHold,
+    rearm: &RearmHoldArgs,
+) -> Result<Task, ContinuationError> {
+    let store = dispatcher.store();
+    if request.changes_run_settings() {
+        return Err(refuse_run_settings(old));
+    }
+    if request.changes_nothing() {
+        return Err(ContinuationError::Refusal(format!(
+            "nothing to change: pass dependsOn, addDependsOn, removeDependsOn, onBlockerFailure or instruction, or rearm: false to drop the rearm: {}",
+            old.id
+        )));
+    }
+    let current_ids = dependencies::dependency_ids(store, &old.id)?;
+    let prerequisite_ids = prerequisite_ids(&old.id, &current_ids, request)?;
+    if prerequisite_ids.is_empty() {
+        return Err(ContinuationError::Refusal(format!(
+            "task {} would wait on no other task; pass rearm: false to drop the rearm instead",
+            old.id
+        )));
+    }
+    let prerequisites = prerequisite_ids
+        .iter()
+        .map(|id| {
+            lifecycle::load_task(store, id)?.ok_or_else(|| {
+                ContinuationError::Refusal(format!("unknown prerequisite task: {id}"))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let policy = match request.on_blocker_failure {
+        Some(policy) => policy,
+        None => dependencies::blocker_policy(store, &old.id)?,
+    };
+    let instruction = request
+        .instruction
+        .as_deref()
+        .map(str::trim)
+        .filter(|instruction| !instruction.is_empty())
+        .map(str::to_owned);
+    let now = now_iso();
+    let mut waiting = dependencies::rearm_hold(
+        &old.id,
+        &prerequisites,
+        policy,
+        instruction
+            .clone()
+            .or_else(|| hold.args.instruction.clone()),
+        rearm.previous_state,
+        &now,
+    );
+    waiting.args.rearm = Some(rearm.clone());
+    waiting.created_at = hold.created_at.clone();
+    let mut changes = Map::new();
+    if prerequisite_ids != current_ids {
+        changes.insert("dependsOn".into(), json!(prerequisite_ids));
+    }
+    if request.on_blocker_failure.is_some() {
+        changes.insert("onBlockerFailure".into(), json!(policy));
+    }
+    store.transaction(|tx| {
+        let removed = tx.execute(
+            "DELETE FROM task_holds WHERE task_id=? AND updated_at=?",
+            params![old.id, hold.updated_at],
+        )?;
+        let changed = tx.execute(
+            "UPDATE tasks SET on_blocker_failure=?,updated_at=? WHERE id=? AND state='pending'",
+            params![policy_column(policy), now, old.id],
+        )?;
+        if removed != 1 || changed != 1 {
+            return Err(StoreError::Refusal(format!(
+                "task changed while it was being edited; read it again and retry: {}",
+                old.id
+            )));
+        }
+        if prerequisite_ids != current_ids {
+            dependencies::replace_dependencies(tx, &old.id, &prerequisite_ids, &now)?;
+        }
+        if !changes.is_empty() {
+            append_event(
+                tx,
+                &old.id,
+                "edited",
+                TaskState::Pending,
+                &Value::Object(changes.clone()),
+                &now,
+                None,
+            )?;
+        }
+        if let Some(instruction) = &instruction {
+            append_event(
+                tx,
+                &old.id,
+                "instruction_added",
+                TaskState::Pending,
+                &json!({"instruction": instruction}),
+                &now,
+                None,
+            )?;
+        }
+        holds::insert_hold(tx, &waiting)
+    })?;
+    let blockers = dependencies::rearm_blockers(store, &old.id, &rearm.at)?;
+    if dependencies::prerequisites_met(policy, &blockers) {
+        dispatcher.resume_rearmed(waiting);
+    }
+    require_task(store, &old.id)
+}
+
+fn refuse_run_settings(task: &Task) -> ContinuationError {
+    ContinuationError::Refusal(format!(
+        "rearm takes only instruction, dependsOn, addDependsOn, removeDependsOn and onBlockerFailure; resume or hand off task {} to change the rest",
+        task.id
+    ))
+}
+
 fn require_rearmable(
     task: &Task,
     hold: Option<&TaskHold>,
@@ -380,7 +511,7 @@ fn require_rearmable(
         TaskState::Completed | TaskState::Failed | TaskState::Cancelled | TaskState::Blocked => {}
         TaskState::Pending if hold.is_some_and(|hold| hold.args.rearm.is_some()) => {
             return Err(ContinuationError::Refusal(format!(
-                "task {} is already rearmed; pass rearm: false to drop that first",
+                "task {} is already rearmed. Change its wait with dependsOn, addDependsOn or removeDependsOn, or pass rearm: false to drop it",
                 task.id
             )));
         }
@@ -399,10 +530,7 @@ fn require_rearmable(
         )));
     }
     if request.changes_run_settings() {
-        return Err(ContinuationError::Refusal(format!(
-            "rearm takes only instruction, dependsOn, addDependsOn, removeDependsOn and onBlockerFailure; resume or hand off task {} to change the rest",
-            task.id
-        )));
+        return Err(refuse_run_settings(task));
     }
     Ok(())
 }
@@ -472,7 +600,7 @@ fn require_editable(task: &Task, request: &EditRequest) -> Result<(), Continuati
     }
     if task.shipped_prompt.is_some() {
         return Err(ContinuationError::Refusal(format!(
-            "task {} has already run, so its brief and wait are fixed; steer it while it runs, or resume it with an instruction",
+            "task {} has already run, so its brief and wait are fixed. Steer it while it runs, resume it with an instruction, or cancel it and delegate again with the new brief",
             task.id
         )));
     }
@@ -487,7 +615,7 @@ fn require_editable(task: &Task, request: &EditRequest) -> Result<(), Continuati
         }
         TaskState::Queued | TaskState::PreparingCheckout => {
             return Err(ContinuationError::Refusal(format!(
-                "task {} is starting now, so it can no longer be edited; steer it once it runs",
+                "task {} is starting now, so it can no longer be edited. Steer it once it runs, or cancel it and delegate again with the new brief",
                 task.id
             )));
         }
