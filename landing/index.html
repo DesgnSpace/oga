@@ -52,12 +52,27 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
+  <svg class="icon-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+    <symbol id="i-search" viewBox="0 0 256 256"><path d="M228.24,219.76l-51.38-51.38a86.15,86.15,0,1,0-8.48,8.48l51.38,51.38a6,6,0,0,0,8.48-8.48ZM38,112a74,74,0,1,1,74,74A74.09,74.09,0,0,1,38,112Z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 256 256"><path d="M82,64a6,6,0,0,1,6-6H216a6,6,0,0,1,0,12H88A6,6,0,0,1,82,64Zm134,58H88a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12Zm0,64H88a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12ZM44,54A10,10,0,1,0,54,64,10,10,0,0,0,44,54Zm0,128a10,10,0,1,0,10,10A10,10,0,0,0,44,182Zm0-64a10,10,0,1,0,10,10A10,10,0,0,0,44,118Z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 256 256"><path d="M220.07,176.94C214.41,167.2,206,139.73,206,104a78,78,0,1,0-156,0c0,35.74-8.42,63.2-14.08,72.94A14,14,0,0,0,48,198H90.48a38,38,0,0,0,75,0H208a14,14,0,0,0,12.06-21.06ZM128,218a26,26,0,0,1-25.29-20h50.58A26,26,0,0,1,128,218Zm81.71-33a1.9,1.9,0,0,1-1.7,1H48a1.9,1.9,0,0,1-1.7-1,2,2,0,0,1,0-2C53.87,170,62,139.69,62,104a66,66,0,1,1,132,0c0,35.68,8.14,65.95,15.71,79A2,2,0,0,1,209.71,185Z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 256 256"><path d="M231.36,116.19,87.28,28.06a14,14,0,0,0-14.18-.27A13.69,13.69,0,0,0,66,39.87V216.13a13.69,13.69,0,0,0,7.1,12.08,14,14,0,0,0,14.18-.27l144.08-88.13a13.82,13.82,0,0,0,0-23.62Zm-6.26,13.38L81,217.7a2,2,0,0,1-2.06,0,1.78,1.78,0,0,1-1-1.61V39.87a1.78,1.78,0,0,1,1-1.61A2.06,2.06,0,0,1,80,38a2,2,0,0,1,1,.31L225.1,126.43a1.82,1.82,0,0,1,0,3.14Z"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 256 256"><path d="M232,128A104,104,0,1,1,24,128A104,104,0,1,1,232,128Zm-12,0a92,92,0,1,0-184,0,92,92,0,1,0,184,0ZM98.95,119.05 89.05,128.95 118,157.9 166.95,108.95 157.05,99.05 118,138.1Z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 256 256"><path d="M216,74H130L101.73,52.8a14,14,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V200a14,14,0,0,0,14,14H216.89A13.12,13.12,0,0,0,230,200.89V88A14,14,0,0,0,216,74Zm2,126.89a1.11,1.11,0,0,1-1.11,1.11H40a2,2,0,0,1-2-2V64a2,2,0,0,1,2-2H93.33a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h88a2,2,0,0,1,2,2Z"/></symbol>
+    <symbol id="i-question" viewBox="0 0 256 256"><path d="M138,180a10,10,0,1,1-10-10A10,10,0,0,1,138,180ZM128,74c-21,0-38,15.25-38,34v4a6,6,0,0,0,12,0v-4c0-12.13,11.66-22,26-22s26,9.87,26,22-11.66,22-26,22a6,6,0,0,0-6,6v8a6,6,0,0,0,12,0v-2.42c18.11-2.58,32-16.66,32-33.58C166,89.25,149,74,128,74Zm102,54A102,102,0,1,1,128,26,102.12,102.12,0,0,1,230,128Zm-12,0a90,90,0,1,0-90,90A90.1,90.1,0,0,0,218,128Z"/></symbol>
+    <symbol id="i-history" viewBox="0 0 256 256"><path d="M134,80v44.6l37.09,22.25a6,6,0,0,1-6.18,10.3l-40-24A6,6,0,0,1,122,128V80a6,6,0,0,1,12,0Zm-6-46A93.4,93.4,0,0,0,61.51,61.56c-8.58,8.68-16,17-23.51,25.8V64a6,6,0,0,0-12,0v40a6,6,0,0,0,6,6H72a6,6,0,0,0,0-12H44.73C52.86,88.29,60.79,79.35,70,70a82,82,0,1,1,1.7,117.62,6,6,0,1,0-8.24,8.72A94,94,0,1,0,128,34Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 256 256"><path d="M228.24,76.24l-128,128a6,6,0,0,1-8.48,0l-56-56a6,6,0,0,1,8.48-8.48L96,191.51,219.76,67.76a6,6,0,0,1,8.48,8.48Z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 256 256"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 256 256"><path d="M214,48V96a6,6,0,0,1-12,0V62.48l-53.76,53.76a6,6,0,0,1-8.48-8.48L193.52,54H160a6,6,0,0,1,0-12h48A6,6,0,0,1,214,48ZM107.76,139.76,54,193.52V160a6,6,0,0,0-12,0v48a6,6,0,0,0,6,6H96a6,6,0,0,0,0-12H62.48l53.76-53.76a6,6,0,0,0-8.48-8.48Z"/></symbol>
+    <symbol id="i-send" viewBox="0 0 256 256"><path d="M204.24,116.24a6,6,0,0,1-8.48,0L134,54.49V216a6,6,0,0,1-12,0V54.49L60.24,116.24a6,6,0,0,1-8.48-8.48l72-72a6,6,0,0,1,8.48,0l72,72A6,6,0,0,1,204.24,116.24Z"/></symbol>
+  </svg>
+
   <header class="site-header">
     <a class="wordmark" href="#main">
       <img src="logo.svg" alt="Oga logo" width="32" height="32">
       <span aria-hidden="true">Oga</span>
     </a>
-    <nav class="header-nav">
+    <nav class="header-nav" aria-label="Site">
       <a class="header-link" href="/docs/">Docs</a>
       <a class="header-link" href="#install">Install</a>
     </nav>
@@ -107,115 +122,215 @@
           </div>
         </div>
       </section>
+    </section>
 
-      <div class="hero-board">
-        <p class="eyebrow board-label">Works with</p>
-        <div class="goal-card">
-          <span class="goal-label">Your goal</span>
-          <strong>Ship the release</strong>
+    <figure class="showcase reveal" aria-label="Oga desktop app with five tasks and the one you picked">
+      <div class="app" data-app>
+        <div class="app-side" aria-hidden="true">
+          <div class="app-workspace">
+            <span class="app-avatar">O</span>
+            <span><strong>Oga</strong><small>5 workers</small></span>
+          </div>
+          <div class="app-search">
+            <svg><use href="#i-search"/></svg>
+            <span>Search tasks</span>
+            <span class="app-kbd">⌘K</span>
+          </div>
+          <span class="app-side-label">Tasks</span>
+          <div class="app-nav is-current"><svg><use href="#i-list"/></svg><span>Recent</span></div>
+          <div class="app-nav"><svg><use href="#i-bell"/></svg><span>Needs you</span><em class="app-badge" data-app-badge>1</em></div>
+          <div class="app-nav"><svg><use href="#i-play"/></svg><span>In progress</span></div>
+          <div class="app-nav"><svg><use href="#i-check-circle"/></svg><span>Finished</span></div>
+          <span class="app-side-label">Projects</span>
+          <div class="app-nav"><svg><use href="#i-folder"/></svg><span>release</span><small>4</small></div>
+          <div class="app-nav"><svg><use href="#i-folder"/></svg><span>docs</span><small>1</small></div>
         </div>
-        <ul class="agent-row">
-          <li class="agent">
-            <img class="agent-mark" src="logos/codex.svg" alt="Codex logo" width="28" height="28">
-            <span class="agent-name">Codex</span>
-            <span class="agent-task">Builds the feature</span>
-            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
-          </li>
-          <li class="agent">
-            <img class="agent-mark" src="logos/claude-code.svg" alt="Claude Code logo" width="28" height="28">
-            <span class="agent-name">Claude Code</span>
-            <span class="agent-task">Writes the tests</span>
-            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
-          </li>
-          <li class="agent">
-            <img class="agent-mark" src="logos/pi.svg" alt="Pi logo" width="28" height="28">
-            <span class="agent-name">Pi</span>
-            <span class="agent-task">Reviews the change</span>
-            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
-          </li>
-          <li class="agent">
-            <img class="agent-mark" src="logos/opencode.svg" alt="OpenCode logo" width="28" height="28">
-            <span class="agent-name">OpenCode</span>
-            <span class="agent-task">Updates the docs</span>
-            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
-          </li>
-          <li class="agent">
-            <img class="agent-mark" src="logos/antigravity.svg" alt="Antigravity logo" width="28" height="28">
-            <span class="agent-name">Antigravity</span>
-            <span class="agent-task">Checks the build</span>
-            <span class="agent-meter" aria-hidden="true"><span class="agent-fill"></span></span>
-          </li>
-        </ul>
+
+        <div class="app-main">
+          <div class="app-head">
+            <div>
+              <p class="app-title">Recent tasks</p>
+              <p class="app-subtitle">Tasks that need you come first</p>
+            </div>
+            <span class="app-count">5 tasks</span>
+          </div>
+          <ul class="app-list" data-app-list>
+            <li data-task="tests">
+              <button class="app-task" type="button" aria-pressed="true" data-look="needs">
+                <span class="app-task-icon" aria-hidden="true">
+                  <svg class="app-glyph-running"><use href="#i-play"/></svg>
+                  <svg class="app-glyph-needs"><use href="#i-question"/></svg>
+                  <svg class="app-glyph-queued"><use href="#i-history"/></svg>
+                  <svg class="app-glyph-done"><use href="#i-check"/></svg>
+                </span>
+                <span class="app-task-text">
+                  <strong>Write the tests</strong>
+                  <small>Claude Code · release · 2m ago</small>
+                </span>
+                <span class="app-tag">Needs you</span>
+              </button>
+            </li>
+            <li data-task="build">
+              <button class="app-task" type="button" aria-pressed="false" data-look="running">
+                <span class="app-task-icon" aria-hidden="true">
+                  <svg class="app-glyph-running"><use href="#i-play"/></svg>
+                  <svg class="app-glyph-needs"><use href="#i-question"/></svg>
+                  <svg class="app-glyph-queued"><use href="#i-history"/></svg>
+                  <svg class="app-glyph-done"><use href="#i-check"/></svg>
+                </span>
+                <span class="app-task-text">
+                  <strong>Build the feature</strong>
+                  <small>Codex · release · 4m ago</small>
+                </span>
+                <span class="app-tag">Running</span>
+              </button>
+            </li>
+            <li data-task="check">
+              <button class="app-task" type="button" aria-pressed="false" data-look="running">
+                <span class="app-task-icon" aria-hidden="true">
+                  <svg class="app-glyph-running"><use href="#i-play"/></svg>
+                  <svg class="app-glyph-needs"><use href="#i-question"/></svg>
+                  <svg class="app-glyph-queued"><use href="#i-history"/></svg>
+                  <svg class="app-glyph-done"><use href="#i-check"/></svg>
+                </span>
+                <span class="app-task-text">
+                  <strong>Check the build</strong>
+                  <small>Antigravity · release · 5m ago</small>
+                </span>
+                <span class="app-tag">Running</span>
+              </button>
+            </li>
+            <li data-task="review">
+              <button class="app-task" type="button" aria-pressed="false" data-look="queued">
+                <span class="app-task-icon" aria-hidden="true">
+                  <svg class="app-glyph-running"><use href="#i-play"/></svg>
+                  <svg class="app-glyph-needs"><use href="#i-question"/></svg>
+                  <svg class="app-glyph-queued"><use href="#i-history"/></svg>
+                  <svg class="app-glyph-done"><use href="#i-check"/></svg>
+                </span>
+                <span class="app-task-text">
+                  <strong>Review the change</strong>
+                  <small>Pi · release · 6m ago</small>
+                </span>
+                <span class="app-tag">Waiting</span>
+              </button>
+            </li>
+            <li data-task="docs">
+              <button class="app-task" type="button" aria-pressed="false" data-look="done">
+                <span class="app-task-icon" aria-hidden="true">
+                  <svg class="app-glyph-running"><use href="#i-play"/></svg>
+                  <svg class="app-glyph-needs"><use href="#i-question"/></svg>
+                  <svg class="app-glyph-queued"><use href="#i-history"/></svg>
+                  <svg class="app-glyph-done"><use href="#i-check"/></svg>
+                </span>
+                <span class="app-task-text">
+                  <strong>Update the docs</strong>
+                  <small>OpenCode · docs · 9m ago</small>
+                </span>
+                <span class="app-tag">Done</span>
+              </button>
+            </li>
+          </ul>
+          <p class="app-hint">Pick a task to see where it stands on the right.</p>
+        </div>
+
+        <div class="app-preview" data-look="needs" data-app-preview>
+          <div class="app-preview-head">
+            <span class="app-dot" aria-hidden="true"></span>
+            <strong data-field="title">Write the tests</strong>
+            <svg aria-hidden="true"><use href="#i-expand"/></svg>
+          </div>
+          <div class="app-thread" data-app-thread>
+            <p class="app-bubble" data-field="prompt">Write tests for the CSV importer.</p>
+            <p class="app-reply" data-field="reply">Should a row with no email be skipped or rejected?</p>
+            <dl class="app-facts">
+              <div><dt>Status</dt><dd data-field="status">Needs you</dd></div>
+              <div><dt>Worker</dt><dd data-field="worker">Claude Code</dd></div>
+              <div><dt>Project</dt><dd data-field="project">release</dd></div>
+              <div><dt>Time</dt><dd data-field="time">2m</dd></div>
+              <div><dt>Cost</dt><dd data-field="cost">$0.18</dd></div>
+            </dl>
+          </div>
+          <div class="app-compose" aria-hidden="true">
+            <span data-field="compose">Answer in the task</span>
+            <span class="app-send"><svg><use href="#i-send"/></svg></span>
+          </div>
+        </div>
       </div>
+      <figcaption class="showcase-caption">A live preview of the app. Pick a task to see where it stands.</figcaption>
+    </figure>
+
+    <section class="works reveal" aria-labelledby="works-title">
+      <p class="eyebrow" id="works-title">Works with</p>
+      <ul class="agent-row" aria-labelledby="works-title">
+        <li class="agent"><img class="agent-mark" src="logos/codex.svg" alt="" width="24" height="24">Codex</li>
+        <li class="agent"><img class="agent-mark" src="logos/claude-code.svg" alt="" width="24" height="24">Claude Code</li>
+        <li class="agent"><img class="agent-mark" src="logos/pi.svg" alt="" width="24" height="24">Pi</li>
+        <li class="agent"><img class="agent-mark" src="logos/opencode.svg" alt="" width="24" height="24">OpenCode</li>
+        <li class="agent"><img class="agent-mark" src="logos/antigravity.svg" alt="" width="24" height="24">Antigravity</li>
+      </ul>
     </section>
 
-    <section class="product-shot" aria-label="Oga desktop app">
-      <picture>
-        <source srcset="app-dark.png" media="(prefers-color-scheme: dark)">
-        <img src="app-light.png" alt="Oga desktop app showing a task list on the left and a task brief on the right, in a dark-themed macOS window" width="2000" height="1360" loading="lazy">
-      </picture>
-    </section>
-
-    <section class="difference" aria-labelledby="difference-title">
-      <div class="section-heading">
+    <section class="difference chapter" aria-labelledby="difference-title">
+      <div class="section-heading reveal">
         <p class="eyebrow">Why Oga is different</p>
         <h2 id="difference-title">You keep the agent you already use.</h2>
         <p class="section-lede">Other tools ask you to move in: a new window, a new chat, a new place to keep your work. Oga adds one server to the agent you already have open, and the delegating starts there.</p>
       </div>
       <div class="contrast-grid">
-        <article>
+        <article class="card lift reveal">
           <h3>Nothing to move into</h3>
-          <p class="contrast-them">Elsewhere: open their app, start the conversation again, learn where everything lives.</p>
-          <p class="contrast-us">Here: add Oga to your agent, keep the conversation you are in, and hand work out from inside it.</p>
+          <p class="contrast-them"><span class="mark mark-no" aria-hidden="true"><svg><use href="#i-x"/></svg></span><span>Elsewhere: open their app, start the conversation again, learn where everything lives.</span></p>
+          <p class="contrast-us"><span class="mark mark-yes" aria-hidden="true"><svg><use href="#i-check"/></svg></span><span>Here: add Oga to your agent, keep the conversation you are in, and hand work out from inside it.</span></p>
         </article>
-        <article>
+        <article class="card lift reveal">
           <h3>Every account you pay for</h3>
-          <p class="contrast-them">Elsewhere: one tool at a time, and its limit is your limit.</p>
-          <p class="contrast-us">Here: work goes to whichever of your accounts has room, so hitting a limit stops one task, not your day.</p>
+          <p class="contrast-them"><span class="mark mark-no" aria-hidden="true"><svg><use href="#i-x"/></svg></span><span>Elsewhere: one tool at a time, and its limit is your limit.</span></p>
+          <p class="contrast-us"><span class="mark mark-yes" aria-hidden="true"><svg><use href="#i-check"/></svg></span><span>Here: work goes to whichever of your accounts has room, so hitting a limit stops one task, not your day.</span></p>
         </article>
-        <article>
+        <article class="card lift reveal">
           <h3>Sent, not supervised</h3>
-          <p class="contrast-them">Elsewhere: panes to watch, each one waiting on you.</p>
-          <p class="contrast-us">Here: a task carries its own brief, the files it may touch, and its own copy of the project. You get told when it lands.</p>
+          <p class="contrast-them"><span class="mark mark-no" aria-hidden="true"><svg><use href="#i-x"/></svg></span><span>Elsewhere: panes to watch, each one waiting on you.</span></p>
+          <p class="contrast-us"><span class="mark mark-yes" aria-hidden="true"><svg><use href="#i-check"/></svg></span><span>Here: a task carries its own brief, the files it may touch, and its own copy of the project. You get told when it lands.</span></p>
         </article>
       </div>
       <ul class="rival-list">
-        <li style="--rival: #319cfc;">
+        <li class="card reveal rival-t3">
           <a href="https://t3.codes/" rel="nofollow noopener" target="_blank">T3 Code</a>
           <p>A control app for the agents already on your machine. Oga skips the extra app: you stay in the agent you already have open.</p>
         </li>
-        <li style="--rival: #155dfc;">
+        <li class="card reveal rival-solo">
           <a href="https://soloterm.com/" rel="nofollow noopener" target="_blank">Solo</a>
           <p>A workspace your agents share. Oga needs no shared room: each task carries what it needs.</p>
         </li>
-        <li style="--rival: #2c2826; --rival-dark: #eae8e6;">
+        <li class="card reveal rival-conductor">
           <a href="https://www.conductor.build/" rel="nofollow noopener" target="_blank">Conductor</a>
           <p>Cloud sandboxes that keep coding agents running after you close your laptop. Oga needs no sandbox: work goes out through the agent you already have and comes back to it.</p>
         </li>
-        <li style="--rival: #4fd8c4;">
+        <li class="card reveal rival-bloom">
           <a href="https://runbloom.app/" rel="nofollow noopener" target="_blank">Bloom</a>
           <p>One machine, one set of agents. Oga spreads the work across every account you already pay for.</p>
         </li>
       </ul>
     </section>
 
-    <section class="outcomes" aria-labelledby="outcomes-title">
-      <div class="section-heading">
+    <section class="outcomes chapter" aria-labelledby="outcomes-title">
+      <div class="section-heading reveal">
         <p class="eyebrow">Built for focused work</p>
         <h2 id="outcomes-title">Keep your attention where it matters.</h2>
       </div>
       <div class="outcome-grid">
-        <article>
+        <article class="card lift reveal">
           <span class="outcome-number">01</span>
           <h3>Move more work at once</h3>
           <p>Send implementation, research, and review ahead without leaving your current conversation.</p>
         </article>
-        <article>
+        <article class="card lift reveal">
           <span class="outcome-number">02</span>
           <h3>Use the right model</h3>
           <p>Match quick edits to fast models and difficult decisions to deeper reasoning.</p>
         </article>
-        <article>
+        <article class="card lift reveal">
           <span class="outcome-number">03</span>
           <h3>Stay in control</h3>
           <p>Set what each task can read, what it can change, and how it proves the work is done.</p>
@@ -223,12 +338,12 @@
       </div>
     </section>
 
-    <section class="handoff" aria-labelledby="handoff-title">
-      <div class="section-heading">
+    <section class="handoff chapter" aria-labelledby="handoff-title">
+      <div class="section-heading reveal">
         <p class="eyebrow">For bigger jobs</p>
         <h2 id="handoff-title">Send it away from your files.</h2>
       </div>
-      <div class="handoff-grid">
+      <div class="handoff-grid card reveal">
         <p class="handoff-lede">Give the work its own branch. It runs in a separate copy of your repository, so nothing changes in your working folder until you merge.</p>
         <ol class="handoff-steps">
           <li>
@@ -251,14 +366,13 @@
       </div>
     </section>
 
-    <section class="closing-cta" aria-labelledby="closing-cta-title">
+    <section class="closing-cta card reveal" aria-labelledby="closing-cta-title">
       <div class="section-heading">
         <p class="eyebrow">Get started</p>
         <h2 id="closing-cta-title">Give it more hands.</h2>
       </div>
       <a class="primary-action" href="#install">Download for macOS</a>
     </section>
-
   </main>
 
   <footer>
@@ -275,5 +389,6 @@
     </div>
   </footer>
   <script src="/site.js"></script>
+  <script src="/app-demo.js"></script>
 </body>
 </html>
