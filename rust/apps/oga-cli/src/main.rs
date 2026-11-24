@@ -1841,11 +1841,18 @@ async fn run_socket_watch(
 
     loop {
         let Some(line) = read_line_until(&mut reader, deadline).await? else {
+            // Running out of time is the watch's own limit, not the broker
+            // hanging up, so it must not read as a lost socket.
+            let reason = if tokio::time::Instant::now() >= deadline {
+                "the deadline expired"
+            } else {
+                "event socket closed"
+            };
             return Ok(SocketWatchResult::Fallback {
                 cursor,
                 pending,
                 settled,
-                reason: "event socket closed".into(),
+                reason: reason.into(),
             });
         };
         let value: Value = serde_json::from_str(&line)
@@ -1879,9 +1886,9 @@ where
     }
     let mut line = String::new();
     match timeout(remaining, reader.read_line(&mut line)).await {
-        Ok(Ok(0)) => Ok(None),
+        // A connection that errors has ended like one that closes.
+        Ok(Ok(0) | Err(_)) => Ok(None),
         Ok(Ok(_)) => Ok(Some(line.trim().to_owned())),
-        Ok(Err(error)) => Err(error.into()),
         Err(_) => Ok(None),
     }
 }
@@ -1954,6 +1961,12 @@ async fn run_database_watch(
             }
             sleep(Duration::from_millis(50)).await;
         }
+    }
+    // A task that ended while nothing was reporting it still counts: look at
+    // the record once more before calling the wait a timeout.
+    if !pending.is_empty() {
+        let tasks = load_watch_tasks(&store, &pending)?;
+        settled += settle_watch_tasks(&tasks, &mut pending);
     }
     let _ = store.close();
     Ok(if settled > 0 { 0 } else { 1 })
