@@ -1,5 +1,5 @@
-//! Changing work that is still waiting to start, over the wire: what it waits
-//! on, its brief, and putting a cancelled one back in line.
+//! Changing work over the wire: what a waiting task waits on, its brief,
+//! putting a cancelled one back in line, and what each run was sent.
 
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
@@ -297,6 +297,40 @@ async fn work_a_task_hands_onward_names_it_as_parent() {
     assert!(broker.record(&by_owner).await.get("parentTaskId").is_none());
     broker.open("slow-gate");
     broker.open("later-gate");
+}
+
+/// Bug caught: a resume replaces the shipped prompt with the continuation, and
+/// the first run's brief, with its memories and house sections, is lost.
+#[tokio::test]
+async fn each_attempt_keeps_the_prompt_its_run_was_sent() {
+    let broker = Broker::new();
+    let task = broker.delegate("quick", "Brief", json!({})).await;
+    broker.wait_for(&task, "completed").await;
+    let first = broker.record(&task).await["shippedPrompt"].clone();
+    assert!(
+        first
+            .as_str()
+            .is_some_and(|prompt| prompt.contains("Brief work"))
+    );
+
+    let resumed = broker
+        .call(
+            "resume",
+            json!({ "taskId": task, "instruction": "check the edge case" }),
+        )
+        .await;
+    assert!(resumed["error"].is_null(), "{resumed}");
+    assert_ne!(resumed["state"], "completed", "{resumed}");
+    broker.wait_for(&task, "completed").await;
+
+    let record = broker.record(&task).await;
+    assert_eq!(record["attempts"][0]["shippedPrompt"], first, "{record}");
+    assert!(
+        record["shippedPrompt"]
+            .as_str()
+            .is_some_and(|prompt| prompt.contains("check the edge case")),
+        "{record}"
+    );
 }
 
 #[tokio::test]

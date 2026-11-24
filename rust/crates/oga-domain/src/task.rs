@@ -299,6 +299,10 @@ pub struct TaskAttempt {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// The prompt this run was sent. A later run sends its own, so only the
+    /// attempt keeps this one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipped_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
