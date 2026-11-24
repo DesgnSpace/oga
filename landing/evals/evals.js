@@ -89,6 +89,23 @@ function describeModel(id) {
   return { name, provider: PROVIDERS[prefix] ?? prefix };
 }
 
+// A model and the program that ran it make one entry, so its id carries both: `claude-sonnet-5-5@claude-code`.
+function entryId(row) {
+  if (!row.runner?.name) return row.model;
+  return `${row.model}@${row.runner.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
+function describeRunner(rows) {
+  const runner = rows.find((row) => row.runner?.name)?.runner;
+  if (!runner) return null;
+  const versions = [...new Set(rows.map((row) => row.runner?.version).filter(Boolean))];
+  return { name: runner.name, version: versions.join(", ") };
+}
+
+function runnerText(runner) {
+  return runner.version ? `${runner.name} ${runner.version}` : runner.name;
+}
+
 function percent(points, max) {
   return max > 0 ? Math.round((points / max) * 100) : 0;
 }
@@ -117,15 +134,19 @@ function tally(rows) {
 function groupByModel(rows) {
   const models = new Map();
   for (const row of rows) {
-    if (!models.has(row.model)) models.set(row.model, new Map());
-    const cases = models.get(row.model);
+    const id = entryId(row);
+    if (!models.has(id)) models.set(id, new Map());
+    const cases = models.get(id);
     if (!cases.has(row.case)) cases.set(row.case, []);
     cases.get(row.case).push(row);
   }
 
   return [...models].map(([id, cases]) => {
     const all = [...cases.values()].flat();
-    return { id, ...describeModel(id), cases, free: isFree(all), ...tally(all) };
+    const { name, provider } = describeModel(all[0].model);
+    const runner = describeRunner(all);
+    const label = runner ? `${name} · ${runner.name}` : name;
+    return { id, model: all[0].model, name, provider, runner, label, cases, free: isFree(all), ...tally(all) };
   });
 }
 
@@ -180,10 +201,17 @@ function modelTitle(model) {
     el("span", { className: "model-name", textContent: model.name }),
   ]);
   if (model.free) title.append(el("span", { className: "pill pill-free", textContent: "Free" }));
-  return el("span", { className: "model" }, [
-    title,
-    el("span", { className: "model-provider", textContent: model.provider }),
-  ]);
+  const provider = el("span", { className: "model-provider", textContent: model.provider });
+  // A provider such as OpenCode can also be the runner; its name shows once.
+  if (model.runner?.name === model.provider) {
+    provider.classList.add("model-runner");
+    provider.title = `Ran in ${runnerText(model.runner)}`;
+  } else if (model.runner) {
+    const runner = el("span", { className: "model-runner", textContent: model.runner.name });
+    runner.title = `Ran in ${runnerText(model.runner)}`;
+    provider.append(" · ", runner);
+  }
+  return el("span", { className: "model" }, [title, provider]);
 }
 
 function renderRanking() {
@@ -206,7 +234,7 @@ function renderRanking() {
       el("span", { className: "rank-cases" }, cases),
       ring(model.score),
     ]);
-    button.setAttribute("aria-label", `${model.name}, ${model.score}% overall. Add to the comparison.`);
+    button.setAttribute("aria-label", `${model.label}, ${model.score}% overall. Add to the comparison.`);
     button.addEventListener("click", () => {
       addPick(model.id);
       compare.scrollIntoView({ block: "start" });
@@ -261,7 +289,7 @@ function createPicker({ trigger, label, selected, choices, onPick, alignEnd = fa
   function fill() {
     const query = search.value.trim().toLowerCase();
     const matches = choices().filter((model) =>
-      `${model.id} ${model.provider}`.toLowerCase().includes(query),
+      `${model.id} ${model.provider} ${model.runner?.name ?? ""}`.toLowerCase().includes(query),
     );
     options = matches.map((model) => {
       const option = el("li", { id: nextId("option"), className: "picker-option" }, [
@@ -362,7 +390,7 @@ function slotCard(id, index, columns) {
       svg("path", { d: "m6 8 4 4 4-4" }),
     ]),
   ]);
-  trigger.setAttribute("aria-label", `Model ${SIDES[index].toUpperCase()}: ${model.name}. Change model`);
+  trigger.setAttribute("aria-label", `Model ${SIDES[index].toUpperCase()}: ${model.label}. Change model`);
   trigger.dataset.focus = `slot-${index}`;
   const picker = createPicker({
     trigger,
@@ -378,7 +406,7 @@ function slotCard(id, index, columns) {
     const remove = el("button", { type: "button", className: "slot-remove" }, [
       svg("svg", { viewBox: "0 0 20 20", "aria-hidden": "true" }, [svg("path", { d: "m6 6 8 8M14 6l-8 8" })]),
     ]);
-    remove.setAttribute("aria-label", `Remove ${model.name} from the comparison`);
+    remove.setAttribute("aria-label", `Remove ${model.label} from the comparison`);
     remove.addEventListener("click", () => removePick(index));
     head.append(remove);
   }
@@ -392,6 +420,7 @@ function slotCard(id, index, columns) {
         overallDelta(model, best, allEven),
       ]),
     ]),
+    ...(model.runner ? [el("p", { className: "slot-runner", textContent: `Ran in ${runnerText(model.runner)}` })] : []),
   ]);
 }
 
@@ -456,7 +485,9 @@ function writeUrl() {
   url.searchParams.delete("b");
   url.searchParams.delete("m");
   const rest = url.searchParams.toString();
-  const picks = state.picks.map((id) => encodeURIComponent(id).replaceAll("%2F", "/")).join(",");
+  const picks = state.picks
+    .map((id) => encodeURIComponent(id).replaceAll("%2F", "/").replaceAll("%40", "@"))
+    .join(",");
   url.search = `?m=${picks}${rest ? `&${rest}` : ""}`;
   window.history.replaceState(null, "", url);
 }
@@ -508,7 +539,7 @@ function checkName(id) {
 
 function judgeBlock(index, model, rows) {
   const block = el("div", { className: `judge ${sideClass(index)}` }, [
-    el("p", { className: "judge-head" }, [sideBadge(index), el("span", { textContent: model.name })]),
+    el("p", { className: "judge-head" }, [sideBadge(index), el("span", { textContent: model.label })]),
   ]);
   if (!rows) {
     block.append(el("p", { className: "evals-muted", textContent: "Not run on this job." }));
@@ -570,7 +601,7 @@ function caseRow(id, models) {
     const differs = new Set(passes).size > 1;
     return el("li", { className: `check-row${differs ? " differs" : ""}` }, [
       checkName(checkId),
-      ...passes.map((pass, index) => dot(pass, models[index].name, differs && pass === true)),
+      ...passes.map((pass, index) => dot(pass, models[index].label, differs && pass === true)),
     ]);
   });
 
@@ -581,7 +612,7 @@ function caseRow(id, models) {
         el("span", { textContent: "Check" }),
         ...models.map((model, index) => {
           const badge = sideBadge(index);
-          badge.title = model.name;
+          badge.title = model.label;
           return el("span", { className: sideClass(index) }, [badge]);
         }),
       ]),
@@ -621,7 +652,7 @@ function caseScore(score, index, model, best) {
     el("span", { className: "case-score-n", textContent: score === null ? "—" : `${score}%` }),
     bar(score ?? 0),
   ]);
-  node.title = model.name;
+  node.title = model.label;
   return node;
 }
 
@@ -639,7 +670,9 @@ function initialPicks() {
   const asked = params.has("m")
     ? params.get("m").split(",")
     : [params.get("a"), params.get("b")];
-  const picks = [...new Set(asked.filter((id) => ids.includes(id)))].slice(0, MAX_PICKS);
+  // A link from before runners were shown names only the model; it opens that model's best entry.
+  const resolved = asked.map((id) => (ids.includes(id) ? id : state.models.find((model) => model.model === id)?.id));
+  const picks = [...new Set(resolved.filter(Boolean))].slice(0, MAX_PICKS);
   // Fill up to 2 with the best models not already picked.
   for (const id of ids) {
     if (picks.length >= MIN_PICKS) break;

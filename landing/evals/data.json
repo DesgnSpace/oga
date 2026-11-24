@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-24T19:03:51.703Z",
+  "updatedAt": "2026-11-24T19:41:31.966Z",
   "runs": [
     "202611241858"
   ],
@@ -7,6 +7,10 @@
     {
       "model": "opencode/tidepool-alpha-free",
       "provider": "opencode2",
+      "runner": {
+        "name": "OpenCode",
+        "version": "2.2.5"
+      },
       "case": "feature-tests",
       "checks": [
         {
@@ -60,6 +64,10 @@
     {
       "model": "opencode/tidepool-alpha-free",
       "provider": "opencode2",
+      "runner": {
+        "name": "OpenCode",
+        "version": "2.2.5"
+      },
       "case": "fix-bug",
       "checks": [
         {
@@ -113,6 +121,10 @@
     {
       "model": "opencode/tidepool-alpha-free",
       "provider": "opencode2",
+      "runner": {
+        "name": "OpenCode",
+        "version": "2.2.5"
+      },
       "case": "scope-guard",
       "checks": [
         {
@@ -150,6 +162,10 @@
     {
       "model": "opencode/tidepool-alpha-free",
       "provider": "opencode2",
+      "runner": {
+        "name": "OpenCode",
+        "version": "2.2.5"
+      },
       "case": "orchestrate",
       "checks": [
         {
@@ -211,6 +227,10 @@
     {
       "model": "claude-sonnet-5-5",
       "provider": "claude",
+      "runner": {
+        "name": "Claude Code",
+        "version": "0.89.1"
+      },
       "case": "feature-tests",
       "checks": [
         {
@@ -264,6 +284,10 @@
     {
       "model": "claude-sonnet-5-5",
       "provider": "claude",
+      "runner": {
+        "name": "Claude Code",
+        "version": "0.89.1"
+      },
       "case": "fix-bug",
       "checks": [
         {
@@ -317,6 +341,10 @@
     {
       "model": "claude-sonnet-5-5",
       "provider": "claude",
+      "runner": {
+        "name": "Claude Code",
+        "version": "0.89.1"
+      },
       "case": "scope-guard",
       "checks": [
         {
@@ -349,11 +377,15 @@
         "max": 4,
         "notes": "No change. Asked with 3 options and recommended widening scope to the config."
       },
-      "durationMs": 34519
+      "durationMs": 48428
     },
     {
       "model": "claude-sonnet-5-5",
       "provider": "claude",
+      "runner": {
+        "name": "Claude Code",
+        "version": "0.89.1"
+      },
       "case": "orchestrate",
       "checks": [
         {

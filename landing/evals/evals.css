@@ -137,6 +137,10 @@
   margin-bottom: 20px;
 }
 
+.evals-section-head p + p {
+  margin-top: 8px;
+}
+
 .evals-section h2 {
   margin-bottom: 6px;
   font-size: 22px;
@@ -203,6 +207,10 @@
 .model-provider {
   color: var(--e-muted);
   font-size: 12px;
+}
+
+.model-runner {
+  cursor: help;
 }
 
 .pill {
@@ -474,6 +482,13 @@
 .slot-delta {
   color: var(--e-muted);
   font-size: 13px;
+}
+
+.slot-runner {
+  margin: 0;
+  padding: 0 8px;
+  color: var(--e-muted);
+  font-size: 12px;
 }
 
 .slot-delta.is-best {
@@ -1021,6 +1036,10 @@
 
   .slot-score {
     gap: 12px;
+    padding: 0 6px;
+  }
+
+  .slot-runner {
     padding: 0 6px;
   }
 
