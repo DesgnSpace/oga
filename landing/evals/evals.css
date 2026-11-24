@@ -152,6 +152,14 @@
   margin-top: 14px;
 }
 
+.evals-note p {
+  margin: 0;
+}
+
+.evals-note p + p {
+  margin-top: 6px;
+}
+
 .evals-state {
   margin: 0;
   padding: 28px;
@@ -326,7 +334,7 @@
 
 .rank-row {
   display: grid;
-  grid-template-columns: 24px minmax(160px, 1.1fr) minmax(0, 3fr) 56px;
+  grid-template-columns: 24px minmax(160px, 1.1fr) minmax(0, 3fr) auto;
   align-items: center;
   gap: 24px;
   width: 100%;
@@ -374,6 +382,53 @@
 .rank-case-label > :first-child {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.rank-case-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  color: var(--e-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-totals {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.rank-total {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.rank-total-label {
+  color: var(--e-muted);
+  font-size: 11px;
+}
+
+/* The reviewer's ring stays neutral so the checks score reads first. */
+.ring-medium {
+  width: 44px;
+  height: 44px;
+  margin-top: 6px;
+}
+
+.ring-medium .ring-value {
+  stroke: var(--e-ink-2);
+}
+
+.ring-medium .ring-label {
+  font-size: 11px;
+}
+
+.model-runs {
+  color: var(--e-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .rank-case-score {
@@ -477,6 +532,18 @@
 
 .slot-label {
   font-weight: 600;
+}
+
+.slot-judge {
+  display: grid;
+  gap: 2px;
+  margin-left: auto;
+  text-align: right;
+}
+
+.slot-judge-n {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .slot-delta {
@@ -810,6 +877,12 @@
   font-weight: 600;
 }
 
+.judge-runs {
+  margin-bottom: 4px;
+  color: var(--e-muted);
+  font-size: 13px;
+}
+
 .judge-note {
   margin: 0;
   color: var(--e-ink-2);
@@ -1007,12 +1080,12 @@
   }
 
   .rank-row {
-    grid-template-columns: 20px minmax(0, 1fr) 56px;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
     gap: 14px 12px;
     padding: 16px;
   }
 
-  .rank-row > .ring {
+  .rank-row > .rank-totals {
     grid-row: 1;
     grid-column: 3;
   }

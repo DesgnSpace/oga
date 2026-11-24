@@ -56,7 +56,11 @@
       <div id="evals-ranking" aria-live="polite">
         <p class="evals-state">Loading results…</p>
       </div>
-      <p class="evals-muted evals-note">A score counts the checks a model passed plus the points a reviewer gave it, out of the most it could get. Select a model to add it to the comparison.</p>
+      <div class="evals-muted evals-note">
+        <p>Checks is the share of our automatic checks a model passed. Reviewer is the score a reviewer gave its work. Workers is how well the models a lead handed work to did.</p>
+        <p>± is how far a score can move from one run to the next. A gap smaller than both models' ± may be chance. More runs make it smaller.</p>
+        <p>A run that failed on our side is counted apart and never lowers a score. Select a model to add it to the comparison.</p>
+      </div>
     </section>
 
     <section class="evals-section" id="compare" aria-labelledby="compare-title" hidden>

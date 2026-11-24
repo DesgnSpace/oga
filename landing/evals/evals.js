@@ -28,6 +28,11 @@ const CHECKS = {
   children_no_abs_paths: ["Briefs name files by repo path", "Its briefs point at files in the repo, not full disk paths."],
   children_titled: ["Gave each task a title", "Each task has a short title, so it is easy to follow."],
   lead_wrote_no_code: ["Left the coding to the other models", "The lead wrote briefs and checked work, but wrote no code."],
+  lead_waited: ["Waited for the work", "As a lead, it waited for its tasks to finish before it reported."],
+  tests_catch_bugs: ["Its tests catch real bugs", "Its new tests fail when we plant a bug in the feature."],
+  branch_unchanged: ["Stayed on its branch", "It worked on the branch it was given and did not switch."],
+  report_honest: ["Honest report", "The report matches what really happened."],
+  report_task_ids: ["Named its tasks in the report", "The lead's report lists the IDs of the tasks it started."],
 };
 
 const PROVIDERS = {
@@ -90,68 +95,102 @@ function describeModel(id) {
 }
 
 // A model and the program that ran it make one entry, so its id carries both: `claude-sonnet-5-5@claude-code`.
-function entryId(row) {
-  if (!row.runner?.name) return row.model;
-  return `${row.model}@${row.runner.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+function entryId(model, runnerName) {
+  if (!runnerName) return model;
+  return `${model}@${runnerName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 }
 
-function describeRunner(rows) {
-  const runner = rows.find((row) => row.runner?.name)?.runner;
-  if (!runner) return null;
-  const versions = [...new Set(rows.map((row) => row.runner?.version).filter(Boolean))];
-  return { name: runner.name, version: versions.join(", ") };
+// The summary names a runner as one string, such as `Claude Code 0.89.1`.
+function describeRunner(texts = []) {
+  const runners = texts.map((text) => {
+    const match = /^(.*\S)\s+(v?\d[\w.+-]*)$/.exec(text);
+    return match ? { name: match[1], version: match[2] } : { name: text, version: "" };
+  });
+  if (!runners.length) return null;
+  const versions = [...new Set(runners.map((runner) => runner.version).filter(Boolean))];
+  return { name: runners[0].name, version: versions.join(", ") };
 }
 
 function runnerText(runner) {
   return runner.version ? `${runner.name} ${runner.version}` : runner.name;
 }
 
-function percent(points, max) {
-  return max > 0 ? Math.round((points / max) * 100) : 0;
+// Scores arrive as 0 to 1; the page shows whole percents.
+function percent(value) {
+  return value == null ? null : Math.round(value * 100);
 }
 
-function isFree(rows) {
-  return rows.some(
-    (row) => row.cost === 0 || row.costUsd === 0 || /(^|[-:/])free$/i.test(row.model),
+function isFree(model, rows) {
+  return (
+    /(^|[-:/])free$/i.test(model) || rows.some((row) => row.cost === 0 || row.costUsd === 0)
   );
 }
 
-// Points for a set of runs: checks passed plus the reviewer's score, pooled.
-function tally(rows) {
-  let points = 0;
-  let max = 0;
+function rowsByEntry(rows) {
+  const entries = new Map();
   for (const row of rows) {
-    points += row.auto?.passed ?? 0;
-    max += row.auto?.total ?? 0;
-    if (row.judge) {
-      points += row.judge.score;
-      max += row.judge.max;
-    }
-  }
-  return { points, max, score: percent(points, max) };
-}
-
-function groupByModel(rows) {
-  const models = new Map();
-  for (const row of rows) {
-    const id = entryId(row);
-    if (!models.has(id)) models.set(id, new Map());
-    const cases = models.get(id);
+    const id = entryId(row.model, row.runner?.name);
+    if (!entries.has(id)) entries.set(id, new Map());
+    const cases = entries.get(id);
     if (!cases.has(row.case)) cases.set(row.case, []);
     cases.get(row.case).push(row);
   }
+  return entries;
+}
 
-  return [...models].map(([id, cases]) => {
-    const all = [...cases.values()].flat();
-    const { name, provider } = describeModel(all[0].model);
-    const runner = describeRunner(all);
-    const label = runner ? `${name} · ${runner.name}` : name;
-    return { id, model: all[0].model, name, provider, runner, label, cases, free: isFree(all), ...tally(all) };
+// One entry per model and runner. Scores come from the summary; rows add checks and reviewer notes.
+function buildEntries(summary, rows) {
+  const rowsById = rowsByEntry(rows);
+  return summary.map((item) => {
+    const { name, provider } = describeModel(item.model);
+    const runner = describeRunner(item.runners);
+    const id = entryId(item.model, runner?.name);
+    const cases = rowsById.get(id) ?? new Map();
+    return {
+      id,
+      model: item.model,
+      name,
+      provider,
+      runner,
+      label: runner ? `${name} · ${runner.name}` : name,
+      cases,
+      results: item.cases ?? {},
+      free: isFree(item.model, [...cases.values()].flat()),
+      score: percent(item.auto) ?? 0,
+      judge: percent(item.judge),
+      noise: Math.round(item.noise ?? 0),
+      runs: item.runs ?? 0,
+      errors: item.errors ?? 0,
+    };
   });
 }
 
-function caseOrder(rows) {
-  const seen = [...new Set(rows.map((row) => row.case))];
+function caseScores(model, id) {
+  const result = model.results[id];
+  if (!result) return null;
+  return {
+    auto: percent(result.auto),
+    judge: percent(result.judge),
+    child: percent(result.child),
+    runs: result.runs ?? 0,
+    passed: result.passed ?? 0,
+  };
+}
+
+function plural(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+// Runs and noise, plus runs that failed on our side, which never count as a low score.
+function runFacts(model) {
+  const facts = [`${plural(model.runs, "run", "runs")} · ±${model.noise} points`];
+  if (model.errors) facts.push(`${plural(model.errors, "run", "runs")} failed on our side`);
+  return facts.join(" · ");
+}
+
+function caseOrder(data, rows) {
+  const listed = Array.isArray(data.cases) ? data.cases : [];
+  const seen = [...new Set([...listed, ...rows.map((row) => row.case)])];
   const known = Object.keys(CASES).filter((id) => seen.includes(id));
   return [...known, ...seen.filter((id) => !(id in CASES))];
 }
@@ -174,7 +213,7 @@ function animateTo(node, property, value) {
   }));
 }
 
-function ring(score, size = "large") {
+function ring(score, size = "large", text = `${score}%`) {
   const arc = svg("circle", { class: "ring-value", cx: 18, cy: 18, r: 15.9155, pathLength: 100 });
   arc.style.strokeDashoffset = "100";
   animateTo(arc, "strokeDashoffset", String(100 - score));
@@ -183,7 +222,7 @@ function ring(score, size = "large") {
       svg("circle", { class: "ring-track", cx: 18, cy: 18, r: 15.9155 }),
       arc,
     ]),
-    el("span", { className: "ring-label", textContent: `${score}%` }),
+    el("span", { className: "ring-label", textContent: text }),
   ]);
 }
 
@@ -214,27 +253,55 @@ function modelTitle(model) {
   return el("span", { className: "model" }, [title, provider]);
 }
 
+function rankTotal(score, label, size) {
+  return el("span", { className: "rank-total" }, [
+    ring(score ?? 0, size, score === null ? "—" : undefined),
+    el("span", { className: "rank-total-label", textContent: label }),
+  ]);
+}
+
+function smallScore(label, score) {
+  return el("span", { textContent: `${label} ${score === null ? "—" : `${score}%`}` });
+}
+
 function renderRanking() {
   const items = state.models.map((model, index) => {
     const cases = state.cases.map((id) => {
-      const rows = model.cases.get(id);
-      const score = rows ? tally(rows).score : null;
+      const scores = caseScores(model, id);
+      const extra = el("span", { className: "rank-case-extra" });
+      if (scores) {
+        extra.append(smallScore("Reviewer", scores.judge));
+        if (scores.child !== null) extra.append(smallScore("Workers", scores.child));
+      }
       return el("span", { className: "rank-case" }, [
         el("span", { className: "rank-case-label" }, [
           el("span", { textContent: caseLabel(id) }),
-          el("span", { className: "rank-case-score", textContent: score === null ? "Not run" : `${score}%` }),
+          el("span", {
+            className: "rank-case-score",
+            textContent: scores?.auto == null ? "Not run" : `${scores.auto}%`,
+          }),
         ]),
-        bar(score ?? 0),
+        bar(scores?.auto ?? 0),
+        extra,
       ]);
     });
 
+    const who = modelTitle(model);
+    who.append(el("span", { className: "model-runs", textContent: runFacts(model) }));
     const button = el("button", { type: "button", className: "rank-row" }, [
       el("span", { className: "rank-n", textContent: String(index + 1) }),
-      modelTitle(model),
+      who,
       el("span", { className: "rank-cases" }, cases),
-      ring(model.score),
+      el("span", { className: "rank-totals" }, [
+        rankTotal(model.score, "Checks", "large"),
+        rankTotal(model.judge, "Reviewer", "medium"),
+      ]),
     ]);
-    button.setAttribute("aria-label", `${model.label}, ${model.score}% overall. Add to the comparison.`);
+    const judge = model.judge === null ? "" : `, reviewer ${model.judge}%`;
+    button.setAttribute(
+      "aria-label",
+      `${model.label}: checks ${model.score}%${judge}, ${runFacts(model)}. Add to the comparison.`,
+    );
     button.addEventListener("click", () => {
       addPick(model.id);
       compare.scrollIntoView({ block: "start" });
@@ -370,18 +437,21 @@ function spareModels() {
   return state.models.filter((model) => !state.picks.includes(model.id));
 }
 
-function overallDelta(model, best, allEven) {
-  const gap = best - model.score;
+// A gap smaller than both models' noise may not be real, so it says so.
+function overallDelta(model, leader, allEven) {
+  const gap = leader.score - model.score;
   if (allEven) return el("span", { className: "slot-delta", textContent: "Even" });
-  if (gap === 0) return el("span", { className: "slot-delta is-best", textContent: "Best overall" });
-  return el("span", { className: "slot-delta", textContent: `${gap} ${gap === 1 ? "point" : "points"} behind` });
+  if (gap === 0) return el("span", { className: "slot-delta is-best", textContent: "Top score" });
+  const behind = `${plural(gap, "point", "points")} behind`;
+  const unsure = gap < model.noise && gap < leader.noise;
+  return el("span", { className: "slot-delta", textContent: unsure ? `${behind}, may be chance` : behind });
 }
 
 function slotCard(id, index, columns) {
   const model = findModel(id);
-  const scores = state.picks.map((pick) => findModel(pick).score);
-  const best = Math.max(...scores);
-  const allEven = scores.every((score) => score === best);
+  const picked = state.picks.map(findModel);
+  const leader = picked.reduce((top, other) => (other.score > top.score ? other : top));
+  const allEven = picked.every((other) => other.score === leader.score);
 
   const trigger = el("button", { type: "button", className: "picker-trigger" }, [
     sideBadge(index),
@@ -416,10 +486,15 @@ function slotCard(id, index, columns) {
     el("div", { className: "slot-score" }, [
       ring(model.score),
       el("span", { className: "slot-score-text" }, [
-        el("span", { className: "slot-label", textContent: "Overall" }),
-        overallDelta(model, best, allEven),
+        el("span", { className: "slot-label", textContent: "Checks" }),
+        overallDelta(model, leader, allEven),
+      ]),
+      el("span", { className: "slot-judge" }, [
+        el("span", { className: "slot-judge-n", textContent: model.judge === null ? "—" : `${model.judge}%` }),
+        el("span", { className: "slot-delta", textContent: "Reviewer" }),
       ]),
     ]),
+    el("p", { className: "slot-runner", textContent: runFacts(model) }),
     ...(model.runner ? [el("p", { className: "slot-runner", textContent: `Ran in ${runnerText(model.runner)}` })] : []),
   ]);
 }
@@ -502,7 +577,7 @@ function syncCompare(focus) {
 
 function checksById(rows) {
   const checks = new Map();
-  for (const check of (rows ?? []).flatMap((row) => row.checks)) {
+  for (const check of (rows ?? []).flatMap((row) => row.checks ?? [])) {
     const seen = checks.get(check.id);
     checks.set(check.id, check.pass && (seen ?? true));
   }
@@ -537,18 +612,28 @@ function checkName(id) {
   return el("span", { className: "check-cell" }, [button, tip]);
 }
 
-function judgeBlock(index, model, rows) {
+function judgeBlock(index, model, caseId, rows) {
   const block = el("div", { className: `judge ${sideClass(index)}` }, [
     el("p", { className: "judge-head" }, [sideBadge(index), el("span", { textContent: model.label })]),
   ]);
-  if (!rows) {
+  const scores = caseScores(model, caseId);
+  if (!scores) {
     block.append(el("p", { className: "evals-muted", textContent: "Not run on this job." }));
     return block;
   }
-  for (const row of rows) {
+  const parts = [`Checks ${scores.auto ?? "—"}%`, `Reviewer ${scores.judge ?? "—"}%`];
+  if (scores.child !== null) parts.push(`Workers ${scores.child}%`);
+  block.append(
+    el("p", { className: "judge-score", textContent: parts.join(" · ").replaceAll("—%", "—") }),
+    el("p", {
+      className: "judge-runs",
+      textContent: `Every check passed in ${scores.passed} of ${plural(scores.runs, "run", "runs")}`,
+    }),
+  );
+  for (const row of rows ?? []) {
     if (row.judge) {
       block.append(
-        el("p", { className: "judge-score", textContent: `Reviewer gave ${row.judge.score} of ${row.judge.max}` }),
+        el("p", { className: "judge-runs", textContent: `Reviewer gave ${row.judge.score} of ${row.judge.max}` }),
       );
       if (row.judge.notes) block.append(el("p", { className: "judge-note" }, richText(row.judge.notes)));
     }
@@ -566,7 +651,7 @@ function bestOf(scores) {
 
 function caseRow(id, models) {
   const runs = models.map((model) => model.cases.get(id));
-  const scores = runs.map((rows) => (rows ? tally(rows).score : null));
+  const scores = models.map((model) => caseScores(model, id)?.auto ?? null);
   const checks = runs.map(checksById);
   const ids = [...new Set(checks.flatMap((map) => [...map.keys()]))];
   const results = (checkId) => runs.map((rows, index) => (rows ? checks[index].get(checkId) : undefined));
@@ -606,7 +691,7 @@ function caseRow(id, models) {
   });
 
   const inner = el("div", { className: "case-inner" }, [
-    el("div", { className: "judges" }, models.map((model, index) => judgeBlock(index, model, runs[index]))),
+    el("div", { className: "judges" }, models.map((model, index) => judgeBlock(index, model, id, runs[index]))),
     el("div", { className: "checks" }, [
       el("p", { className: "checks-head" }, [
         el("span", { textContent: "Check" }),
@@ -698,6 +783,8 @@ function renderMeta(data) {
   if (!Number.isNaN(date.getTime())) {
     parts.push(`updated ${date.toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })}`);
   }
+  const failed = Array.isArray(data.errors) ? data.errors.length : 0;
+  if (failed) parts.push(`${plural(failed, "run", "runs")} failed on our side`);
   meta.textContent = parts.join(" · ");
   meta.hidden = false;
 }
@@ -726,15 +813,18 @@ async function load() {
   }
 
   const rows = Array.isArray(data.rows) ? data.rows : [];
-  if (!rows.length) {
+  const summary = Array.isArray(data.summary) ? data.summary : [];
+  if (!summary.length) {
     ranking.replaceChildren(
       el("p", { className: "evals-state", textContent: "No results yet. Check back after our next run." }),
     );
     return;
   }
 
-  state.cases = caseOrder(rows);
-  state.models = groupByModel(rows).sort((x, y) => y.score - x.score || x.id.localeCompare(y.id));
+  state.cases = caseOrder(data, rows);
+  state.models = buildEntries(summary, rows).sort(
+    (x, y) => y.score - x.score || (y.judge ?? 0) - (x.judge ?? 0) || x.id.localeCompare(y.id),
+  );
   renderMeta(data);
   renderRanking();
   setupCompare();
