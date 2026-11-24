@@ -124,6 +124,15 @@ describe("buildTranscript work segments", () => {
     expect(workItems[1].segment.startsExpanded).toBe(true);
   });
 
+  it("reads a task waiting to start as having worked, not as working", () => {
+    const events: TaskEventView[] = [event(1, 100)];
+    for (const state of ["pending", "queued"] as const) {
+      const work = buildTranscript(task({ state }), events).find((item) => item.type === "work");
+      if (work?.type !== "work") throw new Error("expected a work item");
+      expect(work.segment.live).toBe(false);
+    }
+  });
+
   it("refreshes segment metadata when the same activity settles", () => {
     const events: TaskEventView[] = [event(1, 100)];
     const cache = new WorkSegmentCache();

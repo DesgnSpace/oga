@@ -130,10 +130,30 @@ pub async fn handoff(
         // A provider session belongs to one account, so a row that changes
         // profile leaves its session behind even while it keeps waiting.
         let session_id = old.session_id.clone().filter(|_| same_profile);
+        // The same goes for the account's last ending and its transport: a
+        // waiting task that ran before still carries both, and neither is the
+        // new account's. The ending moves into the attempts, and the new
+        // account decides its transport when it starts.
+        let attempts = if same_profile {
+            old.attempts.clone()
+        } else {
+            close_attempt(&old, &now, false)
+        };
+        let attempts_json = encode_store(&attempts)?;
         dispatcher.store().transaction(|tx| {
             let changed = tx.execute(
-                "UPDATE tasks SET profile_id=?,model=?,effort=?,session_id=?,transport_json=CASE WHEN ? THEN transport_json ELSE json_remove(transport_json,'$.acpSessionId') END,scope_json=?,updated_at=? WHERE id=? AND state IN ('queued','pending')",
-                rusqlite::params![profile_id, model, effort, session_id, same_profile, scope_json, now, old.id],
+                "UPDATE tasks SET profile_id=?1,model=?2,effort=?3,session_id=?4,output=CASE WHEN ?5 THEN output ELSE '' END,error=CASE WHEN ?5 THEN error END,question=CASE WHEN ?5 THEN question END,completion_json=CASE WHEN ?5 THEN completion_json END,attempts_json=?6,transport_json=CASE WHEN ?5 THEN transport_json END,scope_json=?7,updated_at=?8 WHERE id=?9 AND state IN ('queued','pending')",
+                rusqlite::params![
+                    profile_id,
+                    model,
+                    effort,
+                    session_id,
+                    same_profile,
+                    attempts_json,
+                    scope_json,
+                    now,
+                    old.id
+                ],
             )?;
             if changed != 1 {
                 return Err(oga_store::StoreError::Refusal(format!(
@@ -237,7 +257,7 @@ pub async fn handoff(
     };
     dispatcher.store().transaction(|tx| {
         let changed = tx.execute(
-            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,profile_id=?,model=?,effort=?,session_id=?,transport_json=CASE WHEN ? THEN transport_json ELSE json_remove(transport_json,'$.acpSessionId') END,scope_json=?,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending','running','needs_input','answered')",
+            "UPDATE tasks SET state='queued',output='',error=NULL,question=NULL,completion_json=NULL,attempts_json=?,profile_id=?,model=?,effort=?,session_id=?,transport_json=CASE WHEN ? THEN transport_json WHEN ? THEN json_remove(transport_json,'$.acpSessionId') END,scope_json=?,updated_at=? WHERE id=? AND state IN ('failed','cancelled','blocked','queued','pending','running','needs_input','answered')",
             rusqlite::params![
                 attempts_json,
                 profile_id,
@@ -245,6 +265,7 @@ pub async fn handoff(
                 effort,
                 session_id,
                 preserve_session,
+                same_profile,
                 scope_json,
                 now,
                 old.id,

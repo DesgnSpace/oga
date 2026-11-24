@@ -40,6 +40,8 @@ impl Broker {
             ("a", finish("a")),
             ("b", finish("b")),
             ("c", finish("c")),
+            // An account whose sign-in ran out.
+            ("sick", "printf 'Invalid API key\\n' >&2; exit 1".to_owned()),
         ];
         let mut enabled = serde_json::Map::new();
         for (id, script) in workers {
@@ -388,4 +390,52 @@ async fn a_rearmed_wait_cannot_be_emptied_by_an_edit() {
         .await;
     assert!(error(&emptied).contains("rearm: false"), "{emptied}");
     assert_eq!(broker.state(&a).await, "pending");
+}
+
+/// Bug caught: a task handed to another account while it waits keeps the first
+/// account's failure and transport, and runs on the new account as if it were
+/// still the old one.
+#[tokio::test]
+async fn a_rearmed_task_handed_to_another_account_leaves_the_first_one_behind() {
+    let broker = Broker::new();
+    let head = broker.delegate("head", "Head", &[]).await;
+    let t = broker.delegate("sick", "T", &[&head]).await;
+    broker.open_head();
+    broker.wait_for(&t, "failed").await;
+    let failed = broker
+        .call(
+            "inspect",
+            json!({ "taskId": t, "fields": ["routing", "completion"] }),
+        )
+        .await;
+    assert_eq!(failed["completion"]["code"], "auth", "{failed}");
+    assert!(failed["transport"].is_object(), "{failed}");
+
+    broker.rearm(&t).await;
+    let moved = broker
+        .call(
+            "handoff",
+            json!({
+                "taskId": t,
+                "profile": "a",
+                "model": "model",
+                "fields": ["routing", "completion", "attempts"],
+            }),
+        )
+        .await;
+    assert!(error(&moved).is_empty(), "{moved}");
+    assert_eq!(moved["state"], "pending", "{moved}");
+    assert_eq!(moved["profileId"], "a", "{moved}");
+    assert!(
+        moved["transport"].is_null(),
+        "the first account's transport is gone until the new one decides: {moved}"
+    );
+    assert!(moved["completion"].is_null(), "{moved}");
+    assert!(moved["error"].is_null(), "{moved}");
+    assert_eq!(moved["attemptCount"], 1, "the failed run is kept: {moved}");
+    broker.stays(&t, "pending").await;
+
+    broker.rerun_head(&head).await;
+    broker.wait_for(&t, "completed").await;
+    assert_eq!(broker.runs().last().map(String::as_str), Some("a"));
 }

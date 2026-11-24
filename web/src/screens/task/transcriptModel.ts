@@ -59,6 +59,9 @@ export function activityIsSettled(state: TaskState): boolean {
   return SETTLED_STATES.includes(state);
 }
 
+/** No worker holds the task yet: its earlier activity is past, not in progress. */
+const WAITING_STATES: TaskState[] = ["queued", "pending"];
+
 /**
  * Builds the transcript from the task row and its full activity stream.
  *
@@ -336,7 +339,7 @@ function flushFinal(
   task: Task,
   cache: WorkSegmentCache,
 ): void {
-  const live = !activityIsSettled(task.state);
+  const live = !activityIsSettled(task.state) && !WAITING_STATES.includes(task.state);
   if (segment.length > 0) {
     pushWork(segment, items, live, true, undefined, task, cache);
   }

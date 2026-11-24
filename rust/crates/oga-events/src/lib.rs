@@ -4946,8 +4946,15 @@ fn event_detail(event_type: &str, payload: &BTreeMap<String, Value>) -> Option<S
                 .unwrap_or(0);
             (added > 0).then(|| format!("{added} path(s) added to read scope"))
         }
-        "scope_inherited" => tree_value(payload, &["approvedFor"])
-            .map(|approved_for| format!("originally approved for {approved_for}")),
+        "scope_inherited" => {
+            let approved_for = tree_value(payload, &["approvedFor"])?;
+            Some(match tree_value(payload, &["usedBy"]) {
+                Some(used_by) => {
+                    format!("Access approved for {approved_for} now applies to {used_by}")
+                }
+                None => format!("Access approved for {approved_for}"),
+            })
+        }
         "scope_ungranted" => tree_value(payload, &["reason"]),
         "resume_fallback" => number_u64(payload.get("chars"))
             .map(|chars| format!("{chars} chars of message history used"))
