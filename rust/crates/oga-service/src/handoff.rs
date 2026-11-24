@@ -130,10 +130,8 @@ pub async fn handoff(
         // A provider session belongs to one account, so a row that changes
         // profile leaves its session behind even while it keeps waiting.
         let session_id = old.session_id.clone().filter(|_| same_profile);
-        // The same goes for the account's last ending and its transport: a
-        // waiting task that ran before still carries both, and neither is the
-        // new account's. The ending moves into the attempts, and the new
-        // account decides its transport when it starts.
+        // The last ending goes into the earlier runs and the transport is
+        // dropped: neither is the new account's, which decides its own at start.
         let attempts = if same_profile {
             old.attempts.clone()
         } else {

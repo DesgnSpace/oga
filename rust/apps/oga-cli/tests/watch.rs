@@ -70,6 +70,34 @@ fn socket_that_hangs_up(path: &Path) -> thread::JoinHandle<()> {
     })
 }
 
+fn complete(store: &Store) {
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE tasks SET state='completed',updated_at='2026-01-01T00:01:00.000Z' WHERE id=?",
+                [TASK_ID],
+            )?;
+            Ok(())
+        })
+        .expect("task completes");
+}
+
+/// An event socket that greets the watcher and then says nothing, so only the
+/// watch's own deadline can end the wait.
+fn socket_that_goes_quiet(path: &Path) -> thread::JoinHandle<()> {
+    let listener = UnixListener::bind(path).expect("socket");
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().expect("watcher connected");
+        let mut subscribe = String::new();
+        BufReader::new(stream.try_clone().expect("clone"))
+            .read_line(&mut subscribe)
+            .expect("subscribe frame");
+        let mut stream = stream;
+        writeln!(stream, "{HELLO}").expect("hello");
+        thread::sleep(Duration::from_secs(4));
+    })
+}
+
 fn watch(home: &Path, socket: &Path, timeout: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_oga-cli"))
         .args(["watch", TASK_ID, "--timeout", timeout])
@@ -90,15 +118,7 @@ fn watch_keeps_following_a_task_after_the_event_socket_drops() {
 
     let finisher = thread::spawn(move || {
         thread::sleep(Duration::from_millis(1_500));
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "UPDATE tasks SET state='completed',updated_at='2026-01-01T00:01:00.000Z' WHERE id=?",
-                    [TASK_ID],
-                )?;
-                Ok(())
-            })
-            .expect("task completes");
+        complete(&store);
         store
     });
 
@@ -125,19 +145,7 @@ fn watch_that_runs_out_of_time_says_so_instead_of_blaming_the_socket() {
     let home = TempDir::new().expect("temporary home");
     let _store = seed_running_task(&home.path().join("oga.db"));
     let socket = home.path().join("e.sock");
-    // The server greets the watcher and then says nothing, so only the
-    // deadline can end the watch.
-    let listener = UnixListener::bind(&socket).expect("socket");
-    let silent = thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("watcher connected");
-        let mut subscribe = String::new();
-        BufReader::new(stream.try_clone().expect("clone"))
-            .read_line(&mut subscribe)
-            .expect("subscribe frame");
-        let mut stream = stream;
-        writeln!(stream, "{HELLO}").expect("hello");
-        thread::sleep(Duration::from_secs(4));
-    });
+    let silent = socket_that_goes_quiet(&socket);
 
     let output = watch(home.path(), &socket, "1s");
     silent.join().expect("socket thread");
@@ -155,27 +163,8 @@ fn watch_reports_a_task_that_ended_while_the_event_socket_said_nothing() {
     let home = TempDir::new().expect("temporary home");
     let store = seed_running_task(&home.path().join("oga.db"));
     let socket = home.path().join("e.sock");
-    let listener = UnixListener::bind(&socket).expect("socket");
-    let silent = thread::spawn(move || {
-        let (stream, _) = listener.accept().expect("watcher connected");
-        let mut subscribe = String::new();
-        BufReader::new(stream.try_clone().expect("clone"))
-            .read_line(&mut subscribe)
-            .expect("subscribe frame");
-        let mut stream = stream;
-        writeln!(stream, "{HELLO}").expect("hello");
-        thread::sleep(Duration::from_secs(4));
-    });
-    thread::sleep(Duration::from_millis(300));
-    store
-        .transaction(|tx| {
-            tx.execute(
-                "UPDATE tasks SET state='completed',updated_at='2026-01-01T00:01:00.000Z' WHERE id=?",
-                [TASK_ID],
-            )?;
-            Ok(())
-        })
-        .expect("task completes");
+    let silent = socket_that_goes_quiet(&socket);
+    complete(&store);
 
     let output = watch(home.path(), &socket, "1s");
     silent.join().expect("socket thread");

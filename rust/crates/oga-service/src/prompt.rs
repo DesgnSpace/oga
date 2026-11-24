@@ -422,9 +422,8 @@ pub fn interpret_worker_outcome(
     }
 }
 
-/// The value of a `MARKER: value` line. The marker closes the message or
-/// opens it: a worker that asks for input and then writes its report under
-/// the ask is still waiting for an answer.
+/// The value of a `MARKER: value` line that opens or closes the message: an ask
+/// followed by a report is still an ask.
 fn marker_value(output: &str, marker: &str) -> Option<String> {
     let mut lines = output.lines().filter(|line| !line.trim().is_empty());
     let first = lines.next()?;

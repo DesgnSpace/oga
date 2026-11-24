@@ -5,7 +5,7 @@
 use oga_domain::{
     HoldArgs, HoldVerb, OnBlockerFailure, RearmHoldArgs, Task, TaskHold, TaskKind, TaskState,
 };
-use oga_store::{StoreError, append_event};
+use oga_store::{Store, StoreError, append_event};
 use rusqlite::params;
 use serde_json::{Map, Value, json};
 
@@ -94,6 +94,13 @@ impl EditRequest {
             || self.requeue
     }
 
+    fn trimmed_instruction(&self) -> Option<&str> {
+        self.instruction
+            .as_deref()
+            .map(str::trim)
+            .filter(|instruction| !instruction.is_empty())
+    }
+
     fn changes_nothing(&self) -> bool {
         self.depends_on.is_none()
             && self.add_depends_on.is_empty()
@@ -136,14 +143,7 @@ pub async fn edit(
 
     let current_ids = dependencies::dependency_ids(store, &old.id)?;
     let prerequisite_ids = prerequisite_ids(&old.id, &current_ids, &request)?;
-    let prerequisites = prerequisite_ids
-        .iter()
-        .map(|id| {
-            lifecycle::load_task(store, id)?.ok_or_else(|| {
-                ContinuationError::Refusal(format!("unknown prerequisite task: {id}"))
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let prerequisites = load_prerequisites(store, &prerequisite_ids)?;
     let policy = match request.on_blocker_failure {
         Some(policy) => policy,
         None => dependencies::blocker_policy(store, &old.id)?,
@@ -167,11 +167,7 @@ pub async fn edit(
         .filter(|effort| !effort.is_empty())
         .map(str::to_owned)
         .or_else(|| old.effort.clone());
-    let instruction = request
-        .instruction
-        .as_deref()
-        .map(str::trim)
-        .filter(|instruction| !instruction.is_empty());
+    let instruction = request.trimmed_instruction();
     let prompt = match instruction {
         Some(instruction) => format!(
             "{}\n\n{ADDED_INSTRUCTION_HEADING}\n\n{instruction}",
@@ -314,24 +310,12 @@ fn rearm(dispatcher: &Dispatcher, request: &EditRequest) -> Result<Task, Continu
             old.id
         )));
     }
-    let prerequisites = prerequisite_ids
-        .iter()
-        .map(|id| {
-            lifecycle::load_task(store, id)?.ok_or_else(|| {
-                ContinuationError::Refusal(format!("unknown prerequisite task: {id}"))
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let prerequisites = load_prerequisites(store, &prerequisite_ids)?;
     let policy = match request.on_blocker_failure {
         Some(policy) => policy,
         None => dependencies::blocker_policy(store, &old.id)?,
     };
-    let instruction = request
-        .instruction
-        .as_deref()
-        .map(str::trim)
-        .filter(|instruction| !instruction.is_empty())
-        .map(str::to_owned);
+    let instruction = request.trimmed_instruction().map(str::to_owned);
     let now = now_iso();
     let hold = dependencies::rearm_hold(
         &old.id,
@@ -373,10 +357,8 @@ fn rearm(dispatcher: &Dispatcher, request: &EditRequest) -> Result<Task, Continu
     Ok(task)
 }
 
-/// Changes what a rearmed task waits on. The rearm keeps the time it was made
-/// and the state the task settled in, so a prerequisite that already completed
-/// again since still counts. A wait left satisfied by the change starts the
-/// run at once.
+/// Changes what a rearmed task waits on. The rearm keeps its time, so a
+/// prerequisite that completed again since still counts; a satisfied wait starts the run.
 fn edit_rearmed(
     dispatcher: &Dispatcher,
     request: &EditRequest,
@@ -402,26 +384,14 @@ fn edit_rearmed(
             old.id
         )));
     }
-    let prerequisites = prerequisite_ids
-        .iter()
-        .map(|id| {
-            lifecycle::load_task(store, id)?.ok_or_else(|| {
-                ContinuationError::Refusal(format!("unknown prerequisite task: {id}"))
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let prerequisites = load_prerequisites(store, &prerequisite_ids)?;
     let policy = match request.on_blocker_failure {
         Some(policy) => policy,
         None => dependencies::blocker_policy(store, &old.id)?,
     };
-    let instruction = request
-        .instruction
-        .as_deref()
-        .map(str::trim)
-        .filter(|instruction| !instruction.is_empty())
-        .map(str::to_owned);
+    let instruction = request.trimmed_instruction().map(str::to_owned);
     let now = now_iso();
-    let mut waiting = dependencies::rearm_hold(
+    let mut next_hold = dependencies::rearm_hold(
         &old.id,
         &prerequisites,
         policy,
@@ -431,8 +401,8 @@ fn edit_rearmed(
         rearm.previous_state,
         &now,
     );
-    waiting.args.rearm = Some(rearm.clone());
-    waiting.created_at = hold.created_at.clone();
+    next_hold.args.rearm = Some(rearm.clone());
+    next_hold.created_at = hold.created_at.clone();
     let mut changes = Map::new();
     if prerequisite_ids != current_ids {
         changes.insert("dependsOn".into(), json!(prerequisite_ids));
@@ -480,11 +450,11 @@ fn edit_rearmed(
                 None,
             )?;
         }
-        holds::insert_hold(tx, &waiting)
+        holds::insert_hold(tx, &next_hold)
     })?;
     let blockers = dependencies::rearm_blockers(store, &old.id, &rearm.at)?;
     if dependencies::prerequisites_met(policy, &blockers) {
-        dispatcher.resume_rearmed(waiting);
+        dispatcher.resume_rearmed(next_hold);
     }
     require_task(store, &old.id)
 }
@@ -634,6 +604,16 @@ fn require_editable(task: &Task, request: &EditRequest) -> Result<(), Continuati
         )));
     }
     Ok(())
+}
+
+fn load_prerequisites(store: &Store, ids: &[String]) -> Result<Vec<Task>, ContinuationError> {
+    ids.iter()
+        .map(|id| {
+            lifecycle::load_task(store, id)?.ok_or_else(|| {
+                ContinuationError::Refusal(format!("unknown prerequisite task: {id}"))
+            })
+        })
+        .collect()
 }
 
 fn prerequisite_ids(

@@ -160,8 +160,7 @@ async fn a_request_for_input_ahead_of_a_report_parks_the_task_and_holds_its_depe
     broker.wait_for(&asker, "needs_input").await;
     let inspected = broker.inspect(&asker).await;
     assert_eq!(
-        inspected["question"],
-        "please start `make dev`, then tell me.",
+        inspected["question"], "please start `make dev`, then tell me.",
         "{inspected}"
     );
     for _ in 0..30 {
