@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A task you move to another worker while it waits no longer shows the first worker's failure, and the task page says it is waiting instead of working.
+- A task that was rearmed can now have its wait changed with `oga edit`, so one finished task that will never run again no longer holds it back for good.
+- A worker that starts its last message with `needs_input:` and then writes a report now stops and asks you, so the tasks waiting on it stay waiting.
+- `oga watch` no longer says the connection was lost when its time simply ran out, and it reports a task that finished while it was not looking.
+
 ## 0.2.5 - 2026-11-16
 
 - Replying `allow`, or widening the task's scope in your reply, now lets a worker that stopped on a file outside its scope carry on. It no longer asks about the same file again, and the task keeps the new scope.
