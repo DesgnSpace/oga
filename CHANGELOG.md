@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Screens have more room to breathe. New tasks and status changes ease into place, and menus, dialogs and buttons respond with a light touch of motion.
 - The home screen now lists your recent tasks, the ones waiting on you first. Switch between what needs you, what is in progress, what is finished, or one project. Pick a task to see its request, the worker's latest answer, and its status, time and cost, then open it to reply.
 - A task you move to another worker while it waits no longer shows the first worker's failure, and the task page says it is waiting instead of working.
 - A task that was rearmed can now have its wait changed with `oga edit`, so one finished task that will never run again no longer holds it back for good.

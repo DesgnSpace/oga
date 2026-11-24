@@ -64,11 +64,11 @@
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
-    --space-4: 16px;
-    --space-5: 24px;
-    --space-6: 32px;
-    --space-7: 48px;
-    --space-8: 64px;
+    --space-4: 20px;
+    --space-5: 28px;
+    --space-6: 40px;
+    --space-7: 56px;
+    --space-8: 80px;
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --gutter: var(--space-4);
@@ -1496,7 +1496,7 @@ h1 {
 
 .home-search {
     display: flex;
-    height: var(--space-6);
+    height: var(--nav-item-height);
     align-items: center;
     gap: var(--space-2);
     margin-bottom: var(--space-2);
@@ -3135,7 +3135,7 @@ h1 {
 }
 
 .composer-tray-todo-track {
-    width: var(--space-7);
+    width: 3rem;
     height: var(--space-1);
     flex: 0 0 auto;
     border-radius: var(--radius-full);
@@ -4199,8 +4199,8 @@ h1 {
 
 @media (any-pointer: coarse) {
     .copy-button {
-        width: var(--space-7);
-        height: var(--space-7);
+        width: 3rem;
+        height: 3rem;
         opacity: 1;
     }
 
@@ -4330,7 +4330,7 @@ h1 {
 }
 
 .transcript-load-earlier.is-loading {
-    height: var(--space-5);
+    height: var(--control-height-small);
     margin-bottom: var(--space-3);
 }
 
@@ -4378,7 +4378,7 @@ h1 {
     width: 100%;
     align-items: baseline;
     gap: var(--space-2);
-    min-height: var(--space-5);
+    min-height: var(--control-height-small);
 }
 
 /* The whole row is the control. */
@@ -5727,7 +5727,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-section-search input {
     width: 100%;
-    min-height: var(--space-6);
+    min-height: var(--nav-item-height);
     padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) * 2 + var(--space-4));
     border: 1px solid var(--color-border);
     border-radius: var(--radius-control);
@@ -6024,23 +6024,23 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-skeleton-tab {
     width: 60%;
-    height: var(--space-4);
+    height: 1rem;
     margin: var(--space-3);
 }
 
 .settings-skeleton-search {
     width: 100%;
-    height: var(--space-6);
+    height: var(--nav-item-height);
 }
 
 .settings-skeleton-title {
     width: 12rem;
-    height: var(--space-6);
+    height: var(--nav-item-height);
 }
 
 .settings-skeleton-row {
     width: 100%;
-    height: var(--space-6);
+    height: var(--nav-item-height);
 }
 
 .settings-confirmation-actions {
@@ -6251,7 +6251,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-switch {
     display: inline-flex;
-    min-height: calc(var(--space-4) + var(--space-3));
+    min-height: var(--control-height);
     align-items: center;
     gap: var(--space-1);
     color: var(--color-text);
@@ -6266,7 +6266,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 .settings-switch-control {
     position: relative;
     display: inline-flex;
-    width: calc(var(--space-5) + var(--space-3));
+    width: 2.25rem;
     height: calc(var(--space-3) + var(--space-2));
     flex: 0 0 auto;
 }
@@ -6736,5 +6736,73 @@ textarea:disabled {
     .composer-send-choice-option,
     .trace-text-card-scroll-bottom {
         min-height: var(--control-height);
+    }
+}
+
+/* Motion: short, ease-out, opacity and scale or translate only, so layout
+   never moves. The reduced-motion rule above cuts every duration to ~0. */
+
+/* Press feedback: a button gives a little under the pointer. */
+.icon-button,
+.text-button,
+.settings-button {
+    transition: scale 160ms var(--ease-out);
+}
+
+.icon-button:not(:disabled):active,
+.text-button:not(:disabled):active,
+.settings-button:not(:disabled):active {
+    scale: 0.97;
+}
+
+/* A menu grows from its top edge as it opens. */
+.menu-panel {
+    transform-origin: top;
+    transition:
+        opacity 150ms var(--ease-out),
+        scale 150ms var(--ease-out);
+}
+
+/* A dialog settles in over its fading backdrop. */
+.modal-dialog {
+    transition:
+        opacity 200ms var(--ease-out),
+        scale 200ms var(--ease-out);
+}
+
+@starting-style {
+    .menu-panel,
+    .modal-dialog {
+        opacity: 0;
+        scale: 0.97;
+    }
+}
+
+/* A status mark that just changed grows into place. Only marks that changed
+   while shown carry `data-changed`, so a list never pops in on load. */
+.task-dot[data-changed] {
+    transition:
+        opacity 200ms var(--ease-out),
+        scale 200ms var(--ease-out);
+}
+
+@starting-style {
+    .task-dot[data-changed] {
+        opacity: 0;
+        scale: 0.4;
+    }
+}
+
+/* A task that just appeared or changed status drops in. A keyframe, not
+   `@starting-style`, because a row that moves keeps its element. */
+.sidebar-task-row[data-arrived],
+.home-list > li[data-arrived] {
+    animation: task-arrive 200ms var(--ease-out);
+}
+
+@keyframes task-arrive {
+    from {
+        opacity: 0;
+        translate: 0 -4px;
     }
 }

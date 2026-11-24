@@ -76,6 +76,7 @@ import { relativeTime } from "@/ui/time";
 import { handlesClick } from "@/router";
 import { toast } from "@/state/toast";
 import { taskOutcomeViews } from "@/state/task-outcome-views";
+import { useTaskArrivals } from "@/state/task-arrivals";
 import { TaskStatusDot } from "@/components/atoms/TaskStatusDot";
 
 const FILTERS_LABEL = "Filter and sort tasks";
@@ -197,6 +198,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
   const sidebarRef = useMemo(() => sidebarController ?? new SidebarController(), [sidebarController]);
 
   const sidebar = useStore(sidebarRef as unknown as { snapshot: SidebarState; subscribe: (l: () => void) => () => void });
+  const arrivedTaskIds = useTaskArrivals(sidebar.tasks);
   const taskOutcomeVersion = useSyncExternalStore(
     taskOutcomeViews.subscribe,
     () => taskOutcomeViews.snapshot,
@@ -969,6 +971,7 @@ function Sidebar({ sidebarController, onSelectTask, onOpenSettings, initialTask,
                 onOpenMenu={handleRowMenuButton}
                 openMenuTaskId={rowMenu?.task.id}
                 focusedTaskId={focusedTaskId}
+                arrived={row.type === "task" && arrivedTaskIds.has(row.task.id)}
                 taskRowRefs={taskRowRefs}
                 groupRowRefs={groupRowRefs}
                 onFocusTask={setFocusedTaskId}
@@ -1035,6 +1038,7 @@ function SidebarRowView({
   onOpenMenu,
   openMenuTaskId,
   focusedTaskId,
+  arrived,
   taskRowRefs,
   groupRowRefs,
   onFocusTask,
@@ -1048,6 +1052,8 @@ function SidebarRowView({
   onOpenMenu: (event: React.MouseEvent<HTMLButtonElement>, task: TaskSummary) => void;
   openMenuTaskId?: string;
   focusedTaskId?: string;
+  /** The task just appeared or changed status, so the row plays its entrance. */
+  arrived: boolean;
   taskRowRefs: React.RefObject<Map<string, HTMLAnchorElement>>;
   groupRowRefs: React.RefObject<Map<string, HTMLButtonElement>>;
   onFocusTask: (id: string) => void;
@@ -1107,7 +1113,7 @@ function SidebarRowView({
   ].filter(Boolean).join(" ");
 
   return (
-    <div className="sidebar-task-row">
+    <div className="sidebar-task-row" data-arrived={arrived || undefined}>
       <a
         ref={(element) => {
           if (element) taskRowRefs.current.set(task.id, element);

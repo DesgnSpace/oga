@@ -11,22 +11,46 @@ here and in `:root` first. Do not type a raw pixel value into a rule.
 
 ## Spacing scale
 
-All spacing sits on a 4px base.
+All spacing sits on a 4px base. The small steps (1 to 3) set the gaps inside
+a control or row and stay tight. The larger steps (4 to 8) set the room
+between and around things, and they are generous so screens breathe.
 
 | Token | Value | Typical use |
 | --- | --- | --- |
 | `--space-1` | 4px | Title to description in a row or section header; between rail items |
 | `--space-2` | 8px | Tight groups: icon to text in small controls, page title to description, section label to its card |
 | `--space-3` | 12px | Icon to label in the rail; pill inner padding; row vertical padding; between inline controls |
-| `--space-4` | 16px | Row side padding; rail padding |
-| `--space-5` | 24px | Between rail groups; text to control; below the page header |
-| `--space-6` | 32px | Rail search field height; between sections; narrow-window page top padding |
-| `--space-7` | 48px | Above the page title; content side padding; dialog margin |
-| `--space-8` | 64px | Below the last section |
+| `--space-4` | 20px | Row side padding; rail padding; the list gutter |
+| `--space-5` | 28px | Between rail groups; text to control; below the page header; around the home card |
+| `--space-6` | 40px | Between sections; narrow-window page top padding |
+| `--space-7` | 56px | Above the page title; content side padding; dialog margin |
+| `--space-8` | 80px | Below the last section |
 
-There is no 20px step. The existing tokens already name 24px as `--space-5`,
-and renumbering them would move every screen. Where a reference calls for
-20–24px, use 24px; where it calls for 16–20px, use 16px.
+Spacing tokens set gaps, never the size of a thing. A field, track, or
+skeleton block that needs a height uses a control token
+(`--control-height`, `--control-height-small`, `--nav-item-height`) or its
+own `rem` size, so a change to the scale never resizes a control.
+
+## Motion
+
+Motion shows what changed. It is never decoration.
+
+- 150 to 250ms, `--ease-out`, and only on `opacity`, `scale`, or
+  `translate`, so layout never moves. Use the `scale` and `translate`
+  properties, not `transform`, so motion never clobbers a positioned element.
+- Interruptible: CSS transitions with `@starting-style` for entrances. A
+  keyframe only where the element already exists, like a row that moves.
+- Nothing moves on load, on scroll, or on a keystroke. Keyboard actions such
+  as task search open at once.
+- Reduced motion cuts every duration to almost zero.
+
+| What | Motion |
+| --- | --- |
+| Pressing a button (`.icon-button`, `.text-button`, `.settings-button`) | Scales to 0.97, 160ms |
+| A menu opening | Fades in from 0.97 scale, from its top edge, 150ms |
+| A dialog opening | Fades in from 0.97 scale over its fading backdrop, 200ms |
+| A task status mark changing | Grows in from 0.4 scale, 200ms, only when it changed while shown |
+| A task arriving or changing status in the sidebar or on home | Fades in and drops 4px into place, 200ms |
 
 ## Radii
 
@@ -84,8 +108,8 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 - Its own full-height panel on `--color-sidebar`, with a hairline to its
   right. It is 15rem wide.
-- `--space-4` (16px) padding on the sides and bottom, `--space-5` on top.
-- Search field at the top, 32px tall, `--radius-control`.
+- `--space-4` (20px) padding on the sides and bottom, `--space-5` on top.
+- Search field at the top, `--nav-item-height` (32px) tall, `--radius-control`.
 - Items sit in groups under a small muted label (`--text-md`, 600). Groups are
   `--space-5` apart, and items in a group touch.
 - Each item is an icon and a label, `--nav-item-height` (32px) tall, with
