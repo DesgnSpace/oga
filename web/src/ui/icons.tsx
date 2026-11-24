@@ -449,6 +449,22 @@ export function TypeIcon({ size = 16, className }: IconProps) {
 }
 
 // Toast-semantic aliases — same strokes, callers pick by intent.
+export function FolderIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M216,74H130L101.73,52.8a14,14,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V200a14,14,0,0,0,14,14H216.89A13.12,13.12,0,0,0,230,200.89V88A14,14,0,0,0,216,74Zm2,126.89a1.11,1.11,0,0,1-1.11,1.11H40a2,2,0,0,1-2-2V64a2,2,0,0,1,2-2H93.33a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h88a2,2,0,0,1,2,2Z" />
+    </Svg>
+  );
+}
+
+export function ArrowUpRightIcon({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M198,64V168a6,6,0,0,1-12,0V78.48L68.24,196.24a6,6,0,0,1-8.48-8.48L177.52,70H88a6,6,0,0,1,0-12H192A6,6,0,0,1,198,64Z" />
+    </Svg>
+  );
+}
+
 export const ToastPendingIcon = RefreshIcon;
 export const ToastSuccessIcon = CheckIcon;
 export const ToastErrorIcon = ExclamationIcon;
@@ -498,6 +514,8 @@ export const iconRegistry: Array<{ name: string; Component: React.ComponentType<
   { name: "BellIcon", Component: BellIcon },
   { name: "BookmarkIcon", Component: BookmarkIcon },
   { name: "ListIcon", Component: ListIcon },
+  { name: "FolderIcon", Component: FolderIcon },
+  { name: "ArrowUpRightIcon", Component: ArrowUpRightIcon },
   { name: "HistoryIcon", Component: HistoryIcon },
   { name: "KeyboardIcon", Component: KeyboardIcon },
   { name: "TypeIcon", Component: TypeIcon },
