@@ -31,6 +31,27 @@ skeleton block that needs a height uses a control token
 (`--control-height`, `--control-height-small`, `--nav-item-height`) or its
 own `rem` size, so a change to the scale never resizes a control.
 
+## Motion
+
+Motion shows what changed. It is never decoration.
+
+- 150 to 250ms, `--ease-out`, and only on `opacity`, `scale`, or
+  `translate`, so layout never moves. Use the `scale` and `translate`
+  properties, not `transform`, so motion never clobbers a positioned element.
+- Interruptible: CSS transitions with `@starting-style` for entrances. A
+  keyframe only where the element already exists, like a row that moves.
+- Nothing moves on load, on scroll, or on a keystroke. Keyboard actions such
+  as task search open at once.
+- Reduced motion cuts every duration to almost zero.
+
+| What | Motion |
+| --- | --- |
+| Pressing a button (`.icon-button`, `.text-button`, `.settings-button`) | Scales to 0.97, 160ms |
+| A menu opening | Fades in from 0.97 scale, from its top edge, 150ms |
+| A dialog opening | Fades in from 0.97 scale over its fading backdrop, 200ms |
+| A task status mark changing | Grows in from 0.4 scale, 200ms, only when it changed while shown |
+| A task arriving or changing status in the sidebar or on home | Fades in and drops 4px into place, 200ms |
+
 ## Radii
 
 | Token | Value | Use |

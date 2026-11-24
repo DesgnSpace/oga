@@ -10,6 +10,7 @@ import { handlesClick } from "@/router";
 import { taskStatusLabel } from "@/screens/task/format";
 import type { SidebarController } from "@/state";
 import { searchTerm, type SidebarState, type SidebarTask } from "@/state/sidebar-state";
+import { useTaskArrivals } from "@/state/task-arrivals";
 import { focusTaskSearch } from "@/shell/taskSearch";
 import { displayLabel, projectId, projects, taskProjectLabel, type TaskProject } from "@/state/sidebar-projection";
 import {
@@ -254,6 +255,7 @@ function viewHeading(view: HomeView, sidebar: SidebarState, waiting: number): Vi
 
 function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask: (id: string) => void }) {
   const tasks = useMemo(() => recentTasks(sidebar.tasks), [sidebar.tasks]);
+  const arrivedTaskIds = useTaskArrivals(sidebar.tasks);
   const taskProjects = useMemo(() => projects(tasks), [tasks]);
   const waiting = tasks.filter(needsYou);
   const [view, setView] = useState<HomeView>({ kind: "status", id: "recent" });
@@ -319,7 +321,7 @@ function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask:
           <>
             <ul className="home-list" aria-labelledby="page-title">
               {shown.map((task) => (
-                <li key={task.id}>
+                <li key={task.id} data-arrived={arrivedTaskIds.has(task.id) || undefined}>
                   <HomeTaskCard
                     task={task}
                     worker={workerLabel(task, sidebar)}
