@@ -129,7 +129,8 @@ there is news, `1` on timeout, and `2` for invalid input.
 Use `oga inspect <task-id>` before acting on a settled task. A task delegated
 with `dependsOn` lists those task ids in its record's `dependsOn`, before and
 after it runs. While it still waits, `onBlockerFailure` says what happens if
-one of them does not complete. Resume failed,
+one of them does not complete. Work that a task hands onward names that task in
+`parentTaskId`. Resume failed,
 cancelled, or blocked work with `oga resume`; use `-m` when the next run needs
 an instruction. Move a task to a different account or model with
 `oga handoff <task-id> --worker <name>`; it keeps its id, request, and place in

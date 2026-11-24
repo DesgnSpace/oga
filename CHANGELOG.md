@@ -10,6 +10,7 @@
 - `--help` and `-h` now print how to use every `oga` command, instead of an unknown option error.
 - `oga tasks --json` now gives each task's full folder, instead of only its last part.
 - A worker that asks you a question with choices, then writes its report, now waits for your answer instead of showing as finished.
+- Work that a task hands on to other workers now names that task as its parent, so you can see where each piece came from.
 
 ## 0.2.5 - 2026-11-16
 

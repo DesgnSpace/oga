@@ -87,11 +87,20 @@ impl Broker {
     }
 
     async fn call(&self, name: &str, arguments: Value) -> Value {
+        self.call_from(None, name, arguments).await
+    }
+
+    /// A tool call made by a running task, as its worker's MCP client sends it.
+    async fn call_from(&self, caller: Option<&str>, name: &str, arguments: Value) -> Value {
+        let mut request = axum::http::Request::post("/mcp")
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream");
+        if let Some(caller) = caller {
+            request = request.header("x-oga-task-id", caller);
+        }
         let response = router(self.server.state().clone())
             .oneshot(
-                axum::http::Request::post("/mcp")
-                    .header("content-type", "application/json")
-                    .header("accept", "application/json, text/event-stream")
+                request
                     .body(Body::from(
                         json!({
                             "jsonrpc": "2.0",
@@ -248,6 +257,46 @@ async fn the_record_names_what_a_task_waits_on_while_waiting_and_after_it_runs()
     let ran = broker.record(&waiting).await;
     assert_eq!(ran["dependsOn"], json!([urgent]), "{ran}");
     assert!(ran.get("onBlockerFailure").is_none(), "{ran}");
+}
+
+/// Bug caught: work a running task hands onward never names that task, so the
+/// record of a lead's children shows no link back to it.
+#[tokio::test]
+async fn work_a_task_hands_onward_names_it_as_parent() {
+    let broker = Broker::new();
+    let lead = broker
+        .delegate("slow", "Lead", json!({ "canDelegate": true }))
+        .await;
+    let other = broker.delegate("later", "Other", json!({})).await;
+    let delegate_from_lead = |title: &str, extra: Value| {
+        let mut arguments = json!({
+            "prompt": format!("{title} work"),
+            "cwd": broker.cwd(),
+            "tldr": title,
+            "title": title,
+            "profile": "quick",
+            "model": "model",
+        });
+        arguments
+            .as_object_mut()
+            .expect("arguments")
+            .extend(extra.as_object().cloned().unwrap_or_default());
+        broker.call_from(Some(&lead), "delegate", arguments)
+    };
+
+    let child = delegate_from_lead("Child", json!({})).await;
+    let grouped = delegate_from_lead("Grouped", json!({ "parent": other })).await;
+    let by_owner = broker.delegate("quick", "Owner's", json!({})).await;
+
+    let child = broker.record(child["id"].as_str().expect("child id")).await;
+    let grouped = broker
+        .record(grouped["id"].as_str().expect("grouped id"))
+        .await;
+    assert_eq!(child["parentTaskId"], json!(lead), "{child}");
+    assert_eq!(grouped["parentTaskId"], json!(other), "{grouped}");
+    assert!(broker.record(&by_owner).await.get("parentTaskId").is_none());
+    broker.open("slow-gate");
+    broker.open("later-gate");
 }
 
 #[tokio::test]
