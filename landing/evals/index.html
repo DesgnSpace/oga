@@ -56,21 +56,15 @@
       <div id="evals-ranking" aria-live="polite">
         <p class="evals-state">Loading results…</p>
       </div>
-      <p class="evals-muted evals-note">A score counts the checks a model passed plus the points a reviewer gave it, out of the most it could get. Select a model to compare it.</p>
+      <p class="evals-muted evals-note">A score counts the checks a model passed plus the points a reviewer gave it, out of the most it could get. Select a model to add it to the comparison.</p>
     </section>
 
     <section class="evals-section" id="compare" aria-labelledby="compare-title" hidden>
       <div class="evals-section-head">
-        <h2 id="compare-title">Compare 2 models</h2>
-        <p class="evals-muted">Open a job to read the reviewer's note and every check. Copy the page address to share this comparison.</p>
+        <h2 id="compare-title">Compare models</h2>
+        <p class="evals-muted">Pick 2 to 4 models. Open a job to read each reviewer's note and every check. Copy the page address to share this comparison.</p>
       </div>
-      <div class="compare-bar">
-        <div class="picker" data-side="a"></div>
-        <button type="button" class="swap" id="compare-swap" aria-label="Swap the 2 models">
-          <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M6 4 3 7l3 3M3 7h11M14 10l3 3-3 3M17 13H6"/></svg>
-        </button>
-        <div class="picker" data-side="b"></div>
-      </div>
+      <div class="slots" id="compare-slots"></div>
       <div id="compare-result"></div>
     </section>
 

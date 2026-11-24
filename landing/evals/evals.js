@@ -45,9 +45,13 @@ const ranking = document.getElementById("evals-ranking");
 const meta = document.getElementById("evals-meta");
 const compare = document.getElementById("compare");
 const compareResult = document.getElementById("compare-result");
-const swapButton = document.getElementById("compare-swap");
+const slots = document.getElementById("compare-slots");
 
-const state = { models: [], cases: [], a: null, b: null };
+const SIDES = ["a", "b", "c", "d"];
+const MIN_PICKS = 2;
+const MAX_PICKS = 4;
+
+const state = { models: [], cases: [], picks: [] };
 let uid = 0;
 
 function el(tag, props = {}, children = []) {
@@ -162,11 +166,11 @@ function ring(score, size = "large") {
   ]);
 }
 
-function bar(score, side = "") {
+function bar(score) {
   const fill = el("span", { className: "bar-fill" });
   fill.style.transform = "scaleX(0)";
   animateTo(fill, "transform", `scaleX(${score / 100})`);
-  const track = el("span", { className: `bar ${side}`.trim() }, [fill]);
+  const track = el("span", { className: "bar" }, [fill]);
   track.setAttribute("aria-hidden", "true");
   return track;
 }
@@ -202,9 +206,9 @@ function renderRanking() {
       el("span", { className: "rank-cases" }, cases),
       ring(model.score),
     ]);
-    button.setAttribute("aria-label", `${model.name}, ${model.score}% overall. Compare this model.`);
+    button.setAttribute("aria-label", `${model.name}, ${model.score}% overall. Add to the comparison.`);
     button.addEventListener("click", () => {
-      choose("a", model.id);
+      addPick(model.id);
       compare.scrollIntoView({ block: "start" });
     });
     return el("li", {}, [button]);
@@ -214,10 +218,15 @@ function renderRanking() {
 
 /* Picker: a button that opens a searchable list of models. */
 
-function createPicker(side) {
-  const root = compare.querySelector(`.picker[data-side="${side}"]`);
+let openPicker = null;
+
+document.addEventListener("pointerdown", (event) => {
+  if (openPicker && !openPicker.root.contains(event.target)) openPicker.close(false);
+});
+
+// `trigger` is the button that opens the list. `choices` lists the models to offer.
+function createPicker({ trigger, label, selected, choices, onPick, alignEnd = false }) {
   const listId = nextId("picker-list");
-  const trigger = el("button", { type: "button", className: "picker-trigger" });
   trigger.setAttribute("aria-haspopup", "listbox");
   trigger.setAttribute("aria-expanded", "false");
   const search = el("input", {
@@ -228,12 +237,12 @@ function createPicker(side) {
   });
   search.setAttribute("role", "combobox");
   search.setAttribute("aria-controls", listId);
-  search.setAttribute("aria-label", `Search models for side ${side.toUpperCase()}`);
+  search.setAttribute("aria-label", label);
   const list = el("ul", { className: "picker-list", id: listId });
   list.setAttribute("role", "listbox");
   const empty = el("p", { className: "picker-empty", textContent: "No model matches." });
   const panel = el("div", { className: "picker-panel" }, [search, list, empty]);
-  root.replaceChildren(trigger, panel);
+  const root = el("div", { className: `picker${alignEnd ? " align-end" : ""}` }, [trigger, panel]);
 
   let options = [];
   let active = 0;
@@ -251,7 +260,7 @@ function createPicker(side) {
 
   function fill() {
     const query = search.value.trim().toLowerCase();
-    const matches = state.models.filter((model) =>
+    const matches = choices().filter((model) =>
       `${model.id} ${model.provider}`.toLowerCase().includes(query),
     );
     options = matches.map((model) => {
@@ -260,7 +269,7 @@ function createPicker(side) {
         el("span", { className: "picker-score", textContent: `${model.score}%` }),
       ]);
       option.setAttribute("role", "option");
-      option.setAttribute("aria-selected", String(model.id === state[side]));
+      option.setAttribute("aria-selected", String(model.id === selected));
       option.dataset.id = model.id;
       option.addEventListener("pointerdown", (event) => event.preventDefault());
       option.addEventListener("click", () => pick(model.id));
@@ -268,17 +277,19 @@ function createPicker(side) {
     });
     list.replaceChildren(...options);
     empty.hidden = options.length > 0;
-    active = Math.max(0, options.findIndex((option) => option.dataset.id === state[side]));
+    active = Math.max(0, options.findIndex((option) => option.dataset.id === selected));
     paintActive();
   }
 
   function open() {
+    if (openPicker) openPicker.close(false);
     search.value = "";
     fill();
     root.classList.add("is-open");
     trigger.setAttribute("aria-expanded", "true");
     search.setAttribute("aria-expanded", "true");
     search.focus();
+    openPicker = api;
   }
 
   function close(returnFocus = true) {
@@ -286,14 +297,16 @@ function createPicker(side) {
     root.classList.remove("is-open");
     trigger.setAttribute("aria-expanded", "false");
     search.setAttribute("aria-expanded", "false");
+    if (openPicker === api) openPicker = null;
     if (returnFocus) trigger.focus();
   }
 
   function pick(id) {
-    close();
-    choose(side, id);
+    close(false);
+    onPick(id);
   }
 
+  const api = { root, close };
   trigger.addEventListener("click", () => (root.classList.contains("is-open") ? close() : open()));
   search.addEventListener("input", fill);
   search.addEventListener("keydown", (event) => {
@@ -312,41 +325,145 @@ function createPicker(side) {
       close(false);
     }
   });
-  document.addEventListener("pointerdown", (event) => {
-    if (!root.contains(event.target)) close(false);
+  return root;
+}
+
+/* Picked models: one card each, plus a card to add another. */
+
+function sideBadge(index) {
+  return el("span", { className: "picker-side", textContent: SIDES[index].toUpperCase() });
+}
+
+function sideClass(index) {
+  return `side-${SIDES[index]}`;
+}
+
+function spareModels() {
+  return state.models.filter((model) => !state.picks.includes(model.id));
+}
+
+function overallDelta(model, best, allEven) {
+  const gap = best - model.score;
+  if (allEven) return el("span", { className: "slot-delta", textContent: "Even" });
+  if (gap === 0) return el("span", { className: "slot-delta is-best", textContent: "Best overall" });
+  return el("span", { className: "slot-delta", textContent: `${gap} ${gap === 1 ? "point" : "points"} behind` });
+}
+
+function slotCard(id, index, columns) {
+  const model = findModel(id);
+  const scores = state.picks.map((pick) => findModel(pick).score);
+  const best = Math.max(...scores);
+  const allEven = scores.every((score) => score === best);
+
+  const trigger = el("button", { type: "button", className: "picker-trigger" }, [
+    sideBadge(index),
+    modelTitle(model),
+    svg("svg", { class: "picker-chevron", viewBox: "0 0 20 20", "aria-hidden": "true" }, [
+      svg("path", { d: "m6 8 4 4 4-4" }),
+    ]),
+  ]);
+  trigger.setAttribute("aria-label", `Model ${SIDES[index].toUpperCase()}: ${model.name}. Change model`);
+  trigger.dataset.focus = `slot-${index}`;
+  const picker = createPicker({
+    trigger,
+    label: `Search models for ${SIDES[index].toUpperCase()}`,
+    selected: id,
+    choices: () => state.models,
+    onPick: (next) => replacePick(index, next),
+    alignEnd: index > 0 && index >= columns / 2,
   });
 
-  return {
-    update() {
-      const model = findModel(state[side]);
-      trigger.replaceChildren(
-        el("span", { className: "picker-side", textContent: side.toUpperCase() }),
-        modelTitle(model),
-        svg("svg", { class: "picker-chevron", viewBox: "0 0 20 20", "aria-hidden": "true" }, [
-          svg("path", { d: "m6 8 4 4 4-4" }),
-        ]),
-      );
-      trigger.setAttribute("aria-label", `Model ${side.toUpperCase()}: ${model.name}. Change model`);
-    },
-  };
+  const head = el("div", { className: "slot-head" }, [picker]);
+  if (state.picks.length > MIN_PICKS) {
+    const remove = el("button", { type: "button", className: "slot-remove" }, [
+      svg("svg", { viewBox: "0 0 20 20", "aria-hidden": "true" }, [svg("path", { d: "m6 6 8 8M14 6l-8 8" })]),
+    ]);
+    remove.setAttribute("aria-label", `Remove ${model.name} from the comparison`);
+    remove.addEventListener("click", () => removePick(index));
+    head.append(remove);
+  }
+
+  return el("li", { className: `slot ${sideClass(index)}` }, [
+    head,
+    el("div", { className: "slot-score" }, [
+      ring(model.score),
+      el("span", { className: "slot-score-text" }, [
+        el("span", { className: "slot-label", textContent: "Overall" }),
+        overallDelta(model, best, allEven),
+      ]),
+    ]),
+  ]);
 }
 
-const pickers = {};
-
-function choose(side, id) {
-  const other = side === "a" ? "b" : "a";
-  if (state[other] === id) state[other] = state[side];
-  state[side] = id;
-  syncCompare();
+function addCard(columns) {
+  const trigger = el("button", { type: "button", className: "slot-add" }, [
+    svg("svg", { viewBox: "0 0 20 20", "aria-hidden": "true" }, [svg("path", { d: "M10 4v12M4 10h12" })]),
+    el("span", { textContent: "Add a model" }),
+  ]);
+  trigger.dataset.focus = "add";
+  const picker = createPicker({
+    trigger,
+    label: "Search models to add",
+    selected: null,
+    choices: spareModels,
+    onPick: (id) => addPick(id, { fromAddCard: true }),
+    alignEnd: columns > 1,
+  });
+  return el("li", { className: "slot slot-empty" }, [picker]);
 }
 
-function syncCompare() {
+function canAdd() {
+  return state.picks.length < MAX_PICKS && spareModels().length > 0;
+}
+
+function renderSlots(focus) {
+  const columns = state.picks.length + (canAdd() ? 1 : 0);
+  const cards = state.picks.map((id, index) => slotCard(id, index, columns));
+  if (canAdd()) cards.push(addCard(columns));
+  const list = el("ul", { className: "slot-list" }, cards);
+  list.style.setProperty("--columns", String(columns));
+  list.dataset.columns = String(columns);
+  slots.replaceChildren(list);
+  if (focus) slots.querySelector(`[data-focus="${focus}"]`)?.focus();
+}
+
+// Picking a model that sits in another slot swaps the 2 slots.
+function replacePick(index, id) {
+  const from = state.picks.indexOf(id);
+  if (from !== -1) state.picks[from] = state.picks[index];
+  state.picks[index] = id;
+  syncCompare(`slot-${index}`);
+}
+
+// A full comparison swaps its last model for the new one.
+function addPick(id, { fromAddCard = false } = {}) {
+  if (state.picks.includes(id)) return;
+  if (state.picks.length >= MAX_PICKS) state.picks[MAX_PICKS - 1] = id;
+  else state.picks.push(id);
+  const focus = canAdd() ? "add" : `slot-${state.picks.indexOf(id)}`;
+  syncCompare(fromAddCard ? focus : undefined);
+}
+
+function removePick(index) {
+  state.picks.splice(index, 1);
+  syncCompare(canAdd() ? "add" : `slot-${Math.min(index, state.picks.length - 1)}`);
+}
+
+// Keeps the picks in the address as `?m=a,b,c` so a comparison can be shared.
+function writeUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.set("a", state.a);
-  url.searchParams.set("b", state.b);
+  url.searchParams.delete("a");
+  url.searchParams.delete("b");
+  url.searchParams.delete("m");
+  const rest = url.searchParams.toString();
+  const picks = state.picks.map((id) => encodeURIComponent(id).replaceAll("%2F", "/")).join(",");
+  url.search = `?m=${picks}${rest ? `&${rest}` : ""}`;
   window.history.replaceState(null, "", url);
-  pickers.a.update();
-  pickers.b.update();
+}
+
+function syncCompare(focus) {
+  writeUrl();
+  renderSlots(focus);
   renderComparison();
 }
 
@@ -361,11 +478,11 @@ function checksById(rows) {
   return checks;
 }
 
-function dot(pass, side) {
+function dot(pass, name, best) {
   if (pass === undefined) return el("span", { className: "dot dot-none", textContent: "—" });
-  const mark = el("span", { className: `dot ${pass ? "dot-pass" : "dot-fail"}` });
+  const mark = el("span", { className: `dot ${pass ? "dot-pass" : "dot-fail"}${best ? " is-best" : ""}` });
   mark.setAttribute("role", "img");
-  mark.setAttribute("aria-label", `${side}: ${pass ? "passed" : "missed"}`);
+  mark.setAttribute("aria-label", `${name}: ${pass ? "passed" : "missed"}`);
   return mark;
 }
 
@@ -389,12 +506,9 @@ function checkName(id) {
   return el("span", { className: "check-cell" }, [button, tip]);
 }
 
-function judgeBlock(side, model, rows) {
-  const block = el("div", { className: `judge judge-${side}` }, [
-    el("p", { className: "judge-head" }, [
-      el("span", { className: "picker-side", textContent: side.toUpperCase() }),
-      el("span", { textContent: model.name }),
-    ]),
+function judgeBlock(index, model, rows) {
+  const block = el("div", { className: `judge ${sideClass(index)}` }, [
+    el("p", { className: "judge-head" }, [sideBadge(index), el("span", { textContent: model.name })]),
   ]);
   if (!rows) {
     block.append(el("p", { className: "evals-muted", textContent: "Not run on this job." }));
@@ -411,15 +525,22 @@ function judgeBlock(side, model, rows) {
   return block;
 }
 
-function caseRow(id, a, b) {
-  const rowsA = a.cases.get(id);
-  const rowsB = b.cases.get(id);
-  const scoreA = rowsA ? tally(rowsA).score : null;
-  const scoreB = rowsB ? tally(rowsB).score : null;
-  const checksA = checksById(rowsA);
-  const checksB = checksById(rowsB);
-  const ids = [...new Set([...checksA.keys(), ...checksB.keys()])];
-  const differences = ids.filter((checkId) => checksA.get(checkId) !== checksB.get(checkId)).length;
+// Marks the top score, unless every picked model ran the job and tied.
+function bestOf(scores) {
+  const known = scores.filter((score) => score !== null);
+  const top = Math.max(...known);
+  const tied = known.length === scores.length && known.every((score) => score === top);
+  return (score) => !tied && score !== null && score === top;
+}
+
+function caseRow(id, models) {
+  const runs = models.map((model) => model.cases.get(id));
+  const scores = runs.map((rows) => (rows ? tally(rows).score : null));
+  const checks = runs.map(checksById);
+  const ids = [...new Set(checks.flatMap((map) => [...map.keys()]))];
+  const results = (checkId) => runs.map((rows, index) => (rows ? checks[index].get(checkId) : undefined));
+  const differences = ids.filter((checkId) => new Set(results(checkId)).size > 1).length;
+  const isBestScore = bestOf(scores);
 
   const panelId = nextId("case-panel");
   const header = el("button", { type: "button", className: "case-head" }, [
@@ -432,10 +553,11 @@ function caseRow(id, a, b) {
           : "Same checks passed",
       }),
     ]),
-    el("span", { className: "case-scores" }, [
-      caseScore(scoreA, "side-a", scoreA !== null && scoreA > (scoreB ?? -1)),
-      caseScore(scoreB, "side-b", scoreB !== null && scoreB > (scoreA ?? -1)),
-    ]),
+    el(
+      "span",
+      { className: "case-scores" },
+      scores.map((score, index) => caseScore(score, index, models[index], isBestScore(score))),
+    ),
     svg("svg", { class: "case-chevron", viewBox: "0 0 20 20", "aria-hidden": "true" }, [
       svg("path", { d: "m6 8 4 4 4-4" }),
     ]),
@@ -444,22 +566,24 @@ function caseRow(id, a, b) {
   header.setAttribute("aria-controls", panelId);
 
   const lines = ids.map((checkId) => {
-    const passA = checksA.get(checkId);
-    const passB = checksB.get(checkId);
-    return el("li", { className: `check-row${passA !== passB ? " differs" : ""}` }, [
+    const passes = results(checkId);
+    const differs = new Set(passes).size > 1;
+    return el("li", { className: `check-row${differs ? " differs" : ""}` }, [
       checkName(checkId),
-      dot(rowsA ? passA : undefined, "A"),
-      dot(rowsB ? passB : undefined, "B"),
+      ...passes.map((pass, index) => dot(pass, models[index].name, differs && pass === true)),
     ]);
   });
 
   const inner = el("div", { className: "case-inner" }, [
-    el("div", { className: "judges" }, [judgeBlock("a", a, rowsA), judgeBlock("b", b, rowsB)]),
+    el("div", { className: "judges" }, models.map((model, index) => judgeBlock(index, model, runs[index]))),
     el("div", { className: "checks" }, [
       el("p", { className: "checks-head" }, [
         el("span", { textContent: "Check" }),
-        el("span", { textContent: "A" }),
-        el("span", { textContent: "B" }),
+        ...models.map((model, index) => {
+          const badge = sideBadge(index);
+          badge.title = model.name;
+          return el("span", { className: sideClass(index) }, [badge]);
+        }),
       ]),
       el("ul", { className: "check-list" }, lines),
     ]),
@@ -468,70 +592,68 @@ function caseRow(id, a, b) {
   panel.inert = true;
 
   const item = el("li", { className: "case" }, [header, panel]);
-  header.addEventListener("click", () => {
-    const open = !item.classList.contains("is-open");
-    item.classList.toggle("is-open", open);
-    item.classList.remove("is-settled");
-    header.setAttribute("aria-expanded", String(open));
-    panel.inert = !open;
-  });
+  header.addEventListener("click", () => setCaseOpen(item, !item.classList.contains("is-open")));
   panel.addEventListener("transitionend", (event) => {
     if (event.target === panel && item.classList.contains("is-open")) item.classList.add("is-settled");
   });
   return item;
 }
 
-function caseScore(score, side, ahead) {
-  return el("span", { className: `case-score ${side}${ahead ? " is-ahead" : ""}` }, [
-    el("span", { className: "case-score-n", textContent: score === null ? "—" : `${score}%` }),
-    bar(score ?? 0, side),
-  ]);
+const phone = window.matchMedia("(max-width: 760px)");
+
+// On a phone one job stays open at a time, so the page stays short.
+function setCaseOpen(item, open) {
+  if (open && phone.matches) {
+    for (const other of item.parentElement.querySelectorAll(".case.is-open")) {
+      if (other !== item) setCaseOpen(other, false);
+    }
+  }
+  const header = item.querySelector(".case-head");
+  item.classList.toggle("is-open", open);
+  item.classList.remove("is-settled");
+  header.setAttribute("aria-expanded", String(open));
+  item.querySelector(".case-panel").inert = !open;
 }
 
-function overallCard(side, model, other) {
-  const diff = model.score - other.score;
-  return el("div", { className: `overall side-${side}` }, [
-    ring(model.score),
-    el("div", { className: "overall-text" }, [
-      el("span", { className: "picker-side", textContent: side.toUpperCase() }),
-      el("span", { className: "overall-name", textContent: "Overall" }),
-      el("span", {
-        className: `overall-delta${diff > 0 ? " is-ahead" : ""}`,
-        textContent: diff === 0 ? "Even" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)} points`,
-      }),
-    ]),
+function caseScore(score, index, model, best) {
+  const node = el("span", { className: `case-score ${sideClass(index)}${best ? " is-best" : ""}` }, [
+    sideBadge(index),
+    el("span", { className: "case-score-n", textContent: score === null ? "—" : `${score}%` }),
+    bar(score ?? 0),
   ]);
+  node.title = model.name;
+  return node;
 }
 
 function renderComparison() {
-  const a = findModel(state.a);
-  const b = findModel(state.b);
-  compareResult.replaceChildren(
-    el("div", { className: "overalls" }, [overallCard("a", a, b), overallCard("b", b, a)]),
-    el("ul", { className: "case-list" }, state.cases.map((id) => caseRow(id, a, b))),
-  );
+  const models = state.picks.map(findModel);
+  const list = el("ul", { className: "case-list" }, state.cases.map((id) => caseRow(id, models)));
+  list.style.setProperty("--picks", String(models.length));
+  compareResult.replaceChildren(list);
+}
+
+function initialPicks() {
+  const ids = state.models.map((model) => model.id);
+  const params = new URLSearchParams(window.location.search);
+  // `?a=&b=` is the older 2-model address; it still opens the same pair.
+  const asked = params.has("m")
+    ? params.get("m").split(",")
+    : [params.get("a"), params.get("b")];
+  const picks = [...new Set(asked.filter((id) => ids.includes(id)))].slice(0, MAX_PICKS);
+  // Fill up to 2 with the best models not already picked.
+  for (const id of ids) {
+    if (picks.length >= MIN_PICKS) break;
+    if (!picks.includes(id)) picks.push(id);
+  }
+  return picks;
 }
 
 function setupCompare() {
-  if (state.models.length < 2) {
+  if (state.models.length < MIN_PICKS) {
     compare.hidden = true;
     return;
   }
-  const ids = state.models.map((model) => model.id);
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = (key) => (ids.includes(params.get(key)) ? params.get(key) : null);
-  // A missing or unknown pick falls back to the best model not already on the other side.
-  const sharedB = fromUrl("b");
-  state.a = fromUrl("a") ?? ids.find((id) => id !== sharedB);
-  state.b = sharedB && sharedB !== state.a ? sharedB : ids.find((id) => id !== state.a);
-
-  pickers.a = createPicker("a");
-  pickers.b = createPicker("b");
-  swapButton.onclick = () => {
-    swapButton.classList.toggle("is-flipped");
-    [state.a, state.b] = [state.b, state.a];
-    syncCompare();
-  };
+  state.picks = initialPicks();
   compare.hidden = false;
   syncCompare();
 }
