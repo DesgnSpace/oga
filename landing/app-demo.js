@@ -49,7 +49,7 @@ if (app) {
       time: "1m",
       cost: "$0.06",
       replies: {
-        queued: "Starts when Build the feature is done.",
+        queued: "Starts after Build the feature.",
         running: "Reading the 6 changed files.",
         needs: "2 files changed outside src/import/. Keep them?",
       },
@@ -157,7 +157,7 @@ if (app) {
   }
 
   function tick() {
-    if (visible && !document.hidden && Date.now() >= pausedUntil) {
+    if (visible && !holding && !document.hidden && Date.now() >= pausedUntil) {
       step = (step + 1) % STEPS.length;
       apply(STEPS[step]);
     }
@@ -175,6 +175,13 @@ if (app) {
       if (id !== picked) pick(id);
     });
   }
+
+  // The panel holds still while a visitor points at it or tabs through it.
+  let holding = false;
+  app.addEventListener("pointerenter", () => (holding = true));
+  app.addEventListener("pointerleave", () => (holding = false));
+  app.addEventListener("focusin", () => (holding = true));
+  app.addEventListener("focusout", () => (holding = false));
 
   if ("IntersectionObserver" in window) {
     new IntersectionObserver(([entry]) => {
