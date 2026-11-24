@@ -53,7 +53,7 @@ describe("subscribeMenuCommands", () => {
     expect(sidebar.toggleSidebar).toHaveBeenCalledOnce();
   });
 
-  it("opens the sidebar and focuses the task list on toggle-sidebar when collapsed", async () => {
+  it("opens the sidebar and focuses the view on screen on toggle-sidebar when collapsed", async () => {
     const fake = fakeTransport();
     const { subscribeMenuCommands } = await freshMenuCommands(fake.transport);
     const sidebar = fakeSidebar(true);
@@ -68,11 +68,11 @@ describe("subscribeMenuCommands", () => {
       callback(0);
       return 0;
     }) as typeof requestAnimationFrame;
-    document.body.innerHTML = '<div id="task-list"><a role="option" tabindex="0" aria-selected="true"></a></div>';
+    document.body.innerHTML = '<aside class="task-sidebar"><nav><button>Recent</button><button aria-current="page">Needs you</button></nav></aside>';
     try {
       fake.emit(MENU_EVENT, "toggle-sidebar");
       expect(sidebar.toggleSidebar).toHaveBeenCalledOnce();
-      expect(document.activeElement).toBe(document.querySelector('#task-list [role="option"]'));
+      expect(document.activeElement).toBe(document.querySelector('[aria-current="page"]'));
     } finally {
       globalThis.requestAnimationFrame = originalRaf;
       document.body.innerHTML = "";

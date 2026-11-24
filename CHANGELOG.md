@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Screens have more room to breathe. New tasks and status changes ease into place, and menus, dialogs and buttons respond with a light touch of motion.
-- The home screen now lists your recent tasks, the ones waiting on you first. Switch between what needs you, what is in progress, what is finished, or one project. Pick a task to see its request, the worker's latest answer, and its status, time and cost, then open it to reply.
+- The sidebar is now where you move around: search, what needs you, what is in progress, what is finished, archived tasks, and each project with its task count. Projects with the same folder name show the folder above them, so you can tell them apart.
+- Home lists the tasks you pick in the sidebar: what needs you first, then what is running, then finished work by day. Pick a task to see what was asked, the worker's question or error, and its status, time and cost, then open it to reply. Stop, resume and archive are in each task's menu.
 - A task you move to another worker while it waits no longer shows the first worker's failure, and the task page says it is waiting instead of working.
 - A task that was rearmed can now have its wait changed with `oga edit`, so one finished task that will never run again no longer holds it back for good.
 - A worker that starts its last message with `needs_input:` and then writes a report now stops and asks you, so the tasks waiting on it stay waiting.

@@ -1,20 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { setTransport, type Transport } from "@/bridge/transport";
 import { resetFeedsForTests } from "@/bridge/events";
-import { EVENT_BATCH_EVENT, STATUS_EVENT, WINDOW_VISIBILITY_EVENT, type EventBatch, type StreamStatus, type TaskSummary, type WindowVisibility } from "@/bridge/types";
+import { EVENT_BATCH_EVENT, STATUS_EVENT, WINDOW_VISIBILITY_EVENT, type EventBatch, type StateQuery, type StreamStatus, type TaskSummary, type WindowVisibility } from "@/bridge/types";
 import { resetWindowVisibilityForTests } from "@/lib/window-visibility";
 import { SidebarController } from "@/state/sidebar-state";
-import { resetTaskOutcomeViewsForTests, taskOutcomeViews } from "@/state/task-outcome-views";
-import * as sidebarProjection from "@/state/sidebar-projection";
+import { resetTaskOutcomeViewsForTests } from "@/state/task-outcome-views";
 import Sidebar from "./Sidebar";
-
-const projectionFromState = mock(sidebarProjection.projectionFromState);
-
-mock.module("@/state/sidebar-projection", () => ({
-  ...sidebarProjection,
-  projectionFromState,
-}));
 
 function task(id: string, preview: string, extra: Partial<TaskSummary> = {}): TaskSummary {
   return {
@@ -30,319 +22,136 @@ function task(id: string, preview: string, extra: Partial<TaskSummary> = {}): Ta
   };
 }
 
-function transport(
-  options: {
-    profiles?: Array<{ id: string; label: string }>;
-    tasks?: TaskSummary[];
-    tasksHasMore?: boolean;
-  } = {},
-): Transport {
+const WORKER = { id: "worker", label: "Worker", provider: "claude", model: "sonnet", enabled: true, env: {}, capabilities: [] };
+
+interface Answer {
+  tasks: TaskSummary[];
+  groupCounts?: Record<string, number>;
+}
+
+/** A broker whose summary answers depend on the query, as the real one's do. */
+function broker(answer: (query: StateQuery) => Answer, options: { profiles?: unknown[]; listen?: Transport["listen"] } = {}): Transport {
   return {
-    invoke: async (command: string, args?: Record<string, unknown>) => {
-      if (command !== "broker_call") throw { message: `no handler for ${command}` };
-      const call = (args?.call as { call: string }).call;
-      if (call === "summary") {
-        return {
-          profiles: options.profiles ?? [],
-          tasks: options.tasks ?? [task("one", "first task"), task("two", "second task")],
-          tasksHasMore: options.tasksHasMore ?? false,
-          profileFailures: [],
-          grants: [],
-          memoryProjects: [],
-        } as never;
+    invoke: async (command, args) => {
+      if (command === "broker_stream_status") {
+        // SAFETY: this fixture returns the StreamStatus shape the sidebar reads.
+        return { connected: true, cursor: 0, streamFloor: 0, stale: false } as never;
       }
-      throw { message: `no handler for ${call}` };
+      if (command !== "broker_call") throw { message: `no handler for ${command}` };
+      // SAFETY: broker_call requests always carry a call object.
+      const call = args?.call as { call: string; query?: StateQuery };
+      if (call.call !== "summary") throw { message: `no handler for ${call.call}` };
+      const { tasks, groupCounts } = answer(call.query!);
+      // SAFETY: this fixture returns the BrokerSummaryState shape SidebarController reads.
+      return {
+        profiles: options.profiles ?? [WORKER],
+        tasks,
+        tasksHasMore: false,
+        groupCounts,
+        profileFailures: [],
+        grants: [],
+        memoryProjects: [],
+      } as never;
     },
-    listen: () => {},
+    listen: options.listen ?? (() => {}),
   };
 }
 
-/** jsdom lays nothing out, so the list reads the row and viewport sizes a browser would give it. */
-function stubRowLayout({
-  rowHeight,
-  headerHeight = rowHeight,
-  viewportHeight,
-}: {
-  rowHeight: number;
-  headerHeight?: number;
-  viewportHeight: number;
-}): () => void {
-  const prototype = window.HTMLElement.prototype;
-  const offsetHeight = Object.getOwnPropertyDescriptor(prototype, "offsetHeight")!;
-  const getBoundingClientRect = prototype.getBoundingClientRect;
-  const isRow = (element: Element) => element.classList.contains("sidebar-task-row");
-  const isHeader = (element: Element) => element.classList.contains("sidebar-group");
-  Object.defineProperty(prototype, "offsetHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return isRow(this) ? Math.round(rowHeight) : 0;
-    },
-  });
-  Object.defineProperty(prototype, "clientHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return this.id === "task-list" ? viewportHeight : 0;
-    },
-  });
-  prototype.getBoundingClientRect = function (this: HTMLElement) {
-    const height = isHeader(this) ? headerHeight : isRow(this) ? rowHeight : 0;
-    return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect;
-  };
-  return () => {
-    Object.defineProperty(prototype, "offsetHeight", offsetHeight);
-    // Only shadows Element's own clientHeight, so removing it restores that.
-    Reflect.deleteProperty(prototype, "clientHeight");
-    prototype.getBoundingClientRect = getBoundingClientRect;
-  };
+/** The list read, as opposed to the one-row reads that count every active task. */
+function listRead(query: StateQuery): boolean {
+  return query.limit !== 1;
+}
+
+function views() {
+  return within(screen.getByRole("navigation", { name: "Task views" }));
 }
 
 describe("the sidebar", () => {
   beforeEach(() => {
-    projectionFromState.mockClear();
     resetFeedsForTests();
     resetWindowVisibilityForTests();
     resetTaskOutcomeViewsForTests();
-    // Preferences persist between tests otherwise: one that groups by none
-    // would leave the next one without headers.
     window.localStorage.clear();
   });
   afterEach(cleanup);
 
-  it("hands a clicked task to the shell", async () => {
-    setTransport(transport());
-    const selected = mock();
-    const controller = new SidebarController();
+  it("counts what needs you across every project, even while one project is shown", async () => {
+    const oga = task("one", "first", { cwd: "/work/oga", state: "needs_input" });
+    const money = task("two", "second", { cwd: "/work/money", state: "failed" });
+    setTransport(broker((query) => {
+      if (query.group === "project") return { tasks: [], groupCounts: { "/work/oga": 1, "/work/money": 3 } };
+      if (!listRead(query)) return { tasks: [], groupCounts: { needs_input: 1, failed: 1, running: 2, completed: 40 } };
+      // The list read is narrowed to the project shown, totals included.
+      const tasks = [oga, money].filter((entry) => query.project === undefined || entry.cwd === query.project);
+      const groupCounts: Record<string, number> = {};
+      for (const entry of tasks) groupCounts[entry.state] = (groupCounts[entry.state] ?? 0) + 1;
+      return { tasks, groupCounts };
+    }));
+    const showTasks = mock();
+    render(<Sidebar sidebarController={new SidebarController()} onShowTasks={showTasks} tasksShown />);
 
-    render(<Sidebar sidebarController={controller} onSelectTask={selected} />);
+    await waitFor(() => expect(views().getByRole("button", { name: /Needs you/ }).textContent).toContain("2"));
+    expect(views().getByRole("button", { name: /In progress/ }).textContent).toContain("2");
 
-    const row = await screen.findByText("second task");
-    row.closest("a")!.click();
-
-    expect(selected).toHaveBeenCalledWith("two");
+    fireEvent.click(await views().findByRole("button", { name: /^oga/ }));
+    expect(showTasks).toHaveBeenCalledOnce();
+    await waitFor(() => expect(views().getByRole("button", { name: /^oga/ }).getAttribute("aria-current")).toBe("page"));
+    expect(views().getByRole("button", { name: /Needs you/ }).textContent).toContain("2");
   });
 
-  it("announces unread and viewed outcomes in each task row", async () => {
-    setTransport(transport());
+  it("tells same-named projects apart and keeps their order when one is picked", async () => {
+    const first = task("a", "first run", { cwd: "/runs/claude/scope-guard" });
+    const second = task("b", "second run", { cwd: "/runs/opencode/scope-guard", updatedAt: "2026-08-31T09:00:00Z" });
+    setTransport(broker((query) => {
+      if (query.group === "project") return { tasks: [], groupCounts: { [first.cwd]: 1, [second.cwd]: 1 } };
+      if (!listRead(query)) return { tasks: [] };
+      return { tasks: [first, second].filter((entry) => query.project === undefined || entry.cwd === query.project) };
+    }));
     const controller = new SidebarController();
+    render(<Sidebar sidebarController={controller} onShowTasks={mock()} tasksShown />);
 
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
+    const projectButtons = () => views().getAllByRole("button").filter((button) => button.textContent?.startsWith("scope-guard"));
+    const projectNames = () => projectButtons().map((button) => button.textContent);
+    await waitFor(() => expect(projectNames()).toEqual(["scope-guard claude 1 task", "scope-guard opencode 1 task"]));
 
-    const row = await screen.findByText("second task");
-    const link = row.closest("a")!;
-    expect(link.querySelector(".task-dot")?.className).toContain("task-dot-unread");
-    expect(link.textContent).toContain("New update");
-
-    act(() => taskOutcomeViews.markViewed(task("two", "second task")));
-
-    expect(link.querySelector(".task-dot")?.className).toContain("task-dot-viewed");
-    expect(link.textContent).toContain("Viewed");
-  });
-
-  it("keeps the running pulse class after direct navigation marks it viewed", async () => {
-    const running = task("running", "running task");
-    setTransport(transport({ tasks: [running] }));
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    const row = await screen.findByText("running task");
-    const link = row.closest("a")!;
-    act(() => taskOutcomeViews.markViewed(running));
-
-    const dot = link.querySelector(".task-dot")!;
-    expect(dot.className).toContain("task-dot-look-running");
-    expect(dot.className).toContain("task-dot-viewed");
-  });
-
-  it("does not mark a task viewed from selection alone", async () => {
-    setTransport(transport());
-    const selected = mock();
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={selected} />);
-
-    const row = await screen.findByText("second task");
-    await act(async () => row.closest("a")!.click());
-
-    expect(taskOutcomeViews.isViewed(task("two", "second task"))).toBe(false);
-  });
-
-  it("shows a held task with the waiting look and its reason", async () => {
-    const waiting = task("waiting", "waiting task", {
-      state: "pending",
-      hold: {
-        kind: "dependency",
-        waitingOn: "blocker",
-        note: "Waiting for another task",
-        expiresAt: "2026-09-09T10:00:00Z",
-      },
-    });
-    setTransport(transport({ tasks: [waiting] }));
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    const row = await screen.findByText("waiting task");
-    const link = row.closest("a")!;
-    const dot = link.querySelector(".task-dot")!;
-    expect(dot.className).toContain("task-dot-look-waiting");
-    expect(dot.getAttribute("title")).toBe("Waiting for another task");
-    expect(link.textContent).toContain("Waiting for another task");
-  });
-
-  it("reads a task blocked on a dependency as a problem, not as waiting", async () => {
-    const blocked = task("blocked", "blocked task", {
-      state: "blocked",
-      completion: { blocked: true, code: "cancelled", dependencyBlocked: true },
-    });
-    setTransport(transport({ tasks: [blocked] }));
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    const row = await screen.findByText("blocked task");
-    const dot = row.closest("a")!.querySelector(".task-dot")!;
-    expect(dot.className).toContain("task-dot-look-problem");
-    expect(dot.getAttribute("title")).toBe("Blocked");
-  });
-
-  it("names the worker that ran the task in the row's tooltip", async () => {
-    setTransport(transport({ profiles: [{ id: "worker", label: "Night Shift" }] }));
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    await screen.findByText("second task");
-    const rows = screen.getAllByRole("option").map((option) => option.getAttribute("title"));
-    expect(rows.filter((title) => title?.startsWith("Night Shift"))).toHaveLength(2);
-  });
-
-  it("omits the worker from the tooltip when it is not recorded", async () => {
-    setTransport(transport({ profiles: [] }));
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    await screen.findByText("second task");
-    const rows = screen.getAllByRole("option").map((option) => option.getAttribute("title"));
-    expect(rows.some((title) => title?.startsWith("Unknown worker"))).toBe(false);
-  });
-
-  it("rebuilds the projection when an outcome view changes", async () => {
-    setTransport(transport());
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    await screen.findByText("second task");
-    projectionFromState.mockClear();
-
-    act(() => {
-      taskOutcomeViews.markViewed(task("two", "second task"));
-    });
-
-    expect(projectionFromState).toHaveBeenCalled();
-  });
-
-  it("keeps the projection stable for unrelated state changes", async () => {
-    setTransport(transport());
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    await screen.findByText("second task");
-    projectionFromState.mockClear();
-
-    act(() => {
-      controller.setSidebarWidth(controller.snapshot.sidebarWidth + 1);
-      controller.selectTask("two");
-      controller.applyConnection({ connected: false, cursor: 0, streamFloor: 0, stale: false });
-      controller.applyBatch({ cursor: 1, streamFloor: 0, stale: false, pointers: [] });
-    });
-
-    expect(projectionFromState).not.toHaveBeenCalled();
-  });
-
-  it("rebuilds the projection when tasks change", async () => {
-    setTransport(transport());
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    await screen.findByText("second task");
-    projectionFromState.mockClear();
-
-    act(() => {
-      controller.update((state) => ({
-        ...state,
-        tasks: state.tasks.map((entry) => entry.id === "two" ? { ...entry, title: "updated task" } : entry),
-      }));
-    });
-
-    await screen.findByText("updated task");
-    expect(projectionFromState).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps a task row mounted while live task fields change", async () => {
-    setTransport(transport());
-    const controller = new SidebarController();
-
-    render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-
-    const row = await screen.findByText("second task");
-    const link = row.closest("a");
-    expect(link!.querySelector(".task-dot")!.className).toContain("task-dot-look-running");
-
-    act(() => {
-      controller.update((state) => ({
-        ...state,
-        tasks: state.tasks.map((entry) => entry.id === "two"
-          ? { ...entry, title: "updated task", state: "completed", updatedAt: "2026-09-16T10:01:00Z" }
-          : entry),
-      }));
-    });
-
-    const updated = await screen.findByText("updated task");
-    expect(updated.closest("a")).toBe(link);
-    expect(screen.getAllByRole("option")).toHaveLength(2);
-    expect(link!.querySelector(".task-dot")!.className).toContain("task-dot-look-settled");
+    fireEvent.click(projectButtons()[1]);
+    await waitFor(() => expect(controller.snapshot.tasks.map((entry) => entry.id)).toEqual(["b"]));
+    expect(projectNames()).toEqual(["scope-guard claude 1 task", "scope-guard opencode 1 task"]);
   });
 
   it("points a new user at worker settings without reading the model catalogue", async () => {
     const calls: string[] = [];
+    const empty = broker(() => ({ tasks: [] }), { profiles: [] });
     setTransport({
-      ...transport({ tasks: [] }),
-      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
-        const call = (args?.call as { call: string } | undefined)?.call ?? command;
-        calls.push(call);
-        if (call === "modelSettings") return { workers: [] } as T;
-        return transport({ tasks: [] }).invoke(command, args);
+      ...empty,
+      invoke: async (command, args) => {
+        // SAFETY: broker_call requests always carry a call object; other commands carry none.
+        const call = args?.call as { call: string } | undefined;
+        calls.push(call?.call ?? command);
+        return empty.invoke(command, args);
       },
     });
+    const openSettings = mock();
+    render(<Sidebar sidebarController={new SidebarController()} onOpenSettings={openSettings} />);
 
-    render(<Sidebar sidebarController={new SidebarController()} onOpenSettings={mock()} />);
-
-    await screen.findByText("No workers yet");
+    fireEvent.click(await screen.findByRole("button", { name: /Add a worker to start/ }));
+    expect(openSettings).toHaveBeenCalledWith("workers");
     expect(calls).not.toContain("modelSettings");
   });
 
   it("lists each new task as it starts, including two started back to back", async () => {
     const tasks = [task("one", "first task")];
     let batchListener: ((batch: EventBatch) => void) | undefined;
-    resetFeedsForTests();
-    setTransport({
-      ...transport(),
-      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
-        const call = (args?.call as { call: string } | undefined)?.call;
-        if (call !== "summary") return transport().invoke(command, args);
-        return { profiles: [], tasks: [...tasks], tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as T;
-      },
+    setTransport(broker(() => ({ tasks: [...tasks] }), {
       listen: (event, handle) => {
-        if (event === EVENT_BATCH_EVENT) batchListener = handle as (batch: EventBatch) => void;
+        if (event !== EVENT_BATCH_EVENT) return;
+        // SAFETY: the bridge forwards each event's registered payload type.
+        batchListener = handle as (batch: EventBatch) => void;
       },
-    });
-    render(<Sidebar sidebarController={new SidebarController()} />);
-    await screen.findByText("first task");
+    }));
+    const controller = new SidebarController();
+    render(<Sidebar sidebarController={controller} />);
+    await waitFor(() => expect(controller.snapshot.tasks).toHaveLength(1));
 
     const start = (id: string, preview: string, cursor: number) => {
       tasks.unshift(task(id, preview, { state: "queued" }));
@@ -354,120 +163,9 @@ describe("the sidebar", () => {
       }));
     };
     start("two", "second task", 1);
-    await screen.findByText("second task");
+    await waitFor(() => expect(controller.snapshot.tasks.map((entry) => entry.id)).toContain("two"));
     start("three", "third task", 2);
-    await screen.findByText("third task");
-  });
-
-  it("places each task once, at its own row, when rows are not a whole pixel tall", async () => {
-    // A row lays out 52.39px tall; offsetHeight rounds that to 52.
-    const rowHeight = 52.39;
-    const restore = stubRowLayout({ rowHeight, viewportHeight: 480 });
-    try {
-      const tasks = Array.from({ length: 40 }, (_, index) => task(`t${index}`, `task ${index}`));
-      setTransport(transport({ tasks }));
-      // Ungrouped, so the row count below is exactly the task count, with no group header row mixed in.
-      const controller = new SidebarController();
-      controller.setGrouping("none");
-      render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-      await screen.findByText("task 0");
-
-      const list = document.getElementById("task-list")!;
-      act(() => {
-        list.scrollTop = 1_000;
-        list.dispatchEvent(new window.Event("scroll"));
-      });
-
-      const spacer = list.querySelector<HTMLElement>(".sidebar-list-spacer")!;
-      expect(parseFloat(spacer.style.height)).toBeCloseTo(tasks.length * rowHeight, 3);
-
-      const rendered = screen.getAllByRole("option").map((option) => option.getAttribute("href"));
-      expect(new Set(rendered).size).toBe(rendered.length);
-      const firstIndex = Number(rendered[0]!.replace("/tasks/t", ""));
-      const listWindow = list.querySelector<HTMLElement>(".sidebar-list-window")!;
-      const offset = parseFloat(listWindow.style.transform.replace("translateY(", ""));
-      expect(offset).toBeCloseTo(firstIndex * rowHeight, 3);
-    } finally {
-      restore();
-    }
-  });
-
-  it("reserves each header's height and hides Load more when every group is collapsed", async () => {
-    const restore = stubRowLayout({ rowHeight: 36, headerHeight: 44, viewportHeight: 480 });
-    try {
-      setTransport(
-        transport({
-          tasks: [
-            task("run", "running task", { state: "running" }),
-            task("done", "done task", { state: "completed" }),
-          ],
-          tasksHasMore: true,
-        }),
-      );
-      const controller = new SidebarController();
-      render(<Sidebar sidebarController={controller} onSelectTask={mock()} />);
-      await screen.findByText("running task");
-
-      const list = document.getElementById("task-list")!;
-      const spacer = () => list.querySelector<HTMLElement>(".sidebar-list-spacer")!;
-
-      await waitFor(() =>
-        expect(parseFloat(spacer().style.height)).toBeCloseTo(2 * 44 + 2 * 36, 3),
-      );
-      expect(screen.getByRole("button", { name: /Load more/i })).toBeTruthy();
-
-      act(() => {
-        controller.toggleGroup("running");
-        controller.toggleGroup("completed");
-      });
-
-      await waitFor(() => expect(parseFloat(spacer().style.height)).toBeCloseTo(2 * 44, 3));
-      expect(screen.queryByRole("button", { name: /Load more/i })).toBeNull();
-    } finally {
-      restore();
-    }
-  });
-
-  it("folds a long Completed group behind Show more, and holds Load more until it is open", async () => {
-    const restore = stubRowLayout({ rowHeight: 36, headerHeight: 44, viewportHeight: 10_000 });
-    try {
-      const done = Array.from({ length: 25 }, (_, index) => task(`d${index}`, `done ${index}`, { state: "completed" }));
-      setTransport(transport({ tasks: [task("run", "running task"), ...done], tasksHasMore: true }));
-      render(<Sidebar sidebarController={new SidebarController()} onSelectTask={mock()} />);
-      await screen.findByText("running task");
-
-      expect(screen.getByText("done 19")).toBeTruthy();
-      expect(screen.queryByText("done 20")).toBeNull();
-      expect(screen.queryByRole("button", { name: /Load more/i })).toBeNull();
-
-      act(() => screen.getByRole("button", { name: "Show more" }).click());
-      expect(screen.getByText("done 24")).toBeTruthy();
-      expect(screen.getByRole("button", { name: /Load more/i })).toBeTruthy();
-
-      act(() => screen.getByRole("button", { name: "Show fewer" }).click());
-      expect(screen.queryByText("done 20")).toBeNull();
-    } finally {
-      restore();
-    }
-  });
-
-  it("keeps an open task listed when it sits past the fold", async () => {
-    const restore = stubRowLayout({ rowHeight: 36, headerHeight: 44, viewportHeight: 10_000 });
-    try {
-      const done = Array.from({ length: 25 }, (_, index) => task(`d${index}`, `done ${index}`, { state: "completed" }));
-      setTransport(transport({ tasks: done }));
-      render(<Sidebar sidebarController={new SidebarController()} initialTask="d22" onSelectTask={mock()} />);
-
-      expect(await screen.findByText("done 22")).toBeTruthy();
-      expect(screen.queryByText("done 21")).toBeNull();
-
-      act(() => screen.getByRole("button", { name: "Show more" }).click());
-      act(() => screen.getByRole("button", { name: "Show fewer" }).click());
-      expect(screen.getByText("done 22")).toBeTruthy();
-      expect(screen.queryByText("done 21")).toBeNull();
-    } finally {
-      restore();
-    }
+    await waitFor(() => expect(controller.snapshot.tasks.map((entry) => entry.id)).toEqual(["three", "two", "one"]));
   });
 
   it("keeps a newer stream status when the startup read returns late", async () => {
@@ -476,35 +174,25 @@ describe("the sidebar", () => {
     const statusResult = new Promise<StreamStatus>((resolve) => {
       resolveStatus = resolve;
     });
-    resetFeedsForTests();
+    const listed = broker(() => ({ tasks: [task("one", "first task"), task("two", "second task")] }));
     setTransport({
-      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      invoke: async (command, args) => {
         if (command === "broker_stream_status") {
-          return statusResult as Promise<T>;
+          // SAFETY: the status this fixture resolves has the StreamStatus shape the sidebar reads.
+          return statusResult as never;
         }
-        if (command !== "broker_call") throw { message: `no handler for ${command}` };
-        const call = (args?.call as { call: string }).call;
-        if (call === "summary") {
-          return {
-            profiles: [],
-            tasks: [task("one", "first task"), task("two", "second task")],
-            tasksHasMore: false,
-            profileFailures: [],
-            grants: [],
-            memoryProjects: [],
-          } as T;
-        }
-        if (call === "modelSettings") return { workers: [] } as T;
-        throw { message: `no handler for ${call}` };
+        return listed.invoke(command, args);
       },
       listen: (event, handle) => {
-        if (event === STATUS_EVENT) statusListener = handle as (status: StreamStatus) => void;
+        if (event !== STATUS_EVENT) return;
+        // SAFETY: the bridge forwards each event's registered payload type.
+        statusListener = handle as (status: StreamStatus) => void;
       },
     });
     const controller = new SidebarController();
 
     render(<Sidebar sidebarController={controller} />);
-    await screen.findByText("second task");
+    await waitFor(() => expect(controller.snapshot.tasks).toHaveLength(2));
 
     await act(async () => {
       statusListener?.({ connected: true, cursor: 0, streamFloor: 0, stale: false });
@@ -520,22 +208,10 @@ describe("the sidebar", () => {
     let reads = 0;
     let batchListener: ((batch: EventBatch) => void) | undefined;
     let visibilityListener: ((visibility: WindowVisibility) => void) | undefined;
-    resetFeedsForTests();
-    resetWindowVisibilityForTests();
-    setTransport({
-      invoke: async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
-        if (command === "broker_stream_status") {
-          // SAFETY: the stream status this fixture returns has the StreamStatus shape the sidebar reads.
-          return { connected: true, cursor: 0, streamFloor: 0, stale: false } as T;
-        }
-        if (command !== "broker_call") throw { message: `no handler for ${command}` };
-        // SAFETY: broker_call requests in this fixture always carry a call object.
-        const call = (args?.call as { call: string } | undefined)?.call;
-        if (call !== "summary") throw { message: `no handler for ${call}` };
-        reads += 1;
-        // SAFETY: the summary this fixture returns has the BrokerSummaryState shape SidebarController reads.
-        return { profiles: [], tasks, tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as T;
-      },
+    setTransport(broker((query) => {
+      if (listRead(query)) reads += 1;
+      return { tasks };
+    }, {
       listen: (event, handle) => {
         if (event === EVENT_BATCH_EVENT) {
           // SAFETY: the bridge forwards each event's registered payload type.
@@ -546,11 +222,11 @@ describe("the sidebar", () => {
           visibilityListener = handle as (visibility: WindowVisibility) => void;
         }
       },
-    });
+    }));
 
     const controller = new SidebarController();
     render(<Sidebar sidebarController={controller} />);
-    await screen.findByText("first task");
+    await waitFor(() => expect(controller.snapshot.tasks).toHaveLength(1));
     const readsWhileVisible = reads;
 
     act(() => visibilityListener?.({ visible: false }));
@@ -563,13 +239,12 @@ describe("the sidebar", () => {
     }));
     await act(() => new Promise((resolve) => setTimeout(resolve, 150)));
 
-    expect(screen.queryByText("finished while away")).toBeNull();
+    expect(controller.snapshot.tasks.map((entry) => entry.promptPreview)).toEqual(["first task"]);
     expect(reads).toBe(readsWhileVisible);
 
     act(() => visibilityListener?.({ visible: true }));
 
-    await screen.findByText("finished while away");
-    expect(controller.snapshot.tasks.map((entry) => entry.promptPreview)).toEqual(["finished while away"]);
+    await waitFor(() => expect(controller.snapshot.tasks.map((entry) => entry.promptPreview)).toEqual(["finished while away"]));
     expect(reads).toBe(readsWhileVisible + 1);
   });
 });

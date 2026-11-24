@@ -1,48 +1,30 @@
-// The home screen: recent tasks beside a preview of the one picked, or the
-// steps to a first task when there is nothing to show yet.
+// The sidebar's current view as one list beside a preview of the picked task.
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
-import type { TaskState } from "@/bridge/types";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { LoadingState } from "@/components/atoms/ListState";
+import { InlineMarkdown } from "@/domain/markdown";
 import { TaskStatusDot, taskStatusLook } from "@/components/atoms/TaskStatusDot";
-import { formatCost, taskDuration } from "@/lib/format";
 import { handlesClick } from "@/router";
-import { taskStatusLabel } from "@/screens/task/format";
+import { ArchiveBranchDialog, type ArchiveBranchTask } from "@/screens/task/Actions";
+import { isExplainedWait, taskStatusLabel, waitLabel } from "@/screens/task/format";
 import type { SidebarController } from "@/state";
+import { displayLabel, matching, projectId, projectLabel, projectName, projectParents } from "@/state/task-labels";
 import { searchTerm, type SidebarState, type SidebarTask } from "@/state/sidebar-state";
 import { useTaskArrivals } from "@/state/task-arrivals";
-import { focusTaskSearch } from "@/shell/taskSearch";
-import { displayLabel, projectId, projects, taskProjectLabel, type TaskProject } from "@/state/sidebar-projection";
-import {
-  ArrowUpRightIcon,
-  BellIcon,
-  CancelIcon,
-  CheckCircleIcon,
-  CheckIcon,
-  ExclamationIcon,
-  ExpandIcon,
-  FolderIcon,
-  HistoryIcon,
-  ListIcon,
-  PlayIcon,
-  QuestionMarkIcon,
-  SearchIcon,
-  SendIcon,
-} from "@/ui/icons";
+import { taskOutcomeViews } from "@/state/task-outcome-views";
+import { needsYou, inProgress, taskView, viewIncludes, viewTotal, type TaskView } from "@/state/task-views";
+import { MoreIcon } from "@/ui/icons";
 import { absoluteTime, relativeTime } from "@/ui/time";
+import { TaskMenu } from "./TaskMenu";
+import { statusTag, TaskPreview } from "./TaskPreview";
 
-/** Enough rows to fill a desktop window; the sidebar lists the rest. */
-const HOME_TASK_LIMIT = 12;
+/** Below this width the preview has no room, so a pick opens the task. */
+const PREVIEW_MIN_WIDTH = 720;
 
-/** Below this card width the preview has no room, so a pick opens the task. */
-const PREVIEW_MIN_CARD_WIDTH = 640;
+/** Attention views load older pages on their own until every task they count is listed. */
+const SELF_LOADING_VIEWS: ReadonlySet<TaskView> = new Set(["needs-you", "in-progress"]);
 
-/** Below this card width the views column folds into tabs above the list. */
-const SIDE_MIN_CARD_WIDTH = 880;
-
-const NEEDS_YOU: ReadonlySet<TaskState> = new Set(["needs_input", "failed", "blocked"]);
-
-const SETTLED: ReadonlySet<TaskState> = new Set(["completed", "failed", "cancelled"]);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type SettingsTab = "workers" | "connections";
 
@@ -52,89 +34,22 @@ export interface HomeProps {
   onOpenTask: (id: string) => void;
 }
 
-function needsYou(task: SidebarTask): boolean {
-  return NEEDS_YOU.has(task.state);
+function useSidebar(controller: SidebarController): SidebarState {
+  return useSyncExternalStore((listener) => controller.subscribe(listener), () => controller.snapshot);
 }
 
-/** Tasks that wait on the user lead, then the rest by their last change. */
-function recentTasks(tasks: SidebarTask[]): SidebarTask[] {
-  return tasks
-    .filter((task) => task.archivedAt === undefined)
-    .sort((left, right) => {
-      const urgency = Number(needsYou(right)) - Number(needsYou(left));
-      if (urgency !== 0) return urgency;
-      return (Date.parse(right.updatedAt) || 0) - (Date.parse(left.updatedAt) || 0);
-    });
-}
-
-function narrowsTasks(state: SidebarState): boolean {
-  return state.archiveFilter !== "active" || state.projectFilter !== undefined || searchTerm(state) !== "";
-}
-
-function countLabel(total: number): string {
-  return `${total} ${total === 1 ? "task" : "tasks"}`;
-}
-
-function tagLabel(task: SidebarTask): string {
-  return task.state === "needs_input" ? "Needs you" : taskStatusLabel(task);
-}
-
-function workerLabel(task: SidebarTask, state: SidebarState): string {
-  return state.profiles.find((profile) => profile.id === task.profileId)?.label ?? modelLabel(task.model);
-}
-
-/** The model without its provider prefix, as the task title bar shows it. */
-function modelLabel(model: string): string {
-  return model.slice(model.lastIndexOf("/") + 1);
-}
-
-function StatusIcon({ task }: { task: SidebarTask }) {
-  switch (taskStatusLook(task.state)) {
-    case "needs_input":
-      return <QuestionMarkIcon size={16} />;
-    case "problem":
-      return <ExclamationIcon size={16} />;
-    case "running":
-      return <PlayIcon size={14} />;
-    case "waiting":
-      return <HistoryIcon size={16} />;
-    case "settled":
-      return task.state === "cancelled" ? <CancelIcon size={16} /> : <CheckIcon size={16} />;
-  }
-}
-
-/** What the worker last said, in the words the task already carries. */
-function workerWords(task: SidebarTask): string | undefined {
-  const look = taskStatusLook(task.state);
-  if (look === "needs_input") return task.question;
-  if (look === "problem") return task.error ?? task.completion?.reason ?? task.tldr;
-  return task.tldr ?? task.completion?.reason;
-}
-
-function useCardWidth(): [RefObject<HTMLDivElement | null>, number | undefined] {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState<number>();
-  useEffect(() => {
-    const element = ref.current;
-    if (!element || !("ResizeObserver" in globalThis)) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry?.contentRect.width));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
+function narrowed(state: SidebarState): boolean {
+  return state.view !== "recent" || state.projectFilter !== undefined || searchTerm(state) !== "";
 }
 
 export function Home({ sidebarController, onOpenSettings, onOpenTask }: HomeProps) {
-  const sidebar = useSyncExternalStore(
-    (listener) => sidebarController.subscribe(listener),
-    () => sidebarController.snapshot,
-  );
+  const sidebar = useSidebar(sidebarController);
   const hasTasks = sidebar.tasks.length > 0;
 
-  if (sidebar.loadState === "loading" && !hasTasks) {
+  if (sidebar.loadState === "loading" && !hasTasks && !narrowed(sidebar)) {
     return (
       <div id="page-title" className="home-intro">
-        <LoadingState label="Loading your workspace…" />
+        <LoadingState label="Loading your tasks…" />
       </div>
     );
   }
@@ -142,9 +57,9 @@ export function Home({ sidebarController, onOpenSettings, onOpenTask }: HomeProp
   if (sidebar.loadState === "error" && !hasTasks) {
     return (
       <div className="home-intro">
-        <h1 id="page-title" className="page-title">Your workspace</h1>
-        <p className="app-description">Couldn&apos;t load your workspace.</p>
-        <button className="text-button" type="button" onClick={() => sidebarController.refresh()}>
+        <h1 id="page-title" className="page-title">Couldn&apos;t load your tasks</h1>
+        <p className="app-description">Check that Oga is running, then try again.</p>
+        <button className="text-button" type="button" onClick={() => void sidebarController.refresh()}>
           Try again
         </button>
       </div>
@@ -165,9 +80,9 @@ export function Home({ sidebarController, onOpenSettings, onOpenTask }: HomeProp
     );
   }
 
-  if (!hasTasks && !narrowsTasks(sidebar)) return <FirstRun onOpenSettings={onOpenSettings} />;
+  if (sidebar.loadState === "ready" && !hasTasks && !narrowed(sidebar)) return <FirstRun onOpenSettings={onOpenSettings} />;
 
-  return <HomeBoard sidebar={sidebar} onOpenTask={onOpenTask} />;
+  return <TaskBoard controller={sidebarController} sidebar={sidebar} onOpenTask={onOpenTask} />;
 }
 
 function SettingsLink({ tab, onOpenSettings, children }: { tab: SettingsTab; onOpenSettings: (tab: SettingsTab) => void; children: ReactNode }) {
@@ -203,317 +118,349 @@ function FirstRun({ onOpenSettings }: { onOpenSettings: (tab: SettingsTab) => vo
   );
 }
 
-type StatusView = "recent" | "needs-you" | "in-progress" | "finished";
-
-type HomeView = { kind: "status"; id: StatusView } | { kind: "project"; id: string; name: string };
-
-interface StatusViewOption {
-  id: StatusView;
-  label: string;
-  title: string;
-  description: string;
-  icon: ReactNode;
-  matches: (task: SidebarTask) => boolean;
+interface TaskSection {
+  id: string;
+  /** Absent when the view's own title already names the rows. */
+  label?: string;
+  tasks: SidebarTask[];
 }
 
-const STATUS_VIEWS: StatusViewOption[] = [
-  { id: "recent", label: "Recent", title: "Recent tasks", description: "Newest first", icon: <ListIcon />, matches: () => true },
-  { id: "needs-you", label: "Needs you", title: "Needs you", description: "Questions, failures, and blocked tasks", icon: <BellIcon />, matches: needsYou },
-  { id: "in-progress", label: "In progress", title: "In progress", description: "Running now or waiting to start", icon: <PlayIcon />, matches: inProgress },
-  { id: "finished", label: "Finished", title: "Finished", description: "Completed or cancelled", icon: <CheckCircleIcon />, matches: finished },
-];
-
-function inProgress(task: SidebarTask): boolean {
-  const look = taskStatusLook(task.state);
-  return look === "running" || look === "waiting";
+function updatedMs(task: SidebarTask): number {
+  return Date.parse(task.updatedAt) || 0;
 }
 
-function finished(task: SidebarTask): boolean {
-  return task.state === "completed" || task.state === "cancelled";
+function listedTasks(state: SidebarState): SidebarTask[] {
+  const archived = state.archiveFilter === "only";
+  return matching(state.tasks, searchTerm(state))
+    .filter((task) => (task.archivedAt !== undefined) === archived)
+    .filter((task) => state.projectFilter === undefined || projectId(task) === state.projectFilter)
+    .filter((task) => viewIncludes(state.view, task))
+    .sort((left, right) => updatedMs(right) - updatedMs(left));
 }
 
-function statusView(id: StatusView) {
-  return STATUS_VIEWS.find((view) => view.id === id) ?? STATUS_VIEWS[0];
+function dayLabel(task: SidebarTask, today: number): string {
+  const time = updatedMs(task);
+  if (time >= today) return "Today";
+  if (time >= today - DAY_MS) return "Yesterday";
+  return "Earlier";
 }
 
-function viewMatches(view: HomeView, task: SidebarTask): boolean {
-  return view.kind === "project" ? projectId(task) === view.id : statusView(view.id).matches(task);
-}
-
-interface ViewHeading {
-  title: string;
-  description: string;
-}
-
-function viewHeading(view: HomeView, sidebar: SidebarState, waiting: number): ViewHeading {
-  if (view.kind === "project") return { title: view.name, description: "Tasks in this project" };
-  const status = statusView(view.id);
-  if (narrowsTasks(sidebar)) return { title: status.title, description: "Filtered by the sidebar" };
-  if (view.id === "recent" && waiting > 0) return { title: status.title, description: "Tasks that need you come first" };
-  return { title: status.title, description: status.description };
-}
-
-function HomeBoard({ sidebar, onOpenTask }: { sidebar: SidebarState; onOpenTask: (id: string) => void }) {
-  const tasks = useMemo(() => recentTasks(sidebar.tasks), [sidebar.tasks]);
-  const arrivedTaskIds = useTaskArrivals(sidebar.tasks);
-  const taskProjects = useMemo(() => projects(tasks), [tasks]);
+function sectionsFor(tasks: SidebarTask[], view: TaskView, now: Date): TaskSection[] {
+  if (view === "needs-you" || view === "in-progress") return [{ id: view, tasks }];
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const sections: TaskSection[] = [];
+  const add = (id: string, task: SidebarTask) => {
+    const section = sections.find((candidate) => candidate.id === id);
+    if (section) section.tasks.push(task);
+    else sections.push({ id, label: id, tasks: [task] });
+  };
   const waiting = tasks.filter(needsYou);
-  const [view, setView] = useState<HomeView>({ kind: "status", id: "recent" });
-  const viewTasks = tasks.filter((task) => viewMatches(view, task));
-  const shown = viewTasks.slice(0, HOME_TASK_LIMIT);
-  const [pickedId, setPickedId] = useState<string>();
-  const picked = viewTasks.find((task) => task.id === pickedId) ?? tasks.find((task) => task.id === pickedId) ?? shown[0];
-  const [cardRef, cardWidth] = useCardWidth();
-  const previewFits = cardWidth === undefined || cardWidth >= PREVIEW_MIN_CARD_WIDTH;
-  const sideFits = cardWidth === undefined || cardWidth >= SIDE_MIN_CARD_WIDTH;
-  const heading = viewHeading(view, sidebar, waiting.length);
+  const running = tasks.filter(inProgress);
+  if (view !== "archived") {
+    waiting.forEach((task) => add("Needs you", task));
+    running.forEach((task) => add("In progress", task));
+  }
+  for (const task of tasks) {
+    if (view !== "archived" && (needsYou(task) || inProgress(task))) continue;
+    add(dayLabel(task, today), task);
+  }
+  return sections;
+}
 
-  const show = (next: HomeView) => {
-    setView(next);
-    setPickedId(undefined);
+function countLabel(total: number): string {
+  return `${total} ${total === 1 ? "task" : "tasks"}`;
+}
+
+function workerLabel(task: SidebarTask, state: SidebarState): string {
+  const label = state.profiles.find((profile) => profile.id === task.profileId)?.label;
+  return label ?? task.model.slice(task.model.lastIndexOf("/") + 1);
+}
+
+interface ListHeading {
+  title: string;
+  description: string;
+}
+
+function heading(state: SidebarState, parents: ReadonlyMap<string, string>): ListHeading {
+  const term = searchTerm(state);
+  const project = state.projectFilter;
+  const title = project === undefined ? taskView(state.view).label : projectLabel(project, parents);
+  if (term !== "") return { title, description: `Titles matching “${term}”` };
+  if (project !== undefined) return { title, description: project };
+  return { title, description: taskView(state.view).description };
+}
+
+function emptyMessage(state: SidebarState): string {
+  const term = searchTerm(state);
+  if (term !== "") return `No tasks match “${term}”.`;
+  if (state.projectFilter !== undefined) return `No tasks in ${projectName(state.projectFilter)}.`;
+  switch (state.view) {
+    case "needs-you":
+      return "Nothing needs you right now.";
+    case "in-progress":
+      return "Nothing is running right now.";
+    case "finished":
+      return "No finished tasks yet.";
+    case "archived":
+      return "No archived tasks.";
+    case "recent":
+      return "No tasks yet.";
+  }
+}
+
+function useWidth(): [(element: HTMLDivElement | null) => void, number | undefined] {
+  const [width, setWidth] = useState<number>();
+  const observer = useRef<ResizeObserver | undefined>(undefined);
+  const ref = useCallback((element: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    if (!element || !("ResizeObserver" in globalThis)) return;
+    observer.current = new ResizeObserver(([entry]) => setWidth(entry?.contentRect.width));
+    observer.current.observe(element);
+  }, []);
+  return [ref, width];
+}
+
+interface OpenMenu {
+  task: SidebarTask;
+  anchor: HTMLElement;
+}
+
+function TaskBoard({ controller, sidebar, onOpenTask }: { controller: SidebarController; sidebar: SidebarState; onOpenTask: (id: string) => void }) {
+  // Rows read whether each outcome was seen, so the board redraws when that changes.
+  useSyncExternalStore(taskOutcomeViews.subscribe, () => taskOutcomeViews.snapshot, () => 0);
+  const arrivedTaskIds = useTaskArrivals(sidebar.tasks);
+  const parents = useMemo(
+    () => projectParents([...sidebar.tasks.map(projectId), ...Object.keys(sidebar.overview.projects)]),
+    [sidebar.tasks, sidebar.overview.projects],
+  );
+  const tasks = useMemo(
+    () => listedTasks(sidebar),
+    [sidebar.tasks, sidebar.search, sidebar.view, sidebar.projectFilter, sidebar.archiveFilter],
+  );
+  const sections = useMemo(() => sectionsFor(tasks, sidebar.view, new Date()), [tasks, sidebar.view]);
+  const ordered = useMemo(() => sections.flatMap((section) => section.tasks), [sections]);
+  const picked = ordered.find((task) => task.id === sidebar.selectedTask) ?? ordered[0];
+  const [boardRef, width] = useWidth();
+  const previewFits = width === undefined || width >= PREVIEW_MIN_WIDTH;
+  const [menu, setMenu] = useState<OpenMenu>();
+  const [branchTask, setBranchTask] = useState<ArchiveBranchTask>();
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const total = viewTotal(sidebar.view, sidebar.groupCounts);
+  const { title, description } = heading(sidebar, parents);
+  const offline = sidebar.connection !== "connected";
+  const loadingView = sidebar.loadState === "loading" && sidebar.tasks.length === 0;
+  const missing = total !== undefined && total > tasks.length;
+
+  useEffect(() => {
+    if (!SELF_LOADING_VIEWS.has(sidebar.view) || !missing) return;
+    if (sidebar.tasksHasMore && !sidebar.isLoadingMore && !sidebar.loadMoreFailed) void controller.loadMore();
+  }, [controller, missing, sidebar.view, sidebar.tasksHasMore, sidebar.isLoadingMore, sidebar.loadMoreFailed]);
+
+  const pick = useCallback((id: string) => controller.selectTask(id), [controller]);
+
+  const open = useCallback((id: string) => {
+    pick(id);
+    onOpenTask(id);
+  }, [pick, onOpenTask]);
+
+  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (ordered.length === 0) return;
+    const index = ordered.findIndex((task) => task.id === picked?.id);
+    let next: number | undefined;
+    if (event.key === "ArrowDown") next = Math.min(index + 1, ordered.length - 1);
+    if (event.key === "ArrowUp") next = Math.max(index - 1, 0);
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = ordered.length - 1;
+    if (next === undefined) return;
+    event.preventDefault();
+    const target = ordered[next];
+    pick(target.id);
+    rowRefs.current.get(target.id)?.focus();
   };
-  const pick = (id: string) => {
-    if (previewFits) setPickedId(id);
-    else onOpenTask(id);
-  };
+
+  // Archived work waits on nobody, so the archive suggests nothing.
+  const alsoWaiting = picked && sidebar.view !== "archived"
+    ? ordered.filter((task) => needsYou(task) && task.id !== picked.id).slice(0, 3)
+    : [];
 
   return (
-    <div
-      ref={cardRef}
-      className="home-card"
-      data-side={sideFits}
-      data-preview={previewFits && picked !== undefined}
-    >
-      {sideFits && (
-        <HomeSide
-          view={view}
-          workers={sidebar.profiles.length}
-          waiting={waiting.length}
-          projects={taskProjects}
-          onShow={show}
-        />
-      )}
-      <div className="home-tasks">
+    <div ref={boardRef} className="home" data-preview={previewFits && picked !== undefined}>
+      <div className="home-list-pane">
         <header className="home-head">
           <div>
-            <h1 id="page-title" className="home-title">{heading.title}</h1>
-            <p className="home-subtitle">{heading.description}</p>
+            <h1 id="page-title" className="home-title">{title}</h1>
+            <p className="home-subtitle" title={description}>{description}</p>
           </div>
-          <span className="home-count">{countLabel(viewTasks.length)}</span>
+          {total !== undefined && <span className="home-count">{countLabel(total)}</span>}
         </header>
-        {!sideFits && (
-          <div className="home-tabs" role="group" aria-label="Task views">
-            {STATUS_VIEWS.map((status) => (
-              <button
-                key={status.id}
-                type="button"
-                aria-pressed={view.kind === "status" && view.id === status.id}
-                onClick={() => show({ kind: "status", id: status.id })}
-              >
-                {status.label}
+
+        {loadingView ? (
+          <LoadingState label="Loading tasks…" />
+        ) : ordered.length === 0 && !(missing && sidebar.tasksHasMore) ? (
+          <div className="home-empty">
+            <p>{emptyMessage(sidebar)}</p>
+            {searchTerm(sidebar) !== "" && (
+              <button className="text-button" type="button" onClick={() => controller.setSearch("")}>
+                Clear search
               </button>
+            )}
+          </div>
+        ) : (
+          <div id="task-list" className="home-sections" onKeyDown={moveFocus}>
+            {sections.map((section) => (
+              <section key={section.id} aria-label={section.label ?? title}>
+                {section.label && <h2 className="home-section-label">{section.label}</h2>}
+                <ul className="home-list">
+                  {section.tasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      meta={rowMeta(task, sidebar, parents)}
+                      picked={task.id === picked?.id}
+                      showPicked={previewFits}
+                      arrived={arrivedTaskIds.has(task.id)}
+                      menuOpen={menu?.task.id === task.id}
+                      rowRef={(element) => {
+                        if (element) rowRefs.current.set(task.id, element);
+                        else rowRefs.current.delete(task.id);
+                      }}
+                      onPick={() => (previewFits ? pick(task.id) : open(task.id))}
+                      onOpen={() => open(task.id)}
+                      onMenu={(anchor) => setMenu({ task, anchor })}
+                    />
+                  ))}
+                </ul>
+              </section>
             ))}
           </div>
         )}
-        {shown.length === 0 ? (
-          <p className="home-hint">{emptyHint(view, sidebar)}</p>
-        ) : (
-          <>
-            <ul className="home-list" aria-labelledby="page-title">
-              {shown.map((task) => (
-                <li key={task.id} data-arrived={arrivedTaskIds.has(task.id) || undefined}>
-                  <HomeTaskCard
-                    task={task}
-                    worker={workerLabel(task, sidebar)}
-                    picked={previewFits && task.id === picked?.id}
-                    offerOpen={previewFits}
-                    onPick={() => pick(task.id)}
-                    onOpen={() => onOpenTask(task.id)}
-                  />
-                </li>
-              ))}
-            </ul>
-            <p className="home-hint">
-              {previewFits ? "Pick a task to see where it stands on the right." : "Pick a task to open it."}
-              {viewTasks.length > shown.length && ` The sidebar lists all ${viewTasks.length}.`}
-            </p>
-          </>
+
+        {sidebar.tasksHasMore && (total === undefined || missing) && !loadingView && (
+          <div className="home-more">
+            {sidebar.loadMoreFailed && <span role="status">Couldn&apos;t load older tasks.</span>}
+            <button className="text-button" type="button" disabled={sidebar.isLoadingMore} onClick={() => void controller.loadMore()}>
+              {sidebar.isLoadingMore ? "Loading…" : sidebar.loadMoreFailed ? "Try again" : "Show older tasks"}
+            </button>
+          </div>
         )}
       </div>
+
       {previewFits && picked && (
         <TaskPreview
           key={picked.id}
           task={picked}
           worker={workerLabel(picked, sidebar)}
-          alsoWaiting={waiting.filter((task) => task.id !== picked.id).slice(0, 3)}
-          onPick={setPickedId}
-          onOpen={() => onOpenTask(picked.id)}
+          parents={parents}
+          alsoWaiting={alsoWaiting}
+          onPick={pick}
+          onOpen={() => open(picked.id)}
+        />
+      )}
+
+      {menu && (
+        <TaskMenu
+          task={menu.task}
+          anchor={menu.anchor}
+          offline={offline}
+          onClose={() => setMenu(undefined)}
+          onChanged={() => void controller.refresh()}
+          onDeleteBranch={() => {
+            const task = menu.task;
+            setMenu(undefined);
+            if (task.branch !== undefined) setBranchTask({ ...task, branch: task.branch });
+          }}
+        />
+      )}
+
+      {branchTask && (
+        <ArchiveBranchDialog
+          task={branchTask}
+          open
+          onClose={() => setBranchTask(undefined)}
+          onChanged={() => {
+            setBranchTask(undefined);
+            void controller.refresh();
+          }}
         />
       )}
     </div>
   );
 }
 
-function emptyHint(view: HomeView, sidebar: SidebarState): string {
-  if (narrowsTasks(sidebar)) return "No tasks match your sidebar search or filters. Clear them to see every task.";
-  if (view.kind === "status" && view.id === "needs-you") return "Nothing needs you right now.";
-  return "No tasks here yet.";
+function rowMeta(task: SidebarTask, state: SidebarState, parents: ReadonlyMap<string, string>): string {
+  const parts = [state.projectFilter === undefined ? projectLabel(projectId(task), parents) : undefined, workerLabel(task, state)];
+  if (task.originCwd !== undefined && task.branch !== undefined) parts.push(task.branch);
+  // A task nobody stopped is waiting for something; the row says what, so it does not read as stalled.
+  if (isExplainedWait(task.hold)) parts.push(waitLabel(task.hold));
+  return parts.filter((part) => part !== undefined).join(" · ");
 }
 
-function HomeSide({ view, workers, waiting, projects, onShow }: {
-  view: HomeView;
-  workers: number;
-  waiting: number;
-  projects: TaskProject[];
-  onShow: (view: HomeView) => void;
-}) {
-  return (
-    <nav className="home-side" aria-label="Task views">
-      <div className="home-workspace">
-        <span className="home-avatar" aria-hidden="true">O</span>
-        <span>
-          <strong>Oga</strong>
-          <small>{workers} {workers === 1 ? "worker" : "workers"}</small>
-        </span>
-      </div>
-      <button type="button" className="home-search" onClick={focusTaskSearch}>
-        <SearchIcon size={14} />
-        <span>Search tasks</span>
-        <kbd>⌘K</kbd>
-      </button>
-      <span className="home-side-label">Tasks</span>
-      <ul>
-        {STATUS_VIEWS.map((status) => (
-          <li key={status.id}>
-            <button
-              type="button"
-              aria-current={view.kind === "status" && view.id === status.id ? "page" : undefined}
-              onClick={() => onShow({ kind: "status", id: status.id })}
-            >
-              {status.icon}
-              <span>{status.label}</span>
-              {status.id === "needs-you" && waiting > 0 && <em className="home-badge">{waiting}</em>}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {projects.length > 1 && (
-        <>
-          <span className="home-side-label">Projects</span>
-          <ul>
-            {projects.map((project) => (
-              <li key={project.id}>
-                <button
-                  type="button"
-                  title={project.id}
-                  aria-current={view.kind === "project" && view.id === project.id ? "page" : undefined}
-                  onClick={() => onShow({ kind: "project", id: project.id, name: project.name })}
-                >
-                  <FolderIcon />
-                  <span>{project.name}</span>
-                  <small>{project.count}</small>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </nav>
-  );
-}
-
-function HomeTaskCard({ task, worker, picked, offerOpen, onPick, onOpen }: {
+function TaskRow({ task, meta, picked, showPicked, arrived, menuOpen, rowRef, onPick, onOpen, onMenu }: {
   task: SidebarTask;
-  worker: string;
+  meta: string;
   picked: boolean;
-  offerOpen: boolean;
+  /** False while there is no preview, so the pick has nothing to point at. */
+  showPicked: boolean;
+  arrived: boolean;
+  menuOpen: boolean;
+  rowRef: (element: HTMLButtonElement | null) => void;
   onPick: () => void;
   onOpen: () => void;
+  onMenu: (anchor: HTMLElement) => void;
 }) {
   const look = taskStatusLook(task.state);
   const title = displayLabel(task);
+  const status = taskStatusLabel(task);
+  const viewed = taskOutcomeViews.isViewed(task);
+  // The dot and the section already say running, finished, or needs you; a word is kept for what went wrong.
+  const tag = look === "problem" ? statusTag(task) : undefined;
   return (
-    <div className="home-task" data-picked={picked}>
-      <button type="button" className="home-task-pick" aria-pressed={picked} onClick={onPick} onDoubleClick={onOpen}>
-        <span className="home-task-icon" data-look={look} aria-hidden="true">
-          <StatusIcon task={task} />
+    <li
+      className="home-row"
+      data-picked={(showPicked && picked) || undefined}
+      data-menu-open={menuOpen || undefined}
+      data-arrived={arrived || undefined}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onMenu(event.currentTarget);
+      }}
+    >
+      <button
+        ref={rowRef}
+        className="home-row-main"
+        type="button"
+        tabIndex={picked ? 0 : -1}
+        aria-current={showPicked && picked ? "true" : undefined}
+        onClick={onPick}
+        onDoubleClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          onOpen();
+        }}
+      >
+        <TaskStatusDot state={task.state} label={status} unread={!viewed} decorative />
+        <span className="visually-hidden">{`${status} · ${viewed ? "Viewed" : "New update"}`}</span>
+        <span className="home-row-text">
+          <strong><InlineMarkdown source={title} /></strong>
+          <small>{meta}</small>
         </span>
-        <span className="home-task-text">
-          <strong>{title}</strong>
-          <small title={absoluteTime(task.updatedAt)}>
-            {worker} · {taskProjectLabel(task)} · {relativeTime(task.updatedAt)}
-          </small>
-        </span>
-        <span className="home-tag" data-look={look}>{tagLabel(task)}</span>
+        {tag && <span className="home-tag">{tag}</span>}
+        <time className="home-row-time" dateTime={task.updatedAt} title={absoluteTime(task.updatedAt)}>
+          {relativeTime(task.updatedAt)}
+        </time>
       </button>
-      {offerOpen && (
-        <button type="button" className="home-task-open" aria-label={`Open ${title}`} onClick={onOpen}>
-          Open <ArrowUpRightIcon size={12} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function TaskPreview({ task, worker, alsoWaiting, onPick, onOpen }: {
-  task: SidebarTask;
-  worker: string;
-  alsoWaiting: SidebarTask[];
-  onPick: (id: string) => void;
-  onOpen: () => void;
-}) {
-  const look = taskStatusLook(task.state);
-  const words = workerWords(task);
-  const facts: Array<{ label: string; value: string; tone?: "danger" }> = [
-    { label: "Status", value: tagLabel(task), tone: look === "problem" ? "danger" : undefined },
-    { label: "Worker", value: worker },
-    { label: "Project", value: taskProjectLabel(task) },
-  ];
-  const time = taskDuration(task.durationMs, task.runningSince, !SETTLED.has(task.state));
-  if (time) facts.push({ label: "Time", value: time });
-  const cost = formatCost(task.costUsd, task.costUsdEstimated);
-  if (cost) facts.push({ label: "Cost", value: cost });
-  const canWrite = task.state !== "preparing_checkout" && task.state !== "removing_checkout";
-
-  return (
-    <aside className="home-preview" aria-label="Task preview">
-      <header className="home-preview-head">
-        <TaskStatusDot state={task.state} label={tagLabel(task)} />
-        <strong title={displayLabel(task)}>{displayLabel(task)}</strong>
-        <button className="icon-button" type="button" aria-label="Open task" title="Open task" onClick={onOpen}>
-          <ExpandIcon />
-        </button>
-      </header>
-      <div className="home-thread">
-        <p className="home-bubble">{task.promptPreview}</p>
-        {words ? <p className="home-reply-text">{words}</p> : <p className="home-reply-text home-reply-quiet">No update from the worker yet.</p>}
-        <dl className="home-facts">
-          {facts.map((fact) => (
-            <div key={fact.label}>
-              <dt>{fact.label}</dt>
-              <dd data-tone={fact.tone}>{fact.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-      {alsoWaiting.length > 0 && (
-        <div className="home-chips" role="group" aria-labelledby="home-chips-label">
-          <span id="home-chips-label">Also needs you</span>
-          {alsoWaiting.map((other) => (
-            <button key={other.id} type="button" title={displayLabel(other)} onClick={() => onPick(other.id)}>
-              {displayLabel(other)}
-            </button>
-          ))}
-        </div>
-      )}
-      {canWrite && (
-        <button className="home-compose" type="button" onClick={onOpen}>
-          <span>{task.state === "needs_input" ? "Answer in the task" : "Follow up in the task"}</span>
-          <span className="home-compose-send" aria-hidden="true">
-            <SendIcon size={14} />
-          </span>
-        </button>
-      )}
-    </aside>
+      <button
+        className="icon-button home-row-menu"
+        type="button"
+        aria-label={`Task actions for ${title}`}
+        title="Task actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={(event) => onMenu(event.currentTarget)}
+      >
+        <MoreIcon />
+      </button>
+    </li>
   );
 }

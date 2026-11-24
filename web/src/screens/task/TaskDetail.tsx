@@ -12,7 +12,7 @@ import type { ChangeSort } from "@/domain/changes/ordering";
 import { formatCost, formatTokenCount, taskDuration } from "@/lib/format";
 import { absoluteTime } from "@/ui/time";
 import { copyText } from "@/lib/identifiers";
-import { projectName } from "@/state/sidebar-projection";
+import { projectName } from "@/state/task-labels";
 import { toast } from "@/state/toast";
 import { WorktreeIcon } from "@/ui/icons";
 import { watchTaskDetail, type TaskDetailState } from "@/state/taskDetail";

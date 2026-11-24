@@ -1,5 +1,3 @@
-// Ported from rust/crates/oga-ui/src/state/mod.rs `#[cfg(test)] mod tests`.
-
 import { describe, expect, it } from "bun:test";
 import type { BrokerSummaryState, EventPointer, TaskState, TaskSummary } from "@/bridge/types";
 import type { EventFrame } from "./event-frame";
@@ -12,15 +10,11 @@ import {
   beginLoadMore,
   beginRefresh,
   defaultSidebarState,
-  filtersActive,
-  filtersHideTasks,
   finishLoadMoreError,
-  resetFilters,
   searchTerm,
-  setArchiveFilter,
-  setProjectFilter,
   setSearch,
-  setSort,
+  showProject,
+  showView,
   sidebarPreferencesFrom,
   summaryQuery,
   TASK_PAGE_SIZE,
@@ -43,16 +37,11 @@ function task(id: string, cwd: string, state: TaskState): TaskSummary {
 }
 
 describe("summary paging", () => {
-  it("sends the filters that shape the group totals", () => {
-    const query = summaryQuery({
-      ...defaultSidebarState(),
-      projectFilter: "/work/oga",
-      search: "  ship ",
-      grouping: "project",
-    });
+  it("sends the filters that shape the per-state totals", () => {
+    const query = summaryQuery({ ...defaultSidebarState(), projectFilter: "/work/oga", search: "  ship " });
     expect(query.project).toBe("/work/oga");
     expect(query.search).toBe("ship");
-    expect(query.group).toBe("project");
+    expect(query.group).toBe("status");
   });
 
   it("grows by one page", () => {
@@ -118,7 +107,7 @@ describe("applySummary", () => {
     const archived = task("archived", "/tmp/project", "completed");
     let state: SidebarState = { ...defaultSidebarState(), tasks: [archived] };
 
-    const [switched] = setArchiveFilter(state, "only");
+    const [switched] = showView(state, "archived");
     expect(switched.tasks).toEqual([]);
 
     // The merge must not resurrect it from the view the filter switch left behind.
@@ -190,40 +179,32 @@ describe("archiving", () => {
   });
 });
 
-describe("filters", () => {
-  it("only lights up off the default view", () => {
-    let state = defaultSidebarState();
-    expect(filtersActive(state)).toBe(false);
+describe("views", () => {
+  it("reads the archive again only when a view crosses into or out of it", () => {
+    const listed: SidebarState = { ...defaultSidebarState(), tasks: [task("done", "/work/oga", "completed")] };
 
-    state = setSort(state, "recent");
-    expect(filtersActive(state)).toBe(true);
-    expect(filtersHideTasks(state)).toBe(false);
+    const [finished, requeryFinished] = showView(listed, "finished");
+    expect(requeryFinished).toBe(false);
+    expect(finished.tasks).toHaveLength(1);
 
-    state = setProjectFilter(state, "/work/oga");
-    expect(filtersHideTasks(state)).toBe(true);
+    const [archived, requeryArchived] = showView(finished, "archived");
+    expect(requeryArchived).toBe(true);
+    expect(archived.archiveFilter).toBe("only");
+
+    const [recent, requeryRecent] = showView(archived, "recent");
+    expect(requeryRecent).toBe(true);
+    expect(recent.archiveFilter).toBe("active");
   });
 
-  it("resetting restores the default view and requeries", () => {
-    const state: SidebarState = {
-      ...defaultSidebarState(),
-      archiveFilter: "only",
-      grouping: "project",
-      sort: "recent",
-      projectFilter: "/work/oga",
-    };
+  it("leaves a project for a view, and a view for a project, with a fresh read each time", () => {
+    const [inProject, requeryProject] = showProject(defaultSidebarState(), "/work/oga");
+    expect(requeryProject).toBe(true);
+    expect(summaryQuery(inProject).project).toBe("/work/oga");
+    expect(showProject(inProject, "/work/oga")[1]).toBe(false);
 
-    const [next, changed] = resetFilters(state);
-    expect(changed).toBe(true);
-    expect(next).toEqual(defaultSidebarState());
-    expect(resetFilters(next)[1]).toBe(false);
-  });
-
-  it("requeries when only the project filter or grouping was changed", () => {
-    const project = { ...defaultSidebarState(), projectFilter: "/work/oga" };
-    expect(resetFilters(project)[1]).toBe(true);
-
-    const grouped = { ...defaultSidebarState(), grouping: "project" as const };
-    expect(resetFilters(grouped)[1]).toBe(true);
+    const [needsYou, requeryView] = showView(inProject, "needs-you");
+    expect(requeryView).toBe(true);
+    expect(summaryQuery(needsYou).project).toBeUndefined();
   });
 });
 

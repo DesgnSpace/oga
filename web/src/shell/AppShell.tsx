@@ -171,7 +171,6 @@ function Shell() {
   const { route, navigate, canGoBack, canGoForward, goBack, goForward } = useRouter();
   const sidebarController = useMemo(() => new SidebarController(), []);
   const { updateStatus, checkForUpdates, installUpdate } = useAppUpdates();
-  const initialTask = useRef(route.kind === "task" ? route.id : undefined).current;
 
   // The settings route now opens as a modal over whichever screen was
   // showing, so the content area keeps rendering that screen underneath
@@ -184,8 +183,11 @@ function Shell() {
   });
   useEffect(() => {
     if (!isOverlayRoute(route)) setUnderlyingRoute(route);
-    if (route.kind === "task") writeStorage(LAST_SELECTED_TASK_KEY, route.id);
-  }, [route]);
+    if (route.kind !== "task") return;
+    writeStorage(LAST_SELECTED_TASK_KEY, route.id);
+    // Back on the list, the task last open is the one picked.
+    sidebarController.selectTask(route.id);
+  }, [route, sidebarController]);
 
   const closeSettings = useCallback(() => navigate(underlyingRoute), [navigate, underlyingRoute]);
   const openSettings = useCallback((tab: "workers" | "connections") => navigate({ kind: "settings", tab }), [navigate]);
@@ -265,6 +267,10 @@ function Shell() {
     navigate({ kind: "task", id });
     closeFloatingSidebar();
   }, [navigate, closeFloatingSidebar]);
+  const showTasks = useCallback(() => {
+    if (underlyingRoute.kind !== "home") navigate({ kind: "home" });
+    closeFloatingSidebar();
+  }, [navigate, underlyingRoute.kind, closeFloatingSidebar]);
   const consumeFocusRequest = useCallback((nonce: number) => {
     setFocusRequest((current) => current?.nonce === nonce ? undefined : current);
   }, []);
@@ -280,9 +286,9 @@ function Shell() {
       <div className="app-layout">
         <Sidebar
           sidebarController={sidebarController}
-          initialTask={initialTask}
-          onSelectTask={selectTask}
           onOpenSettings={openSettings}
+          onShowTasks={showTasks}
+          tasksShown={underlyingRoute.kind === "home"}
           navigation={navigation}
         />
         <div className="app-main" onPointerDown={closeFloatingSidebar}>
