@@ -56,15 +56,11 @@ function broker(pages: (query: StateQuery) => { tasks: TaskSummary[]; tasksHasMo
 }
 
 function list() {
-  return within(document.getElementById("task-list")!);
+  return within(document.getElementById("home-tasks")!);
 }
 
-function preview() {
-  return within(screen.getByRole("complementary", { name: "Task preview" }));
-}
-
-function showView(name: string) {
-  fireEvent.click(within(screen.getByRole("navigation", { name: "Task views" })).getByRole("button", { name: new RegExp(`^${name}`) }));
+function titles() {
+  return list().getAllByRole("button").flatMap((row) => row.querySelector("strong")?.textContent ?? []);
 }
 
 describe("the home screen", () => {
@@ -76,53 +72,37 @@ describe("the home screen", () => {
   });
   afterEach(cleanup);
 
-  it("leads with what needs you, previews the pick once, and opens it", async () => {
+  it("leads with what needs you, then what runs, then finished work by day, and a click opens the task", async () => {
     const tasks = [
-      summaryTask("done", "Newer finished task", "completed", "2026-08-31T12:00:00Z", {
-        tldr: "Ship the `formatPrice` fix.",
-        promptPreview: "Goal: ship the `formatPrice` fix.\n\nKnown:\n- the tests in `money.test.ts`",
-      }),
+      summaryTask("done", "Newer finished task", "completed", "2026-08-31T12:00:00Z"),
+      summaryTask("run", "Running task", "running", "2026-08-31T11:00:00Z"),
       summaryTask("ask", "Older question", "needs_input", "2026-08-31T10:00:00Z", { question: "Which branch?" }),
+    ];
+    setTransport(broker(() => ({ tasks, groupCounts: { completed: 1, running: 1, needs_input: 1 } })).transport);
+    render(<AppShell />);
+
+    await waitFor(() => expect(list().getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Needs you", "In progress", "Earlier"]));
+    expect(titles()).toEqual(["Older question", "Running task", "Newer finished task"]);
+    expect(screen.getByText("3 tasks")).toBeTruthy();
+
+    fireEvent.click(list().getByText("Newer finished task"));
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/done"));
+  });
+
+  it("lists only what the sidebar search finds", async () => {
+    const tasks = [
+      summaryTask("ship", "Ship the price fix", "completed", "2026-08-31T12:00:00Z"),
+      summaryTask("docs", "Write the docs", "completed", "2026-08-31T11:00:00Z"),
     ];
     setTransport(broker(() => ({ tasks })).transport);
     render(<AppShell />);
 
-    await waitFor(() => expect(list().getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Needs you", "Earlier"]));
-    const titles = () => list().getAllByRole("button").flatMap((row) => row.querySelector("strong")?.textContent ?? []);
-    expect(titles()).toEqual(["Older question", "Newer finished task"]);
-    expect(preview().getByText("Which branch?")).toBeTruthy();
+    await waitFor(() => expect(titles()).toEqual(["Ship the price fix", "Write the docs"]));
+    fireEvent.click(screen.getByRole("button", { name: "Search tasks" }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search tasks" }), { target: { value: "price" } });
 
-    fireEvent.click(list().getByText("Newer finished task"));
-    await waitFor(() => expect(preview().getByText("formatPrice")).toBeTruthy());
-    // The summary shows once, as text: no raw backticks and no second copy of the brief.
-    expect(preview().queryByText(/`/)).toBeNull();
-    expect(preview().queryByText(/Known/)).toBeNull();
-    expect(preview().queryByText("Which branch?")).toBeNull();
-
-    showView("Needs you");
-    await waitFor(() => expect(titles()).toEqual(["Older question"]));
-
-    fireEvent.click(preview().getByRole("button", { name: "Open task to answer" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/tasks/ask"));
-  });
-
-  it("keeps loading older tasks in Needs you until every task it counts is listed", async () => {
-    const recent = Array.from({ length: 50 }, (_, index) =>
-      summaryTask(`done-${index}`, `Finished ${index}`, "completed", `2026-08-31T11:${String(index).padStart(2, "0")}:00Z`));
-    const old = summaryTask("old-failure", "Old failure", "failed", "2026-08-01T10:00:00Z", { error: "rate limited" });
-    setTransport(broker((query) => {
-      const counts = { completed: 50, failed: 1 };
-      if (query.limit === 1) return { tasks: [], groupCounts: query.group === "status" ? counts : { "/repo": 51 } };
-      const all = [...recent, old];
-      return { tasks: all.slice(0, query.limit), tasksHasMore: (query.limit ?? 50) < all.length, groupCounts: counts };
-    }).transport);
-    render(<AppShell />);
-
-    await waitFor(() => expect(list().getByText("Finished 0")).toBeTruthy());
-    showView("Needs you");
-
-    await waitFor(() => expect(list().getByText("Old failure")).toBeTruthy());
-    expect(screen.queryByText("Nothing needs you right now.")).toBeNull();
+    await waitFor(() => expect(titles()).toEqual(["Ship the price fix"]));
+    expect(screen.getByText("Titles matching “price”")).toBeTruthy();
   });
 
   it("archives a task from its row menu and reads the list again", async () => {
@@ -131,14 +111,14 @@ describe("the home screen", () => {
     setTransport(transport);
     render(<AppShell />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Task actions for Finished work" }));
+    fireEvent.click(await waitFor(() => list().getByRole("button", { name: "Task actions for Finished work" })));
     const reads = calls.filter((call) => call.call === "summary").length;
     tasks = [];
     fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
 
     await waitFor(() => expect(calls).toContainEqual({ call: "archiveTask", taskId: "done", archived: true, deleteBranch: false }));
     await waitFor(() => expect(calls.filter((call) => call.call === "summary").length).toBeGreaterThan(reads));
-    await waitFor(() => expect(document.getElementById("task-list")).toBeNull());
+    await waitFor(() => expect(document.getElementById("home-tasks")).toBeNull());
   });
 
   it("says what a held task waits for, and reads a blocked one as a problem", async () => {

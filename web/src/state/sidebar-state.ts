@@ -13,16 +13,22 @@ import type {
 } from "@/bridge/types";
 import type { EventFrame } from "./event-frame";
 import {
+  defaultSidebarPreferences,
+  EMPTY_COLLAPSED_GROUPS,
   loadSidebarPreferences,
   SIDEBAR_DEFAULT_WIDTH,
   storeSidebarPreferences,
+  toggleCollapsedGroup,
+  type CollapsedGroups,
   type SidebarPreferences,
   type TaskArchiveFilter,
+  type TaskGrouping,
+  type TaskSort,
 } from "./sidebar-preferences";
 import { Store } from "./store";
-import type { TaskView } from "./task-views";
 
 export const TASK_PAGE_SIZE = 50;
+export const ATTENTION_PAGE_SIZE = 100;
 // 15s avoids rereading the list on every event while it keeps moving.
 const REREAD_INTERVAL_MS = 15_000;
 
@@ -36,28 +42,21 @@ export interface SidebarTask extends TaskSummary {
   staleOutcome?: true;
 }
 
-/** True totals across every active task, whatever the list shows. */
-export interface TaskOverview {
-  /** Keyed by task state. */
-  states: Record<string, number>;
-  /** Keyed by project folder. */
-  projects: Record<string, number>;
-}
-
 export interface SidebarState {
   profiles: ProfileView[];
   tasks: SidebarTask[];
   tasksHasMore: boolean;
-  /** True totals per state for the list's filters. */
+  /** True totals per group for the current filters, keyed by group id. */
   groupCounts: Record<string, number>;
-  overview: TaskOverview;
-  view: TaskView;
   loadedPages: number;
   isLoadingMore: boolean;
   loadMoreFailed: boolean;
   archiveFilter: TaskArchiveFilter;
   projectFilter: string | undefined;
   search: string;
+  grouping: TaskGrouping;
+  sort: TaskSort;
+  collapsed: CollapsedGroups;
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   selectedTask: string | undefined;
@@ -77,14 +76,15 @@ export function defaultSidebarState(): SidebarState {
     tasks: [],
     tasksHasMore: false,
     groupCounts: {},
-    overview: { states: {}, projects: {} },
-    view: "recent",
     loadedPages: 1,
     isLoadingMore: false,
     loadMoreFailed: false,
     archiveFilter: "active",
     projectFilter: undefined,
     search: "",
+    grouping: "status",
+    sort: "priority",
+    collapsed: EMPTY_COLLAPSED_GROUPS,
     sidebarCollapsed: false,
     sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     selectedTask: undefined,
@@ -103,11 +103,28 @@ export function sidebarStateWithPreferences(preferences: SidebarPreferences): Si
 }
 
 export function applyPreferences(state: SidebarState, preferences: SidebarPreferences): SidebarState {
-  return { ...state, sidebarCollapsed: preferences.sidebarCollapsed, sidebarWidth: preferences.sidebarWidth };
+  return {
+    ...state,
+    archiveFilter: preferences.archiveFilter,
+    projectFilter: preferences.projectFilter,
+    grouping: preferences.grouping,
+    sort: preferences.sort,
+    collapsed: preferences.collapsed,
+    sidebarCollapsed: preferences.sidebarCollapsed,
+    sidebarWidth: preferences.sidebarWidth,
+  };
 }
 
 export function sidebarPreferencesFrom(state: SidebarState): SidebarPreferences {
-  return { sidebarCollapsed: state.sidebarCollapsed, sidebarWidth: state.sidebarWidth };
+  return {
+    archiveFilter: state.archiveFilter,
+    projectFilter: state.projectFilter,
+    grouping: state.grouping,
+    sort: state.sort,
+    collapsed: state.collapsed,
+    sidebarCollapsed: state.sidebarCollapsed,
+    sidebarWidth: state.sidebarWidth,
+  };
 }
 
 export function summaryQuery(state: SidebarState): StateQuery {
@@ -119,13 +136,8 @@ export function summaryQuery(state: SidebarState): StateQuery {
     skipSummaryAggregates: true,
     project: state.projectFilter,
     search: search === "" ? undefined : search,
-    group: "status",
+    group: state.grouping,
   };
-}
-
-/** Reads one kind of total across every active task, with the fewest rows. */
-export function overviewQuery(group: "status" | "project"): StateQuery {
-  return { compact: true, archived: "active", limit: 1, skipSummaryAggregates: true, group };
 }
 
 export function beginRefresh(state: SidebarState): [SidebarState, StateQuery] {
@@ -199,22 +211,32 @@ export function finishLoadMoreError(state: SidebarState, message: string): Sideb
   };
 }
 
-function withArchiveFilter(state: SidebarState, filter: TaskArchiveFilter): SidebarState {
-  if (state.archiveFilter === filter) return state;
-  // Rows from the other filter must not linger while the new read is out.
-  return { ...state, archiveFilter: filter, tasks: [], groupCounts: {}, loadedPages: 1, tasksHasMore: false, loadMoreFailed: false };
+export function setArchiveFilter(state: SidebarState, filter: TaskArchiveFilter): [SidebarState, boolean] {
+  if (state.archiveFilter === filter) return [state, false];
+  return [
+    {
+      ...state,
+      archiveFilter: filter,
+      tasks: [],
+      groupCounts: {},
+      loadedPages: 1,
+      tasksHasMore: false,
+      loadMoreFailed: false,
+    },
+    true,
+  ];
 }
 
-/** Reports whether the list must be read again. */
-export function showView(state: SidebarState, view: TaskView): [SidebarState, boolean] {
-  const next = withArchiveFilter({ ...state, view, projectFilter: undefined }, view === "archived" ? "only" : "active");
-  return [next, next.archiveFilter !== state.archiveFilter || state.projectFilter !== undefined];
+export function setProjectFilter(state: SidebarState, project: string | undefined): SidebarState {
+  return { ...state, projectFilter: project && project !== "" ? project : undefined };
 }
 
-/** Reports whether the list must be read again. */
-export function showProject(state: SidebarState, project: string): [SidebarState, boolean] {
-  const next = withArchiveFilter({ ...state, view: "recent", projectFilter: project }, "active");
-  return [next, next.archiveFilter !== state.archiveFilter || state.projectFilter !== project];
+export function setGrouping(state: SidebarState, grouping: TaskGrouping): SidebarState {
+  return { ...state, grouping };
+}
+
+export function setSort(state: SidebarState, sort: TaskSort): SidebarState {
+  return { ...state, sort };
 }
 
 export function setSearch(state: SidebarState, search: string): SidebarState {
@@ -229,8 +251,43 @@ export function toggleSidebar(state: SidebarState): SidebarState {
   return { ...state, sidebarCollapsed: !state.sidebarCollapsed };
 }
 
-export function selectTask(state: SidebarState, id: string): SidebarState {
-  return state.selectedTask === id ? state : { ...state, selectedTask: id };
+/** True when any popover choice differs from the default view. */
+export function filtersActive(state: SidebarState): boolean {
+  const defaults = defaultSidebarPreferences();
+  return (
+    state.archiveFilter !== defaults.archiveFilter ||
+    state.projectFilter !== undefined ||
+    state.grouping !== defaults.grouping ||
+    state.sort !== defaults.sort
+  );
+}
+
+/** True when a filter is holding tasks back, ignoring the search box. */
+export function filtersHideTasks(state: SidebarState): boolean {
+  const defaults = defaultSidebarPreferences();
+  return state.archiveFilter !== defaults.archiveFilter || state.projectFilter !== undefined;
+}
+
+/** Restores the default view. Reports whether the broker query changed. */
+export function resetFilters(state: SidebarState): [SidebarState, boolean] {
+  const defaults = defaultSidebarPreferences();
+  // A reset can drop the project filter or grouping without touching the
+  // archive filter, and both shape the broker query, so all four decide.
+  const changed = filtersActive(state);
+  const [next] = setArchiveFilter(
+    { ...state, projectFilter: undefined, grouping: defaults.grouping, sort: defaults.sort },
+    defaults.archiveFilter,
+  );
+  return [next, changed];
+}
+
+export function toggleGroup(state: SidebarState, id: string): SidebarState {
+  return { ...state, collapsed: toggleCollapsedGroup(state.collapsed, id, state.grouping) };
+}
+
+export function selectTask(state: SidebarState, id: string): [SidebarState, boolean] {
+  if (!state.tasks.some((task) => task.id === id)) return [state, false];
+  return [{ ...state, selectedTask: id }, true];
 }
 
 export function clearSelection(state: SidebarState): SidebarState {
@@ -388,15 +445,7 @@ export class SidebarController {
   async refresh(): Promise<BridgeError | undefined> {
     const [begun, query] = beginRefresh(this.store.snapshot);
     this.store.set(begun);
-    const [result, states, projects] = await Promise.all([
-      broker.summary(query),
-      broker.summary(overviewQuery("status")),
-      broker.summary(overviewQuery("project")),
-    ]);
-    if (states.ok && projects.ok) {
-      const overview = { states: states.value.groupCounts ?? {}, projects: projects.value.groupCounts ?? {} };
-      this.store.update((state) => ({ ...state, overview }));
-    }
+    const result = await broker.summary(query);
     if (result.ok) {
       this.store.update((state) => applySummary(state, result.value));
       return undefined;
@@ -405,16 +454,12 @@ export class SidebarController {
     return result.error;
   }
 
-  showView(view: TaskView): void {
-    const [next, requery] = showView(this.store.snapshot, view);
+  async setArchiveFilter(filter: TaskArchiveFilter): Promise<BridgeError | undefined> {
+    const [next, changed] = setArchiveFilter(this.store.snapshot, filter);
     this.store.set(next);
-    if (requery) void this.refresh();
-  }
-
-  showProject(project: string): void {
-    const [next, requery] = showProject(this.store.snapshot, project);
-    this.store.set(next);
-    if (requery) void this.refresh();
+    if (!changed) return undefined;
+    this.persist();
+    return this.refresh();
   }
 
   async loadMore(): Promise<BridgeError | undefined> {
@@ -431,6 +476,29 @@ export class SidebarController {
     return result.error;
   }
 
+  setProjectFilter(project: string | undefined): void {
+    const next = setProjectFilter(this.store.snapshot, project);
+    if (next.projectFilter === this.store.snapshot.projectFilter) return;
+    this.store.set(next);
+    this.persist();
+    // The read is filtered by project, so its totals move with the choice.
+    void this.refresh();
+  }
+
+  setGrouping(grouping: TaskGrouping): void {
+    const next = setGrouping(this.store.snapshot, grouping);
+    if (next.grouping === this.store.snapshot.grouping) return;
+    this.store.set(next);
+    this.persist();
+    // Totals are keyed by the grouping, so a change needs a fresh read.
+    void this.refresh();
+  }
+
+  setSort(sort: TaskSort): void {
+    this.store.update((state) => setSort(state, sort));
+    this.persist();
+  }
+
   setSearch(search: string): void {
     this.store.update((state) => setSearch(state, search));
   }
@@ -445,8 +513,22 @@ export class SidebarController {
     this.persist();
   }
 
-  selectTask(id: string): void {
-    this.store.update((state) => selectTask(state, id));
+  toggleGroup(id: string): void {
+    this.store.update((state) => toggleGroup(state, id));
+    this.persist();
+  }
+
+  resetFilters(): boolean {
+    const [next, changed] = resetFilters(this.store.snapshot);
+    this.store.set(next);
+    if (changed) this.persist();
+    return changed;
+  }
+
+  selectTask(id: string): boolean {
+    const [next, ok] = selectTask(this.store.snapshot, id);
+    this.store.set(next);
+    return ok;
   }
 
   clearSelection(): void {

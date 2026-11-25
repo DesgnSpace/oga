@@ -44,8 +44,6 @@
     --color-hover: #f4f4f4;
     --color-selection: rgb(0 0 0 / 9%);
     --color-border: #eeeeee;
-    /* A hovered or picked card's edge: one step darker than a hairline. */
-    --color-border-strong: #dcdcdc;
     --color-text: #141414;
     --color-text-muted: #5c5c5c;
     --color-accent: #141414;
@@ -77,11 +75,8 @@
     --content-max: 50rem;
     /* Settings reads as a narrow form, so its column is tighter. */
     --settings-max: 42rem;
-    /* Home's list stops at a readable width; its preview grows a little
-       on a wide window. */
+    /* Home's list stops at a readable width. */
     --home-list-max: 64rem;
-    --home-preview-width: 20rem;
-    --home-preview-max: 28rem;
     --trace-card-max-height: 24rem;
     --nav-item-height: 32px;
     /* A rounded element inside another takes the outer radius minus the gap
@@ -126,7 +121,6 @@
         --color-hover: #262626;
         --color-selection: #262626;
         --color-border: #2f2f2f;
-        --color-border-strong: #424242;
         --color-text: #f2f2f2;
         --color-text-muted: #a0a0a0;
         --color-accent: #f2f2f2;
@@ -690,11 +684,10 @@ a {
 .task-sidebar {
     display: flex;
     position: relative;
-    width: 248px;
+    width: 320px;
     min-width: 0;
     min-height: 0;
     flex-direction: column;
-    border-right: 1px solid var(--color-border);
     background: var(--color-sidebar);
 }
 
@@ -760,214 +753,37 @@ a {
     cursor: ew-resize;
 }
 
-/* Below the window controls: the workspace, search, then the views and the
-   projects, each row a rail item. Rows share one text edge, `--space-3`
-   inside the body's padding. */
-.sidebar-body {
+.sidebar-search-row {
     display: flex;
-    flex: 1;
-    min-height: 0;
-    flex-direction: column;
-    padding: var(--space-1) var(--space-3) var(--space-4);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-
-.sidebar-workspace {
-    display: flex;
-    width: 100%;
-    flex: none;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
-    border: 0;
-    border-radius: var(--radius-row);
-    background: none;
-    color: var(--color-text);
-    font: inherit;
-    text-align: left;
-    transition: background-color 150ms ease;
+    padding: 0 var(--space-3) var(--space-1);
 }
 
-.sidebar-workspace > svg {
-    flex: none;
-    color: var(--color-text-muted);
-}
-
-.sidebar-avatar {
-    display: grid;
-    flex: none;
-    width: var(--control-height);
-    height: var(--control-height);
-    place-items: center;
-    border-radius: var(--radius-control);
-    background: var(--color-accent);
-    color: var(--color-text-inverse);
-    font-size: var(--text-md);
-    font-weight: 600;
-}
-
-.sidebar-workspace-text {
+.sidebar-search-wrap {
     display: flex;
     min-width: 0;
     flex: 1;
-    flex-direction: column;
-    line-height: 1.3;
-}
-
-.sidebar-workspace-text strong {
-    font-size: var(--text-base);
-    font-weight: 600;
-}
-
-.sidebar-workspace-text small {
-    overflow: hidden;
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .sidebar-search {
-    flex: none;
-    height: var(--nav-item-height);
-    gap: var(--space-2);
-    margin: var(--space-3) 0 var(--space-1);
-    padding: 0 var(--space-1) 0 var(--space-3);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-control);
-    background: var(--color-surface);
-    transition: border-color 150ms ease;
-}
-
-.sidebar-search:focus-within {
-    border-color: var(--color-accent);
-}
-
-.sidebar-search input:focus-visible {
-    outline: none;
-}
-
-.sidebar-search:focus-within .search-field-shortcut {
-    display: none;
-}
-
-.sidebar-nav ul {
     display: flex;
-    flex-direction: column;
-    gap: 1px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.sidebar-label {
-    margin: var(--space-4) 0 var(--space-1);
-    padding: 0 var(--space-3);
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-    font-weight: 600;
-    line-height: 1.4;
-}
-
-.sidebar-item {
-    display: flex;
-    width: 100%;
-    height: var(--nav-item-height);
-    align-items: center;
-    gap: var(--space-3);
-    padding: 0 var(--space-3);
-    border: 0;
-    border-radius: var(--radius-row);
-    background: none;
-    color: var(--color-text);
-    font: inherit;
-    font-size: var(--text-base);
-    text-align: left;
-    transition: background-color 150ms ease;
-}
-
-.sidebar-item > svg {
-    flex: none;
-    color: var(--color-text-muted);
-}
-
-.sidebar-item-label {
     min-width: 0;
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* The parent folder that tells two same-named projects apart. */
-.sidebar-item-hint {
-    margin-left: var(--space-1);
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-}
-
-.sidebar-count {
-    flex: none;
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-    font-variant-numeric: tabular-nums;
-}
-
-/* The rail's one ink tint: how many tasks wait on the user. */
-.sidebar-badge {
-    flex: none;
-    min-width: 1.5em;
-    padding: 0 var(--space-1);
-    border-radius: var(--radius-chip);
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    color: var(--color-accent);
-    font-size: var(--text-sm);
-    font-variant-numeric: tabular-nums;
-    font-weight: 600;
-    line-height: 1.6;
-    text-align: center;
-}
-
-.sidebar-item[aria-current="page"] {
-    background: var(--color-surface);
-    box-shadow: 0 0 0 1px var(--color-border);
-    font-weight: 500;
-}
-
-.sidebar-item[aria-current="page"] > svg {
-    color: var(--color-text);
-}
-
-.sidebar-more {
-    display: block;
-    width: 100%;
-    height: var(--nav-item-height);
-    padding: 0 var(--space-3) 0 calc(var(--space-3) * 2 + 16px);
-    border: 0;
-    border-radius: var(--radius-row);
-    background: none;
-    color: var(--color-text-muted);
-    font: inherit;
-    font-size: var(--text-md);
-    text-align: left;
-}
-
-@media (hover: hover) and (pointer: fine) {
-    .sidebar-workspace:hover,
-    .sidebar-item:not([aria-current="page"]):hover,
-    .sidebar-more:hover {
-        background: color-mix(in srgb, var(--color-text) 5%, transparent);
-    }
-
-    .sidebar-more:hover {
-        color: var(--color-text);
-    }
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-1) 0 var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-bg);
 }
 
 .search-field {
     display: flex;
     align-items: center;
+}
+
+.sidebar-search:focus-within {
+    border-color: var(--color-accent);
 }
 
 .search-field-icon {
@@ -988,6 +804,10 @@ a {
     font-size: var(--text-base);
 }
 
+.sidebar-search input:focus-visible {
+    outline: none;
+}
+
 .search-field input::-webkit-search-cancel-button {
     display: none;
 }
@@ -999,19 +819,120 @@ a {
     padding: 0;
 }
 
-.search-field-shortcut {
-    flex: none;
-    padding: 0 var(--space-1);
+/* Not positioned itself, so the popover anchors to the top bar and stays
+   inside the sidebar at its narrowest width. */
+.sidebar-filter {
+    flex: 0 0 auto;
+}
+
+.sidebar-filter-button-active {
+    color: var(--color-accent);
+}
+
+.filter-popover {
+    position: absolute;
+    z-index: var(--z-popover);
+    top: calc(100% + var(--space-1));
+    right: var(--space-2);
+    width: 232px;
+    max-height: 60vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-2);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-chip);
+    border-radius: var(--radius-panel);
+    background: var(--color-elevated);
+    box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+}
+
+
+.filter-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 0 var(--space-1) var(--space-1);
+}
+
+.filter-popover-header h2 {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: 600;
+}
+
+.filter-popover-action {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+    padding: 5px var(--space-1);
+    border: 0;
+    border-radius: calc(var(--radius-panel) - var(--space-2));
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: var(--text-base);
+    text-align: left;
+}
+
+.filter-popover-action:hover {
+    background: var(--color-bg);
+}
+
+.filter-section {
+    margin: 0;
+    padding: var(--space-2) 0 0;
+    border: 0;
+    border-top: 1px solid var(--color-border);
+}
+
+.filter-section + .filter-section {
+    margin-top: var(--space-2);
+}
+
+.filter-section legend {
+    padding: 0 var(--space-1);
     color: var(--color-text-muted);
-    font-family: var(--font-mono);
     font-size: var(--text-sm);
-    line-height: 1.6;
+    font-weight: 600;
+}
+
+.filter-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 5px var(--space-1);
+    border-radius: calc(var(--radius-panel) - var(--space-2));
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.filter-option:hover {
+    background: var(--color-bg);
+}
+
+.filter-option input {
+    accent-color: var(--color-accent);
+}
+
+.filter-option span:first-of-type {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.filter-option-count {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
 }
 
 .icon-button,
-.text-button {
+.text-button,
+.load-more,
+.sidebar-group {
     border: 0;
     color: inherit;
     font: inherit;
@@ -1049,6 +970,172 @@ a {
     font: inherit;
     font-size: var(--text-md);
     text-align: center;
+}
+
+.sidebar-list-shell {
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.sidebar-list-spacer {
+    position: relative;
+    width: 100%;
+}
+
+.sidebar-list-window {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+}
+
+.sidebar-row-context-menu {
+    position: absolute;
+    z-index: var(--z-context-menu);
+}
+
+/* No rules between rows: the list separates on space and fill alone, the way
+   the task sidebar does. */
+.sidebar-group,
+.sidebar-task {
+    display: flex;
+    width: 100%;
+    min-height: 32px;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    background: transparent;
+    text-align: left;
+    text-decoration: none;
+}
+
+/* Rows sit inset so hover and selection read as a rounded pill; the inner
+   padding keeps their text on the same edge as the group headings. */
+.sidebar-task {
+    width: calc(100% - var(--space-2));
+    margin: 1px var(--space-1);
+    padding: var(--space-2);
+    border-radius: var(--radius-row);
+}
+
+.sidebar-task .task-dot {
+    margin-top: 0;
+}
+
+/* An opened finished task needs no mark; the slot stays so titles share one edge. */
+.sidebar-task .task-dot-look-settled.task-dot-viewed {
+    visibility: hidden;
+}
+
+/* Same height as a task row, with its label on the titles' edge: the row
+   padding, the status mark's width, and the gap after it. */
+.sidebar-show-more {
+    border: 0;
+    padding-inline-start: calc(var(--space-2) * 3);
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: var(--text-base);
+    cursor: pointer;
+}
+
+.sidebar-show-more:hover,
+.sidebar-show-more:focus-visible {
+    color: var(--color-text);
+}
+
+.sidebar-task-row {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+}
+
+.sidebar-task-row .sidebar-task {
+    flex: 1;
+    min-width: 0;
+}
+
+.sidebar-row-menu-button {
+    position: absolute;
+    top: 50%;
+    right: var(--space-3);
+    transform: translateY(-50%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.sidebar-task-row:hover .sidebar-row-menu-button,
+.sidebar-task-row:focus-within .sidebar-row-menu-button {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sidebar-group {
+    min-height: 28px;
+    align-items: center;
+    padding: var(--space-5) var(--space-3) var(--space-1);
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+    font-weight: 600;
+}
+
+.sidebar-group-indented {
+    padding-left: var(--space-5);
+}
+
+.sidebar-task-indented {
+    padding-left: var(--space-4);
+}
+
+.sidebar-task-archived {
+    opacity: 0.6;
+}
+
+.sidebar-group:hover,
+.sidebar-group:focus-visible,
+.sidebar-task:hover,
+.sidebar-task:focus-visible {
+    background: var(--color-hover);
+}
+
+.sidebar-task[aria-current="page"] {
+    background: var(--color-selection);
+}
+
+.sidebar-task[aria-current="page"]:hover {
+    background: var(--color-hover);
+}
+
+.group-disclosure {
+    display: flex;
+    width: 12px;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-muted);
+    transform: rotate(0deg);
+    transition: transform 0.15s ease;
+}
+
+.group-disclosure-open {
+    transform: rotate(90deg);
+}
+
+.group-title,
+.task-title {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-count {
+    flex: 0 0 auto;
+    color: var(--color-text-muted);
+    font-size: var(--text-md);
+    font-weight: 400;
 }
 
 /* One look per state, shared by the sidebar row, task header, and composer — see TaskStatusDot. */
@@ -1139,6 +1226,19 @@ a {
     border: 0;
 }
 
+.task-title {
+    color: var(--color-text);
+    font-size: var(--text-base);
+}
+
+.sidebar-message {
+    margin: 0;
+    padding: var(--space-5) var(--gutter);
+    color: var(--color-text-muted);
+    font-size: var(--text-base);
+    text-align: center;
+}
+
 .list-state {
     display: grid;
     justify-items: center;
@@ -1162,6 +1262,47 @@ a {
 @keyframes list-state-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
     .list-state-spinner { animation: none; }
+}
+
+.sidebar-message-error {
+    color: var(--color-danger);
+}
+
+.sidebar-skeleton {
+    display: grid;
+    gap: 1px;
+}
+
+.sidebar-skeleton-row {
+    display: block;
+    height: 36px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+    background: var(--color-bg);
+}
+
+.sidebar-refresh-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--gutter);
+    color: var(--color-danger);
+    font-size: var(--text-md);
+}
+
+.load-more {
+    display: block;
+    width: calc(100% - var(--gutter) * 2);
+    margin: var(--space-2) auto;
+    min-height: var(--control-height);
+    padding: var(--control-padding-block) var(--control-padding-inline);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    color: var(--color-accent);
+    font-size: var(--text-md);
+    line-height: var(--control-line-height);
+    font-weight: 600;
 }
 
 .sidebar-connection {
@@ -1261,8 +1402,7 @@ h1 {
     font-weight: 600;
 }
 
-/* Home: the sidebar's current view as one list beside a preview of the picked
-   task. It fills the pane; the list and the preview each scroll on their own. */
+/* Home: the sidebar's tasks as one list. It fills the pane and scrolls on its own. */
 .app-content-home {
     display: flex;
     max-width: none;
@@ -1278,22 +1418,10 @@ h1 {
 }
 
 .home {
-    display: grid;
+    display: flex;
     min-width: 0;
     min-height: 0;
     flex: 1;
-    grid-template-columns: minmax(0, 1fr);
-}
-
-/* On a wide window the preview grows a little and the list stops at a
-   readable width, so a title never sits a screen away from its time. */
-.home[data-preview="true"] {
-    grid-template-columns: minmax(0, 1fr) clamp(var(--home-preview-width), 22vw, var(--home-preview-max));
-}
-
-.home-list-pane {
-    display: flex;
-    min-height: 0;
     flex-direction: column;
     gap: var(--space-4);
     padding: var(--space-2) var(--space-5) var(--space-5);
@@ -1374,8 +1502,7 @@ h1 {
     list-style: none;
 }
 
-/* Rows separate on space and fill alone, like the rail. The picked row takes
-   the rail's current look: the surface with a hairline ring. */
+/* Rows separate on space and fill alone on hover. */
 .home-row {
     position: relative;
     display: flex;
@@ -1383,11 +1510,6 @@ h1 {
     padding-right: var(--space-1);
     border-radius: var(--radius-row);
     transition: background-color 150ms ease;
-}
-
-.home-row[data-picked] {
-    background: var(--color-surface);
-    box-shadow: 0 0 0 1px var(--color-border);
 }
 
 .home-row-main {
@@ -1500,243 +1622,24 @@ h1 {
     font-size: var(--text-md);
 }
 
-.home-preview {
-    display: flex;
-    min-height: 0;
-    flex-direction: column;
-    border-left: 1px solid var(--color-border);
-}
-
-.home-preview-head {
-    display: flex;
-    flex: none;
-    align-items: baseline;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4) var(--space-2);
-}
-
-.home-preview-head .task-dot {
-    flex: none;
-    translate: 0 -1px;
-}
-
-.home-preview-head h2 {
-    display: -webkit-box;
-    min-width: 0;
-    flex: 1;
-    margin: 0;
-    overflow: hidden;
-    font-size: var(--text-base);
-    font-weight: 600;
-    line-height: 1.4;
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-}
-
-.home-preview-body {
-    display: flex;
-    min-height: 0;
-    flex: 1;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4) var(--space-4);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-
-/* What was asked sits in the user's bubble, as it does in the task feed. */
-.home-asked,
-.home-note {
-    display: -webkit-box;
-    margin: 0;
-    overflow: hidden;
-    font-size: var(--text-base);
-    line-height: var(--leading-reading);
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    cursor: auto;
-    user-select: text;
-    -webkit-user-select: text;
-}
-
-.home-asked {
-    align-self: flex-end;
-    max-width: 92%;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-panel);
-    background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
-    -webkit-line-clamp: 6;
-    line-clamp: 6;
-}
-
-.home-note {
-    -webkit-line-clamp: 10;
-    line-clamp: 10;
-}
-
-.home-note[data-look="problem"] {
-    color: var(--color-danger);
-}
-
-.home-asked code,
-.home-note code,
-.home-row-text code,
-.home-preview-head code,
-.home-chips code {
+.home-row-text code {
     font-family: var(--font-mono);
     font-size: 0.92em;
 }
 
-.home-facts {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-1);
-    margin: 0;
-    padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-panel);
-    background: var(--color-surface);
-}
-
-.home-facts > div {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-3);
-}
-
-.home-facts dt {
-    flex: none;
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.home-facts dd {
-    min-width: 0;
-    margin: 0;
-    overflow: hidden;
-    font-size: var(--text-md);
-    font-weight: 600;
-    text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.home-facts dd[data-tone="danger"] {
-    color: var(--color-danger);
-}
-
-.home-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-}
-
-.home-chips > span {
-    width: 100%;
-    color: var(--color-text-muted);
-    font-size: var(--text-md);
-}
-
-.home-chips button {
-    max-width: 100%;
-    padding: var(--space-1) var(--space-3);
-    overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-full);
-    background: var(--color-surface);
-    color: var(--color-text);
-    font: inherit;
-    font-size: var(--text-md);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    transition: border-color 150ms ease;
-}
-
-.home-preview-foot {
-    flex: none;
-    padding: var(--space-3) var(--space-4) var(--space-4);
-}
-
-.home-open {
-    display: flex;
-    width: 100%;
-    height: var(--nav-item-height);
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-1);
-    border: 1px solid var(--color-border-strong);
-    border-radius: var(--radius-control);
-    background: var(--color-surface);
-    color: var(--color-text);
-    font: inherit;
-    font-size: var(--text-base);
-    font-weight: 500;
-    transition:
-        border-color 150ms ease,
-        transform 160ms var(--ease-out);
-}
-
-.home-open[data-primary] {
-    border-color: var(--color-accent);
-    background: var(--color-accent);
-    color: var(--color-text-inverse);
-}
-
-.home-open:active {
-    transform: scale(0.98);
-}
-
 @media (hover: hover) and (pointer: fine) {
-    .home-row:not([data-picked]):hover {
+    .home-row:hover {
         background: color-mix(in srgb, var(--color-text) 4%, transparent);
     }
 
     .home-row:hover .home-row-menu {
         opacity: 1;
     }
-
-    .home-chips button:hover,
-    .home-open:not([data-primary]):hover {
-        border-color: var(--color-text-muted);
-    }
 }
 
 @media (hover: none) {
     .home-row-menu {
         opacity: 1;
-    }
-}
-
-/* A newly picked task's preview fades in rather than snapping. */
-.home-preview-body {
-    transition: opacity 150ms var(--ease-out);
-}
-
-@starting-style {
-    .home-preview-body {
-        opacity: 0;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .home-open {
-        transition: none;
-    }
-
-    .home-open:active {
-        transform: none;
-    }
-}
-
-@media (max-width: 800px) {
-    .home-list-pane {
-        padding: var(--space-2) var(--space-3) var(--space-4);
     }
 }
 
@@ -4599,7 +4502,8 @@ select {
     cursor: default;
 }
 
-.sidebar-item,
+.sidebar-group,
+.sidebar-task,
 .settings-tab,
 .settings-worker-row,
 .settings-memory-project,
@@ -6473,7 +6377,8 @@ textarea:disabled {
 
 /* A task that just appeared or changed status drops in. A keyframe, not
    `@starting-style`, because a row that moves keeps its element. */
-.home-row[data-arrived] {
+.sidebar-task-row[data-arrived],
+.home-list > li[data-arrived] {
     animation: task-arrive 200ms var(--ease-out);
 }
 

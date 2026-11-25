@@ -18,29 +18,19 @@ function fullTask(id: string, prompt: string) {
     scope: { read: [], write: [] } };
 }
 
-const PROFILES = [{ id: "worker", label: "Worker", provider: "claude", model: "sonnet", enabled: true, env: {}, capabilities: [] }];
-
-/** Reads rows from the list alone, since the preview repeats the picked task's title. */
-async function listRow(text: string) {
+/** A sidebar row's link; home lists the same titles, so the lookup stays in the sidebar. */
+async function sidebarRow(text: string) {
   const list = await waitFor(() => {
     const element = document.getElementById("task-list");
-    if (!element) throw new Error("the task list has not rendered yet");
+    if (!element) throw new Error("the sidebar list has not rendered yet");
     return element;
   });
-  return (await within(list).findByText(text)).closest("button")!;
+  return (await within(list).findByText(text)).closest("a")!;
 }
 
-async function openFromList(text: string) {
-  fireEvent.doubleClick(await listRow(text));
-}
-
-/** The task screen's only text box; search is a search box. */
+/** The task screen's only text box; the sidebar's search is a search box. */
 function replyBox() {
   return screen.getByRole("textbox");
-}
-
-function showRecent() {
-  fireEvent.click(within(screen.getByRole("navigation", { name: "Task views" })).getByRole("button", { name: "Recent" }));
 }
 
 const transport: Transport = {
@@ -60,7 +50,7 @@ const transport: Transport = {
     const call = args?.call as { call: string; taskId?: string };
     if (call.call === "summary") {
       // SAFETY: this fixture returns the summary response shape expected by SidebarController.
-      return { profiles: PROFILES, tasks: [summaryTask("one", "first task"), summaryTask("two", "second task"), summaryTask("three", "third task")],
+      return { profiles: [], tasks: [summaryTask("one", "first task"), summaryTask("two", "second task"), summaryTask("three", "third task")],
         tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as never;
     }
     if (call.call === "task") {
@@ -79,7 +69,7 @@ const transport: Transport = {
 describe("the app shell", () => {
   afterEach(cleanup);
 
-  it("opens the task a list row opens, with its reply box focused", async () => {
+  it("opens the task a sidebar click picks", async () => {
     setTransport(transport);
     window.history.replaceState(null, "", "/");
 
@@ -89,29 +79,29 @@ describe("the app shell", () => {
       </StrictMode>,
     );
 
-    await openFromList("second task");
+    (await sidebarRow("second task")).click();
 
     await waitFor(() => expect(window.location.pathname).toBe("/tasks/two"));
     await waitFor(() => expect(screen.getAllByText(/prompt for two/).length).toBeGreaterThan(0), { timeout: 5000 });
     await waitFor(() => expect(document.activeElement).toBe(replyBox()));
   });
 
-  it("focuses the reply box of each task opened from the list, the same one again included", async () => {
+  it("focuses the newly picked task when switching tasks and when picking the open task", async () => {
     setTransport(transport);
     window.history.replaceState(null, "", "/");
     render(<AppShell />);
 
-    await openFromList("first task");
+    const firstRow = await sidebarRow("first task");
+    const secondRow = await sidebarRow("second task");
+    firstRow.click();
     const firstReply = await screen.findByRole("textbox");
     await waitFor(() => expect(document.activeElement).toBe(firstReply));
 
-    showRecent();
-    await openFromList("second task");
-    await waitFor(() => expect(window.location.pathname).toBe("/tasks/two"));
-    await waitFor(() => expect(document.activeElement).toBe(replyBox()));
+    secondRow.click();
+    const secondReply = await screen.findByRole("textbox");
+    await waitFor(() => expect(document.activeElement).toBe(secondReply));
 
-    showRecent();
-    await openFromList("second task");
+    secondRow.click();
     await waitFor(() => expect(document.activeElement).toBe(replyBox()));
   });
 
@@ -123,19 +113,31 @@ describe("the app shell", () => {
     const reply = await screen.findByRole("textbox");
     expect(document.activeElement).not.toBe(reply);
 
-    showRecent();
-    await openFromList("second task");
-    await waitFor(() => expect(document.activeElement).toBe(replyBox()));
-    replyBox().blur();
-    window.history.back();
-    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    (await sidebarRow("second task")).click();
+    const selectedReply = await screen.findByRole("textbox");
+    await waitFor(() => expect(document.activeElement).toBe(selectedReply));
+    (await sidebarRow("first task")).focus();
     window.history.back();
     await waitFor(() => expect(window.location.pathname).toBe("/tasks/one"));
-    await screen.findByRole("textbox");
-    expect(document.activeElement).not.toBe(replyBox());
+    window.history.forward();
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/two"));
+    await waitFor(() => expect(document.activeElement).not.toBe(replyBox()));
   });
 
-  it("hides and shows the sidebar on Cmd+B, focusing the view on screen when it reopens", async () => {
+  it("leaves focus alone when the selected task has no reply box", async () => {
+    setTransport(transport);
+    window.history.replaceState(null, "", "/");
+    render(<AppShell />);
+
+    const row = await sidebarRow("third task");
+    row.focus();
+    row.click();
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/three"));
+    expect(document.activeElement).toBe(row);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("hides and shows the task list on Cmd+B, focusing the list when it reopens", async () => {
     setTransport(transport);
     window.history.replaceState(null, "", "/");
 
@@ -154,7 +156,7 @@ describe("the app shell", () => {
           <AppShell />
         </StrictMode>,
       );
-      await screen.findByText("second task");
+      await sidebarRow("second task");
       const sidebar = document.querySelector(".task-sidebar")!;
       expect(sidebar.className).not.toContain("task-sidebar-collapsed");
 
@@ -163,8 +165,7 @@ describe("the app shell", () => {
 
       fireEvent.keyDown(window, { key: "b", metaKey: true });
       await waitFor(() => expect(sidebar.className).not.toContain("task-sidebar-collapsed"));
-      expect(document.activeElement?.getAttribute("aria-current")).toBe("page");
-      expect(document.activeElement?.textContent?.trim()).toBe("Recent");
+      expect(document.activeElement?.getAttribute("role")).toBe("option");
     } finally {
       globalThis.requestAnimationFrame = originalRaf;
     }
@@ -181,12 +182,12 @@ describe("the app shell", () => {
     const liveTransport: Transport = {
       invoke: async (command, args) => {
         // SAFETY: broker_call requests always carry a typed call object.
-        const call = args?.call as { call: string; taskId?: string; query?: { archived?: string; limit?: number } } | undefined;
+        const call = args?.call as { call: string; taskId?: string; query?: { archived?: string } } | undefined;
         if (call?.call === "summary") {
           // The task screen reads the summary too, for worker profiles; only the list's reads filter by archive.
-          if (call.query?.archived !== undefined && call.query.limit !== 1) listReads += 1;
+          if (call.query?.archived !== undefined) listReads += 1;
           // SAFETY: this fixture returns the summary response shape expected by SidebarController.
-          return { profiles: PROFILES, tasks: listed, tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as never;
+          return { profiles: [], tasks: listed, tasksHasMore: false, profileFailures: [], grants: [], memoryProjects: [] } as never;
         }
         if (command === "broker_watch_task" && args?.taskId === "finishing") {
           // SAFETY: this fixture returns the broker_watch_task response shape expected by TaskDetail.
@@ -212,22 +213,22 @@ describe("the app shell", () => {
       await waitFor(() => expect(listReads).toBe(before + 1));
       await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     };
-    const finishingRow = () => within(document.getElementById("task-list")!).getByText("finishing task").closest("button")!;
+    const finishingRow = () => within(document.getElementById("task-list")!).getByText("finishing task").closest("a")!;
 
     resetFeedsForTests();
     resetTaskOutcomeViewsForTests();
     setTransport(liveTransport);
     window.history.replaceState(null, "", "/");
     render(<AppShell />);
-    await screen.findByText("finishing task");
+    await sidebarRow("finishing task");
 
     deliver(1, "completed", finishedAt);
     await waitFor(() => expect(finishingRow().textContent).toContain("New update"));
 
-    fireEvent.doubleClick(finishingRow());
+    finishingRow().click();
     await waitFor(() => expect(screen.getAllByText(/prompt for finishing/).length).toBeGreaterThan(0));
-    showRecent();
-    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    within(document.getElementById("task-list")!).getByText("idle task").closest("a")!.click();
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/idle"));
     expect(finishingRow().textContent).toContain("Viewed");
 
     await reread([idle, { ...summaryTask("finishing", "finishing task"), ...finished(finishedAt) }]);

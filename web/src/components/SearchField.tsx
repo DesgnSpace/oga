@@ -12,11 +12,10 @@ type SearchFieldProps = {
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
   "aria-label"?: string;
   title?: string;
-  shortcut?: string;
   "data-task-search"?: boolean;
 };
 
-export function SearchField({ value, onChange, placeholder, className, inputClassName, inputRef, onKeyDown, "aria-label": ariaLabel, title, shortcut, "data-task-search": dataTaskSearch }: SearchFieldProps) {
+export function SearchField({ value, onChange, placeholder, className, inputClassName, inputRef, onKeyDown, "aria-label": ariaLabel, title, "data-task-search": dataTaskSearch }: SearchFieldProps) {
   const internalInputRef = useRef<HTMLInputElement>(null);
   const setInputRef = (node: HTMLInputElement | null) => {
     internalInputRef.current = node;
@@ -50,7 +49,6 @@ export function SearchField({ value, onChange, placeholder, className, inputClas
         title={title}
         data-task-search={dataTaskSearch}
       />
-      {shortcut && value === "" && <kbd className="search-field-shortcut" aria-hidden="true">{shortcut}</kbd>}
       {value !== "" && (
         <button
           className="icon-button search-field-clear"

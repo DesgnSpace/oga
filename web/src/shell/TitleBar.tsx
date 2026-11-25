@@ -22,7 +22,7 @@ export interface TaskTitleBarInfo {
 }
 
 function sidebarToggleLabel(collapsed: boolean): string {
-  return collapsed ? "Show sidebar" : "Hide sidebar";
+  return collapsed ? "Show task list" : "Hide task list";
 }
 
 async function copyTerminalCommand(command: string): Promise<void> {
@@ -49,6 +49,7 @@ function TerminalResumeButton({ command }: { command: string }) {
 }
 
 function fallbackTitle(route: Route): string {
+  if (route.kind === "home") return "Your workspace";
   if (route.kind === "settings") return "Settings";
   if (route.kind === "icons") return "Icons";
   if (route.kind === "not-found") return "Page not found";
@@ -86,9 +87,9 @@ export function TitleBar({
               className="icon-button"
               type="button"
               aria-expanded={!sidebarCollapsed}
-              aria-controls="app-sidebar"
+              aria-controls="task-list"
               aria-label={sidebarToggleLabel(sidebarCollapsed)}
-              title={`${sidebarToggleLabel(sidebarCollapsed)} ⌘B`}
+              title={sidebarToggleLabel(sidebarCollapsed)}
               onClick={onToggleSidebar}
             >
               <SidebarIcon />

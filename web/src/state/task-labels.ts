@@ -1,28 +1,6 @@
-// How tasks and projects are named in lists.
+// Project labels that stay apart when two projects share a folder name.
 
-import type { TaskSummary } from "@/bridge/types";
-
-export interface TaskProject {
-  /** The project's folder, as the broker groups tasks by it. */
-  id: string;
-  name: string;
-  /** The folders above the project, set only when another project shares its name. */
-  parent?: string;
-  count: number;
-}
-
-export function projectName(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  const parts = trimmed.split("/");
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    if (parts[index] !== "") return parts[index];
-  }
-  return path;
-}
-
-export function projectId(task: Pick<TaskSummary, "cwd" | "originCwd">): string {
-  return task.originCwd ?? task.cwd;
-}
+import { projectName } from "./sidebar-projection";
 
 function parentFolders(path: string): string[] {
   return path.split("/").filter((part) => part !== "").slice(0, -1);
@@ -53,33 +31,4 @@ export function projectParents(ids: readonly string[]): Map<string, string> {
 export function projectLabel(id: string, parents: ReadonlyMap<string, string>): string {
   const parent = parents.get(id);
   return parent ? `${parent}/${projectName(id)}` : projectName(id);
-}
-
-/** Projects in the order newest-first `tasks` meet them. */
-export function recentProjectIds(tasks: readonly TaskSummary[]): string[] {
-  return [...new Set(tasks.map(projectId))];
-}
-
-/** Projects with recent work first, in `recent` order, then the rest by name. */
-export function projectList(recent: readonly string[], totals: Readonly<Record<string, number>>): TaskProject[] {
-  const known = new Set(recent);
-  const rest = Object.keys(totals)
-    .filter((id) => !known.has(id))
-    .sort((left, right) => projectName(left).localeCompare(projectName(right)));
-  const ids = [...recent, ...rest];
-  const parents = projectParents(ids);
-  return ids.map((id) => ({ id, name: projectName(id), parent: parents.get(id), count: totals[id] ?? 0 }));
-}
-
-/** Narrows the list to tasks whose title contains `term`, ignoring case. */
-export function matching<T extends TaskSummary>(tasks: readonly T[], term: string): T[] {
-  if (term === "") return tasks.slice();
-  const needle = term.toLowerCase();
-  return tasks.filter((task) => displayLabel(task).toLowerCase().includes(needle));
-}
-
-export function displayLabel(task: Pick<TaskSummary, "title" | "promptPreview">): string {
-  const title = task.title?.trim();
-  if (title) return title;
-  return task.promptPreview.split("\n")[0] || "Untitled task";
 }
