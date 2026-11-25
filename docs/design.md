@@ -50,7 +50,7 @@ Motion shows what changed. It is never decoration.
 | A menu opening | Fades in from 0.97 scale, from its top edge, 150ms |
 | A dialog opening | Fades in from 0.97 scale over its fading backdrop, 200ms |
 | A task status mark changing | Grows in from 0.4 scale, 200ms, only when it changed while shown |
-| A task arriving or changing status in the home list | Fades in and drops 4px into place, 200ms |
+| A task arriving or changing status in the sidebar or on home | Fades in and drops 4px into place, 200ms |
 
 ## Radii
 
@@ -124,21 +124,21 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 ### App sidebar
 
-- The app's one navigation, on `--color-sidebar` with a hairline to its
-  right, 248px wide by default and resizable. Below the window controls:
-  the workspace (an ink square with "O", "Oga", the worker count, and a
-  settings icon; it opens Settings), a 32px search field with a `⌘K` key
-  cap, then rail rows under small muted labels: Tasks (Recent, Needs you,
-  In progress, Finished, Archived) and Projects.
-- Rows are `--nav-item-height`, icon and label `--space-3` apart. The row
-  for what home shows sits on `--color-surface` with a hairline ring. Needs
-  you carries a count badge, the rail's one ink tint; In progress and
-  projects carry a muted count. Other views carry no number.
-- Projects list recent work first, then the rest by name, with true totals.
-  Two projects with the same folder name each show the nearest parent
-  folder that tells them apart, muted after the name. Past 8 projects the
-  rest fold behind "Show all".
-- Picking a view, a project, or typing a search brings home on screen.
+- The task list, on `--color-sidebar`. It is 320px wide by default, and
+  its edge drags from 240px to 420px. `⌘B` hides and shows it. Below
+  900px it floats over the content with a hairline and a shadow.
+- The top bar holds icon buttons: hide the sidebar, back and forward,
+  Settings, filters, and search (`⌘K`). Search opens a field under the bar.
+- The filter popover sets Group by (status by default), Sort by, Show
+  (Active, Archived, All), and Project. Reset puts them all back.
+- Rows are the title alone; worker, project, time and cost show on hover.
+- A row's status mark shows only what its group doesn't already say: running,
+  waiting, needs a reply, failed, or a new update. A finished task already
+  opened has no mark, and its title stays on the same edge as the others.
+- Grouped by status, Completed and Cancelled list their first 20 tasks, then
+  a "Show more" row. A task open past the fold is listed under those 20.
+  Every other group lists in full, and a search lists every match.
+- Task actions sit in a menu at the row's end, and on right-click.
 
 ### Content column
 
@@ -147,7 +147,7 @@ and compact controls grow to `--control-height`, so touch targets stay large.
   content, with `--space-7` side padding, `--space-7` above the title, and
   `--space-8` below the last section.
 - Below 800px: `--space-5` sides, `--space-6` top, `--space-7` bottom.
-- Home has no column: its list and preview fill the whole pane.
+- Home has no column: its list fills the whole pane, up to `--home-list-max`.
 - `--content-max` is the one reading column every main-pane screen shares:
   empty states and the task screen's transcript, messages, and composer all
   size to it, so their left and right edges line up. Settings reads as a
@@ -228,37 +228,30 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 ### Home
 
-- The sidebar's current view as one list beside a preview of the picked
-  task. No frame: the list scrolls on `--color-bg`, and the preview,
-  `--home-preview-width` (20rem), sits after a hairline and scrolls on its
-  own.
-- List head: the view or project name (`--text-lg`, 600), a muted
-  `--text-md` line (what the view holds, the project's full folder, or the
-  search), and a count pill with the true total.
+- With no task open, home is one list of the tasks the sidebar has loaded.
+  No frame: the list scrolls on `--color-bg` and centres past
+  `--home-list-max`.
+- The sidebar's search, Show, and Project filters narrow home too.
+- List head: "Recent" (`--text-lg`, 600), a muted `--text-md` line that
+  says which filter is on, and a count pill with the task count.
 - Sections under small muted labels: Needs you, then In progress, then
   finished work by the day it last changed (Today, Yesterday, Earlier).
-  The Needs you and In progress views are one plain list, and they load
-  older pages on their own until every task they count is listed.
 - A row is the status mark, the title (500) over a muted meta line
-  (project · worker, plus branch or wait reason), a danger tag only for
-  Failed or Blocked, and the time on the right. Rows separate on space and
-  fill; the picked row takes the rail's current look. A finished task
-  already opened has no mark. Task actions sit in a menu at the row's end,
-  shown on hover or focus, and on right-click.
-- Click picks, double-click or Enter opens, arrow keys move the pick.
-- Preview: the title, what was asked (the task's summary, or the brief's
-  first paragraph as inline markdown) in the user's bubble, the worker's
-  question or error when there is one, a facts card with uppercase mono
-  labels, other tasks that need the user as pills, and one Open task
-  button (ink when the task waits on an answer).
-- Below a 720px home the preview hides and a pick opens the task.
+  (project folder · profile, plus the branch for work in its own copy and
+  what a held task waits for), a danger tag only for Failed or Blocked,
+  and the time on the right. Rows separate on space and fill on hover. A
+  finished task already opened has no mark.
+- Two projects with the same folder name each show the nearest parent
+  folder that tells them apart: `acme/app` and `globex/app`.
+- Task actions sit in a menu at the row's end, shown on hover or focus,
+  and on right-click.
+- Click or Enter opens the task, the same as a sidebar click. Arrow keys
+  move between rows.
+- "Show older tasks" at the bottom loads the next page.
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `--color-border-strong` | `#dcdcdc` | `#424242` | The Open task button's edge |
-| `--home-list-max` | 64rem | 64rem | Widest the home list grows; it centres past that |
-| `--home-preview-width` | 20rem | 20rem | The home preview column, and its narrowest |
-| `--home-preview-max` | 28rem | 28rem | Widest the preview grows, at 22% of the window |
+| Token | Value | Use |
+| --- | --- | --- |
+| `--home-list-max` | 64rem | Widest the home list grows; it centres past that |
 
 ### Changed files panel
 
