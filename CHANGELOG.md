@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The app looks calmer and easier to read. Task text is a little larger with more space between lines, headings in briefs and replies stand out, and the reply box no longer has a heavy black outline.
 - Screens have more room to breathe. New tasks and status changes ease into place, and menus, dialogs and buttons respond with a light touch of motion.
 - Home now lists your recent tasks. What needs you comes first, then what is running, then finished work by day. Each task shows its project, its worker and when it last changed, and two projects with the same folder name show the folder above them. Click a task to open it, or use its menu to stop, resume or archive it. The sidebar's search and filters narrow this list too.
 - A task you move to another worker while it waits no longer shows the first worker's failure, and the task page says it is waiting instead of working.

@@ -27,25 +27,34 @@
     --text-sm: 0.6875rem;
     --text-md: 0.75rem;
     --text-base: 0.8125rem;
+    /* Task rows in the sidebar: a step above body text, so the list reads
+       as the app's main navigation. */
+    --text-nav: 0.875rem;
     /* Monospace sets wider than sans at the same size, so mono text in the
        task view is scaled down to read as the same size as --text-base. */
     --text-base-mono: calc(var(--text-base) * 0.94);
     --text-lg: 1rem;
     /* What the worker says and what the user sends, in the task view. */
-    --text-reading: 0.875rem;
-    --leading-reading: 1.5;
+    --text-reading: 0.9375rem;
+    --leading-reading: 1.6;
     /* About 70 characters of prose at the size it is used with. */
     --reading-max: 72ch;
     --text-title: 1.5rem;
-    --color-bg: #fafafa;
-    --color-sidebar: #f4f4f4;
+    --color-bg: #ffffff;
+    --color-sidebar: #f7f7f7;
     --color-surface: #ffffff;
     --color-elevated: #ffffff;
-    --color-hover: #f4f4f4;
-    --color-selection: rgb(0 0 0 / 9%);
-    --color-border: #eeeeee;
+    /* Translucent, so one hover fill reads on the canvas, the sidebar, and
+       inside menus alike. */
+    --color-hover: rgb(0 0 0 / 4.5%);
+    --color-selection: rgb(0 0 0 / 7%);
+    --color-border: #ebebeb;
+    /* Edges of boxes you type into or act on: the composer, a pinned question. */
+    --color-border-strong: #e0e0e0;
     --color-text: #141414;
-    --color-text-muted: #5c5c5c;
+    --color-text-muted: #6b6b6b;
+    /* One soft lift for the composer and the question pinned above it. */
+    --shadow-raised: 0 1px 2px rgb(0 0 0 / 4%), 0 4px 16px rgb(0 0 0 / 4%);
     --color-accent: #141414;
     --color-text-inverse: #ffffff;
     --color-danger: #b42318;
@@ -121,6 +130,8 @@
         --color-hover: #262626;
         --color-selection: #262626;
         --color-border: #2f2f2f;
+        --color-border-strong: #3a3a3a;
+        --shadow-raised: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 25%);
         --color-text: #f2f2f2;
         --color-text-muted: #a0a0a0;
         --color-accent: #f2f2f2;
@@ -557,6 +568,7 @@ a {
 
 .title-bar {
     flex: 0 0 auto;
+    border-bottom: 1px solid var(--color-border);
     background: var(--color-bg);
 }
 
@@ -688,6 +700,7 @@ a {
     min-width: 0;
     min-height: 0;
     flex-direction: column;
+    border-right: 1px solid var(--color-border);
     background: var(--color-sidebar);
 }
 
@@ -877,7 +890,7 @@ a {
 }
 
 .filter-popover-action:hover {
-    background: var(--color-bg);
+    background: var(--color-hover);
 }
 
 .filter-section {
@@ -909,7 +922,7 @@ a {
 }
 
 .filter-option:hover {
-    background: var(--color-bg);
+    background: var(--color-hover);
 }
 
 .filter-option input {
@@ -954,7 +967,7 @@ a {
 
 .icon-button:not(:disabled):hover,
 .icon-button:focus-visible {
-    background: var(--color-bg);
+    background: var(--color-hover);
     color: var(--color-text);
 }
 
@@ -966,7 +979,7 @@ a {
     border: 1px solid var(--color-border);
     border-bottom-width: 2px;
     border-radius: var(--radius-chip);
-    background: var(--color-bg);
+    background: var(--color-hover);
     font: inherit;
     font-size: var(--text-md);
     text-align: center;
@@ -1016,9 +1029,11 @@ a {
    padding keeps their text on the same edge as the group headings. */
 .sidebar-task {
     width: calc(100% - var(--space-2));
+    min-height: var(--nav-item-height);
     margin: 1px var(--space-1);
     padding: var(--space-2);
     border-radius: var(--radius-row);
+    font-size: var(--text-nav);
 }
 
 .sidebar-task .task-dot {
@@ -1078,7 +1093,7 @@ a {
     padding: var(--space-5) var(--space-3) var(--space-1);
     color: var(--color-text-muted);
     font-size: var(--text-md);
-    font-weight: 600;
+    font-weight: 500;
 }
 
 .sidebar-group-indented {
@@ -1277,7 +1292,7 @@ a {
     display: block;
     height: 36px;
     border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
-    background: var(--color-bg);
+    background: var(--color-hover);
 }
 
 .sidebar-refresh-error {
@@ -1683,7 +1698,7 @@ h1 {
 }
 
 .icon-button-active {
-    background: var(--color-bg);
+    background: var(--color-hover);
     color: var(--color-text);
 }
 
@@ -2220,11 +2235,11 @@ h1 {
 .changed-files-tree-file:hover,
 .changed-files-tree-dir:focus-visible,
 .changed-files-tree-file:focus-visible {
-    background: var(--color-bg);
+    background: var(--color-hover);
 }
 
 .changed-files-tree-file-active {
-    background: var(--color-bg);
+    background: var(--color-hover);
     font-weight: 600;
 }
 
@@ -2257,7 +2272,7 @@ h1 {
     width: 14px;
     height: 14px;
     border-radius: var(--radius-chip);
-    background: var(--color-bg);
+    background: var(--color-hover);
     font-family: var(--font-mono);
     font-size: var(--text-sm);
     font-weight: 700;
@@ -2568,6 +2583,8 @@ h1 {
 .composer-stack {
     display: grid;
     min-width: 0;
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-raised);
 }
 
 /* The tray shares the composer's outline, so the two read as one card. */
@@ -2575,7 +2592,7 @@ h1 {
     display: grid;
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-strong);
     border-bottom: 0;
     border-radius: var(--radius-panel) var(--radius-panel) 0 0;
     background: var(--color-elevated);
@@ -2750,10 +2767,11 @@ h1 {
 }
 
 .pinned-question {
-    padding: var(--space-3);
-    border: 1px solid var(--color-accent);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-panel);
-    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-raised);
 }
 
 .pinned-question-actions {
@@ -2775,14 +2793,15 @@ h1 {
     display: flex;
     align-items: center;
     padding: 0;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-panel);
     background: var(--color-elevated);
+    transition: border-color 150ms var(--ease-out);
 }
 
 .composer-stack:focus-within .composer-card,
 .composer-stack:focus-within .composer-tray {
-    border-color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-text) 28%, transparent);
 }
 
 .composer-input {
@@ -3273,24 +3292,27 @@ h1 {
 .markdown-content h2:not(:first-child),
 .markdown-content h3:not(:first-child),
 .markdown-content h4:not(:first-child) {
-    margin-top: var(--space-2);
+    margin-top: var(--space-3);
 }
 
 .markdown-content :is(h1, h2, h3, h4) + * {
     margin-top: calc(var(--space-2) * -1);
 }
 
+/* Sized from the text around them, so headings scale with the reading
+   size in the feed and in the user's bubble alike. */
 .markdown-content h1 {
-    font-size: var(--text-lg);
+    font-size: 1.4em;
+    letter-spacing: -0.01em;
 }
 
 .markdown-content h2 {
-    font-size: var(--text-lg);
+    font-size: 1.2em;
 }
 
 .markdown-content h3,
 .markdown-content h4 {
-    font-size: var(--text-lg);
+    font-size: 1em;
 }
 
 .markdown-content p {
@@ -3337,8 +3359,10 @@ h1 {
 
 .markdown-content code {
     font-family: var(--font-mono);
-    font-size: var(--text-base-mono);
-    background: var(--color-elevated);
+    /* Mono sets wider than sans; this keeps code the same visual size as the
+       words around it, at any reading size. */
+    font-size: 0.88em;
+    background: color-mix(in srgb, var(--color-text) 6%, transparent);
     padding: 1px 4px;
     border-radius: var(--radius-chip);
 }
@@ -3501,7 +3525,7 @@ h1 {
 /* The brief, follow-ups, replies, and instructions sit in a soft filled
    bubble: a light tint, no border. */
 .transcript-card {
-    --transcript-card-bg: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
+    --transcript-card-bg: color-mix(in srgb, var(--color-text) 4%, var(--color-bg));
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-panel);
     background: var(--transcript-card-bg);
@@ -3511,10 +3535,6 @@ h1 {
     background: linear-gradient(to bottom, transparent, var(--transcript-card-bg));
 }
 
-.transcript-bubble .markdown-content h1,
-.transcript-bubble .markdown-content h2,
-.transcript-bubble .markdown-content h3,
-.transcript-bubble .markdown-content h4,
 .transcript-bubble .markdown-content p {
     font-size: inherit;
     line-height: inherit;
@@ -5734,7 +5754,7 @@ body.modal-open .app-layout *::-webkit-scrollbar {
 
 .settings-prompt-editor textarea[readonly] {
     color: var(--color-text-muted);
-    background: var(--color-bg);
+    background: var(--color-hover);
 }
 
 .settings-toggle {
