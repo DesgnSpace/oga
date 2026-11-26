@@ -15,7 +15,7 @@ React frontend for Oga. The app runs inside the Tauri desktop shell (`rust/apps/
 ```sh
 cd web
 bun install
-bun run dev      # Vite dev server
+bun run dev      # Vite dev server; in a browser it reads the local broker (read-only)
 bun run build    # typecheck + production build
 bun run typecheck
 bun test

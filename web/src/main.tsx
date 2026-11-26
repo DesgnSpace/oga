@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import App from "@/App";
 import { applyFont, applyTechnicalDetails, readCachedFont } from "@/appearance";
 import { broker } from "@/bridge/client";
+import { devTransport } from "@/bridge/devTransport";
+import { hasDesktopBridge, setTransport } from "@/bridge/transport";
 import { installNativeChrome } from "@/shell/nativeChrome";
 import { installOverlayScroll } from "@/ui/overlay-scroll";
 import "@/oga.css";
@@ -38,6 +40,10 @@ function applyPlatformClass(): void {
   if (platform.includes("mac")) {
     document.documentElement.classList.add("platform-macos");
   }
+}
+
+if (import.meta.env.DEV && !hasDesktopBridge()) {
+  setTransport(devTransport);
 }
 
 applyPlatformClass();

@@ -77,11 +77,29 @@ gap reaches the outer radius, the inner element keeps its own token.
 | `--text-lg` | 16px | Dialog title in the rail |
 | `--text-base` | 13px | Body text, row titles, row descriptions (muted), section labels (600, muted) |
 | `--text-md` | 12px | Rail and task list group labels, small captions, and every muted meta line in the task view: title bar facts, `+`/`−` counts, the changed files summary, the line under the composer |
-| `--text-reading` | 14px | What the worker says and what the user sends, in the task view |
+| `--text-reading` | 15px | What the worker says and what the user sends, in the task view; the task title |
+| `--text-nav` | 14px | Task rows in the app sidebar |
 
 Descriptions use `--color-text-muted` and stop at `65ch`.
 
-Reading text uses `--leading-reading` (1.5) and stops at `--reading-max`
+Headings in written content size from the text around them: `h1` 1.4em,
+`h2` 1.2em, `h3` and `h4` 1em, all 600. Inline code is 0.88em on a 6% tint
+of the text colour.
+
+## Surfaces
+
+The canvas (`--color-bg`) is white. The sidebar sits on `--color-sidebar`, a
+step darker, behind a hairline. The title bar ends in a hairline too.
+Hover and selection fills are translucent, so one fill reads on the canvas,
+the sidebar, and inside menus.
+
+| Token | Use |
+| --- | --- |
+| `--color-border` | Hairlines and card edges |
+| `--color-border-strong` | Edges of boxes you type into or act on: the composer, a pinned question |
+| `--shadow-raised` | The composer and the question pinned above it |
+
+Reading text uses `--leading-reading` (1.6) and stops at `--reading-max`
 (`72ch`, about 70 characters a line).
 
 ## Controls
@@ -179,7 +197,8 @@ and compact controls grow to `--control-height`, so touch targets stay large.
 
 ### Composer
 
-- One box at `--text-reading`. Its placeholder says what to type and which
+- One box at `--text-reading`, edged in `--color-border-strong` and lifted
+  by `--shadow-raised`. Focus darkens the edge; it never turns solid black. Its placeholder says what to type and which
   keys send ("Send a message · ⌘↵ to send now, ⌥↵ to queue"); the send
   button sits inside the box.
 - One quiet `--text-md` line under it: what the run may change and its
